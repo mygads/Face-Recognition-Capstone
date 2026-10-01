@@ -1,0 +1,163 @@
+{
+  "metadata": {
+    "configuration": {
+      "device_tokens_recorded": false,
+      "edge_synthetic_gallery_size": 30,
+      "fixture_image_saved_or_hashed": false,
+      "frames_per_decision": 3,
+      "image_path_recorded": false,
+      "iterations_per_lab_scenario": 30,
+      "max_bursts_per_decision": 5,
+      "retry_attempts": 2,
+      "retry_backoff_ms": 250,
+      "synthetic_gallery_seed": 20261002,
+      "warmup_per_lab": 3
+    },
+    "finished_at_utc": "2026-10-01T20:36:23.250113+00:00",
+    "git_revision": "1b81be2300d197fd047a655d5b95d7494d57fd46",
+    "host": {
+      "libraries": {
+        "httpx": "0.28.1",
+        "numpy": "2.4.4",
+        "opencv": "4.14.0",
+        "opencv_distribution": "4.14.0.94",
+        "psutil": "7.2.2"
+      },
+      "logical_cpu_count": 12,
+      "machine": "AMD64",
+      "memory_total_bytes": 14877257728,
+      "os": "Windows-11-10.0.26200-SP0",
+      "physical_cpu_count": 6,
+      "processor": "AMD64 Family 25 Model 80 Stepping 0, AuthenticAMD",
+      "python": "3.14.3"
+    },
+    "run_id": "20261001T203623Z",
+    "schema_version": 1,
+    "started_at_utc": "2026-10-01T20:36:23.250071+00:00"
+  },
+  "methodology": [
+    "Latency starts at a decoded image and ends at a terminal AI_EDGE track decision or AI_CENTRAL response. It excludes camera capture and Core API attendance writes. COLLECTING tracks are reported as incomplete.",
+    "Stage timings come from recognition-core and are summed across frames and bursts until a terminal decision. They measure pipeline work, not camera time.",
+    "AI_EDGE uses the real local YuNet/SFace pipeline and a seeded synthetic gallery. One target template is derived from the supplied test image; remaining distractors are seeded normalized vectors. This workload is for performance only, not threshold calibration or demographic evaluation.",
+    "AI_CENTRAL requests go to the configured service with active-session galleries. The two-lab scenario runs one serialized stream per device concurrently. HTTP byte estimates include HTTP/1.1 headers and bodies, and exclude TLS, TCP/IP, and link-layer framing.",
+    "CPU reports process percent normalized to one core (may exceed 100%) and sampled host CPU percent. RAM reports peak process RSS and average host memory use. Central server values come from its /metrics endpoint.",
+    "Sequential runs one lab at a time. Two-lab runs two workers concurrently. AI_EDGE workers share this benchmark host; repeat one worker on each real lab PC before making a deployment decision.",
+    "Warmup is excluded. Decision latency percentiles use terminal track decisions; response latency covers all measured logical requests. Retry/error rates use all logical requests. Percentiles use nearest rank. This runner saves no camera or raw image, and omits image paths and credentials from reports."
+  ],
+  "overall_status": "PENDING HARDWARE",
+  "profiles": {
+    "AI_CENTRAL": {
+      "scenarios": {
+        "sequential": {
+          "decision_latency_p50_ms": null,
+          "decision_latency_p95_ms": null,
+          "decision_status_counts": {},
+          "duration_seconds": null,
+          "edge": {},
+          "error_count": null,
+          "error_rate": null,
+          "gallery_sizes": [],
+          "incomplete_decisions": null,
+          "incomplete_rate": null,
+          "inference_stage_latency_ms": {},
+          "model_versions": [],
+          "network_application_bytes_per_event": null,
+          "reason": "Provide --image, a running AI Central URL, active lab session/device IDs, and their device tokens.",
+          "request_count": 0,
+          "request_samples": [],
+          "response_latency_p50_ms": null,
+          "response_latency_p95_ms": null,
+          "retry_count": null,
+          "retry_rate": null,
+          "server": {},
+          "status": "PENDING HARDWARE",
+          "terminal_decisions": null,
+          "throughput_decisions_per_second": null
+        },
+        "two_labs_concurrent": {
+          "decision_latency_p50_ms": null,
+          "decision_latency_p95_ms": null,
+          "decision_status_counts": {},
+          "duration_seconds": null,
+          "edge": {},
+          "error_count": null,
+          "error_rate": null,
+          "gallery_sizes": [],
+          "incomplete_decisions": null,
+          "incomplete_rate": null,
+          "inference_stage_latency_ms": {},
+          "model_versions": [],
+          "network_application_bytes_per_event": null,
+          "reason": "Provide --image, a running AI Central URL, active lab session/device IDs, and their device tokens.",
+          "request_count": 0,
+          "request_samples": [],
+          "response_latency_p50_ms": null,
+          "response_latency_p95_ms": null,
+          "retry_count": null,
+          "retry_rate": null,
+          "server": {},
+          "status": "PENDING HARDWARE",
+          "terminal_decisions": null,
+          "throughput_decisions_per_second": null
+        }
+      }
+    },
+    "AI_EDGE": {
+      "scenarios": {
+        "sequential": {
+          "decision_latency_p50_ms": null,
+          "decision_latency_p95_ms": null,
+          "decision_status_counts": {},
+          "duration_seconds": null,
+          "edge": {},
+          "error_count": null,
+          "error_rate": null,
+          "gallery_sizes": [],
+          "incomplete_decisions": null,
+          "incomplete_rate": null,
+          "inference_stage_latency_ms": {},
+          "model_versions": [],
+          "network_application_bytes_per_event": null,
+          "reason": "Provide --image with a local approved fixture, --edge-config, and locally provisioned YuNet/SFace model files.",
+          "request_count": 0,
+          "request_samples": [],
+          "response_latency_p50_ms": null,
+          "response_latency_p95_ms": null,
+          "retry_count": null,
+          "retry_rate": null,
+          "server": {},
+          "status": "PENDING HARDWARE",
+          "terminal_decisions": null,
+          "throughput_decisions_per_second": null
+        },
+        "two_labs_concurrent": {
+          "decision_latency_p50_ms": null,
+          "decision_latency_p95_ms": null,
+          "decision_status_counts": {},
+          "duration_seconds": null,
+          "edge": {},
+          "error_count": null,
+          "error_rate": null,
+          "gallery_sizes": [],
+          "incomplete_decisions": null,
+          "incomplete_rate": null,
+          "inference_stage_latency_ms": {},
+          "model_versions": [],
+          "network_application_bytes_per_event": null,
+          "reason": "Provide --image with a local approved fixture, --edge-config, and locally provisioned YuNet/SFace model files.",
+          "request_count": 0,
+          "request_samples": [],
+          "response_latency_p50_ms": null,
+          "response_latency_p95_ms": null,
+          "retry_count": null,
+          "retry_rate": null,
+          "server": {},
+          "status": "PENDING HARDWARE",
+          "terminal_decisions": null,
+          "throughput_decisions_per_second": null
+        }
+      }
+    }
+  },
+  "warnings": []
+}
