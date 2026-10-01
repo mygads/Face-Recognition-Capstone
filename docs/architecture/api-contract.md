@@ -12,11 +12,11 @@ The HTTP contract lives under /api/v1 and is described by FastAPI OpenAPI at /op
 | Laboratories/devices | GET, POST /api/v1/laboratories; GET, POST /api/v1/devices |
 | Schedules | GET, POST /api/v1/schedules |
 | Sessions | GET, POST /api/v1/sessions; POST /api/v1/sessions/{session_id}/close |
-| Enrollment/templates | POST /api/v1/enrollments; GET /api/v1/face-templates |
+| Enrollment/templates | GET /api/v1/enrollments/class-status; POST /api/v1/enrollments/captures; POST /api/v1/enrollments; GET /api/v1/face-templates |
 | Attendance | GET /api/v1/attendance; POST /api/v1/attendance/corrections |
 | Reports | GET /api/v1/reports/attendance |
 
-Login and token validation are implemented. Protected resource operations other than `/auth/me` remain contract placeholders and return HTTP 501 after authorization succeeds; they do not return data. Their schemas define the proposed request/success shapes only. Template request/response schemas contain metadata only and have no image, blob, or embedding fields. `/health` remains a hidden-from-OpenAPI process-health alias for existing Docker health checks; `/api/v1/health` is the versioned health operation.
+Login and token validation are implemented. Enrollment roster status reads current template metadata. The multi-capture enrollment upload contract remains a HTTP 501 placeholder until biometric embedding persistence is approved and implemented. Other protected resource operations remain contract placeholders and return HTTP 501 after authorization succeeds; they do not return data. Their schemas define the proposed request/success shapes only. Template request/response schemas contain metadata only and have no image, blob, or embedding fields. `/health` remains a hidden-from-OpenAPI process-health alias for existing Docker health checks; `/api/v1/health` is the versioned health operation.
 
 ## Error body
 

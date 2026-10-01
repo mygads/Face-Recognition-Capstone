@@ -1352,6 +1352,217 @@ a:focus-visible {
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
 }
 
+.status-badge--warning {
+  color: var(--orange, #c27816);
+  background: color-mix(in srgb, var(--orange, #c27816) 13%, var(--bg-surface));
+}
+
+.enrollment-view {
+  gap: var(--space-4);
+}
+
+.enrollment-view__hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.enrollment-view__class-picker {
+  display: grid;
+  min-width: min(100%, 280px);
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.enrollment-view__class-picker select {
+  min-height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--bg-surface);
+  font: inherit;
+}
+
+.enrollment-view__class-picker select:focus {
+  border-color: var(--primary);
+  outline: 2px solid color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+.enrollment-view__roster {
+  display: grid;
+  max-height: 340px;
+  gap: 7px;
+  overflow-y: auto;
+  margin-top: var(--space-4);
+}
+
+.enrollment-view__student {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 9px 12px;
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--bg-surface);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.enrollment-view__student:hover:not(:disabled),
+.enrollment-view__student--selected {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 6%, var(--bg-surface));
+}
+
+.enrollment-view__student:disabled {
+  cursor: default;
+  opacity: 0.82;
+}
+
+.enrollment-view__student-copy strong,
+.enrollment-view__student-copy small {
+  display: block;
+}
+
+.enrollment-view__student-copy strong {
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.enrollment-view__student-copy small {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+.enrollment-view__capture-panel {
+  min-width: 0;
+}
+
+.enrollment-view__capture-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(240px, 0.75fr);
+  gap: var(--space-5);
+  margin-top: var(--space-4);
+}
+
+.enrollment-view__camera-frame {
+  position: relative;
+  display: grid;
+  min-height: 250px;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius);
+  background: #141b24;
+  aspect-ratio: 16 / 10;
+}
+
+.enrollment-view__camera {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.enrollment-view__camera-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  color: #cad3df;
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.enrollment-view__camera-placeholder svg {
+  width: 46px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.enrollment-view__countdown {
+  position: absolute;
+  display: grid;
+  width: 74px;
+  height: 74px;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 65%);
+  border-radius: 50%;
+  color: white;
+  background: rgb(20 27 36 / 55%);
+  font-size: 2rem;
+  font-weight: 600;
+}
+
+.enrollment-view__capture-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  justify-content: center;
+}
+
+.enrollment-view__instruction {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.65;
+}
+
+.enrollment-view__progress {
+  width: 100%;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--bg-surface-secondary);
+}
+
+.enrollment-view__progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+  transition: width 220ms ease;
+}
+
+.enrollment-view__confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.enrollment-view__confirm input {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  accent-color: var(--primary);
+}
+
+.enrollment-view__result-status {
+  margin: 0;
+  color: var(--green);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
 @media (max-width: 650px) {
   .session-view__schedule-card {
     align-items: stretch;
@@ -1360,5 +1571,21 @@ a:focus-visible {
 
   .session-view__grace-period {
     margin-top: var(--space-3);
+  }
+
+  .enrollment-view__capture-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .enrollment-view__camera-frame {
+    min-height: 200px;
+  }
+
+  .enrollment-view__class-picker {
+    width: 100%;
+  }
+
+  .enrollment-view__student {
+    align-items: flex-start;
   }
 }

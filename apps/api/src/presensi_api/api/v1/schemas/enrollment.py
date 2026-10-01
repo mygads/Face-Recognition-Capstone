@@ -1,3 +1,4 @@
+from typing import Literal
 from uuid import UUID
 
 from pydantic import AwareDatetime, Field
@@ -20,3 +21,18 @@ class FaceTemplateResponse(ApiSchema):
     quality_metadata: dict[str, str | int | float | bool | None]
     created_at: AwareDatetime
     revoked_at: AwareDatetime | None
+
+
+class EnrollmentStudentStatusResponse(ApiSchema):
+    id: UUID
+    student_number: str
+    full_name: str
+    template_status: Literal["not_enrolled", "enrolled", "needs_reenrollment"]
+
+
+class EnrollmentCaptureResultResponse(ApiSchema):
+    student_id: UUID
+    template_status: Literal["enrolled", "needs_reenrollment"]
+    accepted_frames: int = Field(ge=0)
+    rejected_frames: int = Field(ge=0)
+    confirmation_required: bool = True

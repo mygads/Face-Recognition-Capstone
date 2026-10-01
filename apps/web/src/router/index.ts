@@ -10,6 +10,7 @@ import { useAuthStore } from '../stores/auth'
 import AppShell from '../components/AppShell.vue'
 import AuthLayout from '../layouts/AuthLayout.vue'
 import DashboardView from '../views/DashboardView.vue'
+import EnrollmentView from '../views/EnrollmentView.vue'
 import ForbiddenView from '../views/ForbiddenView.vue'
 import LoginView from '../views/LoginView.vue'
 import MasterDataView from '../views/MasterDataView.vue'
@@ -76,6 +77,16 @@ export const routes: RouteRecordRaw[] = [
           title: 'Sesi presensi',
           description: 'Buka sesi praktikum dan pantau roster presensi.',
           requiredRoles: ['ADMIN', 'TEACHER', 'LABORANT'],
+        },
+      },
+      {
+        path: 'enrollment',
+        name: 'enrollment',
+        component: EnrollmentView,
+        meta: {
+          title: 'Pendaftaran siswa',
+          description: 'Daftarkan atau perbarui template wajah siswa dengan bantuan kamera.',
+          requiredRoles: ['ADMIN', 'LABORANT'],
         },
       },
       {

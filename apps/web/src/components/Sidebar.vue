@@ -20,6 +20,9 @@ const canOperateSessions = computed(
   () =>
     auth.account?.roles.some((role) => ['ADMIN', 'TEACHER', 'LABORANT'].includes(role)) ?? false,
 )
+const canManageEnrollment = computed(
+  () => auth.account?.roles.some((role) => role === 'ADMIN' || role === 'LABORANT') ?? false,
+)
 </script>
 
 <template>
@@ -103,6 +106,22 @@ const canOperateSessions = computed(
           <circle cx="18" cy="16" r="2.5" />
         </svg>
         <span class="app-sidebar__link-label">Sesi presensi</span>
+      </RouterLink>
+      <RouterLink
+        v-if="canManageEnrollment"
+        class="app-sidebar__link"
+        active-class="app-sidebar__link--active"
+        to="/app/enrollment"
+        :aria-label="collapsed ? 'Pendaftaran siswa' : undefined"
+        data-testid="enrollment-link"
+        @click="emit('navigate')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <circle cx="9" cy="10" r="2.5" />
+          <path d="M5.5 17c.7-2 2-3 3.5-3s2.8 1 3.5 3M15 9h3M15 12h3M15 15h3" />
+        </svg>
+        <span class="app-sidebar__link-label">Pendaftaran siswa</span>
       </RouterLink>
     </nav>
 

@@ -320,6 +320,27 @@ def test_expired_bearer_token_is_rejected(api_database: sessionmaker[Session]) -
         ),
         (
             "ADMIN",
+            "GET",
+            f"/api/v1/enrollments/class-status?class_id={UUID(int=44)}",
+            None,
+            404,
+        ),
+        (
+            "TEACHER",
+            "GET",
+            f"/api/v1/enrollments/class-status?class_id={UUID(int=44)}",
+            None,
+            403,
+        ),
+        (
+            "LABORANT",
+            "GET",
+            f"/api/v1/enrollments/class-status?class_id={UUID(int=44)}",
+            None,
+            404,
+        ),
+        (
+            "ADMIN",
             "POST",
             "/api/v1/sessions",
             {"practicum_schedule_id": str(UUID(int=5))},

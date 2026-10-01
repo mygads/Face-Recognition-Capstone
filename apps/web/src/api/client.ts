@@ -23,6 +23,8 @@ export type ScheduleUpdate = components['schemas']['ScheduleUpdateRequest']
 export type ScheduleTeacher = components['schemas']['ScheduleTeacherResponse']
 export type AttendanceSession = components['schemas']['AttendanceSessionResponse']
 export type OpenableSchedule = components['schemas']['OpenableScheduleResponse']
+export type EnrollmentStudentStatus = components['schemas']['EnrollmentStudentStatusResponse']
+export type EnrollmentCaptureResult = components['schemas']['EnrollmentCaptureResultResponse']
 type ErrorDetail = components['schemas']['ErrorDetail']
 type ErrorEnvelope = components['schemas']['ErrorEnvelope']
 type Page<T> = {
@@ -286,6 +288,30 @@ export async function getAttendanceSessionStatus(sessionId: string): Promise<Att
 export async function closeAttendanceSession(sessionId: string): Promise<AttendanceSession> {
   const result = await apiClient.POST('/api/v1/sessions/{session_id}/close', {
     params: { path: { session_id: sessionId } },
+  })
+  return unwrap(result)
+}
+
+export async function listClassEnrollmentStatus(
+  classId: string,
+): Promise<EnrollmentStudentStatus[]> {
+  const result = await apiClient.GET('/api/v1/enrollments/class-status', {
+    params: { query: { class_id: classId } },
+  })
+  return unwrap(result)
+}
+
+export async function submitEnrollmentCaptures(
+  studentId: string,
+  captures: Blob[],
+): Promise<EnrollmentCaptureResult> {
+  const body = new FormData()
+  body.append('student_id', studentId)
+  captures.forEach((capture, index) => {
+    body.append('captures', capture, `capture-${index + 1}.jpg`)
+  })
+  const result = await apiClient.POST('/api/v1/enrollments/captures', {
+    body: body as unknown as components['schemas']['Body_submit_enrollment_captures_api_v1_enrollments_captures_post'],
   })
   return unwrap(result)
 }
