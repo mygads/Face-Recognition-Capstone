@@ -10,7 +10,7 @@ Tidak ada file aplikasi, `AGENTS.md`, folder `docs/`, konfigurasi lint, dependen
 
 ## Lint dan test awal
 
-Tidak ada lint/test command awal yang dapat dijalankan karena tidak ada konfigurasi/package atau test. Foundation menambahkan web typecheck/build scripts dan dua FastAPI `/health` scaffolds, tetapi tidak menambahkan test suite atau lint policy. Konfigurasi quality tooling tetap menjadi task terpisah.
+Tidak ada lint/test command awal yang dapat dijalankan karena tidak ada konfigurasi/package atau test. Foundation pertama menambahkan web typecheck/build scripts dan dua FastAPI `/health` scaffolds. Task environment ini menambahkan pytest smoke test hanya untuk kedua endpoint health dan task runner `test`; lint policy/CI tetap menjadi task terpisah.
 
 ## Audit struktur setelah scaffold
 
@@ -18,4 +18,4 @@ Tidak ada lint/test command awal yang dapat dijalankan karena tidak ada konfigur
 - FastAPI Core API tunggal di `apps/api` dan central inference process shell di `apps/ai-service`.
 - Satu boundary package `libs/recognition-core` untuk kedua deployment profile.
 - Deployment, tests, architecture, ADR, dan test-plan directories tersedia.
-- Business attendance, biometric processing, DB, Docker, and CI belum diimplementasikan.
+- Business attendance, biometric processing, database schema/queries, dan CI belum diimplementasikan. Compose development untuk PostgreSQL, Core API, optional AI service, dan optional web HMR container ditambahkan pada task environment.

@@ -73,6 +73,12 @@ Sumber: [Gentelella getting started](https://gentelella.colorlib.com/docs/gettin
 
 Desain v2 merekomendasikan pilot AI_EDGE karena saat ini hanya ada dua lab dan latency walk-through menjadi prioritas. AI_CENTRAL tetap menjadi profil yang didukung. Pilihan akhir harus dibandingkan pada hardware nyata melalui latency p50/p95, throughput, resource, biaya, dan kebutuhan operasional; angka asumsi tidak boleh ditulis sebagai hasil benchmark.
 
-## Yang belum disiapkan oleh foundation
+## Development environment
 
-Tidak ada database schema/migration, auth, attendance feature, camera capture, model, inference, Docker Compose, CI, lint rules, atau test suite pada tahap ini. Health endpoints pada dua FastAPI package hanya memastikan process scaffold dapat dijalankan. Masing-masing ditambahkan oleh task roadmap yang sesuai.
+`docker-compose.yml` menjalankan PostgreSQL dan Core API secara default. PostgreSQL harus healthy sebelum API dimulai; healthcheck API memeriksa `/health`. AI service adalah service terpisah pada profile Compose `central`, dan web dapat dijalankan native untuk HMR atau sebagai service profile `web-container`. Edge agent/webcam tidak dijalankan di Compose karena akses kamera bergantung pada OS dan device passthrough.
+
+Development Compose memakai `.env` lokal dari `.env.example`, mengekspos port hanya pada loopback, dan menyimpan data PostgreSQL di named volume. `scripts/dev.py` menyediakan `dev-up`, `dev-down`, dan `test` untuk Windows/Linux.
+
+## Yang belum disiapkan
+
+Compose menyediakan database server, tetapi aplikasi API belum menjalankan query, migration, auth, atau attendance feature. Camera capture, model, inference, CI, dan lint policy tetap menjadi task roadmap berikutnya. Health tests saat ini hanya memeriksa endpoint proses API/AI.
