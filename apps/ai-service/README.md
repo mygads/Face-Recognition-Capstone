@@ -92,12 +92,18 @@ lets the authenticated device invalidate its local snapshot and temporal track
 state when a session closes. Expiry also removes cached data; process restart
 clears all cache entries.
 
-`apps/api` currently has no endpoint that supplies template embeddings, and the
-biometric storage/provider decision is still open. This service therefore has no
-production gallery loader yet: the cache is populated only through its internal
-Python adapter (`await app.state.install_gallery_snapshot(...)`) or an injected
-provider in tests. Do not add a public gallery-upload route. A secured Core API gallery
-adapter is required before live AI_CENTRAL enrollment can be used.
+The production `CoreApiGalleryProvider` validates the device credential, fetches
+the active device-scoped session gallery, and adapts its normalized vectors into
+the shared recognition-core domain. Core API encrypts vectors at rest and
+releases them only for the active session/model version. AI Central does not
+write raw frames or persist templates; the cache is memory-only and expires at
+the server-provided age/session deadline. A validated device/session credential
+can continue against the already-loaded gallery during a Core API outage until
+that same bounded deadline. A restart clears both gallery and validation state,
+so the service fails closed until Core API becomes reachable.
+
+Do not add a public gallery-upload route. Provision the device credential
+through the Core API and configure its protected token file on the edge agent.
 
 ## Health and metrics
 

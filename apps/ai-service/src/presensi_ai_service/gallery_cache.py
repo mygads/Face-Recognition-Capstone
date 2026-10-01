@@ -134,6 +134,8 @@ class SessionGalleryProvider(Protocol):
         self,
         device_id: UUID,
         session_id: UUID,
+        *,
+        device_token: str | None = None,
     ) -> SessionGallery | None: ...
 
 

@@ -36,6 +36,8 @@ export type SessionDashboardDevice = components['schemas']['SessionDashboardDevi
 export type OpenableSchedule = components['schemas']['OpenableScheduleResponse']
 export type EnrollmentStudentStatus = components['schemas']['EnrollmentStudentStatusResponse']
 export type EnrollmentCaptureResult = components['schemas']['EnrollmentCaptureResultResponse']
+export type FaceTemplate = components['schemas']['FaceTemplateResponse']
+export type TemplateRevocation = components['schemas']['TemplateRevocationResponse']
 type ErrorDetail = components['schemas']['ErrorDetail']
 type ErrorEnvelope = components['schemas']['ErrorEnvelope']
 type Page<T> = {
@@ -418,6 +420,20 @@ export async function submitEnrollmentCaptures(
   })
   const result = await apiClient.POST('/api/v1/enrollments/captures', {
     body: body as unknown as components['schemas']['Body_submit_enrollment_captures_api_v1_enrollments_captures_post'],
+  })
+  return unwrap(result)
+}
+
+export async function listFaceTemplates(studentId: string): Promise<FaceTemplate[]> {
+  const result = await apiClient.GET('/api/v1/face-templates', {
+    params: { query: { student_id: studentId, include_revoked: false, limit: 100, offset: 0 } },
+  })
+  return unwrap(result).items
+}
+
+export async function revokeFaceTemplate(templateId: string): Promise<TemplateRevocation> {
+  const result = await apiClient.POST('/api/v1/face-templates/{template_id}/revoke', {
+    params: { path: { template_id: templateId } },
   })
   return unwrap(result)
 }

@@ -13,6 +13,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Index,
+    LargeBinary,
     Numeric,
     SmallInteger,
     String,
@@ -176,6 +177,7 @@ class Device(UUIDPrimaryKey, TimestampMixin, Base):
             name="camera_status",
         ),
         Index("ix_devices_laboratory_id", "laboratory_id"),
+        Index("ix_devices_last_seen_at", "last_seen_at"),
     )
 
     laboratory_id: Mapped[UUID] = mapped_column(
@@ -201,6 +203,14 @@ class Device(UUIDPrimaryKey, TimestampMixin, Base):
     )
     latency_summary: Mapped[dict[str, object] | None] = mapped_column(JSON_OBJECT)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    credential_hash: Mapped[str | None] = mapped_column(String(64))
+    credential_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    previous_credential_hash: Mapped[str | None] = mapped_column(String(64))
+    previous_credential_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
 
 class PracticumSchedule(UUIDPrimaryKey, TimestampMixin, Base):
@@ -310,16 +320,26 @@ class FaceTemplate(UUIDPrimaryKey, TimestampMixin, Base):
     __tablename__ = "face_templates"
     __table_args__ = (
         Index(
-            "uq_face_templates_active_student_model_version",
-            "student_id",
+            "ix_face_templates_active_model_student",
             "model_name",
             "model_version",
-            unique=True,
+            "student_id",
             postgresql_where=text("revoked_at IS NULL"),
             sqlite_where=text("revoked_at IS NULL"),
         ),
+        Index("ix_face_templates_enrollment_batch_id", "enrollment_batch_id"),
         Index("ix_face_templates_created_by_user_id", "created_by_user_id"),
         Index("ix_face_templates_revoked_by_user_id", "revoked_by_user_id"),
+        CheckConstraint(
+            "revoked_at IS NOT NULL OR (embedding_ciphertext IS NOT NULL "
+            "AND encryption_key_id IS NOT NULL AND embedding_dimension IS NOT NULL "
+            "AND embedding_dimension > 0)",
+            name="active_template_has_encrypted_embedding",
+        ),
+        CheckConstraint(
+            "embedding_dimension IS NULL OR embedding_dimension > 0",
+            name="embedding_dimension_positive",
+        ),
     )
 
     student_id: Mapped[UUID] = mapped_column(
@@ -329,6 +349,12 @@ class FaceTemplate(UUIDPrimaryKey, TimestampMixin, Base):
     )
     model_name: Mapped[str] = mapped_column(String(120), nullable=False)
     model_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    enrollment_batch_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), nullable=False, default=uuid4
+    )
+    embedding_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary)
+    encryption_key_id: Mapped[str | None] = mapped_column(String(80))
+    embedding_dimension: Mapped[int | None] = mapped_column(SmallInteger)
     quality_metadata: Mapped[dict[str, object]] = mapped_column(
         JSON_OBJECT, nullable=False, default=dict
     )

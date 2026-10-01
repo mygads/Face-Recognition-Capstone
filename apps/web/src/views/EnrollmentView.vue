@@ -4,9 +4,12 @@ import {
   ApiError,
   listClasses,
   listClassEnrollmentStatus,
+  listFaceTemplates,
+  revokeFaceTemplate,
   submitEnrollmentCaptures,
   type EnrollmentCaptureResult,
   type EnrollmentStudentStatus,
+  type FaceTemplate,
   type SchoolClass,
 } from '../api/client'
 
@@ -21,6 +24,10 @@ const capturePhase = ref<CapturePhase>('ready')
 const countdownValue = ref(3)
 const captureIndex = ref(0)
 const captureResult = ref<EnrollmentCaptureResult | null>(null)
+const duplicateWarnings = computed(() => captureResult.value?.duplicate_warnings ?? [])
+const activeTemplates = ref<FaceTemplate[]>([])
+const isLoadingTemplates = ref(false)
+const isRevoking = ref(false)
 const identityConfirmed = ref(false)
 const pageError = ref<string | null>(null)
 const pageMessage = ref<string | null>(null)
@@ -83,6 +90,7 @@ async function loadRoster(classId: string): Promise<void> {
   stopCamera()
   isStarting.value = false
   students.value = []
+  activeTemplates.value = []
   selectedStudentId.value = ''
   capturePhase.value = 'ready'
   captureResult.value = null
@@ -205,11 +213,45 @@ function cancelCapture(): void {
 }
 
 function selectStudent(student: EnrollmentStudentStatus): void {
-  if (student.template_status === 'enrolled') return
   cancelCapture()
   pageMessage.value = null
   pageError.value = null
   selectedStudentId.value = student.id
+  activeTemplates.value = []
+  if (student.template_status === 'enrolled') void loadActiveTemplates(student.id)
+}
+
+async function loadActiveTemplates(studentId: string): Promise<void> {
+  isLoadingTemplates.value = true
+  try {
+    const templates = await listFaceTemplates(studentId)
+    if (selectedStudentId.value === studentId) activeTemplates.value = templates
+  } catch (error) {
+    pageError.value = formatError(error)
+  } finally {
+    isLoadingTemplates.value = false
+  }
+}
+
+async function revokeSelectedTemplates(): Promise<void> {
+  const firstTemplate = activeTemplates.value[0]
+  const student = selectedStudent.value
+  if (!firstTemplate || !student || isRevoking.value) return
+  isRevoking.value = true
+  pageError.value = null
+  try {
+    await revokeFaceTemplate(firstTemplate.id)
+    const updatedRoster = await listClassEnrollmentStatus(selectedClassId.value)
+    students.value = updatedRoster
+    const updatedStudent = updatedRoster.find((item) => item.id === student.id)
+    selectedStudentId.value = updatedStudent?.id ?? ''
+    activeTemplates.value = []
+    pageMessage.value = `${student.full_name}: template dicabut. Siswa dapat didaftarkan ulang.`
+  } catch (error) {
+    pageError.value = formatError(error)
+  } finally {
+    isRevoking.value = false
+  }
 }
 
 function confirmIdentityAndContinue(): void {
@@ -286,7 +328,7 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             'enrollment-view__student--enrolled': student.template_status === 'enrolled',
           }"
           type="button"
-          :disabled="student.template_status === 'enrolled' || isStarting"
+          :disabled="isStarting"
           :aria-pressed="student.id === selectedStudentId"
           :data-testid="`enrollment-student-${student.id}`"
           @click="selectStudent(student)"
@@ -419,6 +461,15 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
                 }}).
               </span>
             </label>
+            <p v-if="duplicateWarnings.length" class="master-data__alert" role="status">
+              Ada kemungkinan wajah mirip dengan
+              {{
+                duplicateWarnings
+                  .map((warning) => `${warning.full_name} (${warning.student_number})`)
+                  .join(', ')
+              }}. Periksa kembali identitas dan lanjutkan hanya setelah operator memastikan siswa
+              yang benar.
+            </p>
             <button
               class="button button--primary"
               type="button"
@@ -458,8 +509,29 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
           >
             Status: {{ statusLabel(captureResult.template_status) }}
           </p>
+          <div
+            v-if="selectedStudent.template_status === 'enrolled' && capturePhase === 'ready'"
+            class="enrollment-view__revoke"
+          >
+            <p class="master-data__muted">
+              Template aktif: {{ isLoadingTemplates ? 'memuat…' : activeTemplates.length }}
+            </p>
+            <button
+              class="button button--secondary"
+              type="button"
+              data-testid="revoke-enrollment-template"
+              :disabled="isLoadingTemplates || isRevoking || activeTemplates.length === 0"
+              @click="revokeSelectedTemplates"
+            >
+              {{ isRevoking ? 'Mencabut…' : 'Cabut template untuk daftar ulang' }}
+            </button>
+          </div>
           <button
-            v-if="capturePhase === 'ready' && selectedStudent"
+            v-if="
+              capturePhase === 'ready' &&
+              selectedStudent &&
+              selectedStudent.template_status !== 'enrolled'
+            "
             class="button button--primary"
             type="button"
             data-testid="start-enrollment-capture"

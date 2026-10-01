@@ -14,15 +14,26 @@ no template history means not enrolled. This endpoint does not return an image,
 embedding, model information, or quality score.
 
 Raw captures stay in browser memory until submitted and are not saved by this
-interface. The API contract for multiple image captures is
-`POST /api/v1/enrollments/captures`. Processing and template persistence are
-currently unavailable: the database policy in
-[database-schema.md](database-schema.md) excludes embedding payloads, so this
-route remains an explicit `501` placeholder until the biometric storage policy
-is resolved. Do not treat the UI's mocked end-to-end submission as proof that
-server enrollment is operational.
+interface. `POST /api/v1/enrollments/captures` accepts 3–10 bounded image
+captures, rejects unsupported formats, decode failures, multiple/no-face
+frames, and poor quality, then stores the best 3–5 normalized embeddings for
+the configured YuNet/SFace model. Embeddings are encrypted at rest using the
+AES-256-GCM key ring described in
+[database-schema.md](database-schema.md); raw frames are discarded after
+processing. Do not reuse enrollment templates across model versions.
+
+The API compares new vectors against other students' active vectors for the
+same model/version. Similarity above the configurable warning threshold adds a
+duplicate-lookalike warning for the operator; it never merges students or
+enrollments. The operator must verify identity before proceeding. To re-enroll,
+select the active student, revoke the current enrollment batch, and capture a
+new set. Revocation is audited and does not delete historical rows. Operators
+must provision the encryption key ring before accepting enrollments; a missing
+or mismatched key fails closed.
 
 The E2E flow uses a synthetic canvas-backed media stream and mocked API
 responses. It exercises class/status selection, countdown/capture progress,
-operator identity confirmation, and automatic selection of the next eligible
-student without using student imagery.
+operator identity confirmation, revocation/re-enrollment controls, and
+automatic selection of the next eligible student without using student
+imagery. It does not validate biometric accuracy; local model assets and a
+locally calibrated duplicate-warning threshold remain deployment inputs.

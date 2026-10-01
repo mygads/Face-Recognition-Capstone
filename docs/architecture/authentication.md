@@ -24,9 +24,9 @@ Attendance report list, summary, and export endpoints constrain a teacher to sch
 
 Reusable `require_permissions(...)` dependencies enforce route-level policy. User roles are stored in `roles` and `user_roles`; a role not in the baseline enum gives no implicit permission. Settings permission is defined for future settings handlers; there is not yet a settings endpoint.
 
-Several protected operations remain placeholders and return 501 after route authorization. Implemented handlers enforce resource scope: teachers may access or manage only their assigned classes/schedules and laborants only their relevant laboratory/devices/sessions/attendance. Teacher correction policy (including any approval workflow) remains a domain rule to specify before implementing corrections. Route permission alone is not a substitute for row-level authorization.
+Several unrelated protected operations remain placeholders and return 501 after route authorization. Implemented handlers enforce resource scope: teachers may access or manage only their assigned classes/schedules and laborants only their relevant laboratory/devices/sessions/attendance. Teacher correction policy (including any approval workflow) remains a domain rule to specify before implementing corrections. Route permission alone is not a substitute for row-level authorization.
 
-Enrollment/template metadata routes require `ADMIN` or `LABORANT`, including while they return 501. The API contract accepts no image, blob, or embedding. See the [biometric data boundary](database-schema.md#recognition-and-privacy-boundary).
+Enrollment and operator template metadata routes require `ADMIN` or `LABORANT`. Raw captures are processed in memory; embeddings are encrypted at rest and only returned in an active session gallery to the matching device credential. Operator routes never expose vectors or ciphertext. See the [biometric data boundary](database-schema.md#recognition-and-privacy-boundary). Device runtime routes authenticate a registered device credential separately from human JWTs.
 
 ## Creating the first account
 

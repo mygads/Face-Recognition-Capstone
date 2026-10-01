@@ -25,8 +25,10 @@ sequenceDiagram
 
 ## Request and data controls
 
-- Authentication uses a configured per-device bearer token plus `X-Device-ID`.
-  Credentials are held outside source control and do not enter logs.
+- The service forwards the per-device bearer token plus `X-Device-ID` to Core
+  API. Core API verifies the registered credential before supplying a gallery.
+  The AI service retains a hash of the validated token in memory for that
+  session's bounded gallery lifetime, never the raw token in logs.
 - Body bytes, frame bytes/count, decoded dimensions, and per-device request rate
   have configurable limits. Only JPEG, PNG, and WebP still images are accepted.
 - Images are verified and decoded in memory. The service has no image disk path
@@ -46,11 +48,13 @@ version, and normalized vector metadata. Each device can invalidate its own
 session snapshot when the session closes; expiration and process restart also
 remove snapshots. Invalidation clears the corresponding temporal track state.
 
-The Core API does not currently expose template embeddings and the storage
-decision remains open. There is no public upload endpoint: production cache
-population needs a separately secured API provider adapter after that decision.
-The route, pipeline, and tests can be exercised by injecting a synthetic
-in-memory gallery; that does not provision a live enrollment source.
+`CoreApiGalleryProvider` obtains the active gallery from the authenticated Core
+API device runtime endpoint. Core API decrypts templates only for the selected
+device/laboratory/session/model scope. A successful device/session validation
+allows AI Central to continue using its already-loaded memory cache during a
+Core API outage until the server expiry, session end, or configured maximum age.
+The device token and gallery are not persisted; a process restart requires Core
+API connectivity again. There is no public gallery upload route.
 
 ## Configuration and deployment
 

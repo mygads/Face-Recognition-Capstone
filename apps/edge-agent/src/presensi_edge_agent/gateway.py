@@ -4,7 +4,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
@@ -105,11 +105,17 @@ class StbGatewayService:
         outbox: EventOutbox,
         processor: FrameProcessor,
     ) -> None:
-        if config.device_id is None or config.gateway.session_id is None:
-            raise ValueError("STB gateway device and session IDs are required.")
+        if config.device_id is None:
+            raise ValueError("STB gateway device ID is required.")
         self.config = config
         self.device_id = config.device_id
-        self.session_id = config.gateway.session_id
+        discover_sessions = getattr(api, "discover_active_sessions", None)
+        self._session_discovery_supported = callable(discover_sessions)
+        self.session_id = (
+            None if self._session_discovery_supported else config.gateway.session_id
+        )
+        self._active_session_end = config.gateway.session_ends_at
+        self._active_session_expires_at = config.gateway.session_ends_at
         self.camera = camera
         self.api = api
         if isinstance(api, CoreApiClient):
@@ -132,9 +138,9 @@ class StbGatewayService:
             "profile": "STB_GATEWAY",
             "camera_open": self._camera_open,
             "device_id_configured": self.config.device_id is not None,
-            "active_session_id": str(self.session_id),
-            "session_ends_at": self.config.gateway.session_ends_at.isoformat()
-            if self.config.gateway.session_ends_at
+            "active_session_id": str(self.session_id) if self.session_id else None,
+            "session_ends_at": self._active_session_end.isoformat()
+            if self._active_session_end
             else None,
             "pending_events": pending,
             "dead_letter_events": dead_letter,
@@ -240,14 +246,59 @@ class StbGatewayService:
         self.stop_event.set()
 
     def _session_active(self) -> bool:
-        starts_at = self.config.gateway.session_starts_at
-        ends_at = self.config.gateway.session_ends_at
         now = datetime.now(UTC)
-        if starts_at is not None and now < starts_at:
+        if self.session_id is None:
             return False
-        if ends_at is not None and now >= ends_at:
+        if self._active_session_end is not None and now >= self._active_session_end:
             return False
-        return True
+        return (
+            self._active_session_expires_at is None
+            or now < self._active_session_expires_at
+        )
+
+    def _refresh_active_session(self) -> None:
+        discover = getattr(self.api, "discover_active_sessions", None)
+        if not callable(discover):
+            return
+        try:
+            candidates = discover()
+        except ApiCallError:
+            raise
+        if len(candidates) != 1:
+            self.session_id = None
+            self._active_session_end = None
+            self._active_session_expires_at = None
+            if len(candidates) > 1:
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "multiple_active_sessions_for_device",
+                    session_count=len(candidates),
+                )
+            return
+        candidate = candidates[0]
+        try:
+            candidate_id = UUID(str(candidate["session_id"]))
+            session_end = _aware_datetime(candidate["session_ends_at"])
+            expiry = _aware_datetime(candidate["expires_at"])
+        except (KeyError, TypeError, ValueError):
+            self.session_id = None
+            self._active_session_end = None
+            self._active_session_expires_at = None
+            log_event(logger, logging.ERROR, "invalid_active_session_discovery_result")
+            return
+        configured_id = self.config.gateway.session_id
+        if configured_id is not None and configured_id != candidate_id:
+            self.session_id = None
+            self._active_session_end = None
+            self._active_session_expires_at = None
+            return
+        self.session_id = candidate_id
+        self._active_session_end = session_end
+        offline_deadline = datetime.now(UTC) + timedelta(
+            seconds=self.config.api.cache_max_offline_seconds
+        )
+        self._active_session_expires_at = min(expiry, offline_deadline)
 
     def _quality_ok(self, assessment: FrameAssessment) -> bool:
         settings = self.config.gateway
@@ -279,6 +330,8 @@ class StbGatewayService:
         return captured
 
     def _submit_burst(self, frames: list[BurstFrame]) -> None:
+        if self.session_id is None:
+            return
         # A burst is one short track: a later person at the same camera must
         # not inherit temporal evidence from the previous candidate.
         track_id = f"camera-{self.config.camera.index}-{uuid4()}"
@@ -307,8 +360,30 @@ class StbGatewayService:
 
     def _sync_worker(self) -> None:
         next_heartbeat = 0.0
+        next_discovery = 0.0
         while not self.stop_event.is_set():
             now = time.monotonic()
+            if self._session_discovery_supported and now >= next_discovery:
+                try:
+                    self._refresh_active_session()
+                    if self.session_id is not None:
+                        log_event(
+                            logger,
+                            logging.DEBUG,
+                            "active_session_discovered",
+                            session_id=str(self.session_id),
+                        )
+                    else:
+                        log_event(logger, logging.DEBUG, "no_unique_active_session")
+                except ApiCallError as exc:
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        "active_session_discovery_failed",
+                        status_code=exc.status_code,
+                        retryable=exc.retryable,
+                    )
+                next_discovery = now + self.config.api.cache_refresh_seconds
             if now >= next_heartbeat:
                 try:
                     self.api.heartbeat()
@@ -392,3 +467,12 @@ def _event_payload(
         "model_name": "opencv-zoo-sface",
         "model_version": decision.model_version,
     }
+
+
+def _aware_datetime(value: object) -> datetime:
+    if not isinstance(value, str):
+        raise ValueError("Expected an ISO datetime string.")
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("Session timestamps must include a timezone.")
+    return parsed.astimezone(UTC)

@@ -16,6 +16,7 @@ class TemplateEnrollmentRequest(ApiSchema):
 class FaceTemplateResponse(ApiSchema):
     id: UUID
     student_id: UUID
+    enrollment_batch_id: UUID
     model_name: str
     model_version: str
     quality_metadata: dict[str, str | int | float | bool | None]
@@ -30,9 +31,26 @@ class EnrollmentStudentStatusResponse(ApiSchema):
     template_status: Literal["not_enrolled", "enrolled", "needs_reenrollment"]
 
 
+class EnrollmentDuplicateWarning(ApiSchema):
+    student_id: UUID
+    student_number: str
+    full_name: str
+    similarity: float = Field(ge=-1, le=1)
+
+
 class EnrollmentCaptureResultResponse(ApiSchema):
     student_id: UUID
+    enrollment_batch_id: UUID
     template_status: Literal["enrolled", "needs_reenrollment"]
     accepted_frames: int = Field(ge=0)
     rejected_frames: int = Field(ge=0)
+    template_count: int = Field(ge=0, le=5)
+    duplicate_warnings: list[EnrollmentDuplicateWarning] = Field(default_factory=list)
     confirmation_required: bool = True
+
+
+class TemplateRevocationResponse(ApiSchema):
+    student_id: UUID
+    enrollment_batch_id: UUID
+    revoked_templates: int = Field(ge=1)
+    revoked_at: AwareDatetime

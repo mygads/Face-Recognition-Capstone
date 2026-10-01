@@ -20,6 +20,12 @@ const roster = [
 ]
 
 async function loginAsLaborant(page: Page): Promise<void> {
+  await page.route('**/api/v1/sessions?**', (route) =>
+    route.fulfill({
+      status: 200,
+      json: { items: [], pagination: { total: 0, limit: 100, offset: 0 } },
+    }),
+  )
   await page.route('**/api/v1/auth/login', (route) =>
     route.fulfill({
       status: 200,
@@ -111,9 +117,19 @@ test('laborant captures a student, confirms identity, and advances to the next s
       status: 201,
       json: {
         student_id: roster[0].id,
+        enrollment_batch_id: 'batch-enrollment-1',
         template_status: 'enrolled',
         accepted_frames: 4,
         rejected_frames: 0,
+        template_count: 4,
+        duplicate_warnings: [
+          {
+            student_id: roster[2].id,
+            student_number: roster[2].student_number,
+            full_name: roster[2].full_name,
+            similarity: 0.91,
+          },
+        ],
         confirmation_required: true,
       },
     })
@@ -137,6 +153,10 @@ test('laborant captures a student, confirms identity, and advances to the next s
   await expect(page.getByText(/capture dimulai dalam 3 detik/i)).toBeVisible()
   await expect(page.getByText('Pengambilan 1 dari 4.')).toBeVisible({ timeout: 5000 })
   await expect(page.getByText(/4 dari 4 capture siap/i)).toBeVisible({ timeout: 10_000 })
+  await expect(
+    page.getByText(/Ada kemungkinan wajah mirip dengan Synthetic Student Three/),
+  ).toBeVisible()
+  await expect(page.getByText('0.91')).toHaveCount(0)
   await expect(page.getByText(/embedding|similarity|threshold/i)).toHaveCount(0)
 
   const confirmButton = page.getByTestId('confirm-enrollment-identity')
@@ -149,4 +169,82 @@ test('laborant captures a student, confirms identity, and advances to the next s
     'true',
   )
   await expect(page.getByRole('status')).toContainText('Synthetic Student Two dipilih')
+})
+
+test('laborant can revoke an active template before re-enrollment', async ({ page }) => {
+  const enrolledId = roster[2].id
+  let status: 'enrolled' | 'needs_reenrollment' = 'enrolled'
+  await page.route('**/api/v1/classes?**', (route) =>
+    route.fulfill({
+      status: 200,
+      json: {
+        items: [
+          {
+            id: classId,
+            code: 'X-A',
+            name: 'Kelas X A',
+            grade: 10,
+            academic_year: '2026-2027',
+            homeroom_teacher_id: null,
+            is_active: true,
+            created_at: '2026-10-01T00:00:00Z',
+            updated_at: '2026-10-01T00:00:00Z',
+          },
+        ],
+        pagination: { total: 1, limit: 100, offset: 0 },
+      },
+    }),
+  )
+  await page.route('**/api/v1/enrollments/class-status?**', (route) =>
+    route.fulfill({
+      status: 200,
+      json: roster.map((student) => ({
+        ...student,
+        template_status: student.id === enrolledId ? status : 'not_enrolled',
+      })),
+    }),
+  )
+  await page.route('**/api/v1/face-templates?**', (route) =>
+    route.fulfill({
+      status: 200,
+      json: {
+        items: [
+          {
+            id: 'template-active-1',
+            student_id: enrolledId,
+            enrollment_batch_id: 'batch-enrollment-1',
+            model_name: 'opencv-zoo-sface',
+            model_version: 'model-v1',
+            quality_metadata: {},
+            created_at: '2026-10-01T00:00:00Z',
+            revoked_at: null,
+          },
+        ],
+        pagination: { total: 1, limit: 100, offset: 0 },
+      },
+    }),
+  )
+  await page.route('**/api/v1/face-templates/template-active-1/revoke', async (route) => {
+    status = 'needs_reenrollment'
+    await route.fulfill({
+      status: 200,
+      json: {
+        student_id: enrolledId,
+        enrollment_batch_id: 'batch-enrollment-1',
+        revoked_templates: 4,
+        revoked_at: '2026-10-01T00:00:00Z',
+      },
+    })
+  })
+
+  await loginAsLaborant(page)
+  await page.getByTestId('enrollment-link').click()
+  const enrolledStudent = page.getByTestId(`enrollment-student-${enrolledId}`)
+  await enrolledStudent.click()
+  const revokeButton = page.getByTestId('revoke-enrollment-template')
+  await expect(revokeButton).toBeEnabled()
+  await revokeButton.click()
+  await expect(enrolledStudent).toContainText('Perlu daftar ulang')
+  await expect(page.getByRole('status')).toContainText('template dicabut')
+  await expect(page.getByTestId('start-enrollment-capture')).toHaveText('Daftar ulang siswa')
 })

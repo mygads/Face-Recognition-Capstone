@@ -23,6 +23,12 @@ type ApiClass = {
 }
 
 async function loginAsAdmin(page: Page): Promise<void> {
+  await page.route('**/api/v1/sessions?**', (route) =>
+    route.fulfill({
+      status: 200,
+      json: { items: [], pagination: { total: 0, limit: 100, offset: 0 } },
+    }),
+  )
   await page.route('**/api/v1/auth/login', (route) =>
     route.fulfill({
       status: 200,

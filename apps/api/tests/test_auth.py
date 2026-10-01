@@ -292,7 +292,7 @@ def test_expired_bearer_token_is_rejected(api_database: sessionmaker[Session]) -
                 "model_name": "model",
                 "model_version": "1",
             },
-            501,
+            422,
         ),
         (
             "TEACHER",
@@ -316,7 +316,7 @@ def test_expired_bearer_token_is_rejected(api_database: sessionmaker[Session]) -
                 "model_name": "model",
                 "model_version": "1",
             },
-            501,
+            422,
         ),
         (
             "ADMIN",

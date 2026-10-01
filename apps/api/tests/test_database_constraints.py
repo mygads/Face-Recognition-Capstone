@@ -159,13 +159,16 @@ def test_recognition_event_uuid_is_an_idempotency_key(
             session.commit()
 
 
-def test_only_one_active_face_template_per_student_and_model_version(
+def test_multiple_active_face_templates_are_allowed_for_student_and_model_version(
     database: Engine, attendance_context: dict[str, object]
 ) -> None:
     values = {
         "student_id": attendance_context["student_id"],
         "model_name": "recognition-model",
         "model_version": "1.0.0",
+        "embedding_ciphertext": b"synthetic-ciphertext",
+        "encryption_key_id": "test-v1",
+        "embedding_dimension": 3,
         "quality_metadata": {"quality_score": 0.93},
     }
     with Session(database) as session:
@@ -173,11 +176,6 @@ def test_only_one_active_face_template_per_student_and_model_version(
         session.commit()
 
         session.add(FaceTemplate(**values))
-        with pytest.raises(IntegrityError):
-            session.commit()
-
-        session.rollback()
-        session.add(FaceTemplate(**values, revoked_at=datetime.now(timezone.utc)))
         session.commit()
 
 
@@ -242,16 +240,20 @@ def test_role_seed_is_repeatable(database: Engine) -> None:
         session.commit()
 
 
-def test_face_template_has_metadata_not_face_payload_columns() -> None:
+def test_face_template_stores_encrypted_embedding_not_raw_face_data() -> None:
     columns = Base.metadata.tables["face_templates"].columns
     assert {
         "model_name",
         "model_version",
+        "enrollment_batch_id",
+        "embedding_ciphertext",
+        "encryption_key_id",
+        "embedding_dimension",
         "quality_metadata",
         "created_at",
         "revoked_at",
     } <= set(columns.keys())
-    assert not {"image", "image_blob", "embedding", "face_blob"} & set(columns.keys())
+    assert not {"image", "image_blob", "raw_image", "face_blob"} & set(columns.keys())
 
 
 def test_all_datetime_columns_are_timezone_aware() -> None:

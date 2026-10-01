@@ -9,12 +9,22 @@ empty when inference versioning is owned by the AI service.
 
 ## Heartbeat contract
 
-`POST /api/v1/devices/{device_id}/heartbeat` refreshes `last_seen_at` using the API
-clock. The optional body reports the deployment profile, agent/app version, model
-version, camera state (`unknown`, `online`, `offline`, or `error`), and aggregate
-`p50_ms`/`p95_ms` latency. It contains no image, embedding, credential, or
-frame-level data. A reported deployment profile must match the registry; heartbeat
-cannot modify the device's laboratory assignment.
+`POST /api/v1/devices/{device_id}/device-heartbeat` refreshes `last_seen_at` using
+the API clock and requires a registered device credential. The optional body
+reports the deployment profile, agent/app version, model version, camera state
+(`unknown`, `online`, `offline`, or `error`), and aggregate `p50_ms`/`p95_ms`
+latency. It contains no image, embedding, or frame-level data. A reported
+deployment profile must match the registry; heartbeat cannot modify the device's
+laboratory assignment. The human-admin route
+`POST /api/v1/devices/{device_id}/heartbeat` remains available for authorized
+manual health updates.
+
+An administrator provisions or rotates a high-entropy device credential. The
+API returns the raw secret once and stores only its SHA-256 verifier. Device
+heartbeat renews an expiring credential when the edge agent uses a protected
+token file; the previous verifier overlaps for 24 hours to allow safe file
+replacement. The device can discover active sessions in its assigned lab and
+fetch only that session's active roster/templates using the same credential.
 
 `PRESENSI_DEVICE_HEARTBEAT_TIMEOUT_SECONDS` controls freshness, defaults to 60
 seconds, and is clamped to 5–3,600 seconds. The same timeout is used for the registry

@@ -16,6 +16,7 @@ class AIServiceConfigError(ValueError):
 @dataclass(frozen=True, slots=True)
 class AISettings:
     device_tokens: Mapping[UUID, str] = field(default_factory=dict, repr=False)
+    core_api_base_url: str | None = None
     max_request_bytes: int = 20 * 1024 * 1024
     max_frame_bytes: int = 3 * 1024 * 1024
     max_frames_per_burst: int = 5
@@ -102,6 +103,10 @@ class AISettings:
                 "Enabled liveness needs an audited local model, version, "
                 "and calibrated score."
             )
+        if self.core_api_base_url is not None and not self.core_api_base_url.startswith(
+            ("http://", "https://")
+        ):
+            raise AIServiceConfigError("Core API URL must use http:// or https://.")
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> AISettings:
@@ -175,6 +180,10 @@ class AISettings:
 
         return cls(
             device_tokens=tokens,
+            core_api_base_url=(
+                values.get("PRESENSI_AI_CORE_API_BASE_URL", "").strip().rstrip("/")
+                or None
+            ),
             max_request_bytes=int_setting(
                 "PRESENSI_AI_MAX_REQUEST_BYTES", 20 * 1024 * 1024
             ),

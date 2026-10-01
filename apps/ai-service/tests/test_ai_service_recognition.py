@@ -15,6 +15,7 @@ from PIL import Image, ImageDraw
 
 from presensi_ai_service.config import AISettings
 from presensi_ai_service.gallery_cache import SessionGallery, SessionGalleryCache
+from presensi_ai_service.gallery_provider import GalleryProviderError
 from presensi_ai_service.inference import RecognitionRunner
 from presensi_ai_service.main import create_app
 from recognition_core.domain import (
@@ -357,8 +358,13 @@ def test_provider_populates_memory_cache_and_invalidation_forces_refresh() -> No
         calls = 0
 
         async def fetch_active_session_gallery(
-            self, device_id: UUID, session_id: UUID
+            self,
+            device_id: UUID,
+            session_id: UUID,
+            *,
+            device_token: str | None = None,
         ) -> SessionGallery | None:
+            assert device_token == DEVICE_TOKEN
             self.calls += 1
             snapshot = _gallery()
             assert snapshot.device_id == device_id
@@ -393,3 +399,62 @@ def test_provider_populates_memory_cache_and_invalidation_forces_refresh() -> No
 
     assert [first.status_code, second.status_code, third.status_code] == [200, 200, 200]
     assert provider.calls == 2
+
+
+def test_validated_gallery_continues_during_bounded_core_api_outage() -> None:
+    class Provider:
+        online = True
+        validation_calls = 0
+        fetch_calls = 0
+
+        async def validate_device_session(
+            self,
+            device_id: UUID,
+            session_id: UUID,
+            *,
+            device_token: str | None = None,
+        ) -> bool:
+            assert device_id == DEVICE_ID
+            assert session_id == SESSION_ID
+            assert device_token == DEVICE_TOKEN
+            self.validation_calls += 1
+            if not self.online:
+                raise GalleryProviderError(None)
+            return True
+
+        async def fetch_active_session_gallery(
+            self,
+            device_id: UUID,
+            session_id: UUID,
+            *,
+            device_token: str | None = None,
+        ) -> SessionGallery | None:
+            assert device_token == DEVICE_TOKEN
+            self.fetch_calls += 1
+            snapshot = _gallery()
+            assert snapshot.device_id == device_id
+            assert snapshot.session_id == session_id
+            return snapshot
+
+    provider = Provider()
+    app = create_app(
+        settings=_settings(),
+        runner=RecognitionRunner(_pipeline()),
+        gallery_provider=provider,
+    )
+
+    async def exercise() -> tuple[httpx.Response, httpx.Response]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            url = f"/api/v1/recognition/sessions/{SESSION_ID}/bursts"
+            first = await client.post(url, headers=_headers(), json=_body(count=1))
+            provider.online = False
+            second = await client.post(url, headers=_headers(), json=_body(count=1))
+            return first, second
+
+    first, second = asyncio.run(exercise())
+    assert first.status_code == second.status_code == 200
+    assert provider.validation_calls == 1
+    assert provider.fetch_calls == 1

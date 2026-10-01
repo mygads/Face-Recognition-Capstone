@@ -63,7 +63,9 @@ def test_stb_profile_needs_no_local_recognition_models(tmp_path: Path) -> None:
     config.require_runtime(api_token="core-token", ai_token="device-token")
 
 
-def test_stb_profile_rejects_full_hd_and_expired_session(tmp_path: Path) -> None:
+def test_stb_profile_rejects_full_hd_and_stops_at_expired_pinned_window(
+    tmp_path: Path,
+) -> None:
     config = gateway_config(tmp_path)
     too_large = replace(config, camera=replace(config.camera, width=1920, height=1080))
     with pytest.raises(EdgeConfigError, match="1280x720"):
@@ -76,8 +78,18 @@ def test_stb_profile_rejects_full_hd_and_expired_session(tmp_path: Path) -> None
             session_ends_at=datetime.now(UTC) - timedelta(seconds=1),
         ),
     )
-    with pytest.raises(EdgeConfigError, match="not currently active"):
-        expired.require_runtime(api_token="core-token", ai_token="device-token")
+    expired.require_runtime(api_token="core-token", ai_token="device-token")
+    outbox = EventOutbox(tmp_path / "expired-window.sqlite3", max_pending=10)
+    service = StbGatewayService(
+        expired,
+        object(),
+        object(),
+        object(),
+        outbox,
+        object(),
+    )  # type: ignore[arg-type]
+    assert not service._session_active()
+    outbox.close()
 
 
 def test_gateway_camera_rejects_driver_mode_above_configured_capture(
@@ -423,4 +435,60 @@ def test_gateway_outbox_retries_after_core_api_reconnect(tmp_path: Path) -> None
     assert api.heartbeats >= 2
     assert len(api.delivered) == 1
     assert outbox.counts() == (0, 0)
+    outbox.close()
+
+
+def test_gateway_discovers_session_and_caps_offline_use(tmp_path: Path) -> None:
+    config = gateway_config(tmp_path)
+    config = replace(config, api=replace(config.api, cache_max_offline_seconds=30))
+    now = datetime.now(UTC)
+
+    class Api:
+        def discover_active_sessions(self) -> list[dict[str, object]]:
+            return [
+                {
+                    "session_id": str(SESSION_ID),
+                    "session_status": "active",
+                    "session_ends_at": (now + timedelta(hours=2)).isoformat(),
+                    "expires_at": (now + timedelta(hours=1)).isoformat(),
+                }
+            ]
+
+    class Camera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            return False, None
+
+        def close(self) -> None: ...
+
+    class AI:
+        def close(self) -> None: ...
+
+    class Processor:
+        def assess(self, _frame: object) -> FrameAssessment:
+            return FrameAssessment(0, 120, 12)
+
+        def encode_jpeg(self, _frame: object, _quality: int) -> bytes:
+            return b"jpeg"
+
+    outbox = EventOutbox(tmp_path / "discovery.sqlite3", max_pending=10)
+    service = StbGatewayService(
+        config,
+        Camera(),
+        Api(),
+        AI(),
+        outbox,
+        Processor(),  # type: ignore[arg-type]
+    )
+    service._refresh_active_session()
+
+    assert service.session_id == SESSION_ID
+    assert service._active_session_expires_at is not None
+    assert service._active_session_expires_at <= datetime.now(UTC) + timedelta(
+        seconds=31
+    )
+    assert service._session_active()
+    service._active_session_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    assert not service._session_active()
     outbox.close()

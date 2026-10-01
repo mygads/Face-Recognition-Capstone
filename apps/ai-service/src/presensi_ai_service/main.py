@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import math
 import secrets
 import time
 from collections import deque
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Literal, cast
 from uuid import UUID
 
@@ -21,6 +23,10 @@ from presensi_ai_service.gallery_cache import (
     SessionGallery,
     SessionGalleryCache,
     SessionGalleryProvider,
+)
+from presensi_ai_service.gallery_provider import (
+    CoreApiGalleryProvider,
+    GalleryProviderError,
 )
 from presensi_ai_service.image_decode import ImageDecodeError, decode_image
 from presensi_ai_service.inference import (
@@ -123,11 +129,21 @@ class DeviceAuthenticator:
             if separator and scheme.lower() == "bearer":
                 token = credentials.strip()
         expected = self._tokens.get(device_id) if device_id is not None else None
-        comparison_value = expected if expected is not None else "0" * 64
-        matches = secrets.compare_digest(
-            token.encode("utf-8"), comparison_value.encode("utf-8")
-        )
-        if device_id is None or expected is None or not matches:
+        if device_id is None or not token:
+            raise ServiceError(
+                401, "invalid_device_credentials", "Device authentication failed."
+            )
+        if expected is not None:
+            matches = secrets.compare_digest(
+                token.encode("utf-8"), expected.encode("utf-8")
+            )
+            if not matches:
+                raise ServiceError(
+                    401,
+                    "invalid_device_credentials",
+                    "Device authentication failed.",
+                )
+        elif self._tokens or len(token) < 32 or not token.isascii():
             raise ServiceError(
                 401, "invalid_device_credentials", "Device authentication failed."
             )
@@ -312,9 +328,50 @@ def create_app(
     app.state.gallery_cache = gallery_cache or SessionGalleryCache(
         max_age_seconds=configured.gallery_max_age_seconds
     )
-    app.state.gallery_provider = gallery_provider
+    configured_provider = gallery_provider
+    if (
+        configured_provider is None
+        and configured.core_api_base_url is not None
+        and configured.model_version is not None
+    ):
+        configured_provider = CoreApiGalleryProvider(
+            configured.core_api_base_url,
+            model_name=SFaceModel.model_name,
+            model_version=configured.model_version,
+            timeout_seconds=configured.inference_timeout_seconds,
+        )
+    app.state.gallery_provider = configured_provider
     app.state.runner = runner if runner is not None else build_model_runner(configured)
     app.state.metrics = BasicMetrics()
+    device_session_grants: dict[tuple[UUID, UUID], tuple[bytes, datetime]] = {}
+
+    def has_cached_device_session_grant(
+        device_id: UUID,
+        session_id: UUID,
+        token: str | None,
+        gallery: SessionGallery | None,
+    ) -> bool:
+        if not token or gallery is None:
+            return False
+        grant = device_session_grants.get((device_id, session_id))
+        if grant is None or grant[1] <= datetime.now(UTC):
+            device_session_grants.pop((device_id, session_id), None)
+            return False
+        return secrets.compare_digest(
+            grant[0], hashlib.sha256(token.encode("ascii")).digest()
+        )
+
+    def cache_device_session_grant(
+        device_id: UUID,
+        session_id: UUID,
+        token: str | None,
+        gallery: SessionGallery | None,
+    ) -> None:
+        if token and gallery is not None:
+            device_session_grants[(device_id, session_id)] = (
+                hashlib.sha256(token.encode("ascii")).digest(),
+                gallery.expires_at,
+            )
 
     async def reset_session_tracks(device_id: UUID, session_id: UUID) -> None:
         active_runner = cast(RecognitionRunner | None, app.state.runner)
@@ -410,6 +467,7 @@ def create_app(
                     else None
                 ),
             )
+            device_token = credentials.credentials if credentials is not None else None
             retry_after = await app.state.rate_limiter.allow(device_id)
             if retry_after is not None:
                 response = _error(
@@ -429,10 +487,57 @@ def create_app(
                 )
             gallery = app.state.gallery_cache.get(device_id, session_id)
             provider: SessionGalleryProvider | None = app.state.gallery_provider
+            if provider is not None:
+                validate_session = getattr(provider, "validate_device_session", None)
+                cached_device_session_grant = has_cached_device_session_grant(
+                    device_id, session_id, device_token, gallery
+                )
+                if callable(validate_session) and not cached_device_session_grant:
+                    try:
+                        valid_session = await asyncio.wait_for(
+                            validate_session(
+                                device_id,
+                                session_id,
+                                device_token=device_token,
+                            ),
+                            timeout=settings_at_request.inference_timeout_seconds,
+                        )
+                    except GalleryProviderError as exc:
+                        if exc.status_code == 401:
+                            raise ServiceError(
+                                401,
+                                "invalid_device_credentials",
+                                "Device authentication failed.",
+                            ) from exc
+                        outcome = "failed"
+                        raise ServiceError(
+                            503,
+                            "core_api_unavailable",
+                            "The Core API could not validate the device session.",
+                        ) from exc
+                    except TimeoutError as exc:
+                        outcome = "timed_out"
+                        raise ServiceError(
+                            504,
+                            "session_validation_timeout",
+                            "Device session validation timed out.",
+                        ) from exc
+                    if not valid_session:
+                        device_session_grants.pop((device_id, session_id), None)
+                        await reset_session_tracks(device_id, session_id)
+                        raise ServiceError(
+                            409,
+                            "session_inactive",
+                            "The attendance session is not active for this device.",
+                        )
             if gallery is None and provider is not None:
                 try:
                     fetched_gallery = await asyncio.wait_for(
-                        provider.fetch_active_session_gallery(device_id, session_id),
+                        provider.fetch_active_session_gallery(
+                            device_id,
+                            session_id,
+                            device_token=device_token,
+                        ),
                         timeout=settings_at_request.inference_timeout_seconds,
                     )
                 except TimeoutError as exc:
@@ -441,6 +546,18 @@ def create_app(
                         504,
                         "gallery_provider_timeout",
                         "Loading the session gallery exceeded the time limit.",
+                    ) from exc
+                except GalleryProviderError as exc:
+                    if exc.status_code == 401:
+                        raise ServiceError(
+                            401,
+                            "invalid_device_credentials",
+                            "Device authentication failed.",
+                        ) from exc
+                    raise ServiceError(
+                        503,
+                        "session_gallery_unavailable",
+                        "The active session gallery could not be loaded.",
                     ) from exc
                 except Exception as exc:
                     raise ServiceError(
@@ -467,6 +584,10 @@ def create_app(
                             "Gallery provider returned an invalid active snapshot.",
                         ) from exc
                     gallery = app.state.gallery_cache.get(device_id, session_id)
+                if not cached_device_session_grant:
+                    cache_device_session_grant(
+                        device_id, session_id, device_token, gallery
+                    )
             if gallery is None:
                 await reset_session_tracks(device_id, session_id)
                 raise ServiceError(
@@ -571,7 +692,33 @@ def create_app(
                 else None
             ),
         )
+        device_token = credentials.credentials if credentials is not None else None
+        provider = app.state.gallery_provider
+        validate_device = getattr(provider, "validate_device", None)
+        if callable(validate_device):
+            try:
+                valid_device = await asyncio.wait_for(
+                    validate_device(device_id, device_token=device_token),
+                    timeout=app.state.settings.inference_timeout_seconds,
+                )
+            except GalleryProviderError as exc:
+                if exc.status_code == 401:
+                    raise ServiceError(
+                        401,
+                        "invalid_device_credentials",
+                        "Device authentication failed.",
+                    ) from exc
+                raise ServiceError(
+                    503,
+                    "core_api_unavailable",
+                    "The Core API could not validate the device.",
+                ) from exc
+            if not valid_device:
+                raise ServiceError(
+                    401, "invalid_device_credentials", "Device authentication failed."
+                )
         await invalidate_session_state(device_id, session_id)
+        device_session_grants.pop((device_id, session_id), None)
         return Response(status_code=204)
 
     return app

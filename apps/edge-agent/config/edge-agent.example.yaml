@@ -8,9 +8,8 @@ api:
   heartbeat_interval_seconds: 15
   cache_refresh_seconds: 3
   cache_max_offline_seconds: 300 # Local hard ceiling; server expiry may be sooner.
-  # Adapter contract awaiting an approved Core API roster/template cache provider.
-  cache_path: /api/v1/devices/{device_id}/active-session-cache
-  token_file: null # Prefer PRESENSI_EDGE_API_TOKEN from a protected service secret.
+  cache_path: /api/v1/devices/{device_id}/active-session-cache?model_name={model_name}&model_version={model_version}
+  token_file: null # Provision a device credential to this protected file.
 
 camera:
   index: 0

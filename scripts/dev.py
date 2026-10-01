@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import os
 import secrets
 import shutil
@@ -23,6 +24,9 @@ def ensure_env_file() -> None:
     secret_factories: dict[str, Callable[[], str]] = {
         "POSTGRES_PASSWORD": lambda: secrets.token_urlsafe(32),
         "JWT_SECRET": lambda: secrets.token_hex(32),
+        "PRESENSI_FACE_TEMPLATE_KEYS": lambda: (
+            '{"local-v1":"' + base64.b64encode(secrets.token_bytes(32)).decode() + '"}'
+        ),
     }
     generated = False
     for key, create_secret in secret_factories.items():

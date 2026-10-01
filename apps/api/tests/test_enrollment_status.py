@@ -84,6 +84,9 @@ def test_class_roster_returns_enrollment_status_without_face_payload(
                     student_id=enrolled.id,
                     model_name="synthetic-model",
                     model_version="1",
+                    embedding_ciphertext=b"synthetic-ciphertext",
+                    encryption_key_id="test-v1",
+                    embedding_dimension=3,
                     quality_metadata={"capture_count": 4},
                 ),
                 FaceTemplate(
@@ -107,6 +110,7 @@ def test_class_roster_returns_enrollment_status_without_face_payload(
         ("S-002", "enrolled"),
         ("S-003", "needs_reenrollment"),
     ]
+    assert "embedding_ciphertext" not in response.text
     assert "embedding" not in response.text
 
 

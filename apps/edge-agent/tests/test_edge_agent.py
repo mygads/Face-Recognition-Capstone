@@ -176,9 +176,70 @@ def test_core_api_client_uses_bearer_header_for_heartbeat_and_event() -> None:
     client.heartbeat()
     client.submit_recognition_event({"event_id": str(uuid4())})
 
-    assert requests[0].url.path == f"/api/v1/devices/{DEVICE_ID}/heartbeat"
+    assert requests[0].url.path == f"/api/v1/devices/{DEVICE_ID}/device-heartbeat"
+    assert requests[0].headers["X-Device-ID"] == str(DEVICE_ID)
     assert requests[0].headers["Authorization"] == "Bearer short-lived-test-token"
-    assert requests[1].url.path == "/api/v1/attendance/recognition-events"
+    assert requests[1].url.path == f"/api/v1/devices/{DEVICE_ID}/recognition-events"
+    assert requests[1].headers["X-Device-ID"] == str(DEVICE_ID)
+    client.close()
+    http.close()
+
+
+def test_core_api_client_renews_device_credential_from_protected_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("PRESENSI_EDGE_API_TOKEN", raising=False)
+    token_file = tmp_path / "device.token"
+    token_file.write_text("old-device-token\n", encoding="utf-8")
+    requests: list[httpx.Request] = []
+    renewed_expiry = datetime.now(UTC) + timedelta(days=90)
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/device-heartbeat"):
+            return httpx.Response(
+                200,
+                json={
+                    "device_id": str(DEVICE_ID),
+                    "last_seen_at": datetime.now(UTC).isoformat(),
+                    "credential_expires_at": (
+                        datetime.now(UTC) + timedelta(days=1)
+                    ).isoformat(),
+                },
+            )
+        assert request.url.path.endswith("/credentials/renew")
+        return httpx.Response(
+            200,
+            json={
+                "device_id": str(DEVICE_ID),
+                "token": "new-device-token",
+                "expires_at": renewed_expiry.isoformat(),
+            },
+        )
+
+    http = httpx.Client(
+        base_url="https://api.example.test", transport=httpx.MockTransport(respond)
+    )
+    client = CoreApiClient(
+        ApiSettings(
+            base_url="https://api.example.test",
+            timeout_seconds=1,
+            heartbeat_interval_seconds=5,
+            cache_refresh_seconds=3,
+            cache_path="/api/v1/devices/{device_id}/active-session-cache",
+            token_file=token_file,
+        ),
+        DEVICE_ID,
+        lambda: token_file.read_text(encoding="utf-8").strip(),
+        client=http,
+    )
+
+    client.heartbeat()
+
+    assert len(requests) == 2
+    assert requests[0].headers["Authorization"] == "Bearer old-device-token"
+    assert requests[1].url.path == f"/api/v1/devices/{DEVICE_ID}/credentials/renew"
+    assert token_file.read_text(encoding="utf-8") == "new-device-token\n"
     client.close()
     http.close()
 

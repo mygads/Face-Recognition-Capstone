@@ -55,6 +55,9 @@ def test_openapi_lists_each_versioned_router_group() -> None:
         "/api/v1/classes",
         "/api/v1/laboratories",
         "/api/v1/devices",
+        "/api/v1/devices/{device_id}/active-sessions",
+        "/api/v1/devices/{device_id}/active-session-cache",
+        "/api/v1/devices/{device_id}/credentials",
         "/api/v1/schedules",
         "/api/v1/sessions",
         "/api/v1/sessions/{session_id}/dashboard",
@@ -96,7 +99,15 @@ def test_openapi_uses_pydantic_contract_and_shared_error_schema() -> None:
     assert {"model_name", "model_version", "quality_metadata", "created_at"} <= (
         template_fields
     )
-    assert not {"image", "image_blob", "embedding"} & template_fields
+    assert (
+        not {
+            "image",
+            "image_blob",
+            "embedding",
+            "embedding_ciphertext",
+        }
+        & template_fields
+    )
     assert (
         student_create["requestBody"]["content"]["application/json"]["schema"]["$ref"]
         == "#/components/schemas/StudentCreateRequest"

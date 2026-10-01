@@ -1,6 +1,9 @@
 # Attendance decision service
 
-Edge/AI clients submit recognition evidence to `POST /api/v1/attendance/recognition-events`.
+Human operator clients may submit recognition evidence to
+`POST /api/v1/attendance/recognition-events`; device agents use the device-scoped
+`POST /api/v1/devices/{device_id}/recognition-events` endpoint with a dedicated
+device credential.
 The request contains an event UUID, device/session/candidate identifiers, the AI outcome,
 similarity and/or confidence, optional liveness result, capture timestamp, and model
 name/version. It never accepts or stores an image or embedding.
@@ -30,7 +33,8 @@ for an already recorded student is itself retained, with reason
 `attendance_already_recorded`; the unique database constraint remains the final guard
 against duplicate attendance.
 
-The endpoint currently requires a bearer token with `SESSION_OPERATE`. Teacher tokens
-are limited to sessions for their own schedules; ADMIN and LABORANT can operate all
-sessions. Dedicated device/service credentials are not modeled yet, so edge deployments
-must use an authorized operator token until that identity mechanism is added.
+The operator endpoint requires a bearer token with `SESSION_OPERATE`. Teacher
+tokens are limited to sessions for their own schedules; ADMIN and LABORANT can
+operate all sessions. The device endpoint authenticates the registered device
+and checks that its laboratory matches the session's schedule before applying
+the same attendance decision service.

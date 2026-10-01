@@ -9,6 +9,12 @@ async function stubSuccessfulLogin(page: Page): Promise<{
 }> {
   let loginWasFormEncoded = false
   let bearerHeaderWasPresent = false
+  await page.route('**/api/v1/sessions?**', (route) =>
+    route.fulfill({
+      status: 200,
+      json: { items: [], pagination: { total: 0, limit: 100, offset: 0 } },
+    }),
+  )
 
   await page.route('**/api/v1/auth/login', async (route) => {
     const request = route.request()

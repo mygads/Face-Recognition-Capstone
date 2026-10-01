@@ -27,20 +27,30 @@ rules. Heartbeat and event delivery run on a separate retrying worker. Central
 AI upload failures are logged with status/retryability and the next camera
 sampling continues without persisting the failed burst.
 
-`gateway.session_id`, `session_starts_at`, and `session_ends_at` must be set for
-the active practicum session. The agent stops sampling outside that timezone-
-aware window; its Core API remains the final authority and rejects closed
-sessions. Since Core API has no active-session discovery route yet, an operator
-must update the gateway environment for each session. Core API device
-authentication also still uses expiring operator JWTs and has no automatic
-device refresh flow. The agent rereads protected token files per request, so
-manual rotation can happen without a process restart; managed renewal remains
-an operational requirement for unattended deployments.
+The gateway discovers active sessions for the registered device's laboratory
+through Core API, so an operator does not have to change a session UUID every
+class. It refuses ambiguous discovery when more than one active session is
+found. Each successful discovery refreshes a local offline deadline capped by
+`api.cache_max_offline_seconds` and the scheduled session end. Core API remains
+the final authority when queued events are delivered.
 
-Central AI also has no production session-gallery provider yet; it currently
-returns `session_gallery_unavailable` unless a synthetic in-memory gallery is
-injected for tests. This blocks live identity matching until the approved
-template provider/storage policy is implemented.
+Devices authenticate to Core API and AI Central with a high-entropy
+device-specific bearer credential, provisioned once by an administrator. The
+API renews it before expiry when the agent is configured with a protected
+`api.token_file`; the old credential has a short overlap for crash-safe file
+replacement. Linux token files are atomically replaced with owner-only
+permissions. Windows service deployments must protect the file with an ACL for
+the service account.
+
+AI Central obtains the production gallery from Core API, checks it against the
+active session and device laboratory, and holds it in memory only. Session
+discovery and active template retrieval are implemented; galleries are bounded
+by the scheduled end and configured cache age. When Core API becomes
+unreachable, a previously validated device/session may continue using its
+cached gallery until that deadline. A restarted AI service has no gallery and
+fails closed until Core API is reachable again. Events already produced remain
+durable in the gateway outbox and are retried with their original idempotency
+key.
 
 The STB profile is native and uses systemd on Armbian. Installation, service
 unit setup, and CPU/RAM/temperature measurements are in
@@ -74,12 +84,12 @@ responses use exponential backoff; non-retryable event delivery is retained in
 a dead-letter state. Log records are structured and exclude secrets and
 biometric material.
 
-The API supports device heartbeat and
-`POST /api/v1/attendance/recognition-events`. Its attendance service remains the
+The API supports device heartbeat and the device-authenticated
+`POST /api/v1/devices/{device_id}/recognition-events`. Its attendance service remains the
 only place that creates final attendance after validating device, lab, active
 session, roster, liveness policy, and duplicate rules.
 
-## Gallery provider and current blocker
+## Gallery and cache lifecycle
 
 The service depends on a cache-provider adapter contract and accepts a
 device-scoped active-session bundle in memory. A bundle is checked for matching
@@ -101,24 +111,11 @@ returns the saved result instead of creating a second record. On reconnect, the
 API still checks that the session is active; queued events from a session that
 has ended remain auditable but cannot create attendance.
 
-Core API currently has no active-session roster/template cache endpoint.
-`GET /api/v1/face-templates` is a metadata-only 501 placeholder, enrollment is
-also a 501 placeholder, and the default `face_templates` schema has no vector
-column or biometric object store. Consequently, the agent currently cannot
-load embeddings for matching and must not be represented as end-to-end
-operational. **This is a blocker until the team approves a biometric storage
-policy and implements an authenticated provider.** This task preserves the
-existing no-image/no-embedding database policy. Replace the configured provider
-adapter when that approved API contract exists; do not put vectors in generic
-JSON or this agent's disk cache. The future provider must return an authoritative
-`expires_at` no later than `session_ends_at`; the edge independently caps that
-expiry by the configured offline freshness ceiling.
-
-The API currently authenticates requests with short-lived operator JWTs. The
-agent reads the token from an environment variable or protected token file. A
-deployment must rotate the token before expiry; protected token files are
-reread per request, while an environment-supplied token requires process
-restart. A device-specific credential/refresh flow is not implemented here.
+Core API encrypts vectors at rest with AES-256-GCM and releases only the
+requested active-session/model gallery to that device's authenticated runtime
+request. Keep the key ring in the institution's secret manager and configure
+the same versioned model on capture and inference devices. Metadata routes,
+operator screens, logs, and the SQLite outbox do not include embeddings.
 
 ## Configuration and operations
 

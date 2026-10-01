@@ -112,7 +112,7 @@ def _idempotent_response(
 def decide_recognition_event(
     db: Session,
     request: RecognitionEventRequest,
-    principal: AuthenticatedUser,
+    principal: AuthenticatedUser | None,
 ) -> RecognitionEventDecisionResponse:
     """Persist one AI event and create a final record only when domain rules pass."""
     close_expired_sessions(db, session_id=request.session_id)
@@ -180,7 +180,8 @@ def decide_recognition_event(
 
     reason: AttendanceDecisionReason | None = None
     if (
-        RoleCode.TEACHER in principal.roles
+        principal is not None
+        and RoleCode.TEACHER in principal.roles
         and RoleCode.ADMIN not in principal.roles
         and schedule.teacher_user_id != principal.id
     ):

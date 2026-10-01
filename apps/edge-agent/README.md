@@ -48,39 +48,27 @@ sudo chmod 0640 /etc/presensi-edge-agent/stb-gateway.yaml
 ```
 
 Edit the copied YAML with the Core API and AI service URLs, and keep the
-resolution/FPS within the documented gateway cap. Create protected token files
-for Core API and central AI at the paths named by `api.token_file` and
-`central_ai.token_file`. The files should be owned by `root:presensi-edge` and
-mode `0440`; provision credentials through the site's secret handling process.
-Do not commit credentials. Core API currently uses expiring operator JWTs and
-does not provide automatic device credential refresh. Since the agent rereads
-token files for each request, an operator can rotate the protected file without
-restarting the process; unattended operation still needs an approved renewable
-device credential or managed rotation process before JWT expiry.
+resolution/FPS within the documented gateway cap. Register the device in the
+Core API, then provision its device-specific credential using an administrator
+account. Save the one-time token into the path configured by `api.token_file`;
+the STB example points `central_ai.token_file` to the same protected file so
+the same registered device identity is authenticated at both services. The
+file should be owned by `root:presensi-edge` and mode `0440`. Do not commit
+credentials. The Core API stores only a hash and device credentials renew
+automatically during heartbeat when loaded from a token file.
 
-Provide device and active-session window values in
-`/etc/presensi-edge-agent/agent.env`:
+Provide the registered device ID in `/etc/presensi-edge-agent/agent.env`:
 
 ```ini
 PRESENSI_EDGE_DEVICE_ID=<registered-device-uuid>
-PRESENSI_EDGE_SESSION_ID=<active-attendance-session-uuid>
-PRESENSI_EDGE_SESSION_STARTS_AT=2026-10-01T08:00:00+07:00
-PRESENSI_EDGE_SESSION_ENDS_AT=2026-10-01T10:00:00+07:00
 ```
 
-Set the real schedule times for the lab; the gateway refuses to start with an
-expired/not-yet-active configured window and stops sending frames at the end
-time. The Core API still verifies the session is active for every final event.
-Because a session discovery endpoint does not exist yet, update these values
-before each practicum session. Protect the env file (`root:root`, mode `0600`)
-and the token files (`root:presensi-edge`, mode `0440`).
-
-**Central inference is not end-to-end operational yet:** the AI service currently
-has no production provider for the session template gallery, and Core API has
-no approved gallery endpoint/storage policy. Until that provider is implemented,
-the AI service returns `session_gallery_unavailable`; this gateway can capture,
-authenticate, retry, and forward decisions, but it cannot identify enrolled
-students against production templates.
+The gateway discovers the active session in the device's assigned laboratory.
+An optional `PRESENSI_EDGE_SESSION_ID` can pin the device to a known session;
+the server still verifies that it is active and belongs to the device's lab.
+Discovery is capped by the configured offline freshness window and session
+end. Protect the env file (`root:root`, mode `0600`) and token file
+(`root:presensi-edge`, mode `0440`).
 
 Install the checked-in unit and enable/start it:
 
@@ -179,7 +167,7 @@ Windows PowerShell:
 ```powershell
 Copy-Item apps/edge-agent/config/edge-agent.example.yaml apps/edge-agent/config/edge-agent.yaml
 $env:PRESENSI_EDGE_DEVICE_ID = "<registered-device-uuid>"
-$env:PRESENSI_EDGE_API_TOKEN = "<short-lived-operator-token>"
+$env:PRESENSI_EDGE_API_TOKEN_FILE = "$env:ProgramData\Presensi\device.token"
 python -m presensi_edge_agent --config apps/edge-agent/config/edge-agent.yaml cameras
 python -m presensi_edge_agent --config apps/edge-agent/config/edge-agent.yaml status
 python -m presensi_edge_agent --config apps/edge-agent/config/edge-agent.yaml run
@@ -190,19 +178,21 @@ Linux:
 ```bash
 cp apps/edge-agent/config/edge-agent.example.yaml apps/edge-agent/config/edge-agent.yaml
 export PRESENSI_EDGE_DEVICE_ID='<registered-device-uuid>'
-export PRESENSI_EDGE_API_TOKEN='<short-lived-operator-token>'
+export PRESENSI_EDGE_API_TOKEN_FILE='/etc/presensi-edge-agent/device.token'
 python3 -m presensi_edge_agent --config apps/edge-agent/config/edge-agent.yaml cameras
 python3 -m presensi_edge_agent --config apps/edge-agent/config/edge-agent.yaml status
 python3 -m presensi_edge_agent --config apps/edge-agent/config/edge-agent.yaml run
 ```
 
-Use `api.token_file` for a protected token file when the service manager supplies
-secrets that way. On Windows, restrict the file ACL to the service account; on
-Linux, use owner-only permissions. The API currently expects its short-lived
-operator JWT. This package does not add a device credential or token-refresh
-endpoint, so a protected token file needs manual rotation before expiry. The
-agent rereads that file on each request; a value supplied only through an
-environment variable requires a process restart to change.
+Provision a device credential once with an administrator account at
+`POST /api/v1/devices/{device_id}/credentials`, and save the returned token to
+the configured `api.token_file`. The Core API stores only a credential hash.
+When the agent uses a token file rather than an environment token, it renews the
+credential during heartbeat before expiry and atomically replaces the file. The
+old credential remains valid for a short overlap in case the agent must retry.
+On Windows, restrict the file ACL to the service account; on Linux, use
+owner-only permissions. Environment-supplied credentials do not auto-renew and
+require controlled reprovisioning.
 
 The `cameras` command reports accessible camera indices; set the selected index
 in config. `status` checks Core API process health, camera availability, and
@@ -216,10 +206,11 @@ controls inference sampling independently from capture FPS. The default example
 requests 1920×1080 at 30 FPS and samples every sixth frame; tune it on target
 hardware.
 
-## API and template-provider blocker
+## API, session discovery, and offline behavior
 
-Heartbeat (`POST /api/v1/devices/{device_id}/heartbeat`) and recognition-event
-ingest (`POST /api/v1/attendance/recognition-events`) use the existing Core API.
+Heartbeat (`POST /api/v1/devices/{device_id}/device-heartbeat`) and
+recognition-event ingest (`POST /api/v1/devices/{device_id}/recognition-events`)
+use device credentials with the Core API.
 The heartbeat reports deployment profile, edge-agent version, configured model
 version when present, and current camera connectivity; central-inference gateway
 model version is refreshed from recognition events. Registry health and timeout
@@ -240,15 +231,19 @@ it has closed; those events can still be stored as recognition audit evidence.
 If the process restarts offline, the in-memory gallery is unavailable and local
 recognition waits for a fresh provider response; queued events still survive.
 
-The active-session cache uses a provider adapter contract at
-`api.cache_path`. The matching Core API endpoint does **not** exist yet and
-`GET /api/v1/face-templates` currently returns 501 with metadata only. The
-database deliberately stores no embedding payload. Therefore a fresh agent
-cannot load a gallery and cannot perform live identity matching until an
-approved template-provider/storage design is implemented. This task does not
-change that biometric storage policy. A failed cache refresh is logged and
-retried while the service remains available for heartbeats and delivery of any
-already queued events.
+The AI_EDGE agent loads its gallery through the device-authenticated
+`/api/v1/devices/{device_id}/active-session-cache` endpoint. STB_GATEWAY uses
+`/api/v1/devices/{device_id}/active-sessions` to discover the session and AI
+Central obtains the gallery. Core API stores only encrypted vectors and
+returns the matching active gallery after checking device/laboratory/session
+scope. A Core API outage does not invalidate an already-loaded gallery before
+its expiry; both edge and central cache validity are capped by the schedule end
+and `api.cache_max_offline_seconds`. After an agent restart, its in-memory
+gallery is empty, so offline recognition waits until the provider responds.
+Events already queued in SQLite survive restarts and are delivered FIFO with
+the original idempotency UUID. Core API still refuses to create final
+attendance for a session that has ended before sync; those events remain
+auditable.
 
 ## Liveness and physical controls
 

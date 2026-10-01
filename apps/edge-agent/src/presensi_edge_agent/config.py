@@ -146,21 +146,13 @@ class EdgeConfig:
                 raise EdgeConfigError(
                     "Set PRESENSI_EDGE_AI_TOKEN or configure central_ai.token_file."
                 )
-            if self.gateway.session_id is None:
-                raise EdgeConfigError(
-                    "gateway.session_id must identify the active attendance session."
-                )
             starts_at = self.gateway.session_starts_at
             ends_at = self.gateway.session_ends_at
-            if starts_at is None or ends_at is None or starts_at >= ends_at:
+            if (starts_at is None) != (ends_at is None) or (
+                starts_at is not None and ends_at is not None and starts_at >= ends_at
+            ):
                 raise EdgeConfigError(
-                    "gateway.session_starts_at and session_ends_at must define "
-                    "a valid window."
-                )
-            now = datetime.now(UTC)
-            if now < starts_at or now >= ends_at:
-                raise EdgeConfigError(
-                    "Configured attendance session is not currently active."
+                    "Optional gateway session window must define valid start/end times."
                 )
             if self.camera.width > 1280 or self.camera.height > 720:
                 raise EdgeConfigError(
@@ -637,9 +629,9 @@ def resolve_ai_token(
     if env_token:
         return env_token
     if config.central_ai.token_file is None:
-        return None
+        return resolve_api_token(config, environ=variables)
     try:
         token = config.central_ai.token_file.read_text(encoding="utf-8").strip()
     except OSError:
-        return None
-    return token or None
+        return resolve_api_token(config, environ=variables)
+    return token or resolve_api_token(config, environ=variables)
