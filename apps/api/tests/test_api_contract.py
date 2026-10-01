@@ -86,6 +86,25 @@ def test_openapi_uses_pydantic_contract_and_shared_error_schema() -> None:
         )
 
 
+def test_openapi_documents_master_data_detail_update_and_roster_contracts() -> None:
+    document = app.openapi()
+    paths = document["paths"]
+    assert {
+        "/api/v1/students/{student_id}",
+        "/api/v1/classes/{class_id}",
+        "/api/v1/classes/{class_id}/students",
+        "/api/v1/classes/{class_id}/students/{student_id}",
+        "/api/v1/laboratories/{laboratory_id}",
+    } <= set(paths)
+    assert "patch" in paths["/api/v1/students/{student_id}"]
+    assert "patch" in paths["/api/v1/classes/{class_id}"]
+    assert "patch" in paths["/api/v1/laboratories/{laboratory_id}"]
+    schemas = document["components"]["schemas"]
+    assert "classes" in schemas["StudentDetailResponse"]["properties"]
+    assert "students" in schemas["ClassDetailResponse"]["properties"]
+    assert "updated_at" in schemas["LaboratoryResponse"]["properties"]
+
+
 def test_openapi_documents_oauth_password_login_and_bearer_auth() -> None:
     document = app.openapi()
     login = document["paths"]["/api/v1/auth/login"]["post"]

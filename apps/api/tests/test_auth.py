@@ -201,15 +201,15 @@ def test_expired_bearer_token_is_rejected(api_database: sessionmaker[Session]) -
 @pytest.mark.parametrize(
     ("role", "method", "path", "body", "expected_status"),
     [
-        ("ADMIN", "GET", "/api/v1/classes", None, 501),
-        ("TEACHER", "GET", "/api/v1/classes", None, 501),
-        ("LABORANT", "GET", "/api/v1/classes", None, 501),
+        ("ADMIN", "GET", "/api/v1/classes", None, 200),
+        ("TEACHER", "GET", "/api/v1/classes", None, 200),
+        ("LABORANT", "GET", "/api/v1/classes", None, 200),
         (
             "ADMIN",
             "POST",
             "/api/v1/students",
             {"student_number": "S1", "full_name": "Student"},
-            501,
+            201,
         ),
         (
             "TEACHER",

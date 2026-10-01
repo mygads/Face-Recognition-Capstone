@@ -12,6 +12,7 @@ import AuthLayout from '../layouts/AuthLayout.vue'
 import DashboardView from '../views/DashboardView.vue'
 import ForbiddenView from '../views/ForbiddenView.vue'
 import LoginView from '../views/LoginView.vue'
+import MasterDataView from '../views/MasterDataView.vue'
 
 export const routes: RouteRecordRaw[] = [
   {
@@ -44,6 +45,15 @@ export const routes: RouteRecordRaw[] = [
         meta: {
           title: 'Ringkasan',
           description: 'Ruang kerja presensi praktikum.',
+        },
+      },
+      {
+        path: 'master-data',
+        name: 'master-data',
+        component: MasterDataView,
+        meta: {
+          title: 'Data master',
+          description: 'Kelola data siswa, kelas, dan laboratorium.',
         },
       },
       {

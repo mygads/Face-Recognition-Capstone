@@ -138,6 +138,7 @@ docs/test-plans/         baseline dan protokol uji
 
 Detail tabel, aturan integritas, index, dan migration ada di [docs/architecture/database-schema.md](docs/architecture/database-schema.md).
 Strategi API versioning dan pembuatan TypeScript client dari OpenAPI dijelaskan di [docs/architecture/api-contract.md](docs/architecture/api-contract.md).
+CRUD siswa, kelas, laboratorium, roster kelas, permission, dan soft-deactivation dijelaskan di [docs/architecture/master-data.md](docs/architecture/master-data.md).
 Shell Vue, layout router, tema, dan penggunaan token Gentelella dijelaskan di [docs/architecture/frontend-shell.md](docs/architecture/frontend-shell.md).
 
 Baca [arsitektur](docs/architecture/overview.md), [ADR-001](docs/adr/ADR-001-shared-recognition-core.md), dan [AGENTS.md](AGENTS.md) sebelum mengubah struktur/domain. Compose hanya untuk development, bukan deployment production.

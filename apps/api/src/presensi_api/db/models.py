@@ -89,6 +89,11 @@ class Student(UUIDPrimaryKey, TimestampMixin, Base):
     __tablename__ = "students"
     __table_args__ = (
         UniqueConstraint("student_number", name="uq_students_student_number"),
+        Index(
+            "uq_students_student_number_ci",
+            text("lower(student_number)"),
+            unique=True,
+        ),
     )
 
     student_number: Mapped[str] = mapped_column(String(32), nullable=False)

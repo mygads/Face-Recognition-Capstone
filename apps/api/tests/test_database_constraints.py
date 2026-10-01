@@ -197,3 +197,16 @@ def test_all_datetime_columns_are_timezone_aware() -> None:
         for column in table.columns:
             if isinstance(column.type, DateTime):
                 assert column.type.timezone is True, f"{table.name}.{column.name}"
+
+
+def test_student_identifier_is_unique_without_case_sensitivity(
+    database: Engine,
+) -> None:
+    with Session(database) as session:
+        session.add(Student(student_number="nis-001", full_name="First Student"))
+        session.commit()
+
+    with pytest.raises(IntegrityError):
+        with Session(database) as session:
+            session.add(Student(student_number="NIS-001", full_name="Second Student"))
+            session.commit()

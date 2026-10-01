@@ -27,7 +27,7 @@ All event and lifecycle timestamps use `timestamp with time zone` (`DateTime(tim
 
 ## Constraints and indexes
 
-Named unique constraints enforce account email, role code, student number, class code within academic year, laboratory code, recognition event UUID, attendance session/student, and attendance record/recognition event uniqueness. User-role, class-student, and session-student links use composite primary keys to prevent duplicate membership. `session_students` also holds student name/number snapshots so a later roster edit does not rewrite the session's roster context.
+Named unique constraints enforce account email, role code, exact student number, class code within academic year, laboratory code, recognition event UUID, attendance session/student, and attendance record/recognition event uniqueness. A unique functional index on `lower(students.student_number)` rejects case-only identifier duplicates as well. User-role, class-student, and session-student links use composite primary keys to prevent duplicate membership. `session_students` also holds student name/number snapshots so a later roster edit does not rewrite the session's roster context.
 
 Two partial unique indexes apply only to active rows: one prevents multiple active templates for the same student/model/version while allowing revoked history, and one prevents two active attendance sessions for the same schedule while preserving past sessions. These indexes are declared for PostgreSQL and SQLite so the same key constraints are exercised by fast unit tests.
 
