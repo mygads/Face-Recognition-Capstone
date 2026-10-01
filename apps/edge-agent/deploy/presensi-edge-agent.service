@@ -1,0 +1,26 @@
+[Unit]
+Description=Presensi STB Gateway camera agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=presensi-edge
+SupplementaryGroups=video
+WorkingDirectory=/opt/presensi-edge-agent
+EnvironmentFile=-/etc/presensi-edge-agent/agent.env
+ExecStart=/opt/presensi-edge-agent/.venv/bin/presensi-edge-agent --config /etc/presensi-edge-agent/stb-gateway.yaml run
+Restart=always
+RestartSec=3
+StateDirectory=presensi-edge-agent
+StateDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/presensi-edge-agent
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

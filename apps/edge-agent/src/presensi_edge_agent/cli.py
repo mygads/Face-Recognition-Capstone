@@ -16,16 +16,17 @@ from presensi_edge_agent.camera import (
     OpenCVCamera,
     enumerate_cameras,
 )
+from presensi_edge_agent.central_ai import CentralAIClient
 from presensi_edge_agent.config import (
     EdgeConfig,
     EdgeConfigError,
     load_config,
+    resolve_ai_token,
     resolve_api_token,
 )
+from presensi_edge_agent.gateway import OpenCVFrameProcessor, StbGatewayService
 from presensi_edge_agent.logging import configure_logging, log_event
 from presensi_edge_agent.outbox import EventOutbox
-from presensi_edge_agent.recognition import LocalRecognizer, build_pipeline
-from presensi_edge_agent.service import EdgeService
 
 DEFAULT_CONFIG = Path("apps/edge-agent/config/edge-agent.yaml")
 
@@ -83,8 +84,9 @@ def _diagnostics(config: EdgeConfig, *, include_cameras: bool) -> int:
             camera_error = str(exc)
             cameras = []
     token = resolve_api_token(config)
+    ai_token = resolve_ai_token(config)
     try:
-        config.require_runtime(api_token=token)
+        config.require_runtime(api_token=token, ai_token=ai_token)
         runtime_ready = True
         configuration_error = None
     except EdgeConfigError as exc:
@@ -94,23 +96,43 @@ def _diagnostics(config: EdgeConfig, *, include_cameras: bool) -> int:
         None if cameras is None else config.camera.index in cameras
     )
     cache_provider_ready = False
+    ai_reachable: bool | None = None
+    if config.mode == "STB_GATEWAY":
+        ai = CentralAIClient(
+            config.central_ai,
+            config.device_id or UUID(int=0),
+            lambda: resolve_ai_token(config),
+        )
+        try:
+            ai_reachable = ai.health()
+        finally:
+            ai.close()
     agent_ready = (
         runtime_ready
         and cache_provider_ready
+        and (config.mode != "STB_GATEWAY" or ai_reachable is True)
         and (not include_cameras or selected_camera_available is True)
+    )
+    dependencies_reachable = health.reachable and (
+        config.mode != "STB_GATEWAY" or ai_reachable is True
     )
     result = {
         "service": "presensi-edge-agent",
-        "profile": "AI_EDGE",
+        "profile": config.mode,
         "status": (
             "ok"
-            if health.reachable and (agent_ready or not include_cameras)
+            if dependencies_reachable and (agent_ready or not include_cameras)
             else "degraded"
         ),
         "api_reachable": health.reachable,
         "api_status_code": health.status_code,
+        "central_ai_reachable": ai_reachable,
         "device_id_configured": config.device_id is not None,
         "api_token_configured": bool(token),
+        "central_ai_token_configured": bool(ai_token),
+        "central_session_gallery_available": False
+        if config.mode == "STB_GATEWAY"
+        else None,
         "camera_indices": cameras,
         "selected_camera_index": config.camera.index,
         "selected_camera_available": selected_camera_available,
@@ -121,14 +143,47 @@ def _diagnostics(config: EdgeConfig, *, include_cameras: bool) -> int:
         "cache_endpoint_implemented_by_core_api": cache_provider_ready,
     }
     _write_json(result)
-    return 0 if health.reachable and (agent_ready or not include_cameras) else 1
+    return 0 if dependencies_reachable and (agent_ready or not include_cameras) else 1
 
 
 def _run_service(config: EdgeConfig) -> int:
     token = resolve_api_token(config)
-    config.require_runtime(api_token=token)
+    ai_token = resolve_ai_token(config)
+    config.require_runtime(api_token=token, ai_token=ai_token)
     assert config.device_id is not None
     configure_logging(config.runtime.log_level)
+    if config.mode == "STB_GATEWAY":
+        client = _api_client(config)
+        ai_client = CentralAIClient(
+            config.central_ai,
+            config.device_id,
+            lambda: resolve_ai_token(config),
+        )
+        outbox = EventOutbox(
+            config.runtime.outbox_path,
+            max_pending=config.runtime.max_outbox_events,
+        )
+        gateway_service = StbGatewayService(
+            config=config,
+            camera=OpenCVCamera(
+                config.camera,
+                max_frame_size=(config.camera.width, config.camera.height),
+            ),
+            api=client,
+            ai=ai_client,
+            outbox=outbox,
+            processor=OpenCVFrameProcessor(),
+        )
+
+        def request_gateway_stop(_signum: int, _frame: FrameType | None) -> None:
+            gateway_service.stop()
+
+        signal.signal(signal.SIGINT, request_gateway_stop)
+        if hasattr(signal, "SIGTERM"):
+            signal.signal(signal.SIGTERM, request_gateway_stop)
+        gateway_service.run()
+        return 0
+
     if not config.liveness.enabled:
         log_event(
             logging.getLogger("presensi_edge_agent"),
@@ -147,8 +202,11 @@ def _run_service(config: EdgeConfig) -> int:
         config.runtime.outbox_path,
         max_pending=config.runtime.max_outbox_events,
     )
+    from presensi_edge_agent.recognition import LocalRecognizer, build_pipeline
+    from presensi_edge_agent.service import EdgeService
+
     pipeline = build_pipeline(config)
-    service = EdgeService(
+    edge_service = EdgeService(
         config=config,
         camera=OpenCVCamera(config.camera),
         api=client,
@@ -158,12 +216,12 @@ def _run_service(config: EdgeConfig) -> int:
     )
 
     def request_stop(_signum: int, _frame: FrameType | None) -> None:
-        service.stop()
+        edge_service.stop()
 
     signal.signal(signal.SIGINT, request_stop)
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, request_stop)
-    service.run()
+    edge_service.run()
     return 0
 
 

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "presensi-edge-agent"
 version = "0.1.0"
-description = "UVC camera capture and local AI_EDGE recognition agent"
+description = "UVC camera agent for local AI_EDGE and central STB_GATEWAY profiles"
 requires-python = ">=3.11"
 dependencies = [
   "httpx>=0.27,<1.0",

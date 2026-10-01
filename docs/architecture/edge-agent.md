@@ -1,4 +1,52 @@
-# AI_EDGE agent
+# Edge agent profiles
+
+`apps/edge-agent` has two runtime modes selected by `mode` in YAML. `AI_EDGE`
+keeps the local inference behavior described below. `STB_GATEWAY` is a separate
+low-resource path for ARM64 Armbian and does not import or instantiate the
+recognition pipeline/model adapters.
+
+## STB_GATEWAY on ARM64 Armbian
+
+The gateway opens one UVC device with the configured V4L2 capture mode. The
+sample requests 640×360 at 10 FPS; runtime validation rejects capture settings
+above 1280×720 or 15 FPS. A downsampled 160×90 grayscale frame-difference,
+brightness, and Laplacian-variance check is used as a cheap candidate/quality
+gate. Periodic sampling remains enabled as a fallback so a stationary person
+is not excluded indefinitely. A cooldown bounds burst frequency. The gateway
+encodes at most five quality-passing JPEG frames in memory and posts them to
+the authenticated AI Central burst endpoint. It never writes a frame to disk,
+and the service response contains no image or embedding.
+The camera adapter also checks negotiated resolution and rejects any returned
+frame larger than the configured camera size if a driver ignores the request.
+
+The gateway forwards AI decisions to Core API as allowlisted recognition-event
+fields. Only that result payload enters the existing ordered SQLite outbox;
+frames are discarded after the central request. Core API validates device,
+laboratory, active session, roster, liveness policy, idempotency, and attendance
+rules. Heartbeat and event delivery run on a separate retrying worker. Central
+AI upload failures are logged with status/retryability and the next camera
+sampling continues without persisting the failed burst.
+
+`gateway.session_id`, `session_starts_at`, and `session_ends_at` must be set for
+the active practicum session. The agent stops sampling outside that timezone-
+aware window; its Core API remains the final authority and rejects closed
+sessions. Since Core API has no active-session discovery route yet, an operator
+must update the gateway environment for each session. Core API device
+authentication also still uses expiring operator JWTs and has no automatic
+device refresh flow. The agent rereads protected token files per request, so
+manual rotation can happen without a process restart; managed renewal remains
+an operational requirement for unattended deployments.
+
+Central AI also has no production session-gallery provider yet; it currently
+returns `session_gallery_unavailable` unless a synthetic in-memory gallery is
+injected for tests. This blocks live identity matching until the approved
+template provider/storage policy is implemented.
+
+The STB profile is native and uses systemd on Armbian. Installation, service
+unit setup, and CPU/RAM/temperature measurements are in
+[`apps/edge-agent/README.md`](../../apps/edge-agent/README.md#stb_gateway-on-armbian).
+
+## AI_EDGE agent
 
 ## Runtime responsibilities
 
@@ -68,8 +116,9 @@ expiry by the configured offline freshness ceiling.
 
 The API currently authenticates requests with short-lived operator JWTs. The
 agent reads the token from an environment variable or protected token file. A
-deployment must rotate the token and restart the process after expiry; a
-device-specific credential/refresh flow is not implemented here.
+deployment must rotate the token before expiry; protected token files are
+reread per request, while an environment-supplied token requires process
+restart. A device-specific credential/refresh flow is not implemented here.
 
 ## Configuration and operations
 
@@ -88,3 +137,7 @@ deployment until the license/use has been cleared and its threshold calibrated.
 Hardware validation is pending: camera enumeration, negotiated 1080p mode,
 reconnect behavior, and end-to-end inference need to be checked on the target
 Windows/Linux lab PCs (**MANUAL HARDWARE TEST REQUIRED**).
+
+For `STB_GATEWAY`, negotiated V4L2 mode, central burst latency, sustained CPU,
+RSS, and thermal behavior still need measurement on each target Armbian board;
+the benchmark procedure is in the edge-agent README (**MANUAL HARDWARE TEST REQUIRED**).

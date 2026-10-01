@@ -75,8 +75,14 @@ def enumerate_cameras(
 
 
 class OpenCVCamera:
-    def __init__(self, settings: CameraSettings) -> None:
+    def __init__(
+        self,
+        settings: CameraSettings,
+        *,
+        max_frame_size: tuple[int, int] | None = None,
+    ) -> None:
         self.settings = settings
+        self.max_frame_size = max_frame_size
         self._cv2 = _cv2()
         self._capture: Any | None = None
 
@@ -93,12 +99,29 @@ class OpenCVCamera:
         capture.set(self._cv2.CAP_PROP_FPS, self.settings.fps)
         if hasattr(self._cv2, "CAP_PROP_BUFFERSIZE"):
             capture.set(self._cv2.CAP_PROP_BUFFERSIZE, 1)
+        if self.max_frame_size is not None:
+            actual_width = int(capture.get(self._cv2.CAP_PROP_FRAME_WIDTH))
+            actual_height = int(capture.get(self._cv2.CAP_PROP_FRAME_HEIGHT))
+            max_width, max_height = self.max_frame_size
+            if actual_width > max_width or actual_height > max_height:
+                capture.release()
+                raise CameraUnavailableError(
+                    "Camera negotiated a capture mode above the configured limit."
+                )
         self._capture = capture
 
     def read(self) -> tuple[bool, object | None]:
         if self._capture is None:
             raise CameraUnavailableError("Camera is not open.")
         ok, frame = self._capture.read()
+        if ok and frame is not None and self.max_frame_size is not None:
+            shape = getattr(frame, "shape", None)
+            if shape is not None and len(shape) >= 2:
+                max_width, max_height = self.max_frame_size
+                if int(shape[1]) > max_width or int(shape[0]) > max_height:
+                    raise CameraUnavailableError(
+                        "Camera returned a frame above the configured size limit."
+                    )
         return bool(ok), frame
 
     def close(self) -> None:

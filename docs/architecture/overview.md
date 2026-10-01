@@ -34,9 +34,9 @@ flowchart LR
 
 Keunggulan profil ini untuk pilot dua lab adalah inference dan frame tetap di PC lab, latency transfer lebih rendah, serta recognition dapat terus berjalan sementara jika koneksi ke API putus dan cache masih valid. Biayanya adalah pemeliharaan runtime/model dan pemantauan setiap PC.
 
-## Profile B — STB camera gateway + AI central (`AI_CENTRAL`)
+## Profile B — STB camera gateway + AI central (`STB_GATEWAY` + `AI_CENTRAL`)
 
-STB ARM64 menjalankan agent ringan untuk capture kamera dan filtering awal. Agent mengirim burst/crop terkompresi melalui LAN tepercaya ke AI service di server pusat. AI service menjalankan pipeline `recognition-core` yang sama, lalu mengembalikan hasil recognition ke edge agent untuk dikirim sebagai event ke Core API. Frame bersifat transient dan tidak disimpan secara default.
+STB ARM64 menjalankan agent ringan tanpa recognition model lokal. Konfigurasi contoh memakai capture UVC 640×360 pada 10 FPS, downsampled motion/quality gate, cooldown, dan periodic fallback. Ketika ada kandidat, gateway mengirim paling banyak lima JPEG dalam burst melalui LAN tepercaya ke AI service pusat. AI service menjalankan pipeline `recognition-core` yang sama, lalu mengembalikan keputusan terbatas ke gateway untuk dikirim sebagai event ke Core API. Frame bersifat transient dan tidak disimpan secara default.
 
 ```mermaid
 flowchart LR
@@ -49,7 +49,7 @@ flowchart LR
   API --> DB[(PostgreSQL)]
 ```
 
-Profil ini memusatkan pengelolaan model dan mengurangi kebutuhan PC kuat per lab. Recognition memerlukan LAN dan server AI yang tersedia; frame wajah berpindah di jaringan lokal sehingga pengamanan transport dan akses perangkat diperlukan.
+Profil ini memusatkan pengelolaan model dan mengurangi kebutuhan PC kuat per lab. Recognition memerlukan LAN dan server AI yang tersedia; frame wajah berpindah di jaringan lokal sehingga pengamanan transport dan akses perangkat diperlukan. Sesi dan batas waktu aktif harus dikonfigurasi pada gateway karena endpoint discovery session belum tersedia. Proses juga memerlukan alur kredensial perangkat yang dapat diperbarui otomatis sebelum cocok untuk unattended long-running deployment.
 
 ## Batas domain dan aliran data
 
@@ -81,9 +81,10 @@ API v1 contract and frontend client generation follow the strategy in [api-contr
 
 Development Compose memakai `.env` lokal dari `.env.example`, mengekspos port hanya pada loopback, dan menyimpan data PostgreSQL di named volume. `scripts/dev.py` menyediakan `dev-up`, `dev-down`, dan `test` untuk Windows/Linux.
 
-The native `AI_EDGE` agent and its current cache-provider limitation are
-documented in [edge-agent.md](edge-agent.md). It remains outside default Compose
-because USB camera passthrough and driver selection are host-specific.
+The native `AI_EDGE` and `STB_GATEWAY` agents, including their provider and
+session-configuration limitations, are documented in [edge-agent.md](edge-agent.md).
+Both remain outside default Compose because USB camera passthrough and driver
+selection are host-specific.
 
 The `AI_CENTRAL` inference contract, device authentication, bounded image handling,
 and memory-only session cache lifecycle are documented in [ai-service.md](ai-service.md).

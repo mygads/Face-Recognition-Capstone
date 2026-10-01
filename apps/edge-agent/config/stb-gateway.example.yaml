@@ -1,0 +1,75 @@
+# Armbian ARM64 profile: capture at low resolution, then send short JPEG bursts.
+# Copy outside the repository and provide device/session values through env.
+mode: STB_GATEWAY
+device_id: null
+
+api:
+  base_url: https://attendance.example.edu
+  timeout_seconds: 4
+  heartbeat_interval_seconds: 15
+  cache_refresh_seconds: 3
+  cache_max_offline_seconds: 300
+  cache_path: /api/v1/devices/{device_id}/active-session-cache
+  token_file: /etc/presensi-edge-agent/core-api.token
+
+central_ai:
+  base_url: https://ai.example.edu
+  timeout_seconds: 8
+  token_file: /etc/presensi-edge-agent/central-ai.token
+
+camera:
+  index: 0
+  width: 640
+  height: 360
+  fps: 10
+  backend: v4l2
+  scan_max_index: 4
+  reconnect_seconds: 2
+
+# STB_GATEWAY does not read these model paths or instantiate recognition-core.
+models:
+  yunet_path: null
+  sface_path: null
+  version: ""
+  liveness_path: null
+  liveness_version: null
+
+quality:
+  min_face_pixels: 80
+  min_laplacian_variance: 45
+  min_brightness: 25
+  max_brightness: 235
+
+recognition:
+  min_top1_similarity: null
+  min_top1_top2_margin: null
+  minimum_agreeing_frames: 3
+  sample_every_n_frames: 6
+  best_frame_count: 5
+  max_history_frames: 10
+  track_ttl_seconds: 3
+
+liveness:
+  enabled: false
+  required: false
+  min_live_score: null
+
+gateway:
+  session_id: null # Set per active practicum session.
+  session_starts_at: null # ISO-8601 with timezone, e.g. 2026-10-01T08:00:00+07:00
+  session_ends_at: null # The gateway stops submitting frames at this instant.
+  motion_threshold: 7
+  periodic_burst_seconds: 30
+  minimum_burst_interval_seconds: 5
+  burst_frame_count: 3
+  burst_frame_interval_seconds: 0.2
+  jpeg_quality: 75
+  min_brightness: 20
+  max_brightness: 240
+  min_sharpness: 8
+
+runtime:
+  outbox_path: /var/lib/presensi-edge-agent/events.sqlite3
+  max_outbox_events: 50000
+  max_retry_seconds: 60
+  log_level: INFO

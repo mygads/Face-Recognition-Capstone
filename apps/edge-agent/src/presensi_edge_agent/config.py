@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import math
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Mapping, cast
 from uuid import UUID
@@ -80,6 +81,29 @@ class RuntimeSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class CentralAISettings:
+    base_url: str
+    token_file: Path | None
+    timeout_seconds: float
+
+
+@dataclass(frozen=True, slots=True)
+class GatewaySettings:
+    session_id: UUID | None
+    session_starts_at: datetime | None
+    session_ends_at: datetime | None
+    motion_threshold: float
+    periodic_burst_seconds: float
+    minimum_burst_interval_seconds: float
+    burst_frame_count: int
+    burst_frame_interval_seconds: float
+    jpeg_quality: int
+    min_brightness: float
+    max_brightness: float
+    min_sharpness: float
+
+
+@dataclass(frozen=True, slots=True)
 class EdgeConfig:
     config_path: Path
     device_id: UUID | None
@@ -90,16 +114,61 @@ class EdgeConfig:
     recognition: RecognitionSettings
     liveness: LivenessSettings
     runtime: RuntimeSettings
+    mode: str = "AI_EDGE"
+    central_ai: CentralAISettings = field(
+        default_factory=lambda: CentralAISettings("http://127.0.0.1:8001", None, 8.0)
+    )
+    gateway: GatewaySettings = field(
+        default_factory=lambda: GatewaySettings(
+            None, None, None, 7.0, 30.0, 5.0, 3, 0.2, 75, 20.0, 240.0, 8.0
+        )
+    )
 
-    def require_runtime(self, *, api_token: str | None) -> None:
+    def require_runtime(
+        self, *, api_token: str | None, ai_token: str | None = None
+    ) -> None:
         if self.device_id is None:
             raise EdgeConfigError("PRESENSI_EDGE_DEVICE_ID is required.")
+        if self.mode not in {"AI_EDGE", "STB_GATEWAY"}:
+            raise EdgeConfigError("mode must be AI_EDGE or STB_GATEWAY.")
         if not self.api.base_url.startswith(("http://", "https://")):
             raise EdgeConfigError("api.base_url must use http:// or https://.")
         if not api_token:
             raise EdgeConfigError(
                 "Set PRESENSI_EDGE_API_TOKEN or configure api.token_file."
             )
+        if self.mode == "STB_GATEWAY":
+            if not self.central_ai.base_url.startswith(("http://", "https://")):
+                raise EdgeConfigError(
+                    "central_ai.base_url must use http:// or https://."
+                )
+            if not ai_token:
+                raise EdgeConfigError(
+                    "Set PRESENSI_EDGE_AI_TOKEN or configure central_ai.token_file."
+                )
+            if self.gateway.session_id is None:
+                raise EdgeConfigError(
+                    "gateway.session_id must identify the active attendance session."
+                )
+            starts_at = self.gateway.session_starts_at
+            ends_at = self.gateway.session_ends_at
+            if starts_at is None or ends_at is None or starts_at >= ends_at:
+                raise EdgeConfigError(
+                    "gateway.session_starts_at and session_ends_at must define "
+                    "a valid window."
+                )
+            now = datetime.now(UTC)
+            if now < starts_at or now >= ends_at:
+                raise EdgeConfigError(
+                    "Configured attendance session is not currently active."
+                )
+            if self.camera.width > 1280 or self.camera.height > 720:
+                raise EdgeConfigError(
+                    "STB_GATEWAY capture is limited to at most 1280x720."
+                )
+            if self.camera.fps > 15:
+                raise EdgeConfigError("STB_GATEWAY capture is limited to 15 FPS.")
+            return
         if self.models.yunet_path is None or not self.models.yunet_path.is_file():
             raise EdgeConfigError("models.yunet_path must point to a local model file.")
         if self.models.sface_path is None or not self.models.sface_path.is_file():
@@ -135,8 +204,11 @@ _ENVIRONMENT_OVERRIDES: dict[
     str, tuple[str, str, type[str] | type[int] | type[float]]
 ] = {
     "PRESENSI_EDGE_DEVICE_ID": ("", "device_id", str),
+    "PRESENSI_EDGE_MODE": ("", "mode", str),
     "PRESENSI_EDGE_API_BASE_URL": ("api", "base_url", str),
     "PRESENSI_EDGE_API_TOKEN_FILE": ("api", "token_file", str),
+    "PRESENSI_EDGE_AI_BASE_URL": ("central_ai", "base_url", str),
+    "PRESENSI_EDGE_AI_TOKEN_FILE": ("central_ai", "token_file", str),
     "PRESENSI_EDGE_CACHE_MAX_OFFLINE_SECONDS": (
         "api",
         "cache_max_offline_seconds",
@@ -146,6 +218,9 @@ _ENVIRONMENT_OVERRIDES: dict[
     "PRESENSI_EDGE_CAMERA_WIDTH": ("camera", "width", int),
     "PRESENSI_EDGE_CAMERA_HEIGHT": ("camera", "height", int),
     "PRESENSI_EDGE_CAMERA_FPS": ("camera", "fps", int),
+    "PRESENSI_EDGE_SESSION_ID": ("gateway", "session_id", str),
+    "PRESENSI_EDGE_SESSION_STARTS_AT": ("gateway", "session_starts_at", str),
+    "PRESENSI_EDGE_SESSION_ENDS_AT": ("gateway", "session_ends_at", str),
     "PRESENSI_EDGE_SAMPLE_EVERY_N_FRAMES": (
         "recognition",
         "sample_every_n_frames",
@@ -278,6 +353,12 @@ def load_config(
     recognition_raw = _mapping(data.get("recognition"), "recognition")
     liveness_raw = _mapping(data.get("liveness"), "liveness")
     runtime_raw = _mapping(data.get("runtime"), "runtime")
+    central_ai_raw = _mapping(data.get("central_ai"), "central_ai")
+    gateway_raw = _mapping(data.get("gateway"), "gateway")
+
+    mode = str(data.get("mode", "AI_EDGE")).upper()
+    if mode not in {"AI_EDGE", "STB_GATEWAY"}:
+        raise EdgeConfigError("mode must be AI_EDGE or STB_GATEWAY.")
 
     raw_device_id = data.get("device_id")
     try:
@@ -318,6 +399,18 @@ def load_config(
     if api.cache_max_offline_seconds > 86400:
         raise EdgeConfigError("api.cache_max_offline_seconds must not exceed 86400.")
 
+    central_ai = CentralAISettings(
+        base_url=str(central_ai_raw.get("base_url", "http://127.0.0.1:8001")).rstrip(
+            "/"
+        ),
+        token_file=_path(
+            base, central_ai_raw.get("token_file"), "central_ai.token_file"
+        ),
+        timeout_seconds=_positive_number(
+            central_ai_raw.get("timeout_seconds", 8), "central_ai.timeout_seconds"
+        ),
+    )
+
     camera_index_raw = camera_raw.get("index", 0)
     try:
         camera_index = int(cast(str | int, camera_index_raw))
@@ -338,6 +431,72 @@ def load_config(
     )
     if camera.backend not in {"auto", "dshow", "msmf", "v4l2"}:
         raise EdgeConfigError("camera.backend must be auto, dshow, msmf, or v4l2.")
+
+    raw_session_id = gateway_raw.get("session_id")
+    try:
+        session_id = UUID(str(raw_session_id)) if raw_session_id else None
+    except ValueError as exc:
+        raise EdgeConfigError("gateway.session_id must be a UUID.") from exc
+
+    def _aware_datetime(key: str) -> datetime | None:
+        raw = gateway_raw.get(key)
+        if raw in (None, ""):
+            return None
+        if not isinstance(raw, str):
+            raise EdgeConfigError(f"gateway.{key} must be an ISO datetime string.")
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise EdgeConfigError(
+                f"gateway.{key} must be an ISO datetime string."
+            ) from exc
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise EdgeConfigError(f"gateway.{key} must include a timezone.")
+        return parsed.astimezone(UTC)
+
+    gateway = GatewaySettings(
+        session_id=session_id,
+        session_starts_at=_aware_datetime("session_starts_at"),
+        session_ends_at=_aware_datetime("session_ends_at"),
+        motion_threshold=_positive_number(
+            gateway_raw.get("motion_threshold", 7),
+            "gateway.motion_threshold",
+            allow_zero=True,
+        ),
+        periodic_burst_seconds=_positive_number(
+            gateway_raw.get("periodic_burst_seconds", 30),
+            "gateway.periodic_burst_seconds",
+        ),
+        minimum_burst_interval_seconds=_positive_number(
+            gateway_raw.get("minimum_burst_interval_seconds", 5),
+            "gateway.minimum_burst_interval_seconds",
+        ),
+        burst_frame_count=_integer(gateway_raw, "burst_frame_count", 3),
+        burst_frame_interval_seconds=_positive_number(
+            gateway_raw.get("burst_frame_interval_seconds", 0.2),
+            "gateway.burst_frame_interval_seconds",
+        ),
+        jpeg_quality=_integer(gateway_raw, "jpeg_quality", 75),
+        min_brightness=_positive_number(
+            gateway_raw.get("min_brightness", 20),
+            "gateway.min_brightness",
+            allow_zero=True,
+        ),
+        max_brightness=_positive_number(
+            gateway_raw.get("max_brightness", 240), "gateway.max_brightness"
+        ),
+        min_sharpness=_positive_number(
+            gateway_raw.get("min_sharpness", 8),
+            "gateway.min_sharpness",
+            allow_zero=True,
+        ),
+    )
+    if gateway.burst_frame_count > 5:
+        raise EdgeConfigError("gateway.burst_frame_count must not exceed 5.")
+    if gateway.jpeg_quality > 100:
+        raise EdgeConfigError("gateway.jpeg_quality must not exceed 100.")
+    if gateway.min_brightness >= gateway.max_brightness:
+        raise EdgeConfigError("gateway.min_brightness must be below max_brightness.")
 
     models = ModelSettings(
         yunet_path=_path(base, models_raw.get("yunet_path"), "models.yunet_path"),
@@ -440,14 +599,17 @@ def load_config(
 
     return EdgeConfig(
         config_path=config_path,
+        mode=mode,
         device_id=device_id,
         api=api,
+        central_ai=central_ai,
         camera=camera,
         models=models,
         quality=quality,
         recognition=recognition,
         liveness=liveness,
         runtime=runtime,
+        gateway=gateway,
     )
 
 
@@ -462,6 +624,22 @@ def resolve_api_token(
         return None
     try:
         token = config.api.token_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return token or None
+
+
+def resolve_ai_token(
+    config: EdgeConfig, *, environ: Mapping[str, str] | None = None
+) -> str | None:
+    variables = os.environ if environ is None else environ
+    env_token = variables.get("PRESENSI_EDGE_AI_TOKEN", "").strip()
+    if env_token:
+        return env_token
+    if config.central_ai.token_file is None:
+        return None
+    try:
+        token = config.central_ai.token_file.read_text(encoding="utf-8").strip()
     except OSError:
         return None
     return token or None
