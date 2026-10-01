@@ -1,8 +1,10 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
 from presensi_api.api.errors import OPENAPI_ERROR_RESPONSES
+from presensi_api.api.security.dependencies import require_permissions
+from presensi_api.api.security.roles import Permission
 from presensi_api.api.v1.routers._placeholder import feature_not_implemented
 from presensi_api.api.v1.schemas.common import PageResponse
 from presensi_api.api.v1.schemas.laboratories import (
@@ -21,6 +23,7 @@ router = APIRouter(tags=["laboratories", "devices"])
     responses=OPENAPI_ERROR_RESPONSES,
     summary="List laboratories",
     description="Contract placeholder; currently returns 501.",
+    dependencies=[Depends(require_permissions(Permission.LABORATORY_READ))],
 )
 def list_laboratories(
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
@@ -36,6 +39,7 @@ def list_laboratories(
     responses=OPENAPI_ERROR_RESPONSES,
     summary="Create a laboratory",
     description="Contract placeholder; currently returns 501.",
+    dependencies=[Depends(require_permissions(Permission.MANAGE_MASTER_DATA))],
 )
 def create_laboratory(request: LaboratoryCreateRequest) -> LaboratoryResponse:
     feature_not_implemented("laboratories")
@@ -47,6 +51,7 @@ def create_laboratory(request: LaboratoryCreateRequest) -> LaboratoryResponse:
     responses=OPENAPI_ERROR_RESPONSES,
     summary="List devices",
     description="Contract placeholder; currently returns 501.",
+    dependencies=[Depends(require_permissions(Permission.DEVICE_OPERATE))],
 )
 def list_devices(
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
@@ -62,6 +67,7 @@ def list_devices(
     responses=OPENAPI_ERROR_RESPONSES,
     summary="Register a device",
     description="Contract placeholder; currently returns 501.",
+    dependencies=[Depends(require_permissions(Permission.MANAGE_MASTER_DATA))],
 )
 def create_device(request: DeviceCreateRequest) -> DeviceResponse:
     feature_not_implemented("devices")

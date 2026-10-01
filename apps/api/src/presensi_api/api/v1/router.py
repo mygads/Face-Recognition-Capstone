@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from presensi_api.api.v1.routers import (
+    accounts,
     attendance,
     auth,
     enrollment_templates,
@@ -15,6 +16,7 @@ from presensi_api.api.v1.routers import (
 api_v1_router = APIRouter(prefix="/api/v1")
 api_v1_router.include_router(health.router)
 api_v1_router.include_router(auth.router)
+api_v1_router.include_router(accounts.router)
 api_v1_router.include_router(students_classes.router)
 api_v1_router.include_router(laboratories_devices.router)
 api_v1_router.include_router(schedules.router)

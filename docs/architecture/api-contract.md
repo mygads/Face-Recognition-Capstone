@@ -7,7 +7,7 @@ The HTTP contract lives under /api/v1 and is described by FastAPI OpenAPI at /op
 | Router | Initial paths |
 | --- | --- |
 | Health | GET /api/v1/health |
-| Auth | POST /api/v1/auth/login, POST /api/v1/auth/refresh |
+| Auth | POST /api/v1/auth/login, GET /api/v1/auth/me |
 | Students/classes | GET, POST /api/v1/students; GET, POST /api/v1/classes |
 | Laboratories/devices | GET, POST /api/v1/laboratories; GET, POST /api/v1/devices |
 | Schedules | GET, POST /api/v1/schedules |
@@ -16,7 +16,7 @@ The HTTP contract lives under /api/v1 and is described by FastAPI OpenAPI at /op
 | Attendance | GET /api/v1/attendance; POST /api/v1/attendance/corrections |
 | Reports | GET /api/v1/reports/attendance |
 
-All resource operations except health are contract placeholders and currently return HTTP 501 with the standard error body. Their schemas define the proposed request/success shapes only; no authentication, enrollment, attendance, or reporting behavior is implemented here. Template request/response schemas contain metadata only and have no image, blob, or embedding fields. /health remains a hidden-from-OpenAPI process-health alias for existing Docker health checks; /api/v1/health is the versioned health operation.
+Login and token validation are implemented. Protected resource operations other than `/auth/me` remain contract placeholders and return HTTP 501 after authorization succeeds; they do not return data. Their schemas define the proposed request/success shapes only. Template request/response schemas contain metadata only and have no image, blob, or embedding fields. `/health` remains a hidden-from-OpenAPI process-health alias for existing Docker health checks; `/api/v1/health` is the versioned health operation.
 
 ## Error body
 

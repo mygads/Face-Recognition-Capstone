@@ -1,9 +1,11 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
 from presensi_api.api.errors import OPENAPI_ERROR_RESPONSES
+from presensi_api.api.security.dependencies import require_permissions
+from presensi_api.api.security.roles import Permission
 from presensi_api.api.v1.routers._placeholder import feature_not_implemented
 from presensi_api.api.v1.schemas.attendance import (
     AttendanceCorrectionRequest,
@@ -21,6 +23,7 @@ router = APIRouter(prefix="/attendance", tags=["attendance"])
     responses=OPENAPI_ERROR_RESPONSES,
     summary="List final attendance records",
     description="Contract placeholder; currently returns 501.",
+    dependencies=[Depends(require_permissions(Permission.ATTENDANCE_READ))],
 )
 def list_attendance(
     session_id: UUID | None = None,
@@ -38,6 +41,7 @@ def list_attendance(
     responses=OPENAPI_ERROR_RESPONSES,
     summary="Request an attendance correction",
     description="Contract placeholder; currently returns 501.",
+    dependencies=[Depends(require_permissions(Permission.ATTENDANCE_CORRECT))],
 )
 def request_attendance_correction(
     request: AttendanceCorrectionRequest,

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import secrets
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +18,26 @@ def ensure_env_file() -> None:
     if not ENV_FILE.exists():
         shutil.copyfile(ENV_EXAMPLE, ENV_FILE)
         print("Created .env from .env.example (local development values).")
+    env_text = ENV_FILE.read_text(encoding="utf-8")
+    lines = env_text.splitlines()
+    secret_factories: dict[str, Callable[[], str]] = {
+        "POSTGRES_PASSWORD": lambda: secrets.token_urlsafe(32),
+        "JWT_SECRET": lambda: secrets.token_hex(32),
+    }
+    generated = False
+    for key, create_secret in secret_factories.items():
+        for index, line in enumerate(lines):
+            if line.startswith(f"{key}="):
+                if not line.partition("=")[2].strip():
+                    lines[index] = f"{key}={create_secret()}"
+                    generated = True
+                break
+        else:
+            lines.append(f"{key}={create_secret()}")
+            generated = True
+    if generated:
+        ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print("Generated local database/auth secrets in the ignored .env file.")
 
 
 def run(command: list[str]) -> int:

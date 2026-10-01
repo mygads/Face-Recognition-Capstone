@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from uuid import UUID
 
 import httpx
 
+from presensi_api.api.security.dependencies import get_current_user
+from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
 from presensi_api.main import app
 
 
@@ -40,6 +43,8 @@ def test_openapi_lists_each_versioned_router_group() -> None:
     assert {
         "/api/v1/health",
         "/api/v1/auth/login",
+        "/api/v1/auth/me",
+        "/api/v1/accounts",
         "/api/v1/students",
         "/api/v1/classes",
         "/api/v1/laboratories",
@@ -72,7 +77,7 @@ def test_openapi_uses_pydantic_contract_and_shared_error_schema() -> None:
         student_create["requestBody"]["content"]["application/json"]["schema"]["$ref"]
         == "#/components/schemas/StudentCreateRequest"
     )
-    for status_code in ("422", "501"):
+    for status_code in ("401", "403", "422", "501"):
         assert (
             student_create["responses"][status_code]["content"]["application/json"][
                 "schema"
@@ -81,8 +86,30 @@ def test_openapi_uses_pydantic_contract_and_shared_error_schema() -> None:
         )
 
 
+def test_openapi_documents_oauth_password_login_and_bearer_auth() -> None:
+    document = app.openapi()
+    login = document["paths"]["/api/v1/auth/login"]["post"]
+    authenticated_me = document["paths"]["/api/v1/auth/me"]["get"]
+
+    assert "application/x-www-form-urlencoded" in login["requestBody"]["content"]
+    assert authenticated_me["security"] == [{"OAuth2PasswordBearer": []}]
+    password_flow = document["components"]["securitySchemes"]["OAuth2PasswordBearer"][
+        "flows"
+    ]["password"]
+    assert password_flow["tokenUrl"] == "/api/v1/auth/login"
+
+
 def test_placeholder_returns_standard_error_envelope() -> None:
-    response = send_request("GET", "/api/v1/schedules")
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        id=UUID(int=1),
+        email="admin@example.edu",
+        full_name="Admin",
+        roles=frozenset({RoleCode.ADMIN}),
+    )
+    try:
+        response = send_request("GET", "/api/v1/schedules")
+    finally:
+        app.dependency_overrides.clear()
 
     assert response.status_code == 501
     assert response.json() == {
@@ -108,8 +135,25 @@ def test_http_not_found_uses_standard_error_envelope() -> None:
     }
 
 
+def test_protected_endpoint_requires_bearer_authentication() -> None:
+    response = send_request("GET", "/api/v1/students")
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+    assert response.json()["error"]["code"] == "unauthorized"
+
+
 def test_request_validation_uses_standard_error_envelope() -> None:
-    response = send_request("POST", "/api/v1/students", {"student_number": ""})
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        id=UUID(int=1),
+        email="admin@example.edu",
+        full_name="Admin",
+        roles=frozenset({RoleCode.ADMIN}),
+    )
+    try:
+        response = send_request("POST", "/api/v1/students", {"student_number": ""})
+    finally:
+        app.dependency_overrides.clear()
 
     assert response.status_code == 422
     body = response.json()

@@ -9,10 +9,9 @@ from presensi_api.db.models import Role
 from presensi_api.db.session import get_engine
 
 ROLE_SEEDS: tuple[tuple[str, str, str], ...] = (
-    ("admin", "Administrator", "Manages system configuration and users."),
-    ("teacher", "Teacher", "Manages practicum sessions and attendance."),
-    ("lab_assistant", "Lab assistant", "Supports laboratory operations."),
-    ("student", "Student", "Views personal attendance information."),
+    ("ADMIN", "Administrator", "Manages master data, accounts, and settings."),
+    ("TEACHER", "Teacher", "Manages practicum sessions and class attendance."),
+    ("LABORANT", "Laborant", "Operates laboratory devices and enrollment."),
 )
 
 

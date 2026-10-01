@@ -83,4 +83,4 @@ Development Compose memakai `.env` lokal dari `.env.example`, mengekspos port ha
 
 ## Yang belum disiapkan
 
-Skema PostgreSQL awal didefinisikan lewat SQLAlchemy 2 dan dikelola dengan Alembic. Migration dan seed role dijalankan eksplisit; proses API tidak mengubah schema saat startup. API belum mengimplementasikan auth atau alur attendance. Detail tabel dan constraint ada di [database-schema.md](database-schema.md). Camera capture dan inference tetap menjadi task roadmap berikutnya.
+Skema PostgreSQL awal didefinisikan lewat SQLAlchemy 2 dan dikelola dengan Alembic. Migration dan seed role dijalankan eksplisit; proses API tidak mengubah schema saat startup. API memakai autentikasi password dengan Argon2 dan short-lived JWT access token; pembatasan resource berbasis kelas/laboratorium serta alur attendance menunggu business handlers. Detail tabel dan constraint ada di [database-schema.md](database-schema.md), sedangkan alur login, role, dan batas otorisasi ada di [authentication.md](authentication.md). Camera capture dan inference tetap menjadi task roadmap berikutnya.

@@ -10,7 +10,7 @@ Monorepo untuk sistem presensi praktikum berbasis face recognition. Kedua deploy
 
 ## Siapkan environment
 
-`.env.example` berisi nilai development lokal, bukan credential untuk lingkungan bersama/production. Salin sebelum menjalankan Compose langsung:
+`.env.example` tidak berisi password atau signing secret. Task runner membuat password PostgreSQL dan signing key JWT acak di `.env` yang diabaikan Git:
 
 ```powershell
 # Windows PowerShell
@@ -22,7 +22,7 @@ Copy-Item .env.example .env
 cp .env.example .env
 ```
 
-Task runner di bawah akan membuat `.env` dari contoh tersebut bila belum ada.
+Jalankan `dev-up` task runner sebelum perintah `docker compose` langsung agar `.env` lokal sudah dibuat dan diisi.
 
 ## Perintah development
 
@@ -65,6 +65,15 @@ Compose menunggu PostgreSQL sehat sebelum memulai API dan menggunakan healthchec
 docker compose run --rm api alembic upgrade head
 docker compose run --rm api python -m presensi_api.db.seed_roles
 ```
+
+`scripts/dev.py dev-up` membuat password PostgreSQL dan signing key JWT acak pada `.env` lokal jika nilainya kosong. Untuk login development, buat akun awal setelah seed role:
+
+```powershell
+# Windows PowerShell
+docker compose run --rm api python -m presensi_api.auth.create_user --email admin@example.edu --full-name "School Administrator" --role ADMIN
+```
+
+Perintah yang sama berlaku di Linux. Password diminta secara interaktif dan tidak diberikan di argumen shell. API menyediakan `POST /api/v1/auth/login` (OAuth2 password form), `GET /api/v1/auth/me`, dan token bearer berumur default 15 menit. Lihat [authentication.md](docs/architecture/authentication.md) untuk permission, audit login, dan batas akses per kelas/laboratorium.
 
 API healthcheck hanya memeriksa kesiapan proses HTTP; migration dijalankan eksplisit sebagai langkah development.
 

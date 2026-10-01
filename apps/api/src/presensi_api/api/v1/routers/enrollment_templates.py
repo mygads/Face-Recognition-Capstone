@@ -1,8 +1,10 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
 from presensi_api.api.errors import OPENAPI_ERROR_RESPONSES
+from presensi_api.api.security.dependencies import require_permissions
+from presensi_api.api.security.roles import Permission
 from presensi_api.api.v1.routers._placeholder import feature_not_implemented
 from presensi_api.api.v1.schemas.common import PageResponse
 from presensi_api.api.v1.schemas.enrollment import (
@@ -23,6 +25,7 @@ router = APIRouter(tags=["enrollment", "templates"])
         "Contract placeholder; currently returns 501. The request intentionally "
         "contains no image, blob, or embedding payload."
     ),
+    dependencies=[Depends(require_permissions(Permission.ENROLLMENT_MANAGE))],
 )
 def create_enrollment(
     request: TemplateEnrollmentRequest,
@@ -38,6 +41,7 @@ def create_enrollment(
     description=(
         "Contract placeholder; currently returns 501 and exposes metadata only."
     ),
+    dependencies=[Depends(require_permissions(Permission.ENROLLMENT_MANAGE))],
 )
 def list_face_templates(
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
