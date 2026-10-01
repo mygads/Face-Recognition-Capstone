@@ -57,7 +57,14 @@ Perintah yang sama berlaku di Linux. Jika ingin seluruh UI berjalan dalam contai
 - PostgreSQL: `127.0.0.1:5432` (dapat diubah lewat `.env`)
 - Central AI (profile `central`): `http://127.0.0.1:8001/health`
 
-Compose menunggu PostgreSQL sehat sebelum memulai API dan menggunakan healthcheck untuk API serta AI service. API saat ini belum membaca/menulis database; koneksi/schema dibuat pada task database berikutnya.
+Compose menunggu PostgreSQL sehat sebelum memulai API dan menggunakan healthcheck untuk API serta AI service. Skema awal API dikelola dengan Alembic. Setelah service siap, terapkan migration dan seed role:
+
+```sh
+docker compose run --rm api alembic upgrade head
+docker compose run --rm api python -m presensi_api.db.seed_roles
+```
+
+API healthcheck hanya memeriksa kesiapan proses HTTP; migration dijalankan eksplisit sebagai langkah development.
 
 ## Quality checks
 
@@ -91,7 +98,7 @@ py -3 scripts/check.py
 python3 scripts/check.py
 ```
 
-Playwright E2E smoke test terpisah dapat dijalankan dengan `npm --prefix apps/web run test:e2e`. Untuk instalasi browser lokal, jalankan `npm --prefix apps/web exec -- playwright install chromium` terlebih dahulu. Workflow GitHub Actions menjalankan quality checks dan E2E tanpa langkah deployment.
+Playwright E2E smoke test terpisah dapat dijalankan dengan `npm --prefix apps/web run test:e2e`. Untuk instalasi browser lokal, jalankan `npm --prefix apps/web exec -- playwright install chromium` terlebih dahulu. Workflow GitHub Actions menjalankan migration PostgreSQL, seed, model/schema drift check, quality checks dan E2E tanpa langkah deployment.
 
 ## Struktur utama
 
@@ -108,5 +115,7 @@ docs/architecture/       arsitektur sistem
 docs/adr/                keputusan arsitektur
 docs/test-plans/         baseline dan protokol uji
 ```
+
+Detail tabel, aturan integritas, index, dan migration ada di [docs/architecture/database-schema.md](docs/architecture/database-schema.md).
 
 Baca [arsitektur](docs/architecture/overview.md), [ADR-001](docs/adr/ADR-001-shared-recognition-core.md), dan [AGENTS.md](AGENTS.md) sebelum mengubah struktur/domain. Compose hanya untuk development, bukan deployment production.

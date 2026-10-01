@@ -81,4 +81,4 @@ Development Compose memakai `.env` lokal dari `.env.example`, mengekspos port ha
 
 ## Yang belum disiapkan
 
-Compose menyediakan database server, tetapi aplikasi API belum menjalankan query, migration, auth, atau attendance feature. Camera capture, model, inference, CI, dan lint policy tetap menjadi task roadmap berikutnya. Health tests saat ini hanya memeriksa endpoint proses API/AI.
+Skema PostgreSQL awal didefinisikan lewat SQLAlchemy 2 dan dikelola dengan Alembic. Migration dan seed role dijalankan eksplisit; proses API tidak mengubah schema saat startup. API belum mengimplementasikan auth atau alur attendance. Detail tabel dan constraint ada di [database-schema.md](database-schema.md). Camera capture dan inference tetap menjadi task roadmap berikutnya.
