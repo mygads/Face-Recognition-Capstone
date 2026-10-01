@@ -1,3 +1,4 @@
+from datetime import time
 from typing import Literal
 from uuid import UUID
 
@@ -18,3 +19,25 @@ class AttendanceSessionResponse(ApiSchema):
     opened_at: AwareDatetime
     closed_at: AwareDatetime | None
     grace_period_minutes: int
+    student_count: int = Field(ge=0)
+    subject: str
+    class_name: str
+    laboratory_name: str
+    teacher_name: str
+    weekday: int
+    start_time: time
+    end_time: time
+    timezone_name: str
+    scheduled_end_at: AwareDatetime
+
+
+class OpenableScheduleResponse(ApiSchema):
+    id: UUID
+    subject: str
+    class_name: str
+    laboratory_name: str
+    teacher_name: str
+    weekday: int
+    start_time: time
+    end_time: time
+    timezone_name: str

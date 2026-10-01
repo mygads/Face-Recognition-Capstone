@@ -16,6 +16,10 @@ const auth = useAuthStore()
 const canManageSchedules = computed(
   () => auth.account?.roles.some((role) => role === 'ADMIN' || role === 'TEACHER') ?? false,
 )
+const canOperateSessions = computed(
+  () =>
+    auth.account?.roles.some((role) => ['ADMIN', 'TEACHER', 'LABORANT'].includes(role)) ?? false,
+)
 </script>
 
 <template>
@@ -83,6 +87,22 @@ const canManageSchedules = computed(
           <path d="M7.5 3.5v3M16.5 3.5v3M3.5 9h17M7.5 12.5h3M13.5 12.5h3M7.5 16h3" />
         </svg>
         <span class="app-sidebar__link-label">Jadwal praktikum</span>
+      </RouterLink>
+      <RouterLink
+        v-if="canOperateSessions"
+        class="app-sidebar__link"
+        active-class="app-sidebar__link--active"
+        to="/app/sessions"
+        :aria-label="collapsed ? 'Sesi presensi' : undefined"
+        data-testid="sessions-link"
+        @click="emit('navigate')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="3.5" y="4" width="17" height="16" rx="2" />
+          <path d="M7.5 8h9M7.5 12h9M7.5 16h5" />
+          <circle cx="18" cy="16" r="2.5" />
+        </svg>
+        <span class="app-sidebar__link-label">Sesi presensi</span>
       </RouterLink>
     </nav>
 

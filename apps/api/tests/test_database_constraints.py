@@ -19,6 +19,7 @@ from presensi_api.db.models import (
     PracticumSchedule,
     RecognitionEvent,
     SchoolClass,
+    SessionStudent,
     Student,
     User,
 )
@@ -77,6 +78,15 @@ def attendance_context(database: Engine) -> dict[str, object]:
         )
         session.add_all([attendance_session, device])
         session.flush()
+        session.add(
+            SessionStudent(
+                session_id=attendance_session.id,
+                student_id=student.id,
+                student_number_snapshot=student.student_number,
+                full_name_snapshot=student.full_name,
+            )
+        )
+        session.flush()
         ids: dict[str, object] = {
             "student_id": student.id,
             "session_id": attendance_session.id,
@@ -105,6 +115,24 @@ def test_attendance_is_unique_per_student_and_session(
             source="manual",
         )
         session.add(duplicate)
+        with pytest.raises(IntegrityError):
+            session.commit()
+
+
+def test_attendance_rejects_students_outside_session_roster(
+    database: Engine, attendance_context: dict[str, object]
+) -> None:
+    with Session(database) as session:
+        outsider = Student(student_number="S-OUT", full_name="Outside Roster")
+        session.add(outsider)
+        session.flush()
+        attendance = AttendanceRecord(
+            session_id=attendance_context["session_id"],
+            student_id=outsider.id,
+            status="present",
+            source="manual",
+        )
+        session.add(attendance)
         with pytest.raises(IntegrityError):
             session.commit()
 

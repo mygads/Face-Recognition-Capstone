@@ -14,6 +14,7 @@ import ForbiddenView from '../views/ForbiddenView.vue'
 import LoginView from '../views/LoginView.vue'
 import MasterDataView from '../views/MasterDataView.vue'
 import ScheduleView from '../views/ScheduleView.vue'
+import SessionsView from '../views/SessionsView.vue'
 
 export const routes: RouteRecordRaw[] = [
   {
@@ -65,6 +66,16 @@ export const routes: RouteRecordRaw[] = [
           title: 'Jadwal praktikum',
           description: 'Atur kelas, laboratorium, guru, dan waktu praktikum.',
           requiredRoles: ['ADMIN', 'TEACHER'],
+        },
+      },
+      {
+        path: 'sessions',
+        name: 'sessions',
+        component: SessionsView,
+        meta: {
+          title: 'Sesi presensi',
+          description: 'Buka sesi praktikum dan pantau roster presensi.',
+          requiredRoles: ['ADMIN', 'TEACHER', 'LABORANT'],
         },
       },
       {

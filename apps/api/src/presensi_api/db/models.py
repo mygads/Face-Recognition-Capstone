@@ -11,6 +11,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Numeric,
     SmallInteger,
@@ -390,6 +391,12 @@ class AttendanceRecord(UUIDPrimaryKey, TimestampMixin, Base):
             "(source = 'face_recognition' AND recognition_event_id IS NOT NULL) OR "
             "(source IN ('manual', 'system') AND recognition_event_id IS NULL)",
             name="attendance_source_event_consistency",
+        ),
+        ForeignKeyConstraint(
+            ["session_id", "student_id"],
+            ["session_students.session_id", "session_students.student_id"],
+            name="fk_attendance_records_session_roster",
+            ondelete="RESTRICT",
         ),
         Index("ix_attendance_records_student_id", "student_id"),
         Index("ix_attendance_records_recorded_by_user_id", "recorded_by_user_id"),

@@ -21,6 +21,8 @@ export type Schedule = components['schemas']['ScheduleResponse']
 export type ScheduleCreate = components['schemas']['ScheduleCreateRequest']
 export type ScheduleUpdate = components['schemas']['ScheduleUpdateRequest']
 export type ScheduleTeacher = components['schemas']['ScheduleTeacherResponse']
+export type AttendanceSession = components['schemas']['AttendanceSessionResponse']
+export type OpenableSchedule = components['schemas']['OpenableScheduleResponse']
 type ErrorDetail = components['schemas']['ErrorDetail']
 type ErrorEnvelope = components['schemas']['ErrorEnvelope']
 type Page<T> = {
@@ -244,6 +246,47 @@ export async function updateSchedule(scheduleId: string, body: ScheduleUpdate): 
 
 export async function listScheduleTeachers(): Promise<ScheduleTeacher[]> {
   const result = await apiClient.GET('/api/v1/schedules/teachers')
+  return unwrap(result)
+}
+
+export async function listOpenableSchedules(): Promise<OpenableSchedule[]> {
+  const result = await apiClient.GET('/api/v1/sessions/openable-schedules')
+  return unwrap(result)
+}
+
+export async function listAttendanceSessions(query: {
+  status?: 'active' | 'closed' | 'cancelled'
+  limit: number
+  offset: number
+}): Promise<Page<AttendanceSession>> {
+  const result = await apiClient.GET('/api/v1/sessions', { params: { query } })
+  return unwrap(result)
+}
+
+export async function openAttendanceSession(
+  practicumScheduleId: string,
+  gracePeriodMinutes = 15,
+): Promise<AttendanceSession> {
+  const result = await apiClient.POST('/api/v1/sessions', {
+    body: {
+      practicum_schedule_id: practicumScheduleId,
+      grace_period_minutes: gracePeriodMinutes,
+    },
+  })
+  return unwrap(result)
+}
+
+export async function getAttendanceSessionStatus(sessionId: string): Promise<AttendanceSession> {
+  const result = await apiClient.GET('/api/v1/sessions/{session_id}', {
+    params: { path: { session_id: sessionId } },
+  })
+  return unwrap(result)
+}
+
+export async function closeAttendanceSession(sessionId: string): Promise<AttendanceSession> {
+  const result = await apiClient.POST('/api/v1/sessions/{session_id}/close', {
+    params: { path: { session_id: sessionId } },
+  })
   return unwrap(result)
 }
 
