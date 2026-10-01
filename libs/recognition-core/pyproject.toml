@@ -9,5 +9,11 @@ description = "Shared, model-agnostic face recognition pipeline package"
 requires-python = ">=3.11"
 dependencies = []
 
+[project.optional-dependencies]
+opencv = ["numpy>=1.26", "opencv-python-headless>=4.10,<5"]
+
+[project.scripts]
+recognition-core = "recognition_core.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]

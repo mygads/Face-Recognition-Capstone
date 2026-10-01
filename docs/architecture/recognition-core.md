@@ -14,7 +14,9 @@ frontal retry behavior; the pipeline foundation leaves those policies replaceabl
 Stage contracts are Python protocols. OpenCV, ONNX Runtime, or other local inference
 implementations can be swapped while keeping FaceDetection, FaceQuality,
 FaceEmbedding, CandidateMatch, RecognitionDecision, and TrackDecision stable. The
-package currently has no external runtime dependencies and downloads no model.
+default install has no external runtime dependencies; the optional `opencv` extra
+provides OpenCV/NumPy. YuNet and SFace model paths must be supplied by the deployment
+configuration. No model is downloaded at runtime; see [model provenance and usage](../models.md).
 
 FaceEmbedding stores a model name/version and numeric vector, but this foundation
 does not persist the vector. Similarity uses cosine-compatible [-1, 1] values.
@@ -22,4 +24,8 @@ Recognition confidence and face quality use [0, 1]; temporal match margin is
 normalized to [0, 1] for the existing recognition-event contract.
 
 Deterministic fake stages live in recognition_core.testing and are used by
-framework-free unit tests. Production adapters must not import those fakes.
+framework-free unit tests. Production adapters must not import those fakes. The
+OpenCV Zoo baseline adapts YuNet's five landmarks to SFace landmark alignment,
+normalizes extracted SFace features, and ranks candidates by cosine similarity.
+The matcher has no default identity threshold; temporal/business policy must use a
+threshold calibrated from local evaluation data.

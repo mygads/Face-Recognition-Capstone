@@ -1,8 +1,9 @@
 # Recognition Core
 
-Framework-independent Python package for the shared face-recognition pipeline used
-by AI_EDGE and AI_CENTRAL. It does not import FastAPI, OpenCV, or a model runtime.
-Frames stay as opaque inputs at this layer boundary, and no image is retained.
+Python package for the shared face-recognition pipeline used by AI_EDGE and
+AI_CENTRAL. Domain contracts and pipeline orchestration remain framework-independent.
+Optional OpenCV Zoo adapters provide a YuNet detector, SFace alignment/embedder, and
+cosine matcher. Frames stay transient and are not retained by the package.
 
 ## Pipeline contract
 
@@ -28,7 +29,8 @@ Preprocessor, FaceDetector, FaceQualityAssessor, FaceAligner, LivenessModel,
 FaceEmbedder, Matcher, and TemporalDecisionEngine are structural Python protocols.
 Implementations can wrap OpenCV, ONNX Runtime, or another compatible local runtime
 without changing domain objects or caller APIs. The Core API remains the only
-authority for attendance decisions.
+authority for attendance decisions. Adapter and model setup is documented in
+[`docs/models.md`](../../docs/models.md).
 
 ## Domain objects
 
@@ -38,8 +40,29 @@ observations, and track decisions. Similarity supports cosine values from -1 to 
 Decision confidence and quality scores use the unit interval; temporal margin is a
 normalized 0–1 value.
 
-recognition_core.testing provides deterministic fakes for each stage. Use synthetic
-values only; no face images, student data, or pretrained weights are bundled.
+recognition_core.testing provides deterministic fakes for each stage. Tests generate
+synthetic in-memory inputs; no face images, student data, or pretrained weights are
+bundled. OpenCV and NumPy are optional package dependencies and are imported only by
+the OpenCV adapters.
+
+## YuNet + SFace baseline
+
+Install the optional runtime and provision the model files separately:
+
+```bash
+python -m pip install -e "libs/recognition-core[opencv]"
+recognition-core compare image-a.jpg image-b.jpg --yunet-model models/face_detection_yunet_2023mar.onnx --sface-model models/face_recognition_sface_2021dec.onnx
+```
+
+The CLI reports cosine similarity only unless `--threshold` is supplied. It does
+not provide a production attendance decision or choose a calibrated threshold.
+Folder benchmarks use one subfolder per identity and compare all pairs. Keep local
+benchmark data lawfully collected and outside Git; the CLI reports aggregate scores
+without printing folder labels or embeddings.
+
+```bash
+recognition-core benchmark ./local-benchmark --yunet-model ./models/yunet.onnx --sface-model ./models/sface.onnx
+```
 
 ## Development
 
@@ -48,3 +71,7 @@ Run the unit suite from the repository root with:
 - python -m pytest libs/recognition-core/tests
 - python -m ruff check libs/recognition-core
 - python -m mypy
+
+OpenCV adapter tests use mocked OpenCV APIs and generated synthetic arrays, so the
+unit suite does not download weights or require camera hardware. For an actual model
+smoke check, supply locally provisioned model assets and lawfully collected images.

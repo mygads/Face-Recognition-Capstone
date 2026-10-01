@@ -12,6 +12,8 @@ from recognition_core.domain import (
     RecognitionDecision,
     TrackDecision,
 )
+from recognition_core.matching import CosineSimilarityMatcher, cosine_similarity
+from recognition_core.opencv_models import SFaceModel, YuNetConfig, YuNetFaceDetector
 from recognition_core.pipeline import RecognitionPipeline
 from recognition_core.protocols import (
     FaceAligner,
@@ -27,6 +29,7 @@ from recognition_core.protocols import (
 __all__ = [
     "BoundingBox",
     "CandidateMatch",
+    "CosineSimilarityMatcher",
     "FaceDetection",
     "FaceAligner",
     "FaceDetector",
@@ -42,6 +45,10 @@ __all__ = [
     "Preprocessor",
     "RecognitionDecision",
     "RecognitionPipeline",
+    "SFaceModel",
     "TrackDecision",
     "TemporalDecisionEngine",
+    "YuNetConfig",
+    "YuNetFaceDetector",
+    "cosine_similarity",
 ]
