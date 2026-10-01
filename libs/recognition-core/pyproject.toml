@@ -11,6 +11,11 @@ dependencies = []
 
 [project.optional-dependencies]
 opencv = ["numpy>=1.26", "opencv-python-headless>=4.10,<5"]
+antispoof = [
+  "numpy>=1.26",
+  "opencv-python-headless>=4.10,<5",
+  "onnxruntime>=1.18",
+]
 
 [project.scripts]
 recognition-core = "recognition_core.cli:main"

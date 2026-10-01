@@ -14,6 +14,7 @@ from recognition_core.domain import (
     RecognitionDecision,
     TrackDecision,
 )
+from recognition_core.liveness import LivenessConfig
 from recognition_core.pipeline import RecognitionPipeline
 from recognition_core.testing import (
     FakeFaceAligner,
@@ -40,7 +41,7 @@ def test_pipeline_invokes_stages_in_order_and_delegates_temporal_decision() -> N
         landmarks=((30, 45), (65, 45), (48, 60), (35, 82), (62, 82)),
     )
     quality = FaceQuality(score=0.95, acceptable=True, signals=(("blur", 0.02),))
-    live = LivenessDecision(state="live", confidence=0.98)
+    live = LivenessDecision(state="live", live_score=0.98)
     embedding = FaceEmbedding(
         values=(0.6, 0.8),
         model_name="fake-embedder",
@@ -56,6 +57,7 @@ def test_pipeline_invokes_stages_in_order_and_delegates_temporal_decision() -> N
             student_id=STUDENT_ID,
             confidence=0.93,
             margin=0.22,
+            liveness_score=0.98,
         ),
         observation_count=3,
     )
@@ -66,6 +68,11 @@ def test_pipeline_invokes_stages_in_order_and_delegates_temporal_decision() -> N
         detector=FakeFaceDetector(calls, (face,)),
         quality_assessor=FakeFaceQualityAssessor(calls, quality),
         aligner=FakeFaceAligner(calls),
+        liveness_config=LivenessConfig(
+            enabled=True,
+            required=True,
+            min_live_score=0.6,
+        ),
         liveness_model=FakeLivenessModel(calls, live),
         embedder=FakeFaceEmbedder(calls, embedding),
         matcher=matcher,
@@ -96,7 +103,12 @@ def test_pipeline_invokes_stages_in_order_and_delegates_temporal_decision() -> N
     assert temporal.observation == observation
     assert temporal.matches == (match,)
     assert temporal.quality == quality
-    assert temporal.liveness == live
+    assert temporal.liveness == LivenessDecision(
+        state="live",
+        live_score=0.98,
+        required=True,
+        passed=True,
+    )
 
 
 def test_quality_rejection_stops_alignment_and_embedding() -> None:
@@ -120,6 +132,11 @@ def test_quality_rejection_stops_alignment_and_embedding() -> None:
         detector=FakeFaceDetector(calls, (face,)),
         quality_assessor=FakeFaceQualityAssessor(calls, quality),
         aligner=FakeFaceAligner(calls),
+        liveness_config=LivenessConfig(
+            enabled=True,
+            required=True,
+            min_live_score=0.6,
+        ),
         liveness_model=FakeLivenessModel(calls, LivenessDecision(state="live")),
         embedder=FakeFaceEmbedder(
             calls,
@@ -142,6 +159,8 @@ def test_quality_rejection_stops_alignment_and_embedding() -> None:
     assert temporal.liveness == LivenessDecision(
         state="inconclusive",
         reason_code="quality_rejected",
+        required=True,
+        passed=False,
     )
 
 
@@ -149,7 +168,7 @@ def test_spoof_liveness_stops_embedding_and_matching() -> None:
     calls: list[str] = []
     face = FaceDetection(box=BoundingBox(0, 0, 30, 30), confidence=0.95)
     quality = FaceQuality(score=0.9, acceptable=True)
-    spoof = LivenessDecision(state="spoof", confidence=0.99)
+    spoof = LivenessDecision(state="spoof", live_score=0.01)
     decision = TrackDecision(
         track_id=TEACHER_TRACK,
         state="rejected",
@@ -162,6 +181,11 @@ def test_spoof_liveness_stops_embedding_and_matching() -> None:
         detector=FakeFaceDetector(calls, (face,)),
         quality_assessor=FakeFaceQualityAssessor(calls, quality),
         aligner=FakeFaceAligner(calls),
+        liveness_config=LivenessConfig(
+            enabled=True,
+            required=True,
+            min_live_score=0.6,
+        ),
         liveness_model=FakeLivenessModel(calls, spoof),
         embedder=FakeFaceEmbedder(
             calls,
@@ -186,8 +210,108 @@ def test_spoof_liveness_stops_embedding_and_matching() -> None:
     ]
     assert temporal.liveness == LivenessDecision(
         state="spoof",
-        confidence=0.99,
+        live_score=0.01,
         reason_code="liveness_rejected",
+        required=True,
+        passed=False,
+    )
+
+
+def test_required_low_liveness_score_cannot_be_bypassed_by_temporal_engine() -> None:
+    calls: list[str] = []
+    face = FaceDetection(box=BoundingBox(0, 0, 30, 30), confidence=0.95)
+    quality = FaceQuality(score=0.9, acceptable=True)
+    accepted = TrackDecision(
+        track_id=TEACHER_TRACK,
+        state="accepted",
+        decision=RecognitionDecision(
+            outcome="matched",
+            student_id=STUDENT_ID,
+            confidence=0.95,
+        ),
+        observation_count=1,
+    )
+    temporal = FakeTemporalDecisionEngine(calls, accepted)
+    pipeline = RecognitionPipeline(
+        preprocessor=FakePreprocessor(calls),
+        detector=FakeFaceDetector(calls, (face,)),
+        quality_assessor=FakeFaceQualityAssessor(calls, quality),
+        aligner=FakeFaceAligner(calls),
+        liveness_config=LivenessConfig(
+            enabled=True,
+            required=True,
+            min_live_score=0.75,
+        ),
+        liveness_model=FakeLivenessModel(
+            calls,
+            LivenessDecision(state="live", live_score=0.74),
+        ),
+        embedder=FakeFaceEmbedder(
+            calls,
+            FaceEmbedding((1.0,), "fake-embedder", "test", True),
+        ),
+        matcher=FakeMatcher(calls, ()),
+        temporal_decision=temporal,
+    )
+
+    result = pipeline.process(
+        any_frame(), (), FrameObservation(TEACHER_TRACK, datetime.now(UTC))
+    )
+
+    assert result.state == "rejected"
+    assert result.status == "REJECTED"
+    assert result.decision.outcome == "no_match"
+    assert result.decision.student_id is None
+    assert result.decision.liveness_score == 0.74
+    assert result.decision.reason_code == "liveness_below_threshold"
+    assert "embed" not in calls
+    assert "match" not in calls
+
+
+def test_disabled_liveness_is_explicit_and_skips_model_inference() -> None:
+    calls: list[str] = []
+    face = FaceDetection(box=BoundingBox(0, 0, 30, 30), confidence=0.95)
+    quality = FaceQuality(score=0.9, acceptable=True)
+    decision = TrackDecision(
+        track_id=TEACHER_TRACK,
+        state="collecting",
+        decision=RecognitionDecision(outcome="retry"),
+        observation_count=1,
+    )
+    temporal = FakeTemporalDecisionEngine(calls, decision)
+    pipeline = RecognitionPipeline(
+        preprocessor=FakePreprocessor(calls),
+        detector=FakeFaceDetector(calls, (face,)),
+        quality_assessor=FakeFaceQualityAssessor(calls, quality),
+        aligner=FakeFaceAligner(calls),
+        liveness_config=LivenessConfig(enabled=False, required=False),
+        liveness_model=None,
+        embedder=FakeFaceEmbedder(
+            calls,
+            FaceEmbedding((1.0,), "fake-embedder", "test", True),
+        ),
+        matcher=FakeMatcher(calls, ()),
+        temporal_decision=temporal,
+    )
+
+    pipeline.process(
+        any_frame(), (), FrameObservation(TEACHER_TRACK, datetime.now(UTC))
+    )
+
+    assert calls == [
+        "sample",
+        "preprocess",
+        "detect",
+        "quality",
+        "align",
+        "embed",
+        "match",
+        "temporal",
+    ]
+    assert temporal.liveness == LivenessDecision(
+        state="disabled",
+        reason_code="liveness_disabled",
+        required=False,
     )
 
 
@@ -210,6 +334,11 @@ def test_multiple_faces_skip_quality_and_request_temporal_handling() -> None:
             FaceQuality(score=0.9, acceptable=True),
         ),
         aligner=FakeFaceAligner(calls),
+        liveness_config=LivenessConfig(
+            enabled=True,
+            required=True,
+            min_live_score=0.6,
+        ),
         liveness_model=FakeLivenessModel(calls, LivenessDecision(state="live")),
         embedder=FakeFaceEmbedder(
             calls,
@@ -246,6 +375,11 @@ def test_pipeline_sampling_skips_before_preprocess_and_model_work() -> None:
             FaceQuality(score=0.9, acceptable=True),
         ),
         aligner=FakeFaceAligner(calls),
+        liveness_config=LivenessConfig(
+            enabled=True,
+            required=True,
+            min_live_score=0.6,
+        ),
         liveness_model=FakeLivenessModel(calls, LivenessDecision(state="live")),
         embedder=FakeFaceEmbedder(
             calls,

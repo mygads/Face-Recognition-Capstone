@@ -15,7 +15,7 @@ TrackStatus = Literal[
     "NEED_FRONTAL_RETRY",
     "REJECTED",
 ]
-LivenessState = Literal["live", "spoof", "inconclusive"]
+LivenessState = Literal["live", "spoof", "inconclusive", "disabled"]
 
 
 def _unit_interval(name: str, value: float | None) -> None:
@@ -103,11 +103,17 @@ class CandidateMatch:
 @dataclass(frozen=True, slots=True)
 class LivenessDecision:
     state: LivenessState
-    confidence: float | None = None
+    live_score: float | None = None
     reason_code: str | None = None
+    required: bool = True
+    passed: bool | None = None
 
     def __post_init__(self) -> None:
-        _unit_interval("liveness confidence", self.confidence)
+        _unit_interval("liveness score", self.live_score)
+        if self.state == "disabled" and self.required:
+            raise ValueError("Disabled liveness cannot be required.")
+        if self.passed is True and (self.state != "live" or self.live_score is None):
+            raise ValueError("Passing liveness needs a live state and a score.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,10 +123,12 @@ class RecognitionDecision:
     confidence: float | None = None
     margin: float | None = None
     reason_code: str | None = None
+    liveness_score: float | None = None
 
     def __post_init__(self) -> None:
         _unit_interval("confidence", self.confidence)
         _unit_interval("margin", self.margin)
+        _unit_interval("liveness score", self.liveness_score)
         if self.outcome == "matched" and self.student_id is None:
             raise ValueError("A matched decision must name a student.")
         if self.outcome != "matched" and self.student_id is not None:

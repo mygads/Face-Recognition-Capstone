@@ -13,7 +13,9 @@ from recognition_core.domain import (
     TrackDecision,
     TrackStatus,
 )
+from recognition_core.liveness import LivenessConfig
 from recognition_core.matching import CosineSimilarityMatcher, cosine_similarity
+from recognition_core.onnx_liveness import ONNXRuntimeAntiSpoofMN3
 from recognition_core.opencv_models import SFaceModel, YuNetConfig, YuNetFaceDetector
 from recognition_core.pipeline import RecognitionPipeline
 from recognition_core.protocols import (
@@ -42,6 +44,7 @@ __all__ = [
     "FrameObservation",
     "GalleryEntry",
     "LivenessDecision",
+    "LivenessConfig",
     "LivenessModel",
     "Matcher",
     "Preprocessor",
@@ -53,6 +56,7 @@ __all__ = [
     "TemporalDecisionEngine",
     "TemporalDecisionConfig",
     "MultiFrameDecisionEngine",
+    "ONNXRuntimeAntiSpoofMN3",
     "YuNetConfig",
     "YuNetFaceDetector",
     "cosine_similarity",

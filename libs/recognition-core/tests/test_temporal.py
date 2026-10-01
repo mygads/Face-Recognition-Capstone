@@ -70,7 +70,12 @@ def _decide(
         _observation(frame),
         matches,
         quality or FaceQuality(score=0.9, acceptable=True),
-        LivenessDecision(state="live"),
+        LivenessDecision(
+            state="live",
+            live_score=0.95,
+            required=True,
+            passed=True,
+        ),
     )
 
 
@@ -87,6 +92,7 @@ def test_consistent_high_confidence_frames_accept_same_identity() -> None:
     assert final.decision.student_id == PERSON_A
     assert final.observation_count == 3
     assert final.decision.confidence == pytest.approx(0.965)
+    assert final.decision.liveness_score == pytest.approx(0.95)
 
 
 def test_close_top1_and_top2_margin_requests_frontal_retry() -> None:
@@ -223,7 +229,12 @@ def test_sampling_stride_skips_configured_intermediate_frames() -> None:
         first,
         _matches(PERSON_A, 0.95),
         FaceQuality(score=0.9, acceptable=True),
-        LivenessDecision(state="live"),
+        LivenessDecision(
+            state="live",
+            live_score=0.95,
+            required=True,
+            passed=True,
+        ),
     )
     assert engine.should_sample(second) is False
     assert engine.on_skipped(second) == first_result

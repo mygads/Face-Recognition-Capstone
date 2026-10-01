@@ -10,7 +10,13 @@ from recognition_core.domain import (
     FrameObservation,
     GalleryEntry,
     LivenessDecision,
+    RecognitionDecision,
     TrackDecision,
+)
+from recognition_core.liveness import (
+    LivenessConfig,
+    apply_liveness_policy,
+    liveness_not_evaluated,
 )
 from recognition_core.protocols import (
     FaceAligner,
@@ -36,7 +42,8 @@ class RecognitionPipeline:
     detector: FaceDetector
     quality_assessor: FaceQualityAssessor
     aligner: FaceAligner
-    liveness_model: LivenessModel
+    liveness_config: LivenessConfig
+    liveness_model: LivenessModel | None
     embedder: FaceEmbedder
     matcher: Matcher
     temporal_decision: TemporalDecisionEngine
@@ -45,6 +52,8 @@ class RecognitionPipeline:
     def __post_init__(self) -> None:
         if self.max_candidates < 1:
             raise ValueError("max_candidates must be positive.")
+        if self.liveness_config.enabled and self.liveness_model is None:
+            raise ValueError("Enabled liveness requires a configured model.")
 
     def process(
         self,
@@ -66,10 +75,7 @@ class RecognitionPipeline:
                 acceptable=False,
                 reason_codes=(code,),
             )
-            liveness = LivenessDecision(
-                state="inconclusive",
-                reason_code=code,
-            )
+            liveness = liveness_not_evaluated(self.liveness_config, reason_code=code)
         else:
             detection = detections[0]
             quality = self.quality_assessor.assess(processed, detection)
@@ -80,14 +86,26 @@ class RecognitionPipeline:
                     signals=quality.signals,
                     reason_codes=quality.reason_codes or (_QUALITY_REJECTED,),
                 )
-                liveness = LivenessDecision(
-                    state="inconclusive",
+                liveness = liveness_not_evaluated(
+                    self.liveness_config,
                     reason_code=_QUALITY_REJECTED,
                 )
             else:
                 aligned = self.aligner.align(processed, detection)
-                liveness = self.liveness_model.evaluate(aligned)
-                if liveness.state == "live":
+                if self.liveness_config.enabled:
+                    assert self.liveness_model is not None
+                    model_result = self.liveness_model.evaluate(aligned)
+                    liveness = apply_liveness_policy(
+                        model_result,
+                        self.liveness_config,
+                    )
+                else:
+                    liveness = apply_liveness_policy(
+                        LivenessDecision(state="inconclusive"),
+                        self.liveness_config,
+                    )
+
+                if not liveness.required or liveness.passed is True:
                     probe = self.embedder.embed(aligned)
                     matches = tuple(
                         self.matcher.match(
@@ -99,13 +117,49 @@ class RecognitionPipeline:
                 elif liveness.reason_code is None:
                     liveness = LivenessDecision(
                         state=liveness.state,
-                        confidence=liveness.confidence,
+                        live_score=liveness.live_score,
                         reason_code=_LIVENESS_REJECTED,
+                        required=liveness.required,
+                        passed=liveness.passed,
                     )
 
-        return self.temporal_decision.decide(
+        decision = self.temporal_decision.decide(
             observation,
             matches,
             quality,
             liveness,
+        )
+        if liveness.required and liveness.passed is not True:
+            return self._prevent_required_liveness_bypass(decision, liveness)
+        return decision
+
+    @staticmethod
+    def _prevent_required_liveness_bypass(
+        decision: TrackDecision,
+        liveness: LivenessDecision,
+    ) -> TrackDecision:
+        """Fail closed if a custom temporal engine returns accept on failed PAD."""
+        if decision.state != "accepted":
+            return decision
+        if liveness.state == "spoof":
+            return TrackDecision(
+                track_id=decision.track_id,
+                state="rejected",
+                decision=RecognitionDecision(
+                    outcome="no_match",
+                    liveness_score=liveness.live_score,
+                    reason_code=liveness.reason_code or _LIVENESS_REJECTED,
+                ),
+                observation_count=decision.observation_count,
+            )
+        return TrackDecision(
+            track_id=decision.track_id,
+            state="retry_frontal",
+            decision=RecognitionDecision(
+                outcome="retry",
+                liveness_score=liveness.live_score,
+                reason_code=liveness.reason_code or "liveness_inconclusive",
+            ),
+            observation_count=decision.observation_count,
+            needs_frontal_look=True,
         )

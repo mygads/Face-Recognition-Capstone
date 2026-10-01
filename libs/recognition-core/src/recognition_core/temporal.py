@@ -67,6 +67,7 @@ class _FrameEvidence:
     top1_similarity: float
     top1_top2_margin: float
     quality_score: float
+    liveness_score: float | None
     sample_number: int
 
 
@@ -153,6 +154,7 @@ class MultiFrameDecisionEngine:
             state = self._tracks[observation.track_id]
         state.pending_sample = False
         state.sampled_frames += 1
+        liveness_score = liveness.live_score
 
         if not quality.acceptable:
             return self._reset_with_retry(
@@ -163,18 +165,21 @@ class MultiFrameDecisionEngine:
                     if quality.reason_codes
                     else "quality_rejected"
                 ),
+                liveness_score=liveness_score,
             )
-        if liveness.state == "spoof":
-            return self._reset_with_rejection(
-                observation.track_id,
-                state,
-                reason_code=liveness.reason_code or "spoof",
-            )
-        if liveness.state != "live":
+        if liveness.required and liveness.passed is not True:
+            if liveness.state == "spoof":
+                return self._reset_with_rejection(
+                    observation.track_id,
+                    state,
+                    reason_code=liveness.reason_code or "spoof",
+                    liveness_score=liveness_score,
+                )
             return self._reset_with_retry(
                 observation.track_id,
                 state,
                 reason_code=liveness.reason_code or "liveness_inconclusive",
+                liveness_score=liveness_score,
             )
 
         best_by_student: dict[UUID, float] = {}
@@ -190,6 +195,7 @@ class MultiFrameDecisionEngine:
                 observation.track_id,
                 state,
                 reason_code="no_candidate",
+                liveness_score=liveness_score,
             )
 
         top1_student_id, top1_similarity = ranked[0]
@@ -201,6 +207,7 @@ class MultiFrameDecisionEngine:
                 observation.track_id,
                 state,
                 reason_code="top1_below_threshold",
+                liveness_score=liveness_score,
             )
         if raw_margin < self.config.min_top1_top2_margin:
             return self._reset_with_retry(
@@ -208,6 +215,7 @@ class MultiFrameDecisionEngine:
                 state,
                 reason_code="top1_top2_margin_too_small",
                 outcome="ambiguous",
+                liveness_score=liveness_score,
             )
 
         if state.locked_student_id != top1_student_id:
@@ -221,6 +229,7 @@ class MultiFrameDecisionEngine:
                 top1_similarity=top1_similarity,
                 top1_top2_margin=raw_margin,
                 quality_score=quality.score,
+                liveness_score=liveness_score,
                 sample_number=state.frames_seen,
             )
         )
@@ -255,11 +264,21 @@ class MultiFrameDecisionEngine:
                 reason_code="awaiting_consensus",
             )
 
+        liveness_scores = [
+            frame.liveness_score
+            for frame in best_frames
+            if frame.liveness_score is not None
+        ]
+        average_liveness_score = (
+            sum(liveness_scores) / len(liveness_scores) if liveness_scores else None
+        )
+
         if len(best_frames) < self.config.minimum_agreeing_frames:
             return self._collecting_decision(
                 track_id,
                 observation_count=state.sampled_frames,
                 reason_code="awaiting_consensus",
+                liveness_score=average_liveness_score,
             )
 
         average_top1 = sum(frame.top1_similarity for frame in best_frames) / len(
@@ -279,6 +298,7 @@ class MultiFrameDecisionEngine:
                     outcome="no_match",
                     confidence=confidence,
                     margin=normalized_margin,
+                    liveness_score=average_liveness_score,
                     reason_code="top1_below_threshold",
                 ),
                 observation_count=state.sampled_frames,
@@ -291,6 +311,7 @@ class MultiFrameDecisionEngine:
                     outcome="ambiguous",
                     confidence=confidence,
                     margin=normalized_margin,
+                    liveness_score=average_liveness_score,
                     reason_code="top1_top2_margin_too_small",
                 ),
                 observation_count=state.sampled_frames,
@@ -304,6 +325,7 @@ class MultiFrameDecisionEngine:
                 student_id=student_id,
                 confidence=confidence,
                 margin=normalized_margin,
+                liveness_score=average_liveness_score,
             ),
             observation_count=state.sampled_frames,
         )
@@ -315,13 +337,18 @@ class MultiFrameDecisionEngine:
         *,
         reason_code: str,
         outcome: Literal["retry", "ambiguous"] = "retry",
+        liveness_score: float | None = None,
     ) -> TrackDecision:
         state.locked_student_id = None
         state.evidence.clear()
         result = TrackDecision(
             track_id=track_id,
             state="retry_frontal",
-            decision=RecognitionDecision(outcome=outcome, reason_code=reason_code),
+            decision=RecognitionDecision(
+                outcome=outcome,
+                liveness_score=liveness_score,
+                reason_code=reason_code,
+            ),
             observation_count=state.sampled_frames,
             needs_frontal_look=True,
         )
@@ -334,13 +361,18 @@ class MultiFrameDecisionEngine:
         state: _TrackState,
         *,
         reason_code: str,
+        liveness_score: float | None = None,
     ) -> TrackDecision:
         state.locked_student_id = None
         state.evidence.clear()
         result = TrackDecision(
             track_id=track_id,
             state="rejected",
-            decision=RecognitionDecision(outcome="no_match", reason_code=reason_code),
+            decision=RecognitionDecision(
+                outcome="no_match",
+                liveness_score=liveness_score,
+                reason_code=reason_code,
+            ),
             observation_count=state.sampled_frames,
         )
         state.last_decision = result
@@ -352,10 +384,15 @@ class MultiFrameDecisionEngine:
         *,
         observation_count: int,
         reason_code: str,
+        liveness_score: float | None = None,
     ) -> TrackDecision:
         return TrackDecision(
             track_id=track_id,
             state="collecting",
-            decision=RecognitionDecision(outcome="retry", reason_code=reason_code),
+            decision=RecognitionDecision(
+                outcome="retry",
+                liveness_score=liveness_score,
+                reason_code=reason_code,
+            ),
             observation_count=observation_count,
         )

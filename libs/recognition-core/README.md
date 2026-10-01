@@ -23,6 +23,14 @@ not permit those stages. TemporalDecisionEngine owns multi-frame policy, thresho
 and retry/frontal behavior; this interface layer does not choose a production
 threshold or accept an attendance record.
 
+Liveness policy must be configured explicitly when constructing
+`RecognitionPipeline`. `LivenessConfig(enabled=False, required=False)` skips the
+model stage; enabled mode requires a local `LivenessModel` and an explicit
+`min_live_score`. Required mode fails closed on missing, inconclusive, or
+below-cutoff scores and does not embed or match that frame. Advisory mode can
+report scores but does not block identity recognition. The configured live-class
+score is propagated as `RecognitionDecision.liveness_score`.
+
 `MultiFrameDecisionEngine` is the configurable implementation. It gates sampling
 before preprocessing/model inference, keeps evidence by upstream `track_id`, and
 uses only the highest-quality configured N frames. A sampled Top-1 identity change
@@ -75,6 +83,12 @@ recognition_core.testing provides deterministic fakes for each stage. Tests gene
 synthetic in-memory inputs; no face images, student data, or pretrained weights are
 bundled. OpenCV and NumPy are optional package dependencies and are imported only by
 the OpenCV adapters.
+
+The optional ONNX Runtime adapter for the `anti-spoof-mn3` evaluation candidate
+requires `python -m pip install -e "libs/recognition-core[antispoof]"` and an
+explicitly provisioned local ONNX model. It never downloads weights. Review the
+license and deployment warning in [`docs/models.md`](../../docs/models.md) before
+enabling any pretrained weights for operational attendance.
 
 ## YuNet + SFace baseline
 

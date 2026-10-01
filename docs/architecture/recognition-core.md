@@ -18,6 +18,27 @@ both each evidence frame and the selected-frame averages must pass configured To
 cosine and Top-1 minus Top-2 margin thresholds. Thresholds have no bundled
 production defaults and must be calibrated from local benchmark data.
 
+Liveness policy is also explicit configuration on `RecognitionPipeline`. Disabled
+mode skips anti-spoof inference; enabled mode requires a model and an explicitly
+calibrated live-score cutoff. When required, missing, inconclusive, and failing
+scores block acceptance before embedding/matching, and the pipeline has a second
+fail-closed guard against custom temporal engines that return an acceptance anyway.
+When optional, liveness scores remain observational and are not a security gate.
+`RecognitionDecision.liveness_score` carries the current failed score or the mean
+score from selected track evidence.
+
+`anti-spoof-mn3` is the ONNX Runtime evaluation candidate, not a cleared
+production default: the source reports MIT licensing and Open Model Zoo metadata
+lists Apache-2.0 for its converted artifact, but its training dataset agreement
+limits dataset use to non-commercial research. The repository intentionally
+includes no weights and performs no download. See [model provenance and deployment
+constraints](../models.md#liveness-presentation-attack-detection).
+
+Students generally do not bring phones on a normal school day, which reduces one
+screen-replay route. It does not address printed images, other displays, or masks.
+Production operation must have a legally cleared liveness detector or documented
+physical/session controls, including for outages and uncertain scores.
+
 An ambiguous margin yields domain state `retry_frontal` and machine status
 `NEED_FRONTAL_RETRY`; it never auto-accepts that observation. The engine returns
 recognition state only. Attendance remains a Core API/domain decision.
