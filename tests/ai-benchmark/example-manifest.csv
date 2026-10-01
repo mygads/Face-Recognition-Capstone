@@ -1,0 +1,5 @@
+path,person_id,condition
+datasets/consented-adult-set/person-a-front.png,synthetic-person-a,frontal
+datasets/consented-adult-set/person-a-low-light.png,synthetic-person-a,low-light
+datasets/consented-adult-set/person-b-front.png,synthetic-person-b,frontal
+datasets/consented-adult-set/person-b-side.png,synthetic-person-b,profile

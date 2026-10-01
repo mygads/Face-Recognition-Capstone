@@ -22,6 +22,7 @@ known-first-party = [
 [tool.mypy]
 python_version = "3.11"
 strict = true
+mypy_path = ["libs/recognition-core/src"]
 files = [
   "apps/api/src",
   "apps/api/tests",
@@ -29,10 +30,11 @@ files = [
   "apps/ai-service/tests",
   "apps/edge-agent/src",
   "libs/recognition-core/src",
+  "tests/ai-benchmark",
   "scripts",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["apps", "libs", "tests"]
-pythonpath = ["apps/api/src", "apps/ai-service/src"]
+pythonpath = ["apps/api/src", "apps/ai-service/src", "libs/recognition-core/src"]
 addopts = "-ra"

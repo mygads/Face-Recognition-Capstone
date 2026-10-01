@@ -145,4 +145,9 @@ Kontrak pipeline bersama dua deployment profile dijelaskan di [docs/architecture
 Baseline YuNet + SFace, lisensi model, konfigurasi path, dan CLI benchmark dijelaskan di [docs/models.md](docs/models.md).
 Shell Vue, layout router, tema, dan penggunaan token Gentelella dijelaskan di [docs/architecture/frontend-shell.md](docs/architecture/frontend-shell.md).
 
+Harness evaluasi genuine/impostor, FAR/FMR dan FRR/FNMR pada banyak threshold,
+latency per tahap, serta aturan dataset lokal ada di
+[tests/ai-benchmark/README.md](tests/ai-benchmark/README.md). Data wajah, bobot
+model, dan laporan benchmark lokal tidak boleh di-commit.
+
 Baca [arsitektur](docs/architecture/overview.md), [ADR-001](docs/adr/ADR-001-shared-recognition-core.md), dan [AGENTS.md](AGENTS.md) sebelum mengubah struktur/domain. Compose hanya untuk development, bukan deployment production.

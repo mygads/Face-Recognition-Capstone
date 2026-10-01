@@ -1,0 +1,5 @@
+# Local biometric evaluation material and generated artifacts must stay out of Git.
+/datasets/
+/local-dataset/
+/models/
+/reports/
