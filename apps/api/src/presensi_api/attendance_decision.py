@@ -176,6 +176,7 @@ def decide_recognition_event(
     db.add(event)
     db.flush()
     device.last_seen_at = datetime.now(UTC)
+    device.model_version = request.model_version
 
     reason: AttendanceDecisionReason | None = None
     if (

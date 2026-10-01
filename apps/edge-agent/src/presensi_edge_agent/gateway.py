@@ -112,6 +112,10 @@ class StbGatewayService:
         self.session_id = config.gateway.session_id
         self.camera = camera
         self.api = api
+        if isinstance(api, CoreApiClient):
+            api.set_camera_status_provider(
+                lambda: "online" if self._camera_open else "offline"
+            )
         self.ai = ai
         self.outbox = outbox
         self.processor = processor

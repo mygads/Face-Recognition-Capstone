@@ -23,6 +23,9 @@ const canOperateSessions = computed(
 const canManageEnrollment = computed(
   () => auth.account?.roles.some((role) => role === 'ADMIN' || role === 'LABORANT') ?? false,
 )
+const canViewDevices = computed(
+  () => auth.account?.roles.some((role) => role === 'ADMIN' || role === 'LABORANT') ?? false,
+)
 </script>
 
 <template>
@@ -122,6 +125,21 @@ const canManageEnrollment = computed(
           <path d="M5.5 17c.7-2 2-3 3.5-3s2.8 1 3.5 3M15 9h3M15 12h3M15 15h3" />
         </svg>
         <span class="app-sidebar__link-label">Pendaftaran siswa</span>
+      </RouterLink>
+      <RouterLink
+        v-if="canViewDevices"
+        class="app-sidebar__link"
+        active-class="app-sidebar__link--active"
+        to="/app/devices"
+        :aria-label="collapsed ? 'Perangkat' : undefined"
+        data-testid="devices-link"
+        @click="emit('navigate')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="3.5" y="5" width="17" height="13" rx="2" />
+          <path d="M8 21h8M12 18v3M7.5 9h9M7.5 13h4" />
+        </svg>
+        <span class="app-sidebar__link-label">Perangkat</span>
       </RouterLink>
     </nav>
 

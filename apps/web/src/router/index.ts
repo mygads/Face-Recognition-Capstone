@@ -10,6 +10,7 @@ import { useAuthStore } from '../stores/auth'
 import AppShell from '../components/AppShell.vue'
 import AuthLayout from '../layouts/AuthLayout.vue'
 import DashboardView from '../views/DashboardView.vue'
+import DevicesView from '../views/DevicesView.vue'
 import EnrollmentView from '../views/EnrollmentView.vue'
 import ForbiddenView from '../views/ForbiddenView.vue'
 import LoginView from '../views/LoginView.vue'
@@ -57,6 +58,16 @@ export const routes: RouteRecordRaw[] = [
         meta: {
           title: 'Data master',
           description: 'Kelola data siswa, kelas, dan laboratorium.',
+        },
+      },
+      {
+        path: 'devices',
+        name: 'devices',
+        component: DevicesView,
+        meta: {
+          title: 'Perangkat',
+          description: 'Kelola penempatan dan pantau kondisi perangkat presensi.',
+          requiredRoles: ['ADMIN', 'LABORANT'],
         },
       },
       {

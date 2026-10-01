@@ -296,13 +296,15 @@ onBeforeUnmount(() => {
               </div>
               <span
                 class="dashboard-view__device-status"
-                :class="
-                  device.is_online
-                    ? 'dashboard-view__device-status--online'
-                    : 'dashboard-view__device-status--offline'
-                "
+                :class="`dashboard-view__device-status--${device.health_status}`"
               >
-                {{ device.is_online ? 'Online' : 'Offline' }}
+                {{
+                  device.health_status === 'warning'
+                    ? 'Warning'
+                    : device.health_status === 'online'
+                      ? 'Online'
+                      : 'Offline'
+                }}
               </span>
             </li>
           </ul>
@@ -627,6 +629,10 @@ onBeforeUnmount(() => {
 
 .dashboard-view__device-status--offline {
   color: var(--text-muted);
+}
+
+.dashboard-view__device-status--warning {
+  color: var(--orange, #c27816);
 }
 
 .dashboard-view__activity-marker {

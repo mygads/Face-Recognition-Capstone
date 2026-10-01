@@ -1357,6 +1357,73 @@ a:focus-visible {
   background: color-mix(in srgb, var(--orange, #c27816) 13%, var(--bg-surface));
 }
 
+.status-badge--online {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 13%, var(--bg-surface));
+}
+
+.status-badge--offline {
+  color: var(--text-muted);
+  background: var(--bg-surface-secondary);
+}
+
+.devices-view {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.devices-view__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.devices-view__toolbar .enrollment-view__class-picker {
+  width: min(100%, 210px);
+}
+
+.devices-view__toolbar select,
+.devices-view__form-panel select {
+  min-height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--bg-surface);
+  font: inherit;
+}
+
+.devices-view__table td strong,
+.devices-view__table td small {
+  display: block;
+}
+
+.devices-view__table td strong {
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.devices-view__table td small {
+  max-width: 210px;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 0.67rem;
+  text-overflow: ellipsis;
+}
+
+.devices-view__profile-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.devices-view__table .status-badge {
+  white-space: nowrap;
+}
+
 .enrollment-view {
   gap: var(--space-4);
 }

@@ -10,6 +10,7 @@ from types import FrameType
 from typing import Sequence
 from uuid import UUID
 
+from presensi_edge_agent import __version__
 from presensi_edge_agent.api import CoreApiClient
 from presensi_edge_agent.camera import (
     CameraUnavailableError,
@@ -52,6 +53,15 @@ def _api_client(config: EdgeConfig) -> CoreApiClient:
         config.api,
         config.device_id or UUID(int=0),
         lambda: resolve_api_token(config),
+        heartbeat_metadata={
+            "deployment_profile": config.mode,
+            "app_version": __version__,
+            **(
+                {"model_version": config.models.version}
+                if config.models.version
+                else {}
+            ),
+        },
     )
 
 

@@ -34,12 +34,15 @@ class CoreApiClient:
         token_provider: Callable[[], str | None],
         *,
         session_cache_path: str | None = None,
+        heartbeat_metadata: dict[str, object] | None = None,
         client: httpx.Client | None = None,
     ) -> None:
         self.settings = settings
         self.device_id = device_id
         self._token_provider = token_provider
         self._cache_path = session_cache_path or settings.cache_path
+        self._heartbeat_metadata = heartbeat_metadata or {}
+        self._camera_status_provider: Callable[[], str] | None = None
         self._client = client or httpx.Client(
             base_url=settings.base_url,
             timeout=settings.timeout_seconds,
@@ -90,7 +93,17 @@ class CoreApiClient:
         return ApiHealth(reachable=True, status_code=response.status_code)
 
     def heartbeat(self) -> None:
-        self._request("POST", f"/api/v1/devices/{self.device_id}/heartbeat")
+        payload = dict(self._heartbeat_metadata)
+        if self._camera_status_provider is not None:
+            payload["camera_status"] = self._camera_status_provider()
+        self._request(
+            "POST",
+            f"/api/v1/devices/{self.device_id}/heartbeat",
+            payload=payload or None,
+        )
+
+    def set_camera_status_provider(self, provider: Callable[[], str]) -> None:
+        self._camera_status_provider = provider
 
     def fetch_active_session_cache(self) -> dict[str, Any]:
         path = self._cache_path.format(device_id=self.device_id)

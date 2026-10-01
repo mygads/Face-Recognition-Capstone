@@ -7,7 +7,7 @@ The Core API owns the domain schema. PostgreSQL changes are applied through Alem
 | Area | Tables | Purpose |
 | --- | --- | --- |
 | Identity and access | `users`, `roles`, `user_roles` | Human accounts and role assignments. Role assignments retain who granted them when available. |
-| Roster and timetable | `students`, `classes`, `class_students`, `laboratories`, `devices`, `practicum_schedules` | Current roster, class membership, rooms, edge devices, and recurring schedules. |
+| Roster and timetable | `students`, `classes`, `class_students`, `laboratories`, `devices`, `practicum_schedules` | Current roster, class membership, rooms, registered devices with deployment/app/model/camera health metadata, and recurring schedules. |
 | Attendance operation | `attendance_sessions`, `session_students` | A live session and its immutable-at-capture roster snapshot. |
 | Recognition evidence | `face_templates`, `recognition_events` | Model-versioned template metadata and raw, idempotent AI outcomes. Ambiguous and no-match outcomes remain evidence only. |
 | Final attendance | `attendance_records`, `attendance_corrections` | The API's final attendance decision and a reviewable correction request/decision history. |
@@ -32,6 +32,8 @@ Named unique constraints enforce account email, role code, exact student number,
 Two partial unique indexes apply only to active rows: one prevents multiple active templates for the same student/model/version while allowing revoked history, and one prevents two active attendance sessions for the same schedule while preserving past sessions. These indexes are declared for PostgreSQL and SQLite so the same key constraints are exercised by fast unit tests.
 
 Foreign keys used for joins have indexes where a composite unique/primary key does not already cover the lookup order. Time-series indexes on `(session_id, occurred_at)` and `(device_id, occurred_at)` support session/device event review; `(recognized_student_id, occurred_at)` supports a student's evidence history. Attendance has an index on student, correction rows on attendance/requester, and audit rows on actor/time and entity/time. These are the initial query paths; additional indexes should follow measured query plans because each index adds write and storage cost.
+
+The device `last_seen_at` index supports stale-heartbeat filtering. `deployment_profile` is constrained to `AI_EDGE` or `STB_GATEWAY` and must match the registered device type. Version fields are bounded strings; camera status is a small enum. Optional latency summary stores only aggregate p50/p95 milliseconds, never frame-level data. Device online/offline status is derived at read time and is not duplicated in storage.
 
 Check constraints validate grades, weekdays, schedule ordering, session/device/outcome/status vocabularies, confidence/margin bounds, correction state consistency, and event/student consistency. They protect data integrity across API code and synchronization/replay paths.
 

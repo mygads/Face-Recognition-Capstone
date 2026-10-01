@@ -270,21 +270,32 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * List devices
-         * @description Device operations are defined separately from master data.
-         */
+        /** List devices */
         get: operations["list_devices_api_v1_devices_get"];
         put?: never;
-        /**
-         * Register a device
-         * @description Device operations are defined separately from master data.
-         */
+        /** Register a device */
         post: operations["create_device_api_v1_devices_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/{device_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update device registry or laboratory assignment */
+        patch: operations["update_device_api_v1_devices__device_id__patch"];
         trace?: never;
     };
     "/api/v1/devices/{device_id}/heartbeat": {
@@ -1018,6 +1029,23 @@ export interface components {
              * @enum {string}
              */
             device_type: "edge_pc" | "camera_gateway";
+            /**
+             * Deployment Profile
+             * @enum {string}
+             */
+            deployment_profile: "AI_EDGE" | "STB_GATEWAY";
+        };
+        /** DeviceHeartbeatRequest */
+        DeviceHeartbeatRequest: {
+            /** Deployment Profile */
+            deployment_profile?: ("AI_EDGE" | "STB_GATEWAY") | null;
+            /** App Version */
+            app_version?: string | null;
+            /** Model Version */
+            model_version?: string | null;
+            /** Camera Status */
+            camera_status?: ("unknown" | "online" | "offline" | "error") | null;
+            latency_summary?: components["schemas"]["DeviceLatencySummary"] | null;
         };
         /** DeviceHeartbeatResponse */
         DeviceHeartbeatResponse: {
@@ -1032,18 +1060,29 @@ export interface components {
              */
             last_seen_at: string;
         };
+        /** DeviceLatencySummary */
+        DeviceLatencySummary: {
+            /** P50 Ms */
+            p50_ms?: number | null;
+            /** P95 Ms */
+            p95_ms?: number | null;
+        };
         /** DeviceResponse */
         DeviceResponse: {
             /**
-             * Id
+             * Device Id
              * Format: uuid
              */
-            id: string;
+            device_id: string;
             /**
              * Laboratory Id
              * Format: uuid
              */
             laboratory_id: string;
+            /** Laboratory Code */
+            laboratory_code: string;
+            /** Laboratory Name */
+            laboratory_name: string;
             /** Name */
             name: string;
             /**
@@ -1051,6 +1090,28 @@ export interface components {
              * @enum {string}
              */
             device_type: "edge_pc" | "camera_gateway";
+            /**
+             * Deployment Profile
+             * @enum {string}
+             */
+            deployment_profile: "AI_EDGE" | "STB_GATEWAY";
+            /** App Version */
+            app_version: string | null;
+            /** Model Version */
+            model_version: string | null;
+            /**
+             * Camera Status
+             * @enum {string}
+             */
+            camera_status: "unknown" | "online" | "offline" | "error";
+            latency_summary: components["schemas"]["DeviceLatencySummary"] | null;
+            /**
+             * Health Status
+             * @enum {string}
+             */
+            health_status: "online" | "offline" | "warning";
+            /** Heartbeat Timeout Seconds */
+            heartbeat_timeout_seconds: number;
             /** Is Active */
             is_active: boolean;
             /** Last Seen At */
@@ -1060,6 +1121,17 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** DeviceUpdateRequest */
+        DeviceUpdateRequest: {
+            /** Laboratory Id */
+            laboratory_id?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Deployment Profile */
+            deployment_profile?: ("AI_EDGE" | "STB_GATEWAY") | null;
+            /** Is Active */
+            is_active?: boolean | null;
         };
         /** EnrollmentCaptureResultResponse */
         EnrollmentCaptureResultResponse: {
@@ -1533,6 +1605,16 @@ export interface components {
             device_type: "edge_pc" | "camera_gateway";
             /** Is Online */
             is_online: boolean;
+            /**
+             * Health Status
+             * @enum {string}
+             */
+            health_status: "online" | "offline" | "warning";
+            /**
+             * Camera Status
+             * @enum {string}
+             */
+            camera_status: "unknown" | "online" | "offline" | "error";
             /** Last Seen At */
             last_seen_at: string | null;
         };
@@ -4439,6 +4521,9 @@ export interface operations {
             query?: {
                 limit?: number;
                 offset?: number;
+                search?: string | null;
+                laboratory_id?: string | null;
+                health_status?: ("online" | "offline" | "warning") | null;
             };
             header?: never;
             path?: never;
@@ -4715,6 +4800,149 @@ export interface operations {
             };
         };
     };
+    update_device_api_v1_devices__device_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceResponse"];
+                };
+            };
+            /** @description The request could not be processed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Authentication is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description You are not allowed to perform this action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The requested resource was not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This method is not allowed for the resource. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The uploaded file exceeds the allowed size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The file extension or media type is not supported. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Request validation failed. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many requests. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description An unexpected server error occurred. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This API operation is not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The service is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     device_heartbeat_api_v1_devices__device_id__heartbeat_post: {
         parameters: {
             query?: never;
@@ -4724,7 +4952,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DeviceHeartbeatRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

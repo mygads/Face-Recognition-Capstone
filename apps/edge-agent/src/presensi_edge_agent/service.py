@@ -65,6 +65,10 @@ class EdgeService:
         self.device_id = config.device_id
         self.camera = camera
         self.api = api
+        if isinstance(api, CoreApiClient):
+            api.set_camera_status_provider(
+                lambda: "online" if self._camera_open else "offline"
+            )
         self.outbox = outbox
         self.recognizer = recognizer
         self.cache_fetch = cache_fetch

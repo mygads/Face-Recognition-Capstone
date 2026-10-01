@@ -60,6 +60,8 @@ class SessionDashboardDevice(ApiSchema):
     name: str
     device_type: Literal["edge_pc", "camera_gateway"]
     is_online: bool
+    health_status: Literal["online", "offline", "warning"]
+    camera_status: Literal["unknown", "online", "offline", "error"]
     last_seen_at: AwareDatetime | None
 
 

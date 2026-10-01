@@ -220,6 +220,10 @@ hardware.
 
 Heartbeat (`POST /api/v1/devices/{device_id}/heartbeat`) and recognition-event
 ingest (`POST /api/v1/attendance/recognition-events`) use the existing Core API.
+The heartbeat reports deployment profile, edge-agent version, configured model
+version when present, and current camera connectivity; central-inference gateway
+model version is refreshed from recognition events. Registry health and timeout
+semantics are described in [device registry architecture](../../docs/architecture/device-registry.md).
 Events are persisted locally with a UUID idempotency key and retried with
 exponential backoff in strict FIFO order. A retrying head event blocks later
 events so reconnect never reorders attendance evidence. SQLite persists the

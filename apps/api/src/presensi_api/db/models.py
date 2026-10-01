@@ -162,6 +162,19 @@ class Device(UUIDPrimaryKey, TimestampMixin, Base):
         CheckConstraint(
             "device_type IN ('edge_pc', 'camera_gateway')", name="device_type"
         ),
+        CheckConstraint(
+            "deployment_profile IN ('AI_EDGE', 'STB_GATEWAY')",
+            name="deployment_profile",
+        ),
+        CheckConstraint(
+            "(device_type = 'edge_pc' AND deployment_profile = 'AI_EDGE') OR "
+            "(device_type = 'camera_gateway' AND deployment_profile = 'STB_GATEWAY')",
+            name="deployment_profile_matches_type",
+        ),
+        CheckConstraint(
+            "camera_status IN ('unknown', 'online', 'offline', 'error')",
+            name="camera_status",
+        ),
         Index("ix_devices_laboratory_id", "laboratory_id"),
     )
 
@@ -175,6 +188,18 @@ class Device(UUIDPrimaryKey, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
     )
+    deployment_profile: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="AI_EDGE",
+        server_default=text("'AI_EDGE'"),
+    )
+    app_version: Mapped[str | None] = mapped_column(String(80))
+    model_version: Mapped[str | None] = mapped_column(String(128))
+    camera_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="unknown", server_default=text("'unknown'")
+    )
+    latency_summary: Mapped[dict[str, object] | None] = mapped_column(JSON_OBJECT)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 

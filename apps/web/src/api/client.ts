@@ -15,6 +15,9 @@ export type ClassUpdate = components['schemas']['ClassUpdateRequest']
 export type Laboratory = components['schemas']['LaboratoryResponse']
 export type LaboratoryCreate = components['schemas']['LaboratoryCreateRequest']
 export type LaboratoryUpdate = components['schemas']['LaboratoryUpdateRequest']
+export type Device = components['schemas']['DeviceResponse']
+export type DeviceCreate = components['schemas']['DeviceCreateRequest']
+export type DeviceUpdate = components['schemas']['DeviceUpdateRequest']
 export type StudentImportPreview = components['schemas']['StudentImportPreviewResponse']
 export type StudentImportCommit = components['schemas']['StudentImportCommitResponse']
 export type Schedule = components['schemas']['ScheduleResponse']
@@ -213,6 +216,30 @@ export async function updateLaboratory(
 ): Promise<Laboratory> {
   const result = await apiClient.PATCH('/api/v1/laboratories/{laboratory_id}', {
     params: { path: { laboratory_id: laboratoryId } },
+    body,
+  })
+  return unwrap(result)
+}
+
+export async function listDevices(query: {
+  limit: number
+  offset: number
+  search?: string
+  laboratory_id?: string
+  health_status?: Device['health_status']
+}): Promise<Page<Device>> {
+  const result = await apiClient.GET('/api/v1/devices', { params: { query } })
+  return unwrap(result)
+}
+
+export async function createDevice(body: DeviceCreate): Promise<Device> {
+  const result = await apiClient.POST('/api/v1/devices', { body })
+  return unwrap(result)
+}
+
+export async function updateDevice(deviceId: string, body: DeviceUpdate): Promise<Device> {
+  const result = await apiClient.PATCH('/api/v1/devices/{device_id}', {
+    params: { path: { device_id: deviceId } },
     body,
   })
   return unwrap(result)

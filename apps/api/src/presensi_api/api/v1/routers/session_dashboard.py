@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Annotated, Literal, cast, get_args
 from uuid import UUID
 
@@ -41,6 +41,7 @@ from presensi_api.db.models import (
     User,
 )
 from presensi_api.db.session import get_db_session
+from presensi_api.device_health import device_health_status, has_recent_heartbeat
 from presensi_api.session_lifecycle import as_utc, close_expired_sessions
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -65,14 +66,6 @@ def _session_for_principal(
     ):
         raise ApiProblem(404, "session_not_found", "Sesi presensi tidak ditemukan.")
     return attendance_session, schedule
-
-
-def _online_threshold_seconds() -> int:
-    try:
-        configured = int(os.getenv("DEVICE_ONLINE_THRESHOLD_SECONDS", "60"))
-    except ValueError:
-        return 60
-    return min(max(configured, 5), 3600)
 
 
 def _poll_interval_seconds() -> float:
@@ -203,7 +196,6 @@ def _build_snapshot(
     activities.sort(key=lambda activity: activity.occurred_at, reverse=True)
 
     now = datetime.now(UTC)
-    online_cutoff = now - timedelta(seconds=_online_threshold_seconds())
     device_rows = db.scalars(
         select(Device)
         .where(Device.laboratory_id == schedule.laboratory_id)
@@ -214,10 +206,14 @@ def _build_snapshot(
             id=device.id,
             name=device.name,
             device_type=cast(Literal["edge_pc", "camera_gateway"], device.device_type),
-            is_online=(
-                device.is_active
-                and device.last_seen_at is not None
-                and as_utc(device.last_seen_at) >= online_cutoff
+            is_online=has_recent_heartbeat(device, now=now),
+            health_status=cast(
+                Literal["online", "offline", "warning"],
+                device_health_status(device, now=now),
+            ),
+            camera_status=cast(
+                Literal["unknown", "online", "offline", "error"],
+                device.camera_status,
             ),
             last_seen_at=(
                 as_utc(device.last_seen_at) if device.last_seen_at is not None else None

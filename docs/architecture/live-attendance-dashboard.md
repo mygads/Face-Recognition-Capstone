@@ -31,8 +31,9 @@ streaming and closes the connection when the access token expires.
 
 The initial implementation refreshes the database snapshot every two seconds per
 connected dashboard. `SESSION_DASHBOARD_POLL_SECONDS` configures the interval and is
-clamped to 0.25–30 seconds. `DEVICE_ONLINE_THRESHOLD_SECONDS` configures the online
-window and is clamped to 5–3,600 seconds (default 60 seconds). These environment
+clamped to 0.25–30 seconds. `PRESENSI_DEVICE_HEARTBEAT_TIMEOUT_SECONDS` configures
+the online window and is clamped to 5–3,600 seconds (default 60 seconds). The older
+`DEVICE_ONLINE_THRESHOLD_SECONDS` name remains a fallback. These environment
 variables tune freshness and database load; this baseline does not require a message
 broker.
 
@@ -43,7 +44,9 @@ the roster count minus present and late final records. Recent activity is limite
 ten recognition or attendance items, with student names from the session-time roster
 snapshot. Device entries come from the laboratory assigned to the session schedule.
 A device is online only when it is active and its `last_seen_at` is inside the online
-window. A protected `POST /api/v1/devices/{device_id}/heartbeat` updates this time;
+window. The registry displays `Warning` when a recent heartbeat reports a camera
+status other than online. A protected `POST /api/v1/devices/{device_id}/heartbeat`
+updates this time and may refresh profile/version/camera/aggregate-latency metadata;
 accepted recognition events also refresh it.
 
 ## Data protection

@@ -145,6 +145,7 @@ docs/test-plans/         baseline dan protokol uji
 Detail tabel, aturan integritas, index, dan migration ada di [docs/architecture/database-schema.md](docs/architecture/database-schema.md).
 Strategi API versioning dan pembuatan TypeScript client dari OpenAPI dijelaskan di [docs/architecture/api-contract.md](docs/architecture/api-contract.md).
 CRUD siswa, kelas, laboratorium, roster kelas, permission, dan soft-deactivation dijelaskan di [docs/architecture/master-data.md](docs/architecture/master-data.md).
+Registry perangkat, heartbeat timeout, status kesehatan, dan audit assignment lab dijelaskan di [docs/architecture/device-registry.md](docs/architecture/device-registry.md).
 Jadwal praktikum mingguan, aturan bentrok, dan batas akses guru dijelaskan di [docs/architecture/schedules.md](docs/architecture/schedules.md).
 Snapshot roster, grace period, lifecycle sesi, dan batas roster untuk presensi final dijelaskan di [docs/architecture/attendance-sessions.md](docs/architecture/attendance-sessions.md).
 Kontrak pipeline bersama dua deployment profile dijelaskan di [docs/architecture/recognition-core.md](docs/architecture/recognition-core.md).
