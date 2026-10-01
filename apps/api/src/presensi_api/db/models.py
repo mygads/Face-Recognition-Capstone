@@ -372,7 +372,7 @@ class RecognitionEvent(UUIDPrimaryKey, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("event_uuid", name="uq_recognition_events_event_uuid"),
         CheckConstraint(
-            "outcome IN ('matched', 'ambiguous', 'no_match', 'error')",
+            "outcome IN ('matched', 'ambiguous', 'no_match', 'error', 'redacted')",
             name="event_outcome",
         ),
         CheckConstraint(

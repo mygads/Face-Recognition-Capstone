@@ -146,6 +146,7 @@ docs/test-plans/         baseline dan protokol uji
 ```
 
 Detail tabel, aturan integritas, index, dan migration ada di [docs/architecture/database-schema.md](docs/architecture/database-schema.md).
+Kontrol data biometrik, akses, CORS, rate limit, retensi, dan reverse proxy HTTPS ada di [docs/security-and-privacy.md](docs/security-and-privacy.md).
 Strategi API versioning dan pembuatan TypeScript client dari OpenAPI dijelaskan di [docs/architecture/api-contract.md](docs/architecture/api-contract.md).
 CRUD siswa, kelas, laboratorium, roster kelas, permission, dan soft-deactivation dijelaskan di [docs/architecture/master-data.md](docs/architecture/master-data.md).
 Registry perangkat, heartbeat timeout, status kesehatan, dan audit assignment lab dijelaskan di [docs/architecture/device-registry.md](docs/architecture/device-registry.md).

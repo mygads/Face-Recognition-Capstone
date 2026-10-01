@@ -11,8 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from presensi_api.api.errors import OPENAPI_ERROR_RESPONSES, ApiProblem
-from presensi_api.api.security.dependencies import require_permissions
-from presensi_api.api.security.roles import AuthenticatedUser, Permission
+from presensi_api.api.security.request_rate_limit import EnrollmentOperator
 from presensi_api.api.v1.schemas.common import PageResponse, Pagination
 from presensi_api.api.v1.schemas.enrollment import (
     EnrollmentCaptureResultResponse,
@@ -38,6 +37,7 @@ from presensi_api.db.models import (
 from presensi_api.db.session import get_db_session
 from presensi_api.enrollment_processing import (
     MAX_CAPTURE_BYTES,
+    MAX_TOTAL_CAPTURE_BYTES,
     EnrollmentFrameResult,
     EnrollmentProcessor,
     get_enrollment_processor,
@@ -46,14 +46,10 @@ from presensi_api.session_lifecycle import as_utc
 
 router = APIRouter(tags=["enrollment", "templates"])
 DbSession = Annotated[Session, Depends(get_db_session)]
-EnrollmentOperator = Annotated[
-    AuthenticatedUser, Depends(require_permissions(Permission.ENROLLMENT_MANAGE))
-]
 EnrollmentStatus = Literal["not_enrolled", "enrolled", "needs_reenrollment"]
 MIN_ACCEPTED_TEMPLATES = 3
 MAX_STORED_TEMPLATES = 5
 MAX_CAPTURES = 10
-MAX_TOTAL_CAPTURE_BYTES = 15 * 1024 * 1024
 ALLOWED_IMAGE_TYPES = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
@@ -67,11 +63,13 @@ ALLOWED_IMAGE_TYPES = {
     response_model=list[EnrollmentStudentStatusResponse],
     responses=OPENAPI_ERROR_RESPONSES,
     summary="List enrollment status for a class roster",
-    dependencies=[Depends(require_permissions(Permission.ENROLLMENT_MANAGE))],
 )
 def list_class_enrollment_status(
-    class_id: Annotated[UUID, Query()], session: DbSession
+    class_id: Annotated[UUID, Query()],
+    session: DbSession,
+    principal: EnrollmentOperator,
 ) -> list[EnrollmentStudentStatusResponse]:
+    del principal
     school_class = session.get(SchoolClass, class_id)
     if school_class is None:
         raise ApiProblem(404, "class_not_found", "Kelas tidak ditemukan.")
@@ -119,10 +117,11 @@ def list_class_enrollment_status(
     responses=OPENAPI_ERROR_RESPONSES,
     summary="Reject metadata-only enrollment requests",
     description="Templates can be created only by submitting multiple captures.",
-    dependencies=[Depends(require_permissions(Permission.ENROLLMENT_MANAGE))],
 )
-def create_enrollment(request: TemplateEnrollmentRequest) -> FaceTemplateResponse:
-    del request
+def create_enrollment(
+    request: TemplateEnrollmentRequest, principal: EnrollmentOperator
+) -> FaceTemplateResponse:
+    del request, principal
     raise ApiProblem(
         422,
         "captures_required",
@@ -365,15 +364,16 @@ def revoke_face_template_batch(
     response_model=PageResponse[FaceTemplateResponse],
     responses=OPENAPI_ERROR_RESPONSES,
     summary="List face template metadata without biometric vectors",
-    dependencies=[Depends(require_permissions(Permission.ENROLLMENT_MANAGE))],
 )
 def list_face_templates(
     session: DbSession,
+    principal: EnrollmentOperator,
     student_id: UUID | None = None,
     include_revoked: bool = False,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> PageResponse[FaceTemplateResponse]:
+    del principal
     query = select(FaceTemplate)
     count_query = select(func.count()).select_from(FaceTemplate)
     if student_id is not None:

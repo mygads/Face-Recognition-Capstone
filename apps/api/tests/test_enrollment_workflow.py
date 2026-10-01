@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from presensi_api.api.security.dependencies import get_current_user
+from presensi_api.api.security.request_rate_limit import SlidingWindowRateLimiter
 from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
 from presensi_api.db.base import Base
 from presensi_api.db.models import (
@@ -87,6 +88,7 @@ def enrollment_runtime(
 
     processor = SyntheticEnrollmentProcessor(reject_last=True)
     app.dependency_overrides[get_db_session] = override_db
+    app.state.request_rate_limiter = SlidingWindowRateLimiter()
     app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
         id=OPERATOR_ID,
         email="laborant@example.test",
@@ -165,6 +167,7 @@ def _captures(count: int = 5) -> list[tuple[str, tuple[str, bytes, str]]]:
 
 def test_multiple_captures_create_encrypted_templates_and_duplicate_warning(
     enrollment_runtime: tuple[sessionmaker[Session], SyntheticEnrollmentProcessor],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     factory, processor = enrollment_runtime
     from presensi_api.biometric_crypto import FaceTemplateKeyring
@@ -208,6 +211,9 @@ def test_multiple_captures_create_encrypted_templates_and_duplicate_warning(
     assert payload["template_count"] == 4
     assert payload["duplicate_warnings"][0]["student_id"] == str(DUPLICATE_STUDENT_ID)
     assert payload["confirmation_required"] is True
+    assert "embedding" not in response.text
+    assert "ciphertext" not in response.text
+    assert "synthetic-private-frame" not in caplog.text
     assert processor.calls == 5
     with factory() as session:
         templates = session.scalars(
@@ -264,6 +270,10 @@ def test_revoke_enrollment_batch_allows_reenrollment(
             template.embedding_ciphertext is None for template in revoked_templates
         )
         assert all(template.encryption_key_id is None for template in revoked_templates)
+        revoke_audit = session.scalar(
+            select(AuditLog).where(AuditLog.action == "face_template.revoked")
+        )
+        assert revoke_audit is not None
     class_status = _request(
         "GET", f"/api/v1/enrollments/class-status?class_id={CLASS_ID}"
     )
@@ -285,6 +295,20 @@ def test_revoke_enrollment_batch_allows_reenrollment(
             )
         ).all()
         assert len(active) == 4
+
+
+def test_template_metadata_route_is_rate_limited_per_operator(
+    enrollment_runtime: tuple[sessionmaker[Session], SyntheticEnrollmentProcessor],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(app.state, "enrollment_requests_per_minute", 1)
+
+    first = _request("GET", "/api/v1/face-templates")
+    second = _request("GET", "/api/v1/face-templates")
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.json()["error"]["code"] == "enrollment_rate_limit_exceeded"
 
 
 def test_active_template_keys_can_be_rotated_in_batches(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Annotated, TypeVar
 from uuid import UUID
@@ -11,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from presensi_api.api.errors import OPENAPI_ERROR_RESPONSES, ApiProblem
 from presensi_api.api.security.dependencies import require_permissions
-from presensi_api.api.security.roles import Permission
+from presensi_api.api.security.roles import AuthenticatedUser, Permission
 from presensi_api.api.v1.schemas.common import PageResponse, Pagination
 from presensi_api.api.v1.schemas.students import (
     ClassCreateRequest,
@@ -26,7 +27,14 @@ from presensi_api.api.v1.schemas.students import (
     StudentResponse,
     StudentUpdateRequest,
 )
-from presensi_api.db.models import ClassStudent, SchoolClass, Student, User
+from presensi_api.db.models import (
+    AuditLog,
+    ClassStudent,
+    FaceTemplate,
+    SchoolClass,
+    Student,
+    User,
+)
 from presensi_api.db.session import get_db_session
 
 router = APIRouter(tags=["students", "classes"])
@@ -188,10 +196,14 @@ def get_student(student_id: UUID, session: DbSession) -> StudentDetailResponse:
     response_model=StudentResponse,
     responses=OPENAPI_ERROR_RESPONSES,
     summary="Update or deactivate a student",
-    dependencies=[Depends(require_permissions(Permission.MANAGE_MASTER_DATA))],
 )
 def update_student(
-    student_id: UUID, request: StudentUpdateRequest, session: DbSession
+    student_id: UUID,
+    request: StudentUpdateRequest,
+    session: DbSession,
+    principal: Annotated[
+        AuthenticatedUser, Depends(require_permissions(Permission.MANAGE_MASTER_DATA))
+    ],
 ) -> StudentResponse:
     student = session.get(Student, student_id)
     if student is None:
@@ -208,6 +220,59 @@ def update_student(
             raise ApiProblem(
                 409, "duplicate_student_number", "NIS/NISN siswa sudah digunakan."
             )
+    deactivated_now = student.is_active and changes.get("is_active") is False
+    reactivated_now = not student.is_active and changes.get("is_active") is True
+    revoked_templates: Sequence[FaceTemplate] = ()
+    if deactivated_now:
+        revoked_templates = session.scalars(
+            select(FaceTemplate)
+            .where(
+                FaceTemplate.student_id == student_id,
+                FaceTemplate.revoked_at.is_(None),
+            )
+            .with_for_update()
+        ).all()
+        now = datetime.now(UTC)
+        for template in revoked_templates:
+            template.revoked_at = now
+            template.revoked_by_user_id = principal.id
+            template.embedding_ciphertext = None
+            template.encryption_key_id = None
+            template.embedding_dimension = None
+        session.add(
+            AuditLog(
+                actor_user_id=principal.id,
+                action="student.deactivated",
+                entity_type="student",
+                entity_id=student.id,
+                before_state={"is_active": True},
+                after_state={
+                    "is_active": False,
+                    "revoked_template_count": len(revoked_templates),
+                },
+            )
+        )
+        if revoked_templates:
+            session.add(
+                AuditLog(
+                    actor_user_id=principal.id,
+                    action="face_template.revoked_on_student_deactivation",
+                    entity_type="student_face_templates",
+                    entity_id=student.id,
+                    after_state={"revoked_template_count": len(revoked_templates)},
+                )
+            )
+    elif reactivated_now:
+        session.add(
+            AuditLog(
+                actor_user_id=principal.id,
+                action="student.reactivated",
+                entity_type="student",
+                entity_id=student.id,
+                before_state={"is_active": False},
+                after_state={"is_active": True},
+            )
+        )
     for key, value in changes.items():
         setattr(student, key, value)
     _commit(
@@ -378,13 +443,26 @@ def add_student_to_class(
     status_code=status.HTTP_204_NO_CONTENT,
     responses=OPENAPI_ERROR_RESPONSES,
     summary="Remove a student from a class",
-    dependencies=[Depends(require_permissions(Permission.MANAGE_MASTER_DATA))],
 )
 def remove_student_from_class(
-    class_id: UUID, student_id: UUID, session: DbSession
+    class_id: UUID,
+    student_id: UUID,
+    session: DbSession,
+    principal: Annotated[
+        AuthenticatedUser, Depends(require_permissions(Permission.MANAGE_MASTER_DATA))
+    ],
 ) -> None:
     link = session.get(ClassStudent, (class_id, student_id))
     if link is None:
         raise _not_found("Class membership")
     session.delete(link)
+    session.add(
+        AuditLog(
+            actor_user_id=principal.id,
+            action="class.student_membership_removed",
+            entity_type="class_student",
+            entity_id=student_id,
+            before_state={"class_id": str(class_id), "student_id": str(student_id)},
+        )
+    )
     session.commit()

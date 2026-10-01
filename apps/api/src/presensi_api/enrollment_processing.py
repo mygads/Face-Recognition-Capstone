@@ -13,6 +13,7 @@ from PIL import Image, UnidentifiedImageError
 from presensi_api.api.errors import ApiProblem
 
 MAX_CAPTURE_BYTES = 3 * 1024 * 1024
+MAX_TOTAL_CAPTURE_BYTES = 15 * 1024 * 1024
 MAX_CAPTURE_PIXELS = 16_000_000
 MAX_CAPTURE_WIDTH = 4096
 MAX_CAPTURE_HEIGHT = 4096

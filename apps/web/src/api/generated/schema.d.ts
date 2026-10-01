@@ -1783,7 +1783,7 @@ export interface components {
              * Outcome
              * @enum {string}
              */
-            outcome: "matched" | "ambiguous" | "no_match" | "error";
+            outcome: "matched" | "ambiguous" | "no_match" | "error" | "redacted";
             /**
              * Decision
              * @enum {string}
@@ -1818,7 +1818,7 @@ export interface components {
              * Outcome
              * @enum {string}
              */
-            outcome: "matched" | "ambiguous" | "no_match" | "error";
+            outcome: "matched" | "ambiguous" | "no_match" | "error" | "redacted";
             /** Similarity */
             similarity?: number | string | null;
             /** Confidence */
@@ -2068,7 +2068,7 @@ export interface components {
             /** Student Name */
             student_name: string | null;
             /** Recognition Outcome */
-            recognition_outcome: ("matched" | "ambiguous" | "no_match" | "error") | null;
+            recognition_outcome: ("matched" | "ambiguous" | "no_match" | "error" | "redacted") | null;
             /** Attendance Status */
             attendance_status: ("present" | "late" | "absent" | "excused") | null;
             /** Decision Reason */

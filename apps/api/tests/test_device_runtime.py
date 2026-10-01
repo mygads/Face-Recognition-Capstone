@@ -6,6 +6,7 @@ import json
 import secrets
 from collections.abc import Generator
 from datetime import UTC, datetime, time, timedelta
+from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
@@ -17,16 +18,19 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from presensi_api.api.security.device_credentials import hash_device_credential
+from presensi_api.api.security.request_rate_limit import SlidingWindowRateLimiter
 from presensi_api.biometric_crypto import FaceTemplateKeyring
 from presensi_api.db.base import Base
 from presensi_api.db.models import (
     AttendanceRecord,
     AttendanceSession,
+    AuditLog,
     ClassStudent,
     Device,
     FaceTemplate,
     Laboratory,
     PracticumSchedule,
+    RecognitionEvent,
     SchoolClass,
     SessionStudent,
     Student,
@@ -34,6 +38,7 @@ from presensi_api.db.models import (
 )
 from presensi_api.db.session import get_db_session
 from presensi_api.main import app
+from presensi_api.retention import apply_recognition_event_retention
 
 DEVICE_ID = UUID("91d79367-8f2a-479e-8ae2-b820f7a0e6f8")
 OTHER_DEVICE_ID = UUID("b9773dfd-653e-457c-a9ce-55a818663aed")
@@ -67,6 +72,7 @@ def runtime_database(
             yield session
 
     app.dependency_overrides[get_db_session] = override_db
+    app.state.request_rate_limiter = SlidingWindowRateLimiter()
     now = datetime.now(UTC)
     local_now = now.astimezone(ZoneInfo("Asia/Jakarta"))
     start = time(0, 1)
@@ -248,6 +254,20 @@ def test_device_authentication_rejects_missing_or_unknown_credentials(
     assert invalid.status_code == 401
 
 
+def test_device_runtime_requests_are_rate_limited_per_registered_device(
+    runtime_database: tuple[sessionmaker[Session], dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(app.state, "device_requests_per_minute", 1)
+
+    first = _request("GET", f"/api/v1/devices/{DEVICE_ID}/active-sessions")
+    second = _request("GET", f"/api/v1/devices/{DEVICE_ID}/active-sessions")
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.json()["error"]["code"] == "device_rate_limit_exceeded"
+
+
 def test_credential_renewal_returns_new_secret_and_accepts_short_overlap(
     runtime_database: tuple[sessionmaker[Session], dict[str, Any]],
 ) -> None:
@@ -278,6 +298,13 @@ def test_credential_renewal_returns_new_secret_and_accepts_short_overlap(
         assert device is not None
         assert device.credential_hash == hash_device_credential(new_token)
         assert device.credential_hash != new_token
+        renewal_audit = session.scalar(
+            select(AuditLog).where(AuditLog.action == "device.credential_renewed")
+        )
+        assert renewal_audit is not None
+        audit_text = json.dumps(renewal_audit.after_state)
+        assert "token" not in audit_text.lower()
+        assert new_token not in audit_text
 
 
 def test_device_event_uses_shared_attendance_decision_and_is_idempotent(
@@ -319,3 +346,100 @@ def test_device_event_uses_shared_attendance_decision_and_is_idempotent(
             )
         ).all()
         assert len(records) == 1
+
+
+def test_event_retention_deletes_unlinked_events_and_redacts_attendance_events(
+    runtime_database: tuple[sessionmaker[Session], dict[str, Any]],
+) -> None:
+    factory, _time_data = runtime_database
+    now = datetime.now(UTC)
+    linked_event_id = uuid4()
+    unlinked_event_id = uuid4()
+    with factory.begin() as session:
+        linked_event = RecognitionEvent(
+            id=linked_event_id,
+            event_uuid=uuid4(),
+            session_id=SESSION_ID,
+            device_id=DEVICE_ID,
+            recognized_student_id=STUDENT_ID,
+            created_at=now - timedelta(days=100),
+            occurred_at=now - timedelta(days=100),
+            outcome="matched",
+            model_name=MODEL_NAME,
+            model_version=MODEL_VERSION,
+            confidence=Decimal("0.98"),
+            similarity=Decimal("0.98"),
+            margin=Decimal("0.25"),
+            quality_metadata={
+                "idempotency_fingerprint": "synthetic-private-fingerprint",
+                "reported_student_id": str(STUDENT_ID),
+                "liveness_score": 0.99,
+            },
+        )
+        session.add(linked_event)
+        session.flush()
+        session.add(
+            AttendanceRecord(
+                session_id=SESSION_ID,
+                student_id=STUDENT_ID,
+                recognition_event_id=linked_event.id,
+                status="present",
+                source="face_recognition",
+            )
+        )
+        session.add(
+            RecognitionEvent(
+                id=unlinked_event_id,
+                event_uuid=uuid4(),
+                session_id=SESSION_ID,
+                device_id=DEVICE_ID,
+                recognized_student_id=None,
+                created_at=now - timedelta(days=100),
+                occurred_at=now - timedelta(days=100),
+                outcome="ambiguous",
+                model_name=MODEL_NAME,
+                model_version=MODEL_VERSION,
+                confidence=None,
+                similarity=None,
+                margin=None,
+                quality_metadata={"liveness_score": 0.12},
+            )
+        )
+
+    with factory() as session:
+        result = apply_recognition_event_retention(
+            session,
+            retention_days=90,
+            now=now,
+        )
+
+    assert result.deleted_events == 1
+    assert result.redacted_events == 1
+    with factory() as session:
+        redacted = session.get(RecognitionEvent, linked_event_id)
+        assert redacted is not None
+        assert redacted.outcome == "redacted"
+        assert redacted.recognized_student_id is None
+        assert redacted.confidence is None
+        assert redacted.similarity is None
+        assert redacted.margin is None
+        assert redacted.quality_metadata == {"retention_redacted": True}
+        assert session.get(RecognitionEvent, unlinked_event_id) is None
+        attendance = session.scalar(
+            select(AttendanceRecord).where(
+                AttendanceRecord.recognition_event_id == linked_event_id
+            )
+        )
+        assert attendance is not None
+        assert attendance.student_id == STUDENT_ID
+        audit = session.scalar(
+            select(AuditLog).where(
+                AuditLog.action == "recognition_events.retention_applied"
+            )
+        )
+        assert audit is not None
+        assert audit.after_state == {
+            "retention_days": 90,
+            "deleted_events": 1,
+            "redacted_events": 1,
+        }

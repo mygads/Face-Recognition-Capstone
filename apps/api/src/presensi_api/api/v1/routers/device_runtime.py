@@ -13,10 +13,10 @@ from presensi_api.api.errors import OPENAPI_ERROR_RESPONSES, ApiProblem
 from presensi_api.api.security.dependencies import require_permissions
 from presensi_api.api.security.device_credentials import (
     AuthenticatedDevice,
-    authenticate_device,
     require_path_device,
     rotate_device_credential,
 )
+from presensi_api.api.security.request_rate_limit import DeviceActor
 from presensi_api.api.security.roles import AuthenticatedUser, Permission
 from presensi_api.api.v1.schemas.attendance import (
     RecognitionEventDecisionResponse,
@@ -55,7 +55,6 @@ from presensi_api.session_lifecycle import (
 
 router = APIRouter(tags=["device-runtime"])
 DbSession = Annotated[Session, Depends(get_db_session)]
-DeviceActor = Annotated[AuthenticatedDevice, Depends(authenticate_device)]
 
 
 def _session_end(schedule: PracticumSchedule, opened_at: datetime) -> datetime:
@@ -164,7 +163,7 @@ def rotate_provisioned_device_credential(
             after_state={
                 "reason": request.reason,
                 "credential_expires_at": expires_at.isoformat(),
-                "previous_token_valid_until": (
+                "previous_credential_valid_until": (
                     previous_until.isoformat() if previous_until else None
                 ),
             },
@@ -202,7 +201,7 @@ def renew_device_credential(
             entity_id=device.id,
             after_state={
                 "credential_expires_at": expires_at.isoformat(),
-                "previous_token_valid_until": (
+                "previous_credential_valid_until": (
                     previous_until.isoformat() if previous_until else None
                 ),
             },

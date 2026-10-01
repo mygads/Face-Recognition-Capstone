@@ -6,13 +6,14 @@ from uuid import UUID
 
 import httpx
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from presensi_api.api.security.dependencies import get_current_user
 from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
 from presensi_api.db.base import Base
+from presensi_api.db.models import AuditLog, FaceTemplate, User
 from presensi_api.db.session import get_db_session
 from presensi_api.main import app
 
@@ -34,6 +35,15 @@ def api_database(
             yield session
 
     app.dependency_overrides[get_db_session] = override_db
+    with factory.begin() as session:
+        session.add(
+            User(
+                id=UUID(int=42),
+                email="admin@example.test",
+                full_name="Test Admin",
+                password_hash="unused-test-hash",
+            )
+        )
     principal = AuthenticatedUser(
         id=UUID(int=42),
         email="admin@example.test",
@@ -99,11 +109,44 @@ def test_student_crud_search_pagination_and_soft_deactivation(
     assert updated.status_code == 200
     assert updated.json()["full_name"] == "Updated Synthetic Student"
 
+    with api_database.begin() as session:
+        session.add(
+            FaceTemplate(
+                student_id=UUID(student["id"]),
+                model_name="synthetic-sface",
+                model_version="test-v1",
+                embedding_ciphertext=b"synthetic-encrypted-vector",
+                encryption_key_id="test-key",
+                embedding_dimension=3,
+                quality_metadata={"quality": 0.9},
+            )
+        )
+
     deactivated = request(
         "PATCH", f"/api/v1/students/{student['id']}", {"is_active": False}
     )
     assert deactivated.status_code == 200
     assert deactivated.json()["is_active"] is False
+    with api_database() as session:
+        template = session.scalar(select(FaceTemplate))
+        assert template is not None
+        assert template.revoked_at is not None
+        assert template.embedding_ciphertext is None
+        assert template.encryption_key_id is None
+        assert (
+            session.scalar(
+                select(AuditLog).where(AuditLog.action == "student.deactivated")
+            )
+            is not None
+        )
+        assert (
+            session.scalar(
+                select(AuditLog).where(
+                    AuditLog.action == "face_template.revoked_on_student_deactivation"
+                )
+            )
+            is not None
+        )
     assert (
         request("GET", "/api/v1/students?is_active=true").json()["pagination"]["total"]
         == 0
@@ -161,6 +204,13 @@ def test_classes_laboratories_and_student_class_relationship(
         ).status_code
         == 204
     )
+    with api_database() as session:
+        removal_audit = session.scalar(
+            select(AuditLog).where(
+                AuditLog.action == "class.student_membership_removed"
+            )
+        )
+        assert removal_audit is not None
     assert (
         request("GET", f"/api/v1/classes/{class_data['id']}").json()["students"] == []
     )

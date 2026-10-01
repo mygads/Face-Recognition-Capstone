@@ -8,7 +8,7 @@ from presensi_api.api.v1.schemas.common import ApiSchema
 
 AttendanceStatus = Literal["present", "late", "absent", "excused"]
 AttendanceSource = Literal["face_recognition", "manual", "system"]
-RecognitionOutcome = Literal["matched", "ambiguous", "no_match", "error"]
+RecognitionOutcome = Literal["matched", "ambiguous", "no_match", "error", "redacted"]
 AttendanceDecisionReason = Literal[
     "device_inactive",
     "device_laboratory_mismatch",

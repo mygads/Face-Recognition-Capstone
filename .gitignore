@@ -27,6 +27,8 @@ apps/web/playwright/.cache/
 # Local device and biometric data (never commit real student data)
 **/data/biometric/
 **/data/camera-queue/
+**/debug-artifacts/
+debug-artifacts/
 datasets/private/
 tests/fixtures/private/
 tests/fixtures/biometric/
