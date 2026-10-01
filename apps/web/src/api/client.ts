@@ -22,6 +22,9 @@ export type ScheduleCreate = components['schemas']['ScheduleCreateRequest']
 export type ScheduleUpdate = components['schemas']['ScheduleUpdateRequest']
 export type ScheduleTeacher = components['schemas']['ScheduleTeacherResponse']
 export type AttendanceSession = components['schemas']['AttendanceSessionResponse']
+export type SessionDashboardSnapshot = components['schemas']['SessionDashboardSnapshot']
+export type SessionRecentActivity = components['schemas']['SessionRecentActivity']
+export type SessionDashboardDevice = components['schemas']['SessionDashboardDevice']
 export type OpenableSchedule = components['schemas']['OpenableScheduleResponse']
 export type EnrollmentStudentStatus = components['schemas']['EnrollmentStudentStatusResponse']
 export type EnrollmentCaptureResult = components['schemas']['EnrollmentCaptureResultResponse']
@@ -283,6 +286,24 @@ export async function getAttendanceSessionStatus(sessionId: string): Promise<Att
     params: { path: { session_id: sessionId } },
   })
   return unwrap(result)
+}
+
+export async function getSessionDashboardSnapshot(
+  sessionId: string,
+): Promise<SessionDashboardSnapshot> {
+  const result = await apiClient.GET('/api/v1/sessions/{session_id}/dashboard', {
+    params: { path: { session_id: sessionId } },
+  })
+  return unwrap(result)
+}
+
+export function sessionDashboardWebSocketUrl(sessionId: string): string {
+  const url = new URL(
+    `/api/v1/sessions/${encodeURIComponent(sessionId)}/updates`,
+    window.location.origin,
+  )
+  url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return url.toString()
 }
 
 export async function closeAttendanceSession(sessionId: string): Promise<AttendanceSession> {

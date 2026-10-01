@@ -4,6 +4,11 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, Field
 
+from presensi_api.api.v1.schemas.attendance import (
+    AttendanceDecisionReason,
+    AttendanceStatus,
+    RecognitionOutcome,
+)
 from presensi_api.api.v1.schemas.common import ApiSchema
 
 
@@ -41,3 +46,37 @@ class OpenableScheduleResponse(ApiSchema):
     start_time: time
     end_time: time
     timezone_name: str
+
+
+class SessionAttendanceSummary(ApiSchema):
+    total_roster: int = Field(ge=0)
+    present: int = Field(ge=0)
+    late: int = Field(ge=0)
+    not_present: int = Field(ge=0)
+
+
+class SessionDashboardDevice(ApiSchema):
+    id: UUID
+    name: str
+    device_type: Literal["edge_pc", "camera_gateway"]
+    is_online: bool
+    last_seen_at: AwareDatetime | None
+
+
+class SessionRecentActivity(ApiSchema):
+    id: UUID
+    occurred_at: AwareDatetime
+    kind: Literal["recognition", "attendance"]
+    student_name: str | None
+    recognition_outcome: RecognitionOutcome | None
+    attendance_status: AttendanceStatus | None
+    decision_reason: AttendanceDecisionReason | None
+
+
+class SessionDashboardSnapshot(ApiSchema):
+    session_id: UUID
+    session_status: Literal["active", "closed", "cancelled"]
+    generated_at: AwareDatetime
+    summary: SessionAttendanceSummary
+    devices: list[SessionDashboardDevice]
+    recent_activity: list[SessionRecentActivity]

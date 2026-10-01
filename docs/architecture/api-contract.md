@@ -9,9 +9,9 @@ The HTTP contract lives under /api/v1 and is described by FastAPI OpenAPI at /op
 | Health | GET /api/v1/health |
 | Auth | POST /api/v1/auth/login, GET /api/v1/auth/me |
 | Students/classes | GET, POST /api/v1/students; GET, POST /api/v1/classes |
-| Laboratories/devices | GET, POST /api/v1/laboratories; GET, POST /api/v1/devices |
+| Laboratories/devices | GET, POST /api/v1/laboratories; GET, POST /api/v1/devices; POST /api/v1/devices/{device_id}/heartbeat |
 | Schedules | GET, POST /api/v1/schedules |
-| Sessions | GET, POST /api/v1/sessions; POST /api/v1/sessions/{session_id}/close |
+| Sessions | GET, POST /api/v1/sessions; GET /api/v1/sessions/{session_id}/dashboard; POST /api/v1/sessions/{session_id}/close; WS /api/v1/sessions/{session_id}/updates |
 | Enrollment/templates | GET /api/v1/enrollments/class-status; POST /api/v1/enrollments/captures; POST /api/v1/enrollments; GET /api/v1/face-templates |
 | Attendance | GET /api/v1/attendance; POST /api/v1/attendance/corrections |
 | Reports | GET /api/v1/reports/attendance |

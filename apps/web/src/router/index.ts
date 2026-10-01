@@ -47,7 +47,7 @@ export const routes: RouteRecordRaw[] = [
         component: DashboardView,
         meta: {
           title: 'Ringkasan',
-          description: 'Ruang kerja presensi praktikum.',
+          description: 'Pantau kehadiran dan konektivitas perangkat secara live.',
         },
       },
       {

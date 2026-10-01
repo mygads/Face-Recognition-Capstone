@@ -54,3 +54,8 @@ class DeviceResponse(ApiSchema):
     is_active: bool
     last_seen_at: AwareDatetime | None
     created_at: AwareDatetime
+
+
+class DeviceHeartbeatResponse(ApiSchema):
+    device_id: UUID
+    last_seen_at: AwareDatetime

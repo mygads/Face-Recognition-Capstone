@@ -31,6 +31,10 @@ record before adding that constraint.
 Recognition-to-attendance rules and the event-ingest contract are described in
 [attendance-decisions.md](attendance-decisions.md).
 
+The teacher's live attendance summary, session-scoped WebSocket contract, device
+heartbeat, and privacy limits are described in
+[live-attendance-dashboard.md](live-attendance-dashboard.md).
+
 The Vue /app/sessions page lists schedules openable today, supports the configurable
 grace period, and shows current/recent session status, roster count, scheduled end,
 manual close action, and the status detail returned by the Core API.

@@ -57,6 +57,7 @@ def test_openapi_lists_each_versioned_router_group() -> None:
         "/api/v1/devices",
         "/api/v1/schedules",
         "/api/v1/sessions",
+        "/api/v1/sessions/{session_id}/dashboard",
         "/api/v1/enrollments",
         "/api/v1/enrollments/class-status",
         "/api/v1/enrollments/captures",
@@ -81,6 +82,16 @@ def test_openapi_uses_pydantic_contract_and_shared_error_schema() -> None:
     assert "EnrollmentCaptureResultResponse" in schemas
     assert "RecognitionEventRequest" in schemas
     assert "RecognitionEventDecisionResponse" in schemas
+    assert "SessionDashboardSnapshot" in schemas
+    assert "SessionRecentActivity" in schemas
+    dashboard_fields = set(schemas["SessionDashboardSnapshot"]["properties"])
+    assert {"summary", "devices", "recent_activity"} <= dashboard_fields
+    dashboard_properties = str(schemas["SessionDashboardSnapshot"]["properties"])
+    assert not {"embedding", "image", "photo", "blob"} & {
+        name
+        for name in ("embedding", "image", "photo", "blob")
+        if name in dashboard_properties.lower()
+    }
     template_fields = set(schemas["FaceTemplateResponse"]["properties"])
     assert {"model_name", "model_version", "quality_metadata", "created_at"} <= (
         template_fields
@@ -123,6 +134,19 @@ def test_openapi_documents_master_data_detail_update_and_roster_contracts() -> N
         in paths["/api/v1/students/import/preview"]["post"]["requestBody"]["content"]
     )
     assert "StudentImportPreviewResponse" in schemas
+
+
+def test_openapi_documents_device_heartbeat_contract() -> None:
+    document = app.openapi()
+    heartbeat = document["paths"]["/api/v1/devices/{device_id}/heartbeat"]["post"]
+    assert (
+        heartbeat["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+        == "#/components/schemas/DeviceHeartbeatResponse"
+    )
+    assert (
+        "last_seen_at"
+        in document["components"]["schemas"]["DeviceHeartbeatResponse"]["properties"]
+    )
 
 
 def test_openapi_documents_oauth_password_login_and_bearer_auth() -> None:

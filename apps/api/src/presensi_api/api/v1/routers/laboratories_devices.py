@@ -16,12 +16,13 @@ from presensi_api.api.v1.routers._placeholder import feature_not_implemented
 from presensi_api.api.v1.schemas.common import PageResponse, Pagination
 from presensi_api.api.v1.schemas.laboratories import (
     DeviceCreateRequest,
+    DeviceHeartbeatResponse,
     DeviceResponse,
     LaboratoryCreateRequest,
     LaboratoryResponse,
     LaboratoryUpdateRequest,
 )
-from presensi_api.db.models import Laboratory
+from presensi_api.db.models import Device, Laboratory
 from presensi_api.db.session import get_db_session
 
 router = APIRouter(tags=["laboratories", "devices"])
@@ -173,3 +174,25 @@ def list_devices(
 def create_device(request: DeviceCreateRequest) -> DeviceResponse:
     del request
     feature_not_implemented("devices")
+
+
+@router.post(
+    "/devices/{device_id}/heartbeat",
+    response_model=DeviceHeartbeatResponse,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Record a device heartbeat",
+    dependencies=[Depends(require_permissions(Permission.DEVICE_OPERATE))],
+)
+def device_heartbeat(
+    device_id: UUID,
+    session: DbSession,
+) -> DeviceHeartbeatResponse:
+    device = session.get(Device, device_id)
+    if device is None:
+        raise _not_found("Device")
+    if not device.is_active:
+        raise ApiProblem(409, "device_inactive", "Perangkat sedang nonaktif.")
+    now = datetime.now(UTC)
+    device.last_seen_at = now
+    session.commit()
+    return DeviceHeartbeatResponse(device_id=device.id, last_seen_at=now)

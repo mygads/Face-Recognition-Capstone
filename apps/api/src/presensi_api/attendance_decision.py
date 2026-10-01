@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import cast
 
 from sqlalchemy import select
@@ -175,6 +175,7 @@ def decide_recognition_event(
     )
     db.add(event)
     db.flush()
+    device.last_seen_at = datetime.now(UTC)
 
     reason: AttendanceDecisionReason | None = None
     if (
