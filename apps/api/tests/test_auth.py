@@ -399,7 +399,7 @@ def test_expired_bearer_token_is_rejected(api_database: sessionmaker[Session]) -
                 "corrected_status": "present",
                 "reason": "Correction",
             },
-            501,
+            404,
         ),
         (
             "TEACHER",
@@ -410,7 +410,7 @@ def test_expired_bearer_token_is_rejected(api_database: sessionmaker[Session]) -
                 "corrected_status": "present",
                 "reason": "Correction",
             },
-            501,
+            404,
         ),
         (
             "LABORANT",

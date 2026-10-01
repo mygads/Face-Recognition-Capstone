@@ -731,8 +731,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Request an attendance correction
-         * @description Contract placeholder; currently returns 501.
+         * Create an audited pending attendance correction request
+         * @description Stores a teacher correction request for a schedule they own. The request remains pending and does not change final attendance until an approval policy and decision workflow are implemented.
          */
         post: operations["request_attendance_correction_api_v1_attendance_corrections_post"];
         delete?: never;

@@ -2,7 +2,7 @@ from decimal import Decimal
 from typing import Literal, Self
 from uuid import UUID
 
-from pydantic import AwareDatetime, Field, model_validator
+from pydantic import AwareDatetime, Field, field_validator, model_validator
 
 from presensi_api.api.v1.schemas.common import ApiSchema
 
@@ -82,6 +82,14 @@ class AttendanceCorrectionRequest(ApiSchema):
     attendance_record_id: UUID
     corrected_status: AttendanceStatus
     reason: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("reason")
+    @classmethod
+    def strip_and_validate_reason(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("A correction reason is required.")
+        return cleaned
 
 
 class AttendanceCorrectionResponse(ApiSchema):

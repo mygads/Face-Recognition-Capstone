@@ -129,6 +129,20 @@ python3 scripts/check.py
 
 Playwright E2E smoke test terpisah dapat dijalankan dengan `npm --prefix apps/web run test:e2e`. Untuk instalasi browser lokal, jalankan `npm --prefix apps/web exec -- playwright install chromium` terlebih dahulu. Workflow GitHub Actions menjalankan migration PostgreSQL, seed, model/schema drift check, quality checks dan E2E tanpa langkah deployment.
 
+Jalankan regression suite alur presensi sintetis dari root repository dengan satu command:
+
+```powershell
+# Windows PowerShell
+py -3 scripts/regression.py
+```
+
+```bash
+# Linux
+python3 scripts/regression.py
+```
+
+Suite ini mencakup import siswa, enrollment melalui processor fake, pembukaan sesi, keputusan PRESENT/LATE, roster rejection, retry idempotent, audit permintaan koreksi, penolakan setelah sesi ditutup, dan export CSV. Tidak diperlukan webcam atau model wajah.
+
 ## Struktur utama
 
 ```text
