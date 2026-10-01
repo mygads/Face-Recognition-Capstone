@@ -5,7 +5,7 @@ Monorepo untuk sistem presensi praktikum berbasis face recognition. Kedua deploy
 ## Prasyarat
 
 - Docker Desktop (Windows) atau Docker Engine + Compose plugin (Linux).
-- Node.js 20.19+ dan npm 10+ untuk web native.
+- Node.js 22.22.2+, 24.15+, atau 26+ dan npm 10+ untuk tooling web.
 - Python 3.11+ untuk task runner.
 
 ## Siapkan environment
@@ -58,6 +58,40 @@ Perintah yang sama berlaku di Linux. Jika ingin seluruh UI berjalan dalam contai
 - Central AI (profile `central`): `http://127.0.0.1:8001/health`
 
 Compose menunggu PostgreSQL sehat sebelum memulai API dan menggunakan healthcheck untuk API serta AI service. API saat ini belum membaca/menulis database; koneksi/schema dibuat pada task database berikutnya.
+
+## Quality checks
+
+Pasang dependency tooling Python dalam virtual environment dan dependency web sekali setelah clone:
+
+```powershell
+# Windows PowerShell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-dev.txt
+npm ci --prefix apps/web
+```
+
+```bash
+# Linux
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+npm ci --prefix apps/web
+```
+
+Dari root repository, satu command menjalankan Ruff lint/format check, mypy, seluruh pytest, serta ESLint, Prettier, TypeScript strict check untuk web dan E2E, dan Vitest:
+
+```powershell
+# Windows PowerShell
+py -3 scripts/check.py
+```
+
+```bash
+# Linux
+python3 scripts/check.py
+```
+
+Playwright E2E smoke test terpisah dapat dijalankan dengan `npm --prefix apps/web run test:e2e`. Untuk instalasi browser lokal, jalankan `npm --prefix apps/web exec -- playwright install chromium` terlebih dahulu. Workflow GitHub Actions menjalankan quality checks dan E2E tanpa langkah deployment.
 
 ## Struktur utama
 

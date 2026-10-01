@@ -32,8 +32,14 @@ def run_web_build() -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Local development task runner")
     parser.add_argument("task", choices=("dev-up", "dev-down", "test"))
-    parser.add_argument("--central", action="store_true", help="also start the central AI service")
-    parser.add_argument("--web-container", action="store_true", help="run the optional web HMR container")
+    parser.add_argument(
+        "--central", action="store_true", help="also start the central AI service"
+    )
+    parser.add_argument(
+        "--web-container",
+        action="store_true",
+        help="run the optional web HMR container",
+    )
     args = parser.parse_args()
 
     ensure_env_file()
@@ -47,9 +53,17 @@ def main() -> int:
         return run(command)
 
     if args.task == "dev-down":
-        return run([
-            "docker", "compose", "--profile", "central", "--profile", "web-container", "down",
-        ])
+        return run(
+            [
+                "docker",
+                "compose",
+                "--profile",
+                "central",
+                "--profile",
+                "web-container",
+                "down",
+            ]
+        )
 
     commands = [
         ["docker", "compose", "config", "--quiet"],
@@ -60,15 +74,37 @@ def main() -> int:
         return 1
 
     api_test = [
-        "docker", "compose", "run", "--build", "--rm", "--no-deps",
-        "api", "python", "-m", "pytest", "-q", "/service/tests",
+        "docker",
+        "compose",
+        "run",
+        "--build",
+        "--rm",
+        "--no-deps",
+        "api",
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "/service/tests",
     ]
     if run(api_test) != 0:
         return 1
 
     ai_test = [
-        "docker", "compose", "--profile", "central", "run", "--build", "--rm", "--no-deps",
-        "ai-service", "python", "-m", "pytest", "-q", "/service/tests",
+        "docker",
+        "compose",
+        "--profile",
+        "central",
+        "run",
+        "--build",
+        "--rm",
+        "--no-deps",
+        "ai-service",
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "/service/tests",
     ]
     return run(ai_test)
 

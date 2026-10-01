@@ -1,0 +1,38 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+src = [
+  "apps/api/src",
+  "apps/ai-service/src",
+  "apps/edge-agent/src",
+  "libs/recognition-core/src",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+  "presensi_api",
+  "presensi_ai_service",
+  "presensi_edge_agent",
+  "recognition_core",
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = [
+  "apps/api/src",
+  "apps/api/tests",
+  "apps/ai-service/src",
+  "apps/ai-service/tests",
+  "apps/edge-agent/src",
+  "libs/recognition-core/src",
+  "scripts",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["apps", "libs", "tests"]
+pythonpath = ["apps/api/src", "apps/ai-service/src"]
+addopts = "-ra"
