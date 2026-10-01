@@ -328,6 +328,10 @@ class RecognitionEvent(UUIDPrimaryKey, TimestampMixin, Base):
             name="confidence_range",
         ),
         CheckConstraint(
+            "similarity IS NULL OR (similarity >= -1 AND similarity <= 1)",
+            name="similarity_range",
+        ),
+        CheckConstraint(
             "margin IS NULL OR (margin >= 0 AND margin <= 1)", name="margin_range"
         ),
         CheckConstraint(
@@ -364,6 +368,7 @@ class RecognitionEvent(UUIDPrimaryKey, TimestampMixin, Base):
     model_name: Mapped[str] = mapped_column(String(120), nullable=False)
     model_version: Mapped[str] = mapped_column(String(80), nullable=False)
     confidence: Mapped[Decimal | None] = mapped_column(Numeric(7, 6))
+    similarity: Mapped[Decimal | None] = mapped_column(Numeric(8, 6))
     margin: Mapped[Decimal | None] = mapped_column(Numeric(7, 6))
     quality_metadata: Mapped[dict[str, object]] = mapped_column(
         JSON_OBJECT, nullable=False, default=dict

@@ -19,7 +19,7 @@ All event and lifecycle timestamps use `timestamp with time zone` (`DateTime(tim
 
 ## Recognition and privacy boundary
 
-`recognition_events` stores the raw result (`matched`, `ambiguous`, `no_match`, or `error`), model name/version, confidence and margin, quality metadata, event UUID, source device, session, optional recognized student, and the event timestamp. It does not decide attendance.
+`recognition_events` stores the raw result (`matched`, `ambiguous`, `no_match`, or `error`), model name/version, similarity, confidence and margin, quality metadata, event UUID, source device, session, optional recognized student, and the event timestamp. The Core API adds its attendance decision/rejection reason to metadata; raw outcome and final attendance remain separate.
 
 `attendance_records` is the final domain decision. The application validates the active session, `session_students` snapshot, device, timing/grace period, and recognition outcome before inserting a record. A database unique constraint allows at most one final row per `(session_id, student_id)`. One recognition event can be used by at most one final record. Manual/system decisions have no recognition event; face-recognition decisions must reference one.
 

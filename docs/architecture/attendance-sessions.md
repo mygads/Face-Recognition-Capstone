@@ -28,6 +28,8 @@ session_students. This prevents any final attendance record for a student who wa
 not in the session-time roster, even if a future write path misses an application
 check. The migration backfills a snapshot row for any pre-existing attendance
 record before adding that constraint.
+Recognition-to-attendance rules and the event-ingest contract are described in
+[attendance-decisions.md](attendance-decisions.md).
 
 The Vue /app/sessions page lists schedules openable today, supports the configurable
 grace period, and shows current/recent session status, roster count, scheduled end,

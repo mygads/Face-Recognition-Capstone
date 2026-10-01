@@ -486,6 +486,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/attendance/recognition-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record an AI recognition event and decide attendance
+         * @description Stores the recognition event for audit. Creates a final attendance record only when device, session, roster, liveness, and duplicate rules pass.
+         */
+        post: operations["ingest_recognition_event_api_v1_attendance_recognition_events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/attendance": {
         parameters: {
             query?: never;
@@ -1220,6 +1240,78 @@ export interface components {
             limit: number;
             /** Offset */
             offset: number;
+        };
+        /** RecognitionEventDecisionResponse */
+        RecognitionEventDecisionResponse: {
+            /**
+             * Event Id
+             * Format: uuid
+             */
+            event_id: string;
+            /**
+             * Recognition Event Id
+             * Format: uuid
+             */
+            recognition_event_id: string;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "matched" | "ambiguous" | "no_match" | "error";
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "attendance_recorded" | "no_attendance";
+            /** Reason */
+            reason: ("device_inactive" | "device_laboratory_mismatch" | "session_inactive" | "student_not_found" | "student_not_in_session_roster" | "session_not_accessible" | "recognition_not_matched" | "liveness_failed" | "attendance_already_recorded") | null;
+            attendance: components["schemas"]["AttendanceRecordResponse"] | null;
+            /** Replayed */
+            replayed: boolean;
+        };
+        /** RecognitionEventRequest */
+        RecognitionEventRequest: {
+            /**
+             * Event Id
+             * Format: uuid
+             */
+            event_id: string;
+            /**
+             * Device Id
+             * Format: uuid
+             */
+            device_id: string;
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /** Student Id */
+            student_id: string | null;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "matched" | "ambiguous" | "no_match" | "error";
+            /** Similarity */
+            similarity?: number | string | null;
+            /** Confidence */
+            confidence?: number | string | null;
+            /** Margin */
+            margin?: number | string | null;
+            /** Liveness Passed */
+            liveness_passed?: boolean | null;
+            /** Liveness Score */
+            liveness_score?: number | string | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Model Name */
+            model_name: string;
+            /** Model Version */
+            model_version: string;
         };
         /** ScheduleCreateRequest */
         ScheduleCreateRequest: {
@@ -6339,6 +6431,147 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PageResponse_FaceTemplateResponse_"];
+                };
+            };
+            /** @description The request could not be processed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Authentication is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description You are not allowed to perform this action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The requested resource was not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This method is not allowed for the resource. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The uploaded file exceeds the allowed size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The file extension or media type is not supported. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Request validation failed. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many requests. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description An unexpected server error occurred. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This API operation is not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The service is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    ingest_recognition_event_api_v1_attendance_recognition_events_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecognitionEventRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecognitionEventDecisionResponse"];
                 };
             };
             /** @description The request could not be processed. */

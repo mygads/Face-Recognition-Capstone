@@ -62,6 +62,7 @@ def test_openapi_lists_each_versioned_router_group() -> None:
         "/api/v1/enrollments/captures",
         "/api/v1/face-templates",
         "/api/v1/attendance",
+        "/api/v1/attendance/recognition-events",
         "/api/v1/attendance/corrections",
         "/api/v1/reports/attendance",
     } <= set(document["paths"])
@@ -78,6 +79,8 @@ def test_openapi_uses_pydantic_contract_and_shared_error_schema() -> None:
     assert "ErrorEnvelope" in schemas
     assert "EnrollmentStudentStatusResponse" in schemas
     assert "EnrollmentCaptureResultResponse" in schemas
+    assert "RecognitionEventRequest" in schemas
+    assert "RecognitionEventDecisionResponse" in schemas
     template_fields = set(schemas["FaceTemplateResponse"]["properties"])
     assert {"model_name", "model_version", "quality_metadata", "created_at"} <= (
         template_fields

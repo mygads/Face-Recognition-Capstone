@@ -200,6 +200,40 @@ def test_recognition_event_rejects_confidence_outside_unit_interval(
             session.commit()
 
 
+def test_recognition_event_similarity_uses_cosine_range(
+    database: Engine, attendance_context: dict[str, object]
+) -> None:
+    with Session(database) as session:
+        session.add(
+            RecognitionEvent(
+                event_uuid=uuid4(),
+                session_id=attendance_context["session_id"],
+                device_id=attendance_context["device_id"],
+                occurred_at=datetime.now(timezone.utc),
+                outcome="no_match",
+                model_name="recognition-model",
+                model_version="1.0.0",
+                similarity=-1.0,
+            )
+        )
+        session.commit()
+
+        session.add(
+            RecognitionEvent(
+                event_uuid=uuid4(),
+                session_id=attendance_context["session_id"],
+                device_id=attendance_context["device_id"],
+                occurred_at=datetime.now(timezone.utc),
+                outcome="no_match",
+                model_name="recognition-model",
+                model_version="1.0.0",
+                similarity=1.01,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+
+
 def test_role_seed_is_repeatable(database: Engine) -> None:
     with Session(database) as session:
         assert seed_roles(session) == len(ROLE_SEEDS)
