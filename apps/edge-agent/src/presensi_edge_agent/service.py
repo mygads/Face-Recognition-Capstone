@@ -175,11 +175,18 @@ class EdgeService:
         bundle = self.cache.current()
         if bundle is None:
             if self._active_session_id is not None:
+                expired_session_id = str(self._active_session_id)
                 self._active_session_id = None
                 self._active_bundle = None
                 self._gallery = ()
                 self._last_decision = None
                 self.recognizer.reset()
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "active_session_cache_expired_or_cleared",
+                    session_id=expired_session_id,
+                )
             return
         session_changed = bundle.session_id != self._active_session_id
         cache_changed = (
@@ -296,6 +303,7 @@ class EdgeService:
                 device_id=self.device_id,
                 model_name="opencv-zoo-sface",
                 model_version=self.config.models.version,
+                max_offline_seconds=self.config.api.cache_max_offline_seconds,
             )
         except ApiCallError as exc:
             log_event(

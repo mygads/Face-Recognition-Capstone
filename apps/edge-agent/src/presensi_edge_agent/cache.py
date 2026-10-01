@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import threading
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol, cast
 from uuid import UUID
 
@@ -12,6 +12,9 @@ from recognition_core.domain import FaceEmbedding, GalleryEntry
 
 class CacheSchemaError(ValueError):
     """Raised when a session cache response is unsafe or malformed."""
+
+
+DEFAULT_MAX_OFFLINE_SECONDS = 300.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +31,7 @@ class SessionCacheBundle:
     session_id: UUID
     session_status: str
     generated_at: datetime
+    session_ends_at: datetime
     expires_at: datetime
     model_name: str
     model_version: str
@@ -120,6 +124,7 @@ def parse_session_cache(
     device_id: UUID,
     model_name: str,
     model_version: str,
+    max_offline_seconds: float = DEFAULT_MAX_OFFLINE_SECONDS,
     now: datetime | None = None,
 ) -> SessionCacheBundle:
     data = _object(payload, "root")
@@ -129,9 +134,27 @@ def parse_session_cache(
     if _required_string(data, "session_status") != "active":
         raise CacheSchemaError("Cache session is not active.")
     generated_at = _timestamp(data, "generated_at")
+    session_ends_at = _timestamp(data, "session_ends_at")
     expires_at = _timestamp(data, "expires_at")
     current_time = (now or datetime.now(UTC)).astimezone(UTC)
-    if expires_at <= current_time or generated_at > current_time:
+    if (
+        not math.isfinite(max_offline_seconds)
+        or max_offline_seconds <= 0
+        or max_offline_seconds > 86400
+    ):
+        raise ValueError("max_offline_seconds must be between 0 and 86400.")
+    # Server expiry is authoritative; the local freshness policy can only
+    # shorten it. An old bundle can never be made valid by a distant expiry.
+    expires_at = min(
+        expires_at,
+        session_ends_at,
+        generated_at + timedelta(seconds=max_offline_seconds),
+    )
+    if (
+        expires_at <= current_time
+        or generated_at > current_time
+        or session_ends_at <= current_time
+    ):
         raise CacheSchemaError("Cache is expired or has an invalid timestamp.")
     returned_model_name = _required_string(data, "model_name")
     returned_model_version = _required_string(data, "model_version")
@@ -163,6 +186,7 @@ def parse_session_cache(
         session_id=_uuid(data, "session_id"),
         session_status="active",
         generated_at=generated_at,
+        session_ends_at=session_ends_at,
         expires_at=expires_at,
         model_name=returned_model_name,
         model_version=returned_model_version,

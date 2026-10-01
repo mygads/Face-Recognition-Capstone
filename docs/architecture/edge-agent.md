@@ -36,7 +36,22 @@ session, roster, liveness policy, and duplicate rules.
 The service depends on a cache-provider adapter contract and accepts a
 device-scoped active-session bundle in memory. A bundle is checked for matching
 device, active session, expiry, and recognition model/version before it becomes
-the matching gallery. It is not persisted locally.
+the matching gallery. Its effective expiry is the earliest of the provider
+expiry, scheduled session end, and the configured local freshness ceiling
+(`api.cache_max_offline_seconds`, default 300 seconds after the last successful
+fetch). An expired bundle is cleared and the agent stops recognition until a
+fresh active-session bundle arrives. The gallery is not persisted locally.
+If the process restarts while disconnected, it cannot restore biometric vectors
+from disk; it fails closed until the provider is reachable, while the event
+outbox remains durable across that restart.
+
+The event outbox uses a durable monotonically ordered SQLite sequence. Events
+are sent FIFO with the original `event_id`; retrying a head event blocks later
+events until it is acknowledged or dead-lettered. If an event is accepted by
+the API but its response is lost, the same idempotency key is retried. The API
+returns the saved result instead of creating a second record. On reconnect, the
+API still checks that the session is active; queued events from a session that
+has ended remain auditable but cannot create attendance.
 
 Core API currently has no active-session roster/template cache endpoint.
 `GET /api/v1/face-templates` is a metadata-only 501 placeholder, enrollment is
@@ -47,7 +62,9 @@ operational. **This is a blocker until the team approves a biometric storage
 policy and implements an authenticated provider.** This task preserves the
 existing no-image/no-embedding database policy. Replace the configured provider
 adapter when that approved API contract exists; do not put vectors in generic
-JSON or this agent's disk cache.
+JSON or this agent's disk cache. The future provider must return an authoritative
+`expires_at` no later than `session_ends_at`; the edge independently caps that
+expiry by the configured offline freshness ceiling.
 
 The API currently authenticates requests with short-lived operator JWTs. The
 agent reads the token from an environment variable or protected token file. A

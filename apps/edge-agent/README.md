@@ -83,9 +83,20 @@ hardware.
 Heartbeat (`POST /api/v1/devices/{device_id}/heartbeat`) and recognition-event
 ingest (`POST /api/v1/attendance/recognition-events`) use the existing Core API.
 Events are persisted locally with a UUID idempotency key and retried with
-exponential backoff. The allowlisted outbox schema contains no image, embedding,
-or token fields. Non-retryable event responses are moved to a local dead-letter
-state for operator review.
+exponential backoff in strict FIFO order. A retrying head event blocks later
+events so reconnect never reorders attendance evidence. SQLite persists the
+queue across agent restarts. The allowlisted outbox schema contains no image,
+embedding, or token fields. Non-retryable event responses are moved to a local
+dead-letter state for operator review.
+
+The session gallery remains in memory. Its local validity is capped by both the
+provider expiry and `session_ends_at`, plus `api.cache_max_offline_seconds`
+(default 300 seconds since the last successful fetch). After that limit, the
+agent clears the gallery and stops recognition until a fresh active-session
+cache arrives. On reconnect the Core API also rejects attendance for sessions
+it has closed; those events can still be stored as recognition audit evidence.
+If the process restarts offline, the in-memory gallery is unavailable and local
+recognition waits for a fresh provider response; queued events still survive.
 
 The active-session cache uses a provider adapter contract at
 `api.cache_path`. The matching Core API endpoint does **not** exist yet and

@@ -55,9 +55,10 @@ class EventOutbox:
         self._db = sqlite3.connect(self.path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute(
-            """CREATE TABLE IF NOT EXISTS edge_event_outbox (
-                event_id TEXT PRIMARY KEY,
+        self._db.execute("PRAGMA synchronous=FULL")
+        create_table_sql = """CREATE TABLE IF NOT EXISTS edge_event_outbox (
+                queue_seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT NOT NULL UNIQUE,
                 payload_json TEXT NOT NULL,
                 attempts INTEGER NOT NULL DEFAULT 0,
                 next_attempt_at TEXT NOT NULL,
@@ -65,10 +66,35 @@ class EventOutbox:
                 last_error_status INTEGER,
                 created_at TEXT NOT NULL
             )"""
-        )
+        self._db.execute(create_table_sql)
+        columns = {
+            str(row["name"])
+            for row in self._db.execute(
+                "PRAGMA table_info(edge_event_outbox)"
+            ).fetchall()
+        }
+        if "queue_seq" not in columns:
+            # Preserve queue contents when upgrading databases created by the
+            # first outbox version, whose ordering used timestamps and UUIDs.
+            self._db.execute("BEGIN IMMEDIATE")
+            self._db.execute(
+                "ALTER TABLE edge_event_outbox RENAME TO edge_event_outbox_legacy"
+            )
+            self._db.execute(create_table_sql)
+            self._db.execute(
+                """INSERT INTO edge_event_outbox
+                    (event_id, payload_json, attempts, next_attempt_at, status,
+                     last_error_status, created_at)
+                   SELECT event_id, payload_json, attempts, next_attempt_at, status,
+                          last_error_status, created_at
+                   FROM edge_event_outbox_legacy
+                   ORDER BY created_at, event_id"""
+            )
+            self._db.execute("DROP TABLE edge_event_outbox_legacy")
+            self._db.commit()
         self._db.execute(
             "CREATE INDEX IF NOT EXISTS ix_edge_event_outbox_due "
-            "ON edge_event_outbox(status, next_attempt_at, created_at)"
+            "ON edge_event_outbox(status, queue_seq)"
         )
         self._db.commit()
 
@@ -122,13 +148,17 @@ class EventOutbox:
         timestamp = (now or datetime.now(UTC)).astimezone(UTC).isoformat()
         with self._lock:
             rows = self._db.execute(
-                "SELECT event_id, payload_json, attempts FROM edge_event_outbox "
-                "WHERE status = 'pending' AND next_attempt_at <= ? "
-                "ORDER BY created_at, event_id LIMIT ?",
-                (timestamp, limit),
+                "SELECT event_id, payload_json, attempts, next_attempt_at "
+                "FROM edge_event_outbox WHERE status = 'pending' "
+                "ORDER BY queue_seq LIMIT ?",
+                (limit,),
             ).fetchall()
         result: list[QueuedEvent] = []
         for row in rows:
+            # A retrying head event blocks later events, preserving strict FIFO
+            # order instead of skipping ahead while its backoff is in effect.
+            if str(row["next_attempt_at"]) > timestamp:
+                break
             payload = json.loads(row["payload_json"])
             if not isinstance(payload, dict):
                 continue

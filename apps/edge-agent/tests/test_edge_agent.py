@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import logging
+import sqlite3
+import time
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -65,6 +68,7 @@ def sample_bundle_payload(
         "session_id": str(SESSION_ID),
         "session_status": "active",
         "generated_at": created_at.isoformat(),
+        "session_ends_at": (created_at + timedelta(hours=2)).isoformat(),
         "expires_at": (created_at + timedelta(minutes=1)).isoformat(),
         "model_name": MODEL_NAME,
         "model_version": model_version,
@@ -99,6 +103,7 @@ def test_yaml_config_accepts_environment_overrides_without_a_secret_in_yaml() ->
             "PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID),
             "PRESENSI_EDGE_CAMERA_INDEX": "2",
             "PRESENSI_EDGE_SAMPLE_EVERY_N_FRAMES": "7",
+            "PRESENSI_EDGE_CACHE_MAX_OFFLINE_SECONDS": "90",
             "PRESENSI_EDGE_API_TOKEN": "test-token-is-in-environment-only",
         },
     )
@@ -108,6 +113,7 @@ def test_yaml_config_accepts_environment_overrides_without_a_secret_in_yaml() ->
     assert config.camera.width == 1920
     assert config.camera.height == 1080
     assert config.recognition.sample_every_n_frames == 7
+    assert config.api.cache_max_offline_seconds == 90
     assert config.recognition.min_top1_similarity is None
     assert "test-token-is-in-environment-only" not in repr(config)
 
@@ -248,6 +254,122 @@ def test_cache_rejects_invalid_session_scope_and_timestamps(
         )
 
 
+def test_cache_expiry_is_capped_by_session_end_and_local_offline_policy() -> None:
+    now = datetime.now(UTC)
+    payload = sample_bundle_payload(now=now)
+    session_end = now + timedelta(minutes=2)
+    payload["expires_at"] = (now + timedelta(hours=1)).isoformat()
+    payload["session_ends_at"] = session_end.isoformat()
+    bundle = parse_session_cache(
+        payload,
+        device_id=DEVICE_ID,
+        model_name=MODEL_NAME,
+        model_version=MODEL_VERSION,
+        max_offline_seconds=300,
+        now=now,
+    )
+    assert bundle.expires_at == session_end
+
+    cache = ActiveSessionCache()
+    cache.replace(bundle)
+    assert cache.current(now=session_end) is None
+
+    stale_payload = sample_bundle_payload(now=now - timedelta(minutes=6))
+    stale_payload["expires_at"] = (now + timedelta(hours=1)).isoformat()
+    stale_payload["session_ends_at"] = (now + timedelta(hours=1)).isoformat()
+    with pytest.raises(CacheSchemaError, match="expired"):
+        parse_session_cache(
+            stale_payload,
+            device_id=DEVICE_ID,
+            model_name=MODEL_NAME,
+            model_version=MODEL_VERSION,
+            max_offline_seconds=300,
+            now=now,
+        )
+
+
+def test_expired_cache_prevents_service_from_running_another_decision(
+    tmp_path: Path,
+) -> None:
+    now = datetime.now(UTC)
+    bundle = parse_session_cache(
+        sample_bundle_payload(now=now),
+        device_id=DEVICE_ID,
+        model_name=MODEL_NAME,
+        model_version=MODEL_VERSION,
+    )
+    expired_bundle = replace(bundle, expires_at=now - timedelta(seconds=1))
+    config = EdgeConfig(
+        config_path=tmp_path / "edge.yaml",
+        device_id=DEVICE_ID,
+        api=ApiSettings(
+            base_url="https://api.example.test",
+            timeout_seconds=1,
+            heartbeat_interval_seconds=5,
+            cache_refresh_seconds=3,
+            cache_path="/api/v1/devices/{device_id}/active-session-cache",
+            token_file=None,
+        ),
+        camera=CameraSettings(0, 1920, 1080, 30, "auto", 4, 1),
+        models=ModelSettings(None, None, MODEL_VERSION, None, None),
+        quality=QualitySettings(80, 45, 25, 235),
+        recognition=RecognitionSettings(None, None, 3, 5, 5, 10, 3),
+        liveness=LivenessSettings(False, False, None),
+        runtime=RuntimeSettings(tmp_path / "expired.sqlite3", 10, 1, "INFO"),
+    )
+
+    class NeverCalledApi:
+        def heartbeat(self) -> None: ...
+
+        def submit_recognition_event(self, _payload: dict[str, object]) -> None: ...
+
+    class FakeCamera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            return False, None
+
+        def close(self) -> None: ...
+
+    class CountingRecognizer:
+        calls = 0
+
+        def process(
+            self,
+            _frame: object,
+            _gallery: tuple[GalleryEntry, ...],
+            _captured_at: datetime,
+        ) -> TrackDecision:
+            self.calls += 1
+            raise AssertionError("Expired cache must not reach recognition.")
+
+        def reset(self) -> None: ...
+
+    outbox = EventOutbox(tmp_path / "expired.sqlite3", max_pending=10)
+    recognizer = CountingRecognizer()
+    service = EdgeService(
+        config,
+        FakeCamera(),
+        NeverCalledApi(),  # type: ignore[arg-type]
+        outbox,
+        recognizer,  # type: ignore[arg-type]
+        lambda: {},
+    )
+    service.cache.replace(expired_bundle)
+    service._active_session_id = bundle.session_id
+    service._active_bundle = bundle
+    service._gallery = bundle.gallery()
+
+    service._process_frame(object())
+
+    assert recognizer.calls == 0
+    assert service.cache.current() is None
+    assert service._active_session_id is None
+    assert service._gallery == ()
+    assert outbox.counts() == (0, 0)
+    outbox.close()
+
+
 def test_outbox_keeps_idempotent_event_payloads_across_retry(tmp_path: Path) -> None:
     outbox = EventOutbox(tmp_path / "events.sqlite3", max_pending=2)
     payload = event_payload(
@@ -326,6 +448,66 @@ def test_outbox_refuses_biometrics_and_detects_local_id_reuse(tmp_path: Path) ->
     with pytest.raises(OutboxFullError):
         outbox.enqueue({**payload, "event_id": str(uuid4())})
     outbox.close()
+
+
+def test_outbox_migrates_prior_sqlite_schema_without_losing_fifo_order(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "legacy-events.sqlite3"
+    legacy = sqlite3.connect(path)
+    legacy.execute(
+        """CREATE TABLE edge_event_outbox (
+            event_id TEXT PRIMARY KEY,
+            payload_json TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            next_attempt_at TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            last_error_status INTEGER,
+            created_at TEXT NOT NULL
+        )"""
+    )
+    legacy.execute(
+        "CREATE INDEX ix_edge_event_outbox_due "
+        "ON edge_event_outbox(status, next_attempt_at, created_at)"
+    )
+    base_time = datetime.now(UTC)
+    expected: list[str] = []
+    for index in range(3):
+        event_id = str(UUID(int=9000 + index))
+        expected.append(event_id)
+        payload = {
+            "event_id": event_id,
+            "device_id": str(DEVICE_ID),
+            "session_id": str(SESSION_ID),
+            "student_id": str(STUDENT_ID),
+            "outcome": "matched",
+            "similarity": 0.8,
+            "confidence": 0.9,
+            "margin": 0.3,
+            "liveness_passed": None,
+            "liveness_score": None,
+            "occurred_at": (base_time + timedelta(seconds=index)).isoformat(),
+            "model_name": MODEL_NAME,
+            "model_version": MODEL_VERSION,
+        }
+        legacy.execute(
+            """INSERT INTO edge_event_outbox
+               (event_id, payload_json, attempts, next_attempt_at, status,
+                last_error_status, created_at)
+               VALUES (?, ?, 0, ?, 'pending', NULL, ?)""",
+            (
+                event_id,
+                json.dumps(payload, sort_keys=True),
+                base_time.isoformat(),
+                (base_time + timedelta(seconds=index)).isoformat(),
+            ),
+        )
+    legacy.commit()
+    legacy.close()
+
+    migrated = EventOutbox(path, max_pending=10)
+    assert [str(event.event_id) for event in migrated.due()] == expected
+    migrated.close()
 
 
 class FakeCapture:
@@ -515,3 +697,163 @@ def test_transient_api_failures_leave_edge_service_and_outbox_usable(
     assert "embedding" not in serialized_logs.lower()
     assert "short-lived-test-token" not in serialized_logs
     outbox.close()
+
+
+def test_ten_offline_events_survive_restart_and_reconnect_in_fifo_idempotently(
+    tmp_path: Path,
+) -> None:
+    second_student_id = UUID("33000000-0000-4000-8000-000000000004")
+    config = EdgeConfig(
+        config_path=tmp_path / "edge.yaml",
+        device_id=DEVICE_ID,
+        api=ApiSettings(
+            base_url="https://api.example.test",
+            timeout_seconds=1,
+            heartbeat_interval_seconds=5,
+            cache_refresh_seconds=3,
+            cache_path="/api/v1/devices/{device_id}/active-session-cache",
+            token_file=None,
+        ),
+        camera=CameraSettings(0, 1920, 1080, 30, "auto", 4, 1),
+        models=ModelSettings(None, None, MODEL_VERSION, None, None),
+        quality=QualitySettings(80, 45, 25, 235),
+        recognition=RecognitionSettings(None, None, 3, 5, 5, 10, 3),
+        liveness=LivenessSettings(False, False, None),
+        runtime=RuntimeSettings(tmp_path / "queue.sqlite3", 20, 0.5, "INFO"),
+    )
+
+    class IdempotentFakeApi:
+        available = False
+        lose_response_for: str | None = None
+
+        def __init__(self) -> None:
+            self.attempted: list[str] = []
+            self.accepted: list[str] = []
+            self._accepted_ids: set[str] = set()
+
+        def heartbeat(self) -> None:
+            if not self.available:
+                raise ApiCallError(503, retryable=True)
+
+        def submit_recognition_event(self, payload: dict[str, object]) -> None:
+            event_id = str(payload["event_id"])
+            self.attempted.append(event_id)
+            if not self.available:
+                raise ApiCallError(503, retryable=True)
+            if event_id not in self._accepted_ids:
+                self._accepted_ids.add(event_id)
+                self.accepted.append(event_id)
+            if self.lose_response_for == event_id:
+                self.lose_response_for = None
+                raise ApiCallError(None, retryable=True)
+
+    class FakeCamera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            return False, None
+
+        def close(self) -> None: ...
+
+    class FakeRecognizer:
+        def __init__(self) -> None:
+            self.candidate_ids = [STUDENT_ID, second_student_id] * 5
+            self.processed = 0
+            self.reset_count = 0
+
+        def process(
+            self,
+            _frame: object,
+            gallery: tuple[GalleryEntry, ...],
+            _captured_at: datetime,
+        ) -> TrackDecision:
+            assert len(gallery) == 2
+            candidate = self.candidate_ids[self.processed]
+            self.processed += 1
+            return TrackDecision(
+                track_id="offline-test-camera",
+                state="accepted",
+                decision=RecognitionDecision(
+                    outcome="matched",
+                    student_id=candidate,
+                    confidence=0.95,
+                    margin=0.4,
+                ),
+                observation_count=3,
+            )
+
+        def reset(self) -> None:
+            self.reset_count += 1
+
+    cache_payload = sample_bundle_payload()
+    roster = cache_payload["roster"]
+    assert isinstance(roster, list)
+    second_student = roster[1]
+    first_student = roster[0]
+    assert isinstance(second_student, dict) and isinstance(first_student, dict)
+    second_student["templates"] = first_student["templates"]
+    bundle = parse_session_cache(
+        cache_payload,
+        device_id=DEVICE_ID,
+        model_name=MODEL_NAME,
+        model_version=MODEL_VERSION,
+    )
+
+    api = IdempotentFakeApi()
+    outbox = EventOutbox(config.runtime.outbox_path, max_pending=20)
+    recognizer = FakeRecognizer()
+    first_process = EdgeService(
+        config,
+        FakeCamera(),
+        api,  # type: ignore[arg-type]
+        outbox,
+        recognizer,  # type: ignore[arg-type]
+        lambda: {},
+    )
+    first_process.cache.replace(bundle)
+    for _ in range(10):
+        first_process._process_frame(object())
+    assert recognizer.processed == 10
+    assert outbox.counts() == (10, 0)
+
+    # The API is unavailable while decisions keep being queued locally.
+    first_process._flush_outbox()
+    expected_order = [
+        str(event.event_id)
+        for event in outbox.due(now=datetime.now(UTC) + timedelta(minutes=1))
+    ]
+    assert len(expected_order) == 10
+    assert api.attempted == [expected_order[0]]
+    assert outbox.due(now=datetime.now(UTC) + timedelta(milliseconds=100)) == []
+    outbox.close()
+
+    # A new process opens the same SQLite file and resumes the pending queue.
+    reopened_outbox = EventOutbox(config.runtime.outbox_path, max_pending=20)
+    assert reopened_outbox.counts() == (10, 0)
+    restarted_process = EdgeService(
+        config,
+        FakeCamera(),
+        api,  # type: ignore[arg-type]
+        reopened_outbox,
+        FakeRecognizer(),  # type: ignore[arg-type]
+        lambda: {},
+    )
+    time.sleep(0.55)
+    api.available = True
+    api.lose_response_for = expected_order[0]
+    restarted_process._flush_outbox()
+    assert api.accepted == [expected_order[0]]
+    assert (
+        reopened_outbox.due(now=datetime.now(UTC) + timedelta(milliseconds=100)) == []
+    )
+
+    # The simulated server already committed the first UUID before its response
+    # was lost. Replaying that UUID is idempotent, then later UUIDs drain FIFO.
+    time.sleep(0.55)
+    restarted_process._flush_outbox()
+    restarted_process._flush_outbox()
+    assert api.accepted == expected_order
+    assert len(set(api.accepted)) == 10
+    assert api.attempted.count(expected_order[0]) == 3
+    assert reopened_outbox.counts() == (0, 0)
+    reopened_outbox.close()

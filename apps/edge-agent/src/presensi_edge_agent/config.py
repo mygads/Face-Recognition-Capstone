@@ -22,6 +22,7 @@ class ApiSettings:
     cache_refresh_seconds: float
     cache_path: str
     token_file: Path | None
+    cache_max_offline_seconds: float = 300.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +137,11 @@ _ENVIRONMENT_OVERRIDES: dict[
     "PRESENSI_EDGE_DEVICE_ID": ("", "device_id", str),
     "PRESENSI_EDGE_API_BASE_URL": ("api", "base_url", str),
     "PRESENSI_EDGE_API_TOKEN_FILE": ("api", "token_file", str),
+    "PRESENSI_EDGE_CACHE_MAX_OFFLINE_SECONDS": (
+        "api",
+        "cache_max_offline_seconds",
+        float,
+    ),
     "PRESENSI_EDGE_CAMERA_INDEX": ("camera", "index", int),
     "PRESENSI_EDGE_CAMERA_WIDTH": ("camera", "width", int),
     "PRESENSI_EDGE_CAMERA_HEIGHT": ("camera", "height", int),
@@ -304,7 +310,13 @@ def load_config(
         ),
         cache_path=cache_path,
         token_file=_path(base, api_raw.get("token_file"), "api.token_file"),
+        cache_max_offline_seconds=_positive_number(
+            api_raw.get("cache_max_offline_seconds", 300),
+            "api.cache_max_offline_seconds",
+        ),
     )
+    if api.cache_max_offline_seconds > 86400:
+        raise EdgeConfigError("api.cache_max_offline_seconds must not exceed 86400.")
 
     camera_index_raw = camera_raw.get("index", 0)
     try:
