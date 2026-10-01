@@ -206,6 +206,54 @@ controls inference sampling independently from capture FPS. The default example
 requests 1920×1080 at 30 FPS and samples every sixth frame; tune it on target
 hardware.
 
+## Local camera calibration preview
+
+`presensi-camera-calibration` is a local installation utility, separate from the
+production UI and edge-agent runtime. It shows a live preview, YuNet face boxes,
+observed preview FPS, face size in pixels, Laplacian blur score, grayscale
+brightness proxy, quality score, and simple too-dark/backlight warnings. It
+never writes frames, crops, embeddings, or camera images. An optional JSON report
+contains aggregate measurements and camera mode metadata only. For face checks,
+use an adult volunteer who has agreed to the local calibration.
+
+Use a dedicated virtual environment because this preview needs the desktop
+`opencv-python` package for its window. Do not install the preview extra into an
+environment that also uses the agent's `camera` or `recognition-core[opencv]`
+extras; those use headless OpenCV. YuNet is read from a locally provisioned
+model file and is never downloaded by this utility.
+
+Windows PowerShell, from the repository root:
+
+```powershell
+python -m venv .venv-camera-calibration
+.\.venv-camera-calibration\Scripts\Activate.ps1
+python -m pip install -e "apps/edge-agent[camera-preview]" -e "libs/recognition-core"
+presensi-camera-calibration --list-cameras
+presensi-camera-calibration --config apps/edge-agent/config/edge-agent.yaml --report camera-calibration.json
+```
+
+Linux, from the repository root in a desktop session:
+
+```bash
+python3 -m venv .venv-camera-calibration
+. .venv-camera-calibration/bin/activate
+python -m pip install -e 'apps/edge-agent[camera-preview]' -e 'libs/recognition-core'
+presensi-camera-calibration --list-cameras
+presensi-camera-calibration --config apps/edge-agent/config/edge-agent.yaml --report camera-calibration.json
+```
+
+The config is optional if `--yunet-model /path/to/local-yunet.onnx` is supplied;
+camera mode and quality limits can also be overridden with CLI flags. Close the
+preview with **Q** or **Esc**, or use `--duration-seconds 60`. Aim the camera at
+the real walk-through path and check the face box size and stability at several
+positions. A persistent `TOO_DARK` or `BACKLIGHT` warning suggests trying a
+diffuse light near the camera axis or changing the camera direction. The
+brightness value is a grayscale pixel-value proxy, not lux or sensor exposure;
+warnings are setup heuristics and should be checked under the lab's actual
+lighting conditions. FPS shown is measured through detection and preview, so it
+is not a camera-only throughput measurement. Calibration is local and does not
+create attendance events.
+
 ## API, session discovery, and offline behavior
 
 Heartbeat (`POST /api/v1/devices/{device_id}/device-heartbeat`) and

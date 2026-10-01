@@ -7,6 +7,7 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv-camera-calibration/
 venv/
 .mypy_cache/
 .ruff_cache/
@@ -36,6 +37,7 @@ tests/deployment-benchmark/datasets/
 tests/deployment-benchmark/reports/runs/
 models/weights/
 apps/edge-agent/config/edge-agent.yaml
+camera-calibration*.json
 *.embedding
 *.embeddings
 *.sqlite

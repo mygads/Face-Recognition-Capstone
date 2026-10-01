@@ -14,11 +14,13 @@ dependencies = [
 
 [project.optional-dependencies]
 camera = ["numpy>=1.26", "opencv-python-headless>=4.10,<5"]
+camera-preview = ["numpy>=1.26", "opencv-python>=4.10,<5"]
 antispoof = ["onnxruntime>=1.18"]
 dev = ["pytest>=8,<10", "types-PyYAML>=6,<7"]
 
 [project.scripts]
 presensi-edge-agent = "presensi_edge_agent.cli:main"
+presensi-camera-calibration = "presensi_edge_agent.camera_calibration:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
