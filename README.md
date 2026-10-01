@@ -54,6 +54,8 @@ Perintah yang sama berlaku di Linux. Jika ingin seluruh UI berjalan dalam contai
 
 - Web native: `http://127.0.0.1:5173`
 - Core API: `http://127.0.0.1:8000/health`
+- API v1 health: `http://127.0.0.1:8000/api/v1/health`
+- FastAPI OpenAPI: `http://127.0.0.1:8000/openapi.json`
 - PostgreSQL: `127.0.0.1:5432` (dapat diubah lewat `.env`)
 - Central AI (profile `central`): `http://127.0.0.1:8001/health`
 
@@ -117,5 +119,6 @@ docs/test-plans/         baseline dan protokol uji
 ```
 
 Detail tabel, aturan integritas, index, dan migration ada di [docs/architecture/database-schema.md](docs/architecture/database-schema.md).
+Strategi API versioning dan pembuatan TypeScript client dari OpenAPI dijelaskan di [docs/architecture/api-contract.md](docs/architecture/api-contract.md).
 
 Baca [arsitektur](docs/architecture/overview.md), [ADR-001](docs/adr/ADR-001-shared-recognition-core.md), dan [AGENTS.md](AGENTS.md) sebelum mengubah struktur/domain. Compose hanya untuk development, bukan deployment production.

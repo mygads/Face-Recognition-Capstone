@@ -75,6 +75,8 @@ Desain v2 merekomendasikan pilot AI_EDGE karena saat ini hanya ada dua lab dan l
 
 ## Development environment
 
+API v1 contract and frontend client generation follow the strategy in [api-contract.md](api-contract.md).
+
 `docker-compose.yml` menjalankan PostgreSQL dan Core API secara default. PostgreSQL harus healthy sebelum API dimulai; healthcheck API memeriksa `/health`. AI service adalah service terpisah pada profile Compose `central`, dan web dapat dijalankan native untuk HMR atau sebagai service profile `web-container`. Edge agent/webcam tidak dijalankan di Compose karena akses kamera bergantung pada OS dan device passthrough.
 
 Development Compose memakai `.env` lokal dari `.env.example`, mengekspos port hanya pada loopback, dan menyimpan data PostgreSQL di named volume. `scripts/dev.py` menyediakan `dev-up`, `dev-down`, dan `test` untuk Windows/Linux.
