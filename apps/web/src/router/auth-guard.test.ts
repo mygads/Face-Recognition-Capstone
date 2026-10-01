@@ -68,4 +68,25 @@ describe('route authorization', () => {
     await router.push('/app/reports')
     expect(router.currentRoute.value.name).toBe('forbidden')
   })
+
+  it('keeps master data limited to administrators', async () => {
+    const pinia = createPinia()
+    const auth = useAuthStore(pinia)
+    auth.$patch({
+      accessToken: 'unit-fixture-access-token',
+      expiresAt: Date.now() + 60_000,
+      account: {
+        id: '9c6c68d0-9b70-4c80-a9bd-15c2a55ecb27',
+        email: 'teacher@example.test',
+        full_name: 'Test Teacher',
+        roles: ['TEACHER'],
+      },
+    })
+    const router = createAppRouter(createMemoryHistory())
+    installAuthGuard(router, pinia)
+
+    await router.push('/app/master-data')
+
+    expect(router.currentRoute.value.name).toBe('forbidden')
+  })
 })

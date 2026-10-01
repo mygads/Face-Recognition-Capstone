@@ -59,6 +59,7 @@ export const routes: RouteRecordRaw[] = [
         meta: {
           title: 'Data master',
           description: 'Kelola data siswa, kelas, dan laboratorium.',
+          requiredRoles: ['ADMIN'],
         },
       },
       {

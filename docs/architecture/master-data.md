@@ -8,12 +8,12 @@ All routes are under `/api/v1` and return the shared `ErrorEnvelope` on errors.
 
 | Resource | Read | Write |
 | --- | --- | --- |
-| Students | `GET /students`, `GET /students/{student_id}` | `POST /students`, `PATCH /students/{student_id}` |
-| Classes | `GET /classes`, `GET /classes/{class_id}` | `POST /classes`, `PATCH /classes/{class_id}` |
-| Class roster | Included in class details; student details list linked classes | `POST /classes/{class_id}/students`, `DELETE /classes/{class_id}/students/{student_id}` |
+| Students | `GET /students`, `GET /students/{student_id}` (ADMIN only) | `POST /students`, `PATCH /students/{student_id}` |
+| Classes | `GET /classes` (ADMIN, TEACHER, LABORANT); `GET /classes/{class_id}` with roster (ADMIN only) | `POST /classes`, `PATCH /classes/{class_id}` |
+| Class roster | Included in class details and student details (ADMIN only) | `POST /classes/{class_id}/students`, `DELETE /classes/{class_id}/students/{student_id}` |
 | Laboratories | `GET /laboratories`, `GET /laboratories/{laboratory_id}` | `POST /laboratories`, `PATCH /laboratories/{laboratory_id}` |
 
-List endpoints accept `limit` (1–100), `offset`, case-insensitive `search`, and `is_active`. Read access uses roster/laboratory permissions. Writes and roster membership changes require `MANAGE_MASTER_DATA` (currently ADMIN only).
+List endpoints accept `limit` (1–100), `offset`, case-insensitive `search`, and `is_active`. The class catalog exposes class metadata needed by schedule and enrollment workflows. Student identifiers/names and full class rosters are restricted to `MANAGE_MASTER_DATA` (ADMIN only); TEACHER and LABORANT do not receive a global student directory. Laborants use `GET /enrollments/class-status` to see only the selected class roster needed for enrollment. Writes and roster membership changes also require `MANAGE_MASTER_DATA`.
 
 ## Integrity and lifecycle
 
@@ -35,4 +35,4 @@ The API accepts `.csv` and `.xlsx` only, checks the media type and extension, li
 
 ## UI
 
-`/app/master-data` provides responsive tabs for students, classes, and laboratories, with text search, paging, create/edit forms, detail panels, active-state updates, and class roster membership controls. Authenticated users with read permission can inspect records; write controls are shown only for ADMIN. API validation details and duplicate conflicts remain visible beside the relevant form or page.
+`/app/master-data` is restricted to ADMIN and provides responsive tabs for students, classes, and laboratories, with text search, paging, create/edit forms, detail panels, active-state updates, and class roster membership controls. The authenticated router guard, sidebar visibility, and API permissions enforce the same role boundary. API validation details and duplicate conflicts remain visible beside the relevant form or page.

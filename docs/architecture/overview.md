@@ -12,7 +12,7 @@ Sistem mendukung dua deployment profile. Keduanya memakai satu Vue SPA, satu Cor
 | --- | --- |
 | `apps/web` | Vue 3 SPA untuk pengguna sekolah. Internal dashboard; tidak membutuhkan SSR/SEO. |
 | `apps/api` | FastAPI Core API, OpenAPI contract, aturan session/roster/attendance, dan akses ke database. Ini otoritas domain. |
-| PostgreSQL | Master data, session/roster, template metadata, recognition events, attendance records, dan audit. pgvector bersifat opsional. |
+| PostgreSQL | Master data, session/roster, encrypted face-template vectors, recognition events, attendance records, dan audit. Embeddings disimpan sebagai AES-256-GCM ciphertext; pgvector tidak dipakai. |
 | `libs/recognition-core` | Pipeline Python yang dapat dipanggil dari edge-agent atau AI service; bukan aplikasi web/API. |
 | `apps/edge-agent` | Camera capture, health, cache, transport, dan offline queue sesuai profil. |
 | `apps/ai-service` | Host inference untuk profil Central; menggunakan recognition-core, bukan salinan pipeline. |
@@ -36,7 +36,7 @@ Keunggulan profil ini untuk pilot dua lab adalah inference dan frame tetap di PC
 
 ## Profile B — STB camera gateway + AI central (`STB_GATEWAY` + `AI_CENTRAL`)
 
-STB ARM64 menjalankan agent ringan tanpa recognition model lokal. Konfigurasi contoh memakai capture UVC 640×360 pada 10 FPS, downsampled motion/quality gate, cooldown, dan periodic fallback. Ketika ada kandidat, gateway mengirim paling banyak lima JPEG dalam burst melalui LAN tepercaya ke AI service pusat. AI service menjalankan pipeline `recognition-core` yang sama, lalu mengembalikan keputusan terbatas ke gateway untuk dikirim sebagai event ke Core API. Frame bersifat transient dan tidak disimpan secara default.
+STB ARM64 menjalankan agent ringan tanpa recognition model lokal. Konfigurasi contoh memakai capture UVC 640×360 pada 10 FPS, downsampled motion/quality gate, cooldown, dan periodic fallback. Gateway menemukan sesi aktif melalui Core API untuk laboratorium perangkat dan menolak kondisi lebih dari satu sesi aktif. Ketika ada kandidat, gateway mengirim paling banyak lima JPEG dalam burst melalui LAN tepercaya ke AI service pusat. AI service mengambil gallery sesi aktif dari Core API dengan kredensial perangkat, menjalankan pipeline `recognition-core` yang sama, lalu mengembalikan keputusan terbatas ke gateway untuk dikirim sebagai event ke Core API. Frame bersifat transient dan tidak disimpan secara default.
 
 ```mermaid
 flowchart LR
@@ -49,7 +49,7 @@ flowchart LR
   API --> DB[(PostgreSQL)]
 ```
 
-Profil ini memusatkan pengelolaan model dan mengurangi kebutuhan PC kuat per lab. Recognition memerlukan LAN dan server AI yang tersedia; frame wajah berpindah di jaringan lokal sehingga pengamanan transport dan akses perangkat diperlukan. Sesi dan batas waktu aktif harus dikonfigurasi pada gateway karena endpoint discovery session belum tersedia. Proses juga memerlukan alur kredensial perangkat yang dapat diperbarui otomatis sebelum cocok untuk unattended long-running deployment.
+Profil ini memusatkan pengelolaan model dan mengurangi kebutuhan PC kuat per lab. Recognition memerlukan LAN dan server AI yang tersedia; frame wajah berpindah di jaringan lokal sehingga pengamanan transport dan akses perangkat diperlukan. Gallery AI Central disimpan di memory saja, dengan expiry dibatasi waktu cache dan jadwal. Kredensial perangkat dapat diperbarui otomatis jika token file dikonfigurasi dan diamankan; sistem operasi tetap perlu melindungi berkas itu.
 
 ## Batas domain dan aliran data
 
@@ -57,7 +57,7 @@ Profil ini memusatkan pengelolaan model dan mengurangi kebutuhan PC kuat per lab
 - Recognition memakai bukti beberapa frame dan margin Top-1/Top-2. Hasil ambigu meminta retry frontal.
 - AI/edge mengirim recognition event dengan `event_id` stabil agar retry jaringan idempotent.
 - Core API menolak event di luar sesi atau roster, mencegah presensi ganda, menentukan status hadir/terlambat, dan mencatat audit.
-- Video mentah tidak disimpan secara default. Log tidak berisi gambar, embedding, token, password, atau secret.
+- Frame mentah diproses sementara dan tidak disimpan secara default. Embedding template disimpan sebagai ciphertext AES-256-GCM. Log dan respons operator tidak berisi gambar, embedding, token, password, atau secret; gallery berisi embedding terdekripsi hanya untuk perangkat terautentikasi pada sesi/lab aktif.
 - Data biometrik siswa nyata/minor tidak digunakan di cloud/CI dan tidak dimasukkan ke repository.
 - Template wajah menyimpan nama dan versi model. Pilihan model/pretrained weight memerlukan tinjauan lisensi dan validasi lokal sebelum dipakai.
 
@@ -65,7 +65,7 @@ Profil ini memusatkan pengelolaan model dan mengurangi kebutuhan PC kuat per lab
 
 `apps/web` adalah satu-satunya aplikasi frontend: Vue 3 + Vite + TypeScript. Baseline visual dipin ke Gentelella v4.1.1. Gentelella dipakai untuk design tokens, SCSS, layout, iconography, dan pola komponen; perilaku UI dibangun sebagai komponen Vue agar Vue tetap mengelola DOM secara reaktif. Jangan menjalankan skrip vanilla template yang memutasi DOM milik Vue, jangan menambahkan dashboard/template frontend kedua, dan jangan mem-port semua halaman contoh.
 
-UI ditujukan untuk dashboard internal yang responsif di desktop dan tablet. Navigasi hanya memuat fitur nyata; form harus menampilkan validation/error state. Detail shell dan komponen reusable menjadi pekerjaan UI tersendiri setelah foundation ini.
+UI ditujukan untuk dashboard internal yang responsif di desktop dan tablet. Navigasi hanya memuat halaman yang diimplementasikan, dengan visibilitas menu dan route guard berbasis role; form menampilkan validation/error state.
 
 Sumber: [Gentelella getting started](https://gentelella.colorlib.com/docs/getting-started/) dan [repository ColorlibHQ](https://github.com/ColorlibHQ/gentelella). Pertahankan atribusi dan lisensi MIT ketika aset/template didistribusikan.
 
@@ -89,6 +89,8 @@ selection are host-specific.
 The `AI_CENTRAL` inference contract, device authentication, bounded image handling,
 and memory-only session cache lifecycle are documented in [ai-service.md](ai-service.md).
 
-## Yang belum disiapkan
+## Status implementasi dan pekerjaan tersisa
 
-Skema PostgreSQL awal didefinisikan lewat SQLAlchemy 2 dan dikelola dengan Alembic. Migration dan seed role dijalankan eksplisit; proses API tidak mengubah schema saat startup. API memakai autentikasi password dengan Argon2 dan short-lived JWT access token; pembatasan resource berbasis kelas/laboratorium serta alur attendance menunggu business handlers. Detail tabel dan constraint ada di [database-schema.md](database-schema.md), sedangkan alur login, role, dan batas otorisasi ada di [authentication.md](authentication.md). UVC capture dan service AI_EDGE sudah memiliki implementasi awal; gallery template belum dapat disuplai oleh Core API sampai keputusan storage/provider diselesaikan.
+Skema PostgreSQL didefinisikan lewat SQLAlchemy 2 dan Alembic; migration dan seed role dijalankan eksplisit. API memakai Argon2, short-lived JWT operator, kredensial perangkat terpisah, permission checks, dan scope sumber daya pada handler yang sudah diimplementasikan. Attendance decision, sesi/roster, device gallery, enrollment dengan embedding terenkripsi, dan reporting tersedia. Beberapa operasi account/settings dan attendance listing tetap contract placeholder HTTP 501 setelah autentikasi/otorisasi; teacher correction saat ini hanya membuat permintaan pending dan belum memiliki approval workflow. Detail akses tercatat di [authentication.md](authentication.md) dan [api-contract.md](api-contract.md).
+
+Threshold recognition belum dikalibrasi pada dataset/hardware sekolah. Penggunaan liveness tetap bergantung pada clearance lisensi model, dan akurasi/latency perangkat belum diverifikasi lewat field test fisik. Gallery lokal AI_EDGE berada di memory dan agent memerlukan koneksi baru setelah restart offline; event outbox tetap durable. Lihat [model provenance](../models.md), [field-test protocol](../test-plans/walkthrough-field-test.md), dan [deployment runbooks](../deployment/).

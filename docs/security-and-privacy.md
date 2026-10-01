@@ -26,6 +26,9 @@ fixtures.
 
 - `ADMIN` and `LABORANT` may use enrollment and view template metadata. `TEACHER`
   and other roles are denied. Teacher UI never receives template values.
+- Global student directories and class-detail rosters are ADMIN-only. Teachers
+  use their scoped schedules/session snapshots, while laborants receive a
+  selected class roster only through the enrollment workflow.
 - Device runtime endpoints require a registered device UUID and high-entropy
   bearer credential. Credential verifiers are stored as SHA-256 hashes; a secret
   is returned once on provisioning/rotation, has an expiry, and renewal is

@@ -29,6 +29,7 @@ const canViewDevices = computed(
 const canViewReports = computed(
   () => auth.account?.roles.some((role) => role === 'ADMIN' || role === 'TEACHER') ?? false,
 )
+const canManageMasterData = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
 </script>
 
 <template>
@@ -69,6 +70,7 @@ const canViewReports = computed(
         <span class="app-sidebar__link-label">Ringkasan</span>
       </RouterLink>
       <RouterLink
+        v-if="canManageMasterData"
         class="app-sidebar__link"
         active-class="app-sidebar__link--active"
         to="/app/master-data"

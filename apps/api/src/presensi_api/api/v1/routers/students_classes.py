@@ -97,7 +97,7 @@ def _page(items: list[T], total: int, limit: int, offset: int) -> PageResponse[T
     response_model=PageResponse[StudentResponse],
     responses=OPENAPI_ERROR_RESPONSES,
     summary="List students",
-    dependencies=[Depends(require_permissions(Permission.ROSTER_READ))],
+    dependencies=[Depends(require_permissions(Permission.MANAGE_MASTER_DATA))],
 )
 def list_students(
     session: DbSession,
@@ -166,7 +166,7 @@ def create_student(
     response_model=StudentDetailResponse,
     responses=OPENAPI_ERROR_RESPONSES,
     summary="Get student details",
-    dependencies=[Depends(require_permissions(Permission.ROSTER_READ))],
+    dependencies=[Depends(require_permissions(Permission.MANAGE_MASTER_DATA))],
 )
 def get_student(student_id: UUID, session: DbSession) -> StudentDetailResponse:
     student = session.get(Student, student_id)
@@ -350,7 +350,7 @@ def create_class(request: ClassCreateRequest, session: DbSession) -> ClassRespon
     response_model=ClassDetailResponse,
     responses=OPENAPI_ERROR_RESPONSES,
     summary="Get class details and roster",
-    dependencies=[Depends(require_permissions(Permission.ROSTER_READ))],
+    dependencies=[Depends(require_permissions(Permission.MANAGE_MASTER_DATA))],
 )
 def get_class(class_id: UUID, session: DbSession) -> ClassDetailResponse:
     school_class = session.get(SchoolClass, class_id)

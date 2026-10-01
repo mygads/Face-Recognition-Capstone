@@ -17,8 +17,8 @@ Successful and failed password logins write `auth.login.succeeded` or `auth.logi
 | Role | Route permissions |
 | --- | --- |
 | `ADMIN` | All listed permissions: master data, accounts, settings, roster/laboratory/device, schedules/sessions, enrollment, attendance read/correction, reports. |
-| `TEACHER` | Read roster/laboratories/schedules, manage schedules and sessions, read attendance and reports for owned schedules, request attendance corrections. |
-| `LABORANT` | Read roster/laboratories, operate devices/sessions, manage enrollment, read relevant attendance. |
+| `TEACHER` | Read class/laboratory catalogs and roster snapshots for operated sessions, manage schedules and sessions, read attendance and reports for owned schedules, request attendance corrections. No global student directory. |
+| `LABORANT` | Read class/laboratory catalogs, operate devices/sessions, manage enrollment using the selected-class roster, read relevant attendance. No global student directory. |
 
 Attendance report list, summary, and export endpoints constrain a teacher to schedules assigned to their account; `ADMIN` can read all schedules. Other roles cannot access reports.
 
