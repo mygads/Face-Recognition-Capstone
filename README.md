@@ -141,6 +141,7 @@ Strategi API versioning dan pembuatan TypeScript client dari OpenAPI dijelaskan 
 CRUD siswa, kelas, laboratorium, roster kelas, permission, dan soft-deactivation dijelaskan di [docs/architecture/master-data.md](docs/architecture/master-data.md).
 Jadwal praktikum mingguan, aturan bentrok, dan batas akses guru dijelaskan di [docs/architecture/schedules.md](docs/architecture/schedules.md).
 Snapshot roster, grace period, lifecycle sesi, dan batas roster untuk presensi final dijelaskan di [docs/architecture/attendance-sessions.md](docs/architecture/attendance-sessions.md).
+Kontrak pipeline bersama dua deployment profile dijelaskan di [docs/architecture/recognition-core.md](docs/architecture/recognition-core.md).
 Shell Vue, layout router, tema, dan penggunaan token Gentelella dijelaskan di [docs/architecture/frontend-shell.md](docs/architecture/frontend-shell.md).
 
 Baca [arsitektur](docs/architecture/overview.md), [ADR-001](docs/adr/ADR-001-shared-recognition-core.md), dan [AGENTS.md](AGENTS.md) sebelum mengubah struktur/domain. Compose hanya untuk development, bukan deployment production.
