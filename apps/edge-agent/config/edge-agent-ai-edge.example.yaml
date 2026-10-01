@@ -1,0 +1,55 @@
+# Copy to /etc/presensi-edge-agent/edge-agent.yaml and customize per device.
+mode: AI_EDGE
+device_id: null # Set PRESENSI_EDGE_DEVICE_ID in the systemd EnvironmentFile.
+
+api:
+  base_url: https://presensi.example.edu
+  timeout_seconds: 4
+  heartbeat_interval_seconds: 15
+  cache_refresh_seconds: 3
+  cache_max_offline_seconds: 300
+  cache_path: /api/v1/devices/{device_id}/active-session-cache?model_name={model_name}&model_version={model_version}
+  token_file: /var/lib/presensi-edge-agent/device.token
+
+camera:
+  index: 0
+  width: 1920
+  height: 1080
+  fps: 30
+  backend: v4l2
+  scan_max_index: 8
+  reconnect_seconds: 2
+
+models:
+  yunet_path: /opt/presensi-edge-agent/models/face_detection_yunet_2023mar.onnx
+  sface_path: /opt/presensi-edge-agent/models/face_recognition_sface_2021dec.onnx
+  version: opencv-zoo-sface-2021dec
+  liveness_path: null
+  liveness_version: null
+
+quality:
+  min_face_pixels: 80
+  min_laplacian_variance: 45
+  min_brightness: 25
+  max_brightness: 235
+
+recognition:
+  # Do not start production attendance until both values are locally calibrated.
+  min_top1_similarity: null
+  min_top1_top2_margin: null
+  minimum_agreeing_frames: 3
+  sample_every_n_frames: 6
+  best_frame_count: 5
+  max_history_frames: 10
+  track_ttl_seconds: 3
+
+liveness:
+  enabled: false
+  required: false
+  min_live_score: null
+
+runtime:
+  outbox_path: /var/lib/presensi-edge-agent/edge-events.sqlite3
+  max_outbox_events: 50000
+  max_retry_seconds: 60
+  log_level: INFO

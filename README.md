@@ -95,6 +95,8 @@ Perintah yang sama berlaku di Linux. Password diminta secara interaktif dan tida
 
 API healthcheck hanya memeriksa kesiapan proses HTTP; migration dijalankan eksplisit sebagai langkah development.
 
+Runbook deployment AI_EDGE production, termasuk Compose API/PostgreSQL tanpa port database publik, reverse proxy HTTPS, model checksum, per-device systemd, backup/restore, dan rollback ada di [docs/deployment/ai-edge.md](docs/deployment/ai-edge.md). `docker-compose.yml` tetap khusus development.
+
 ## Quality checks
 
 Pasang dependency tooling Python dalam virtual environment dan dependency web sekali setelah clone:

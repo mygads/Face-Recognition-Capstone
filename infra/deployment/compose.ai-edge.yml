@@ -1,0 +1,81 @@
+name: presensi-ai-edge
+
+services:
+  db:
+    image: ${POSTGRES_IMAGE:-postgres:16}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env.ai-edge}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env.ai-edge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.ai-edge}
+      PRESENSI_APP_DB_USER: ${PRESENSI_APP_DB_USER:?Set PRESENSI_APP_DB_USER in .env.ai-edge}
+      PRESENSI_APP_DB_PASSWORD: ${PRESENSI_APP_DB_PASSWORD:?Set PRESENSI_APP_DB_PASSWORD in .env.ai-edge}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/deployment/postgres/10-create-api-role.sh:/docker-entrypoint-initdb.d/10-create-api-role.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  api:
+    image: presensi-core-api:${PRESENSI_RELEASE_TAG:?Set PRESENSI_RELEASE_TAG to the approved source revision}
+    build:
+      context: .
+      dockerfile: infra/docker/api-production.Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_HOST: db
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: ${POSTGRES_DB:?Set POSTGRES_DB in .env.ai-edge}
+      DATABASE_USER: ${PRESENSI_APP_DB_USER:?Set PRESENSI_APP_DB_USER in .env.ai-edge}
+      DATABASE_PASSWORD: ${PRESENSI_APP_DB_PASSWORD:?Set PRESENSI_APP_DB_PASSWORD in .env.ai-edge}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.ai-edge}
+      JWT_ACCESS_TOKEN_TTL_MINUTES: ${JWT_ACCESS_TOKEN_TTL_MINUTES:-15}
+      PRESENSI_DEVICE_HEARTBEAT_TIMEOUT_SECONDS: ${PRESENSI_DEVICE_HEARTBEAT_TIMEOUT_SECONDS:-60}
+      PRESENSI_FACE_TEMPLATE_KEYS: ${PRESENSI_FACE_TEMPLATE_KEYS:?Set the encrypted-template keyring in .env.ai-edge}
+      PRESENSI_FACE_TEMPLATE_ACTIVE_KEY_ID: ${PRESENSI_FACE_TEMPLATE_ACTIVE_KEY_ID:?Set the active template key ID in .env.ai-edge}
+      PRESENSI_CORS_ALLOWED_ORIGINS: ${PRESENSI_CORS_ALLOWED_ORIGINS:-}
+      PRESENSI_API_MAX_REQUEST_BYTES: ${PRESENSI_API_MAX_REQUEST_BYTES:-16777216}
+      PRESENSI_DEVICE_API_REQUESTS_PER_MINUTE: ${PRESENSI_DEVICE_API_REQUESTS_PER_MINUTE:-120}
+      PRESENSI_ENROLLMENT_REQUESTS_PER_MINUTE: ${PRESENSI_ENROLLMENT_REQUESTS_PER_MINUTE:-10}
+      PRESENSI_RECOGNITION_EVENT_RETENTION_DAYS: ${PRESENSI_RECOGNITION_EVENT_RETENTION_DAYS:-90}
+      PRESENSI_GALLERY_MAX_AGE_SECONDS: ${PRESENSI_GALLERY_MAX_AGE_SECONDS:-300}
+      PRESENSI_ENROLLMENT_YUNET_MODEL_PATH: /models/face_detection_yunet_2023mar.onnx
+      PRESENSI_ENROLLMENT_SFACE_MODEL_PATH: /models/face_recognition_sface_2021dec.onnx
+      PRESENSI_ENROLLMENT_MODEL_VERSION: ${PRESENSI_ENROLLMENT_MODEL_VERSION:?Set the SFace model version in .env.ai-edge}
+      PRESENSI_ENROLLMENT_DUPLICATE_WARNING_THRESHOLD: ${PRESENSI_ENROLLMENT_DUPLICATE_WARNING_THRESHOLD:-0.85}
+    volumes:
+      - ${PRESENSI_MODELS_DIR:?Set PRESENSI_MODELS_DIR to the absolute model directory}:/models:ro
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2); assert response.status == 200"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  migrate:
+    image: presensi-core-api:${PRESENSI_RELEASE_TAG:?Set PRESENSI_RELEASE_TAG to the approved source revision}
+    profiles: [ops]
+    working_dir: /opt/presensi/apps/api
+    entrypoint: ["alembic"]
+    command: ["upgrade", "head"]
+    environment:
+      DATABASE_HOST: db
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: ${POSTGRES_DB:?Set POSTGRES_DB in .env.ai-edge}
+      DATABASE_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env.ai-edge}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.ai-edge}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres-data:

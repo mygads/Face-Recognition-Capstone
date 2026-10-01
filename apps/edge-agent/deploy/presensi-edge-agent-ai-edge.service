@@ -1,0 +1,27 @@
+[Unit]
+Description=Presensi AI_EDGE lab camera agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=presensi-edge
+SupplementaryGroups=video
+WorkingDirectory=/opt/presensi-edge-agent/current
+EnvironmentFile=-/etc/presensi-edge-agent/edge-agent.env
+ExecStart=/opt/presensi-edge-agent/current/.venv/bin/presensi-edge-agent --config /etc/presensi-edge-agent/edge-agent.yaml run
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+StateDirectory=presensi-edge-agent
+StateDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/presensi-edge-agent
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
