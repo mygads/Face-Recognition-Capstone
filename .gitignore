@@ -1,0 +1,40 @@
+# Local secrets and settings
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# JavaScript
+node_modules/
+**/node_modules/
+dist/
+coverage/
+
+# Local device and biometric data (never commit real student data)
+**/data/biometric/
+**/data/camera-queue/
+datasets/private/
+tests/fixtures/private/
+tests/fixtures/biometric/
+models/weights/
+*.embedding
+*.embeddings
+*.sqlite
+*.sqlite3
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
