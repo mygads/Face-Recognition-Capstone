@@ -13,15 +13,16 @@
     "build": "npm run typecheck && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "lint": "eslint --config eslint.config.js .",
-    "format": "prettier --write \"src/**/*.{ts,vue,css}\" \"e2e/**/*.ts\" \"*.{ts,js,json}\"",
-    "format:check": "prettier --check \"src/**/*.{ts,vue,css}\" \"e2e/**/*.ts\" \"*.{ts,js,json}\"",
+    "format": "prettier --write \"src/**/*.{ts,vue,css,scss}\" \"e2e/**/*.ts\" \"*.{ts,js,json}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,vue,css,scss}\" \"e2e/**/*.ts\" \"*.{ts,js,json}\"",
     "test:unit": "vitest run",
     "typecheck:e2e": "tsc --noEmit --project tsconfig.e2e.json",
     "test:e2e": "playwright test --config playwright.config.ts"
   },
   "dependencies": {
     "gentelella": "4.1.1",
-    "vue": "^3.5.43"
+    "vue": "^3.5.43",
+    "vue-router": "^4.6.4"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
