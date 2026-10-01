@@ -17,6 +17,11 @@ ERROR_STATUS: dict[int, tuple[str, str]] = {
     404: ("not_found", "The requested resource was not found."),
     405: ("method_not_allowed", "This method is not allowed for the resource."),
     409: ("conflict", "The request conflicts with the current resource state."),
+    413: ("file_too_large", "The uploaded file exceeds the allowed size."),
+    415: (
+        "unsupported_media_type",
+        "The file extension or media type is not supported.",
+    ),
     422: ("validation_error", "Request validation failed."),
     429: ("rate_limit_exceeded", "Too many requests."),
     500: ("internal_error", "An unexpected server error occurred."),

@@ -95,6 +95,8 @@ def test_openapi_documents_master_data_detail_update_and_roster_contracts() -> N
         "/api/v1/classes/{class_id}/students",
         "/api/v1/classes/{class_id}/students/{student_id}",
         "/api/v1/laboratories/{laboratory_id}",
+        "/api/v1/students/import/preview",
+        "/api/v1/students/import/commit",
     } <= set(paths)
     assert "patch" in paths["/api/v1/students/{student_id}"]
     assert "patch" in paths["/api/v1/classes/{class_id}"]
@@ -103,6 +105,11 @@ def test_openapi_documents_master_data_detail_update_and_roster_contracts() -> N
     assert "classes" in schemas["StudentDetailResponse"]["properties"]
     assert "students" in schemas["ClassDetailResponse"]["properties"]
     assert "updated_at" in schemas["LaboratoryResponse"]["properties"]
+    assert (
+        "multipart/form-data"
+        in paths["/api/v1/students/import/preview"]["post"]["requestBody"]["content"]
+    )
+    assert "StudentImportPreviewResponse" in schemas
 
 
 def test_openapi_documents_oauth_password_login_and_bearer_auth() -> None:
@@ -160,23 +167,3 @@ def test_protected_endpoint_requires_bearer_authentication() -> None:
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
     assert response.json()["error"]["code"] == "unauthorized"
-
-
-def test_request_validation_uses_standard_error_envelope() -> None:
-    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
-        id=UUID(int=1),
-        email="admin@example.edu",
-        full_name="Admin",
-        roles=frozenset({RoleCode.ADMIN}),
-    )
-    try:
-        response = send_request("POST", "/api/v1/students", {"student_number": ""})
-    finally:
-        app.dependency_overrides.clear()
-
-    assert response.status_code == 422
-    body = response.json()
-    assert body["error"]["code"] == "validation_error"
-    assert any(
-        detail["field"] == "body.student_number" for detail in body["error"]["details"]
-    )

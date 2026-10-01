@@ -200,3 +200,14 @@ def test_master_data_rejects_empty_patch_and_unknown_resources(
         ).status_code
         == 404
     )
+    invalid_student = request(
+        "POST",
+        "/api/v1/students",
+        {"student_number": "", "full_name": "Synthetic"},
+    )
+    assert invalid_student.status_code == 422
+    assert invalid_student.json()["error"]["code"] == "validation_error"
+    assert any(
+        detail["field"] == "body.student_number"
+        for detail in invalid_student.json()["error"]["details"]
+    )

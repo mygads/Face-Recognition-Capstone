@@ -15,6 +15,8 @@ export type ClassUpdate = components['schemas']['ClassUpdateRequest']
 export type Laboratory = components['schemas']['LaboratoryResponse']
 export type LaboratoryCreate = components['schemas']['LaboratoryCreateRequest']
 export type LaboratoryUpdate = components['schemas']['LaboratoryUpdateRequest']
+export type StudentImportPreview = components['schemas']['StudentImportPreviewResponse']
+export type StudentImportCommit = components['schemas']['StudentImportCommitResponse']
 type ErrorDetail = components['schemas']['ErrorDetail']
 type ErrorEnvelope = components['schemas']['ErrorEnvelope']
 type Page<T> = {
@@ -201,6 +203,47 @@ export async function updateLaboratory(
   const result = await apiClient.PATCH('/api/v1/laboratories/{laboratory_id}', {
     params: { path: { laboratory_id: laboratoryId } },
     body,
+  })
+  return unwrap(result)
+}
+
+export type StudentImportMapping = {
+  student_number_column: string
+  full_name_column: string
+  class_code_column: string
+}
+
+function studentImportForm(file: File, mapping: StudentImportMapping): FormData {
+  const body = new FormData()
+  body.append('upload', file, file.name)
+  body.append('student_number_column', mapping.student_number_column)
+  body.append('full_name_column', mapping.full_name_column)
+  body.append('class_code_column', mapping.class_code_column)
+  return body
+}
+
+export async function previewStudentImport(
+  file: File,
+  mapping: StudentImportMapping,
+): Promise<StudentImportPreview> {
+  const result = await apiClient.POST('/api/v1/students/import/preview', {
+    body: studentImportForm(
+      file,
+      mapping,
+    ) as unknown as components['schemas']['Body_preview_student_import_api_v1_students_import_preview_post'],
+  })
+  return unwrap(result)
+}
+
+export async function commitStudentImport(
+  file: File,
+  mapping: StudentImportMapping,
+): Promise<StudentImportCommit> {
+  const result = await apiClient.POST('/api/v1/students/import/commit', {
+    body: studentImportForm(
+      file,
+      mapping,
+    ) as unknown as components['schemas']['Body_commit_student_import_api_v1_students_import_commit_post'],
   })
   return unwrap(result)
 }

@@ -6,6 +6,7 @@ import {
   createClass,
   createLaboratory,
   createStudent,
+  commitStudentImport,
   enrollStudent,
   getClass,
   getLaboratory,
@@ -13,6 +14,7 @@ import {
   listClasses,
   listLaboratories,
   listStudents,
+  previewStudentImport,
   removeStudentFromClass,
   updateClass,
   updateLaboratory,
@@ -22,6 +24,7 @@ import {
   type SchoolClass,
   type Student,
   type StudentDetails,
+  type StudentImportPreview,
 } from '../api/client'
 
 type MasterTab = 'students' | 'classes' | 'laboratories'
@@ -52,6 +55,18 @@ const isDetailsLoading = ref(false)
 const isFormOpen = ref(false)
 const editingId = ref<string | null>(null)
 const form = ref<FormState>({})
+const isImportOpen = ref(false)
+const isImportLoading = ref(false)
+const isImportCommitting = ref(false)
+const importFile = ref<File | null>(null)
+const importMapping = ref({
+  student_number_column: 'NIS',
+  full_name_column: 'Nama',
+  class_code_column: 'Kelas',
+})
+const importPreview = ref<StudentImportPreview | null>(null)
+const importError = ref<string | null>(null)
+const importSuccess = ref<string | null>(null)
 
 const columns = computed(() => {
   if (tab.value === 'students') return ['NIS/NISN', 'Nama', 'Status']
@@ -151,6 +166,60 @@ function openCreate(): void {
   form.value = createDefaults()
   formError.value = null
   isFormOpen.value = true
+}
+
+function openImport(): void {
+  isImportOpen.value = true
+  importFile.value = null
+  importPreview.value = null
+  importError.value = null
+  importSuccess.value = null
+  importMapping.value = {
+    student_number_column: 'NIS',
+    full_name_column: 'Nama',
+    class_code_column: 'Kelas',
+  }
+}
+
+function handleImportFileChange(event: Event): void {
+  const input = event.target
+  importFile.value = input instanceof HTMLInputElement ? (input.files?.[0] ?? null) : null
+  importPreview.value = null
+  importError.value = null
+}
+
+async function previewImport(): Promise<void> {
+  if (!importFile.value) {
+    importError.value = 'Pilih file CSV atau XLSX terlebih dahulu.'
+    return
+  }
+  isImportLoading.value = true
+  importError.value = null
+  importPreview.value = null
+  try {
+    importPreview.value = await previewStudentImport(importFile.value, importMapping.value)
+  } catch (error) {
+    importError.value = formatError(error)
+  } finally {
+    isImportLoading.value = false
+  }
+}
+
+async function commitImport(): Promise<void> {
+  if (!importFile.value || !importPreview.value?.can_commit) return
+  isImportCommitting.value = true
+  importError.value = null
+  try {
+    const result = await commitStudentImport(importFile.value, importMapping.value)
+    importSuccess.value = `${result.imported_count} siswa berhasil diimpor bersama relasi kelasnya.`
+    isImportOpen.value = false
+    importPreview.value = null
+    await loadRows()
+  } catch (error) {
+    importError.value = formatError(error)
+  } finally {
+    isImportCommitting.value = false
+  }
 }
 
 function openEdit(row: MasterRow): void {
@@ -301,9 +370,128 @@ function goToPage(nextPage: number): void {
       >
         Tambah {{ tabs.find((item) => item.id === tab)?.label.toLowerCase() }}
       </button>
+      <button
+        v-if="canManage && tab === 'students'"
+        class="button button--secondary"
+        data-testid="open-student-import"
+        @click="openImport"
+      >
+        Import CSV/XLSX
+      </button>
     </div>
 
     <p v-if="errorMessage" class="master-data__alert" role="alert">{{ errorMessage }}</p>
+    <p v-if="importSuccess" class="master-data__success" role="status">{{ importSuccess }}</p>
+
+    <section v-if="isImportOpen" class="master-data__panel" aria-labelledby="import-title">
+      <div class="master-data__panel-heading">
+        <div>
+          <p class="master-data__eyebrow">Siswa</p>
+          <h2 id="import-title">Preview import CSV/XLSX</h2>
+        </div>
+        <button class="button button--text" type="button" @click="isImportOpen = false">
+          Tutup
+        </button>
+      </div>
+      <p class="master-data__muted">
+        Pilih header file untuk setiap kolom. Baris dengan NIS/NISN duplikat, nama kosong, atau
+        kelas yang tidak dikenal akan ditandai sebelum commit.
+      </p>
+      <form class="master-data__form" @submit.prevent="previewImport">
+        <label class="master-data__file-field"
+          >File CSV atau XLSX
+          <input type="file" accept=".csv,.xlsx" required @change="handleImportFileChange" />
+        </label>
+        <label
+          >Header kolom NIS/NISN<input
+            v-model="importMapping.student_number_column"
+            required
+            maxlength="128"
+        /></label>
+        <label
+          >Header kolom nama<input
+            v-model="importMapping.full_name_column"
+            required
+            maxlength="128"
+        /></label>
+        <label
+          >Header kolom kode kelas<input
+            v-model="importMapping.class_code_column"
+            required
+            maxlength="128"
+        /></label>
+        <div class="master-data__form-actions">
+          <button class="button button--primary" type="submit" :disabled="isImportLoading">
+            {{ isImportLoading ? 'Memeriksa file…' : 'Preview data' }}
+          </button>
+        </div>
+      </form>
+      <p v-if="importError" class="master-data__alert master-data__alert--form" role="alert">
+        {{ importError }}
+      </p>
+      <template v-if="importPreview">
+        <div class="master-data__import-summary" data-testid="import-summary">
+          <span>{{ importPreview.total_rows }} baris</span>
+          <span class="master-data__import-valid">{{ importPreview.valid_rows }} valid</span>
+          <span class="master-data__import-invalid"
+            >{{ importPreview.invalid_rows }} perlu diperbaiki</span
+          >
+        </div>
+        <div class="master-data__table-wrap master-data__preview-table-wrap">
+          <table class="master-data__table">
+            <thead>
+              <tr>
+                <th scope="col">Baris</th>
+                <th scope="col">NIS/NISN</th>
+                <th scope="col">Nama</th>
+                <th scope="col">Kelas</th>
+                <th scope="col">Status</th>
+                <th scope="col">Validasi</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="row in importPreview.rows"
+                :key="row.row_number"
+                :data-testid="`import-row-${row.row_number}`"
+              >
+                <td data-label="Baris">{{ row.row_number }}</td>
+                <td data-label="NIS/NISN">{{ row.student_number || '—' }}</td>
+                <td data-label="Nama">{{ row.full_name || '—' }}</td>
+                <td data-label="Kelas">{{ row.class_code || '—' }}</td>
+                <td data-label="Status">
+                  <span
+                    class="status-badge"
+                    :class="row.valid ? 'status-badge--active' : 'status-badge--inactive'"
+                    >{{ row.valid ? 'Valid' : 'Tidak valid' }}</span
+                  >
+                </td>
+                <td data-label="Validasi">
+                  {{ row.errors.length ? row.errors.join(' ') : 'Siap diimpor' }}
+                </td>
+              </tr>
+              <tr v-if="importPreview.rows.length === 0">
+                <td colspan="6" class="master-data__empty">Tidak ada baris data untuk diimpor.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="master-data__form-actions">
+          <button
+            class="button button--primary"
+            data-testid="commit-student-import"
+            type="button"
+            :disabled="!importPreview.can_commit || isImportCommitting"
+            @click="commitImport"
+          >
+            {{ isImportCommitting ? 'Menyimpan…' : 'Commit import' }}
+          </button>
+        </div>
+        <p v-if="!importPreview.can_commit" class="master-data__muted">
+          Tidak ada baris yang disimpan. Perbaiki file lalu jalankan preview kembali.
+        </p>
+      </template>
+    </section>
 
     <section v-if="isFormOpen" class="master-data__panel" aria-labelledby="form-title">
       <div class="master-data__panel-heading">

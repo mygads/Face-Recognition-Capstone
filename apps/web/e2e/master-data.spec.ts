@@ -258,6 +258,42 @@ async function stubMasterDataApi(page: Page): Promise<void> {
     }
     return route.fallback()
   })
+
+  await page.route('**/api/v1/students/import/preview', (route) =>
+    route.fulfill({
+      status: 200,
+      json: {
+        total_rows: 1,
+        valid_rows: 1,
+        invalid_rows: 0,
+        can_commit: true,
+        rows: [
+          {
+            row_number: 2,
+            student_number: 'S-200',
+            full_name: 'Imported Synthetic Student',
+            class_code: 'XI-IPA-1',
+            valid: true,
+            errors: [],
+          },
+        ],
+      },
+    }),
+  )
+  await page.route('**/api/v1/students/import/commit', (route) => {
+    students.push({
+      id: `student-${nextId++}`,
+      student_number: 'S-200',
+      full_name: 'Imported Synthetic Student',
+      is_active: true,
+      created_at: now,
+      updated_at: now,
+    })
+    return route.fulfill({
+      status: 201,
+      json: { imported_count: 1, class_memberships_created: 1 },
+    })
+  })
 }
 
 test('administrator creates, searches, edits, and links master data', async ({ page }) => {
@@ -305,4 +341,17 @@ test('administrator creates, searches, edits, and links master data', async ({ p
   await page.getByRole('textbox', { name: 'Lokasi (opsional)' }).fill('Gedung B')
   await page.getByRole('button', { name: 'Simpan', exact: true }).click()
   await expect(page.getByRole('cell', { name: 'Laboratorium Biologi' })).toBeVisible()
+
+  await page.getByTestId('tab-students').click()
+  await page.getByTestId('open-student-import').click()
+  await page.locator('input[type="file"]').setInputFiles({
+    name: 'students.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from('NIS,Nama,Kelas\nS-200,Imported Synthetic Student,XI-IPA-1'),
+  })
+  await page.getByRole('button', { name: 'Preview data' }).click()
+  await expect(page.getByTestId('import-row-2')).toContainText('Valid')
+  await page.getByTestId('commit-student-import').click()
+  await expect(page.getByRole('status')).toContainText('1 siswa berhasil diimpor')
+  await expect(page.getByRole('cell', { name: 'Imported Synthetic Student' })).toBeVisible()
 })

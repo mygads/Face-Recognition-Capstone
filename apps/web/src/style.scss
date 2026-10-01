@@ -995,6 +995,46 @@ a:focus-visible {
   line-height: 1.5;
 }
 
+.master-data__success {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 8%, var(--bg-surface));
+  font-size: 0.76rem;
+}
+
+.master-data__form .master-data__file-field {
+  grid-column: 1 / -1;
+}
+
+.master-data__form input[type='file'] {
+  padding: 6px;
+}
+
+.master-data__import-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: var(--space-4) 0 var(--space-3);
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.master-data__import-valid {
+  color: var(--green);
+}
+
+.master-data__import-invalid {
+  color: var(--red);
+}
+
+.master-data__preview-table-wrap {
+  max-height: 360px;
+}
+
 .master-data__eyebrow {
   margin: 0 0 4px;
   color: var(--text-muted);

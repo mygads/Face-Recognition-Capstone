@@ -57,6 +57,28 @@ class StudentDetailResponse(StudentResponse):
     classes: list[StudentClassResponse]
 
 
+class StudentImportRowResponse(ApiSchema):
+    row_number: int = Field(ge=2)
+    student_number: str
+    full_name: str
+    class_code: str
+    valid: bool
+    errors: list[str]
+
+
+class StudentImportPreviewResponse(ApiSchema):
+    total_rows: int = Field(ge=0)
+    valid_rows: int = Field(ge=0)
+    invalid_rows: int = Field(ge=0)
+    can_commit: bool
+    rows: list[StudentImportRowResponse]
+
+
+class StudentImportCommitResponse(ApiSchema):
+    imported_count: int = Field(ge=0)
+    class_memberships_created: int = Field(ge=0)
+
+
 class ClassStudentResponse(ApiSchema):
     id: UUID
     student_number: str
