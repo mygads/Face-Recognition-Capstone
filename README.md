@@ -148,6 +148,10 @@ CRUD siswa, kelas, laboratorium, roster kelas, permission, dan soft-deactivation
 Jadwal praktikum mingguan, aturan bentrok, dan batas akses guru dijelaskan di [docs/architecture/schedules.md](docs/architecture/schedules.md).
 Snapshot roster, grace period, lifecycle sesi, dan batas roster untuk presensi final dijelaskan di [docs/architecture/attendance-sessions.md](docs/architecture/attendance-sessions.md).
 Kontrak pipeline bersama dua deployment profile dijelaskan di [docs/architecture/recognition-core.md](docs/architecture/recognition-core.md).
+Device authentication, burst limits, safe image decode, gallery cache lifecycle,
+dan latency metrics AI_CENTRAL dijelaskan di
+[docs/architecture/ai-service.md](docs/architecture/ai-service.md) dan
+[apps/ai-service/README.md](apps/ai-service/README.md).
 Baseline YuNet + SFace, lisensi model, konfigurasi path, dan CLI benchmark dijelaskan di [docs/models.md](docs/models.md).
 Shell Vue, layout router, tema, dan penggunaan token Gentelella dijelaskan di [docs/architecture/frontend-shell.md](docs/architecture/frontend-shell.md).
 
