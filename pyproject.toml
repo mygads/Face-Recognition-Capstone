@@ -20,7 +20,8 @@ known-first-party = [
 ]
 
 [tool.mypy]
-python_version = "3.11"
+# Match CI's Python 3.12 so third-party NumPy stubs using PEP 695 parse correctly.
+python_version = "3.12"
 strict = true
 mypy_path = ["libs/recognition-core/src"]
 files = [
