@@ -81,6 +81,10 @@ API v1 contract and frontend client generation follow the strategy in [api-contr
 
 Development Compose memakai `.env` lokal dari `.env.example`, mengekspos port hanya pada loopback, dan menyimpan data PostgreSQL di named volume. `scripts/dev.py` menyediakan `dev-up`, `dev-down`, dan `test` untuk Windows/Linux.
 
+The native `AI_EDGE` agent and its current cache-provider limitation are
+documented in [edge-agent.md](edge-agent.md). It remains outside default Compose
+because USB camera passthrough and driver selection are host-specific.
+
 ## Yang belum disiapkan
 
-Skema PostgreSQL awal didefinisikan lewat SQLAlchemy 2 dan dikelola dengan Alembic. Migration dan seed role dijalankan eksplisit; proses API tidak mengubah schema saat startup. API memakai autentikasi password dengan Argon2 dan short-lived JWT access token; pembatasan resource berbasis kelas/laboratorium serta alur attendance menunggu business handlers. Detail tabel dan constraint ada di [database-schema.md](database-schema.md), sedangkan alur login, role, dan batas otorisasi ada di [authentication.md](authentication.md). Camera capture dan inference tetap menjadi task roadmap berikutnya.
+Skema PostgreSQL awal didefinisikan lewat SQLAlchemy 2 dan dikelola dengan Alembic. Migration dan seed role dijalankan eksplisit; proses API tidak mengubah schema saat startup. API memakai autentikasi password dengan Argon2 dan short-lived JWT access token; pembatasan resource berbasis kelas/laboratorium serta alur attendance menunggu business handlers. Detail tabel dan constraint ada di [database-schema.md](database-schema.md), sedangkan alur login, role, dan batas otorisasi ada di [authentication.md](authentication.md). UVC capture dan service AI_EDGE sudah memiliki implementasi awal; gallery template belum dapat disuplai oleh Core API sampai keputusan storage/provider diselesaikan.

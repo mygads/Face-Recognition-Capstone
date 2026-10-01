@@ -3,5 +3,5 @@ mypy==2.3.1
 pytest==9.1.1
 -e ./apps/api[dev]
 -e ./apps/ai-service[dev]
--e ./apps/edge-agent
+-e ./apps/edge-agent[dev]
 -e ./libs/recognition-core[opencv]

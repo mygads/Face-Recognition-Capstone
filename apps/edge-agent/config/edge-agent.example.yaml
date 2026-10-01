@@ -1,0 +1,57 @@
+# Copy to edge-agent.yaml and edit values for this lab PC.
+device_id: null # Provide PRESENSI_EDGE_DEVICE_ID via the environment.
+
+api:
+  base_url: http://127.0.0.1:8000
+  timeout_seconds: 4
+  heartbeat_interval_seconds: 15
+  cache_refresh_seconds: 3
+  # Adapter contract awaiting an approved Core API roster/template cache provider.
+  cache_path: /api/v1/devices/{device_id}/active-session-cache
+  token_file: null # Prefer PRESENSI_EDGE_API_TOKEN from a protected service secret.
+
+camera:
+  index: 0
+  width: 1920
+  height: 1080
+  fps: 30
+  backend: auto # auto, dshow/MSMF on Windows, or v4l2 on Linux.
+  scan_max_index: 8
+  reconnect_seconds: 2
+
+models:
+  # Provision weights locally. Never fetch model files at runtime or commit them.
+  yunet_path: ../../../models/weights/face_detection_yunet_2023mar.onnx
+  sface_path: ../../../models/weights/face_recognition_sface_2021dec.onnx
+  version: opencv-zoo-sface-2021dec
+  liveness_path: null
+  liveness_version: null
+
+quality:
+  # Tune with authorized camera samples during local validation.
+  min_face_pixels: 80
+  min_laplacian_variance: 45
+  min_brightness: 25
+  max_brightness: 235
+
+recognition:
+  # Populate both values from local benchmark/calibration before running.
+  min_top1_similarity: null
+  min_top1_top2_margin: null
+  minimum_agreeing_frames: 3
+  sample_every_n_frames: 6
+  best_frame_count: 5
+  max_history_frames: 10
+  track_ttl_seconds: 3
+
+liveness:
+  # Keep disabled only with a documented physical/session control.
+  enabled: false
+  required: false
+  min_live_score: null
+
+runtime:
+  outbox_path: ../data/camera-queue/edge-events.sqlite3
+  max_outbox_events: 50000
+  max_retry_seconds: 60
+  log_level: INFO

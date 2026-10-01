@@ -31,6 +31,7 @@ datasets/private/
 tests/fixtures/private/
 tests/fixtures/biometric/
 models/weights/
+apps/edge-agent/config/edge-agent.yaml
 *.embedding
 *.embeddings
 *.sqlite

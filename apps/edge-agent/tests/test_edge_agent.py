@@ -1,0 +1,517 @@
+from __future__ import annotations
+
+import logging
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from uuid import UUID, uuid4
+
+import httpx
+import pytest
+
+from presensi_edge_agent import camera as camera_module
+from presensi_edge_agent.api import ApiCallError, CoreApiClient
+from presensi_edge_agent.cache import (
+    ActiveSessionCache,
+    CacheSchemaError,
+    parse_session_cache,
+)
+from presensi_edge_agent.config import (
+    ApiSettings,
+    CameraSettings,
+    EdgeConfig,
+    EdgeConfigError,
+    LivenessSettings,
+    ModelSettings,
+    QualitySettings,
+    RecognitionSettings,
+    RuntimeSettings,
+    load_config,
+)
+from presensi_edge_agent.events import event_payload
+from presensi_edge_agent.logging import JsonLogFormatter
+from presensi_edge_agent.outbox import (
+    EventOutbox,
+    OutboxEventConflict,
+    OutboxFullError,
+)
+from presensi_edge_agent.recognition import LocalRecognizer
+from presensi_edge_agent.service import EdgeService
+from recognition_core.domain import (
+    FaceEmbedding,
+    GalleryEntry,
+    RecognitionDecision,
+    TrackDecision,
+)
+
+ROOT = Path(__file__).resolve().parents[3]
+EXAMPLE_CONFIG = ROOT / "apps" / "edge-agent" / "config" / "edge-agent.example.yaml"
+DEVICE_ID = UUID("33000000-0000-4000-8000-000000000001")
+SESSION_ID = UUID("33000000-0000-4000-8000-000000000002")
+STUDENT_ID = UUID("33000000-0000-4000-8000-000000000003")
+MODEL_NAME = "opencv-zoo-sface"
+MODEL_VERSION = "test-version"
+
+
+def sample_bundle_payload(
+    *,
+    now: datetime | None = None,
+    device_id: UUID = DEVICE_ID,
+    model_version: str = MODEL_VERSION,
+) -> dict[str, object]:
+    created_at = now or datetime.now(UTC)
+    return {
+        "device_id": str(device_id),
+        "session_id": str(SESSION_ID),
+        "session_status": "active",
+        "generated_at": created_at.isoformat(),
+        "expires_at": (created_at + timedelta(minutes=1)).isoformat(),
+        "model_name": MODEL_NAME,
+        "model_version": model_version,
+        "roster": [
+            {
+                "student_id": str(STUDENT_ID),
+                "student_number": "SYN-01",
+                "full_name": "Synthetic Student",
+                "templates": [
+                    {
+                        "model_name": MODEL_NAME,
+                        "model_version": model_version,
+                        "normalized": True,
+                        "values": [1.0, 0.0, 0.0],
+                    }
+                ],
+            },
+            {
+                "student_id": "33000000-0000-4000-8000-000000000004",
+                "student_number": "SYN-02",
+                "full_name": "Not Enrolled",
+                "templates": [],
+            },
+        ],
+    }
+
+
+def test_yaml_config_accepts_environment_overrides_without_a_secret_in_yaml() -> None:
+    config = load_config(
+        EXAMPLE_CONFIG,
+        environ={
+            "PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID),
+            "PRESENSI_EDGE_CAMERA_INDEX": "2",
+            "PRESENSI_EDGE_SAMPLE_EVERY_N_FRAMES": "7",
+            "PRESENSI_EDGE_API_TOKEN": "test-token-is-in-environment-only",
+        },
+    )
+
+    assert config.device_id == DEVICE_ID
+    assert config.camera.index == 2
+    assert config.camera.width == 1920
+    assert config.camera.height == 1080
+    assert config.recognition.sample_every_n_frames == 7
+    assert config.recognition.min_top1_similarity is None
+    assert "test-token-is-in-environment-only" not in repr(config)
+
+
+def test_runtime_config_requires_calibrated_thresholds_and_model_files(
+    tmp_path: Path,
+) -> None:
+    config = load_config(
+        EXAMPLE_CONFIG, environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)}
+    )
+
+    with pytest.raises(EdgeConfigError, match="API_TOKEN"):
+        config.require_runtime(api_token=None)
+    # Provision dummy local paths so this check reaches the calibration guard.
+    fake_model_path = tmp_path / "unused-model-test.onnx"
+    fake_model_path.write_bytes(b"not-a-real-model")
+    model_config = replace(
+        config.models,
+        yunet_path=fake_model_path,
+        sface_path=fake_model_path,
+    )
+    config = replace(config, models=model_config)
+    with pytest.raises(EdgeConfigError, match="thresholds"):
+        config.require_runtime(api_token="injected-test-token")
+
+
+def test_config_rejects_liveness_required_without_enabling_it(tmp_path: Path) -> None:
+    config_path = tmp_path / "edge.yaml"
+    config_path.write_text(
+        "liveness:\n  enabled: false\n  required: true\n", encoding="utf-8"
+    )
+    with pytest.raises(EdgeConfigError, match="Required liveness"):
+        load_config(config_path, environ={})
+
+
+def test_core_api_client_uses_bearer_header_for_heartbeat_and_event() -> None:
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"status": "ok"})
+
+    http = httpx.Client(
+        base_url="https://api.example.test",
+        transport=httpx.MockTransport(respond),
+    )
+    client = CoreApiClient(
+        ApiSettings(
+            base_url="https://api.example.test",
+            timeout_seconds=1,
+            heartbeat_interval_seconds=5,
+            cache_refresh_seconds=3,
+            cache_path="/api/v1/devices/{device_id}/active-session-cache",
+            token_file=None,
+        ),
+        DEVICE_ID,
+        lambda: "short-lived-test-token",
+        client=http,
+    )
+    client.heartbeat()
+    client.submit_recognition_event({"event_id": str(uuid4())})
+
+    assert requests[0].url.path == f"/api/v1/devices/{DEVICE_ID}/heartbeat"
+    assert requests[0].headers["Authorization"] == "Bearer short-lived-test-token"
+    assert requests[1].url.path == "/api/v1/attendance/recognition-events"
+    client.close()
+    http.close()
+
+
+def test_api_5xx_is_retryable_and_does_not_include_response_body() -> None:
+    http = httpx.Client(
+        base_url="https://api.example.test",
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(503, text="private response detail")
+        ),
+    )
+    client = CoreApiClient(
+        ApiSettings(
+            base_url="https://api.example.test",
+            timeout_seconds=1,
+            heartbeat_interval_seconds=5,
+            cache_refresh_seconds=3,
+            cache_path="/api/v1/devices/{device_id}/active-session-cache",
+            token_file=None,
+        ),
+        DEVICE_ID,
+        lambda: "test-token",
+        client=http,
+    )
+
+    with pytest.raises(ApiCallError) as failure:
+        client.heartbeat()
+
+    assert failure.value.retryable is True
+    assert failure.value.status_code == 503
+    assert "private response detail" not in str(failure.value)
+    client.close()
+    http.close()
+
+
+def test_cache_parses_memory_only_gallery_and_keeps_unenrolled_roster() -> None:
+    bundle = parse_session_cache(
+        sample_bundle_payload(),
+        device_id=DEVICE_ID,
+        model_name=MODEL_NAME,
+        model_version=MODEL_VERSION,
+    )
+    cache = ActiveSessionCache()
+    cache.replace(bundle)
+
+    assert len(bundle.students) == 2
+    assert len(bundle.gallery()) == 1
+    assert len(bundle.gallery()[0].embedding.values) == 3
+    assert cache.current() == bundle
+    assert "1.0" not in repr(bundle)
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "expected"),
+    [
+        ("device_id", str(uuid4()), "different device"),
+        ("session_status", "closed", "not active"),
+        ("generated_at", "not-a-date", "generated_at"),
+    ],
+)
+def test_cache_rejects_invalid_session_scope_and_timestamps(
+    key: str, value: str, expected: str
+) -> None:
+    payload = sample_bundle_payload()
+    payload[key] = value
+
+    with pytest.raises(CacheSchemaError, match=expected):
+        parse_session_cache(
+            payload,
+            device_id=DEVICE_ID,
+            model_name=MODEL_NAME,
+            model_version=MODEL_VERSION,
+        )
+
+
+def test_outbox_keeps_idempotent_event_payloads_across_retry(tmp_path: Path) -> None:
+    outbox = EventOutbox(tmp_path / "events.sqlite3", max_pending=2)
+    payload = event_payload(
+        TrackDecision(
+            track_id="test-camera",
+            state="accepted",
+            decision=RecognitionDecision(
+                outcome="matched",
+                student_id=STUDENT_ID,
+                confidence=0.95,
+                margin=0.4,
+            ),
+            observation_count=3,
+        ),
+        device_id=DEVICE_ID,
+        session_id=SESSION_ID,
+        occurred_at=datetime.now(UTC),
+        model_name=MODEL_NAME,
+        model_version=MODEL_VERSION,
+        liveness_required=False,
+        liveness_enabled=False,
+        min_live_score=None,
+    )
+    event_id = outbox.enqueue(payload)
+    assert outbox.enqueue(payload) == event_id
+    assert outbox.counts() == (1, 0)
+    queued = outbox.due()[0]
+    assert queued.event_id == event_id
+    assert queued.payload == payload
+    assert set(queued.payload) == {
+        "event_id",
+        "device_id",
+        "session_id",
+        "student_id",
+        "outcome",
+        "similarity",
+        "confidence",
+        "margin",
+        "liveness_passed",
+        "liveness_score",
+        "occurred_at",
+        "model_name",
+        "model_version",
+    }
+    outbox.retry(event_id, max_delay_seconds=4, status_code=503)
+    assert outbox.due() == []
+    due_time = datetime.now(UTC) + timedelta(seconds=5)
+    assert outbox.due(now=due_time)[0].attempts == 1
+    outbox.acknowledge(event_id)
+    assert outbox.counts() == (0, 0)
+    outbox.close()
+
+
+def test_outbox_refuses_biometrics_and_detects_local_id_reuse(tmp_path: Path) -> None:
+    outbox = EventOutbox(tmp_path / "events.sqlite3", max_pending=1)
+    payload: dict[str, object] = {
+        "event_id": str(uuid4()),
+        "device_id": str(DEVICE_ID),
+        "session_id": str(SESSION_ID),
+        "student_id": str(STUDENT_ID),
+        "outcome": "matched",
+        "similarity": 0.9,
+        "confidence": 0.95,
+        "margin": 0.2,
+        "liveness_passed": None,
+        "liveness_score": None,
+        "occurred_at": datetime.now(UTC).isoformat(),
+        "model_name": MODEL_NAME,
+        "model_version": MODEL_VERSION,
+    }
+    outbox.enqueue(payload)
+    with pytest.raises(ValueError, match="recognition event contract"):
+        outbox.enqueue({**payload, "embedding": [1.0]})
+    with pytest.raises(OutboxEventConflict):
+        outbox.enqueue({**payload, "confidence": 0.94})
+    with pytest.raises(OutboxFullError):
+        outbox.enqueue({**payload, "event_id": str(uuid4())})
+    outbox.close()
+
+
+class FakeCapture:
+    def __init__(self, opened: bool) -> None:
+        self.opened = opened
+        self.released = False
+        self.properties: list[tuple[int, float]] = []
+
+    def isOpened(self) -> bool:
+        return self.opened
+
+    def release(self) -> None:
+        self.released = True
+
+    def set(self, prop: int, value: float) -> bool:
+        self.properties.append((prop, value))
+        return True
+
+    def read(self) -> tuple[bool, object]:
+        return True, object()
+
+
+def test_camera_enumeration_and_capture_apply_requested_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captures: list[FakeCapture] = []
+
+    def factory(index: int, _backend: str) -> FakeCapture:
+        capture = FakeCapture(opened=index == 1)
+        captures.append(capture)
+        return capture
+
+    found = camera_module.enumerate_cameras(2, capture_factory=factory)
+    assert [camera.index for camera in found] == [1]
+    assert all(capture.released for capture in captures)
+
+    fake_cv2 = type(
+        "FakeCV2",
+        (),
+        {
+            "CAP_PROP_FRAME_WIDTH": 3,
+            "CAP_PROP_FRAME_HEIGHT": 4,
+            "CAP_PROP_FPS": 5,
+            "CAP_PROP_BUFFERSIZE": 6,
+            "VideoCapture": staticmethod(lambda _index: video_capture),
+        },
+    )()
+    video_capture = FakeCapture(opened=True)
+    monkeypatch.setattr(camera_module, "_cv2", lambda: fake_cv2)
+    camera = camera_module.OpenCVCamera(
+        CameraSettings(
+            index=0,
+            width=1920,
+            height=1080,
+            fps=30,
+            backend="auto",
+            scan_max_index=2,
+            reconnect_seconds=1,
+        )
+    )
+    camera.open()
+    ok, frame = camera.read()
+    assert ok and frame is not None
+    assert video_capture.properties == [(3, 1920), (4, 1080), (5, 30), (6, 1)]
+    camera.close()
+    assert video_capture.released
+
+
+def test_recognizer_keeps_all_template_candidates_for_distinct_student_margin() -> None:
+    class FakePipeline:
+        max_candidates = 2
+
+        def process(
+            self,
+            _frame: object,
+            _gallery: tuple[GalleryEntry, ...],
+            _observation: object,
+        ) -> TrackDecision:
+            return TrackDecision(
+                track_id="test",
+                state="collecting",
+                decision=RecognitionDecision(outcome="retry"),
+                observation_count=0,
+            )
+
+    pipeline = FakePipeline()
+    recognizer = LocalRecognizer(pipeline, DEVICE_ID)  # type: ignore[arg-type]
+    gallery = tuple(
+        GalleryEntry(
+            student_id=STUDENT_ID if index < 3 else UUID(int=4),
+            embedding=FaceEmbedding(
+                values=(1.0, float(index + 1)),
+                model_name=MODEL_NAME,
+                model_version=MODEL_VERSION,
+                normalized=True,
+            ),
+        )
+        for index in range(5)
+    )
+
+    recognizer.process(object(), gallery, datetime.now(UTC))
+
+    assert pipeline.max_candidates == 5
+
+
+def test_transient_api_failures_leave_edge_service_and_outbox_usable(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    config = EdgeConfig(
+        config_path=tmp_path / "config.yaml",
+        device_id=DEVICE_ID,
+        api=ApiSettings(
+            base_url="https://api.example.test",
+            timeout_seconds=1,
+            heartbeat_interval_seconds=5,
+            cache_refresh_seconds=3,
+            cache_path="/api/v1/devices/{device_id}/active-session-cache",
+            token_file=None,
+        ),
+        camera=CameraSettings(0, 1920, 1080, 30, "auto", 4, 1),
+        models=ModelSettings(None, None, MODEL_VERSION, None, None),
+        quality=QualitySettings(80, 45, 25, 235),
+        recognition=RecognitionSettings(None, None, 3, 5, 5, 10, 3),
+        liveness=LivenessSettings(False, False, None),
+        runtime=RuntimeSettings(tmp_path / "outbox.sqlite3", 10, 8, "INFO"),
+    )
+
+    class FakeApi:
+        def heartbeat(self) -> None:
+            raise ApiCallError(503, retryable=True)
+
+        def submit_recognition_event(self, _payload: dict[str, object]) -> None:
+            raise ApiCallError(503, retryable=True)
+
+    class FakeCamera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            return False, None
+
+        def close(self) -> None: ...
+
+    class FakeRecognizer:
+        def process(self, _frame, _gallery, _captured_at) -> TrackDecision:
+            raise AssertionError("No camera frame should be processed in this test.")
+
+        def reset(self) -> None: ...
+
+    outbox = EventOutbox(tmp_path / "outbox.sqlite3", max_pending=10)
+    payload = {
+        "event_id": str(uuid4()),
+        "device_id": str(DEVICE_ID),
+        "session_id": str(SESSION_ID),
+        "student_id": str(STUDENT_ID),
+        "outcome": "matched",
+        "similarity": 0.8,
+        "confidence": 0.9,
+        "margin": 0.3,
+        "liveness_passed": None,
+        "liveness_score": None,
+        "occurred_at": datetime.now(UTC).isoformat(),
+        "model_name": MODEL_NAME,
+        "model_version": MODEL_VERSION,
+    }
+    event_id = outbox.enqueue(payload)
+    service = EdgeService(
+        config,
+        FakeCamera(),
+        FakeApi(),  # type: ignore[arg-type]
+        outbox,
+        FakeRecognizer(),  # type: ignore[arg-type]
+        lambda: (_ for _ in ()).throw(ApiCallError(503, retryable=True)),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        service._send_heartbeat()
+        service._refresh_cache()
+        service._flush_outbox()
+
+    assert service.status()["session_cache_loaded"] is False
+    assert service.status()["pending_events"] == 1
+    assert (
+        outbox.due(now=datetime.now(UTC) + timedelta(seconds=5))[0].event_id == event_id
+    )
+    serialized_logs = JsonLogFormatter().format(caplog.records[-1])
+    assert "embedding" not in serialized_logs.lower()
+    assert "short-lived-test-token" not in serialized_logs
+    outbox.close()

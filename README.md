@@ -68,6 +68,12 @@ Perintah yang sama berlaku di Linux. Jika ingin seluruh UI berjalan dalam contai
 - PostgreSQL: `127.0.0.1:5432` (dapat diubah lewat `.env`)
 - Central AI (profile `central`): `http://127.0.0.1:8001/health`
 
+AI_EDGE camera agent runs natively on the lab PC, not in default Compose. Setup,
+Windows/Linux commands, and camera diagnostics are in
+[apps/edge-agent/README.md](apps/edge-agent/README.md). Its roster/template cache
+provider is currently blocked by the Core API's metadata-only 501 and the
+approved storage decision; see [edge-agent architecture](docs/architecture/edge-agent.md).
+
 Compose menunggu PostgreSQL sehat sebelum memulai API dan menggunakan healthcheck untuk API serta AI service. Skema awal API dikelola dengan Alembic. Setelah service siap, terapkan migration dan seed role:
 
 ```sh

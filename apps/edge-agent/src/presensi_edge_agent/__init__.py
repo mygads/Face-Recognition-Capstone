@@ -1,1 +1,3 @@
-"""Camera and edge-agent package; implementation is intentionally deferred."""
+"""UVC capture and AI_EDGE service package for the presensi system."""
+
+__version__ = "0.1.0"

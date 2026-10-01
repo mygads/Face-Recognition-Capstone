@@ -37,5 +37,10 @@ files = [
 
 [tool.pytest.ini_options]
 testpaths = ["apps", "libs", "tests"]
-pythonpath = ["apps/api/src", "apps/ai-service/src", "libs/recognition-core/src"]
+pythonpath = [
+  "apps/api/src",
+  "apps/ai-service/src",
+  "apps/edge-agent/src",
+  "libs/recognition-core/src",
+]
 addopts = "-ra"

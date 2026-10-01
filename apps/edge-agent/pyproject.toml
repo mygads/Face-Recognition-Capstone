@@ -5,9 +5,20 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "presensi-edge-agent"
 version = "0.1.0"
-description = "Camera and edge-agent package foundation"
+description = "UVC camera capture and local AI_EDGE recognition agent"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+  "httpx>=0.27,<1.0",
+  "PyYAML>=6,<7",
+]
+
+[project.optional-dependencies]
+camera = ["numpy>=1.26", "opencv-python-headless>=4.10,<5"]
+antispoof = ["onnxruntime>=1.18"]
+dev = ["pytest>=8,<10", "types-PyYAML>=6,<7"]
+
+[project.scripts]
+presensi-edge-agent = "presensi_edge_agent.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
