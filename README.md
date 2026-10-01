@@ -48,6 +48,15 @@ npm ci
 npm run dev
 ```
 
+Saat Core API berjalan, generate ulang tipe client dari OpenAPI setelah kontrak backend berubah:
+
+```sh
+npm run api:generate
+```
+
+Frontend menggunakan `openapi-fetch` untuk request bertipe terhadap schema hasil generator. Access token hanya
+berada di memori tab browser; reload halaman meminta pengguna masuk kembali.
+
 Perintah yang sama berlaku di Linux. Jika ingin seluruh UI berjalan dalam container, gunakan opsi `--web-container`; service itu memakai polling file watcher agar perubahan bind mount Windows tetap terdeteksi. Jangan jalankan web native dan container bersamaan pada port yang sama.
 
 ## URL dan health checks

@@ -42,14 +42,12 @@ The details property is omitted when there are no field errors. Unexpected 500 r
 
 ## TypeScript client
 
-FastAPI's OpenAPI document is the only source for frontend API response and request types. Do not hand-write duplicate API response interfaces across Vue components. Generate a shared client type surface, then use it through one frontend API module.
-
-For example, after adding openapi-typescript as a web development dependency and starting the API:
+FastAPI's OpenAPI document is the only source for frontend API request/response types. `apps/web` pins `openapi-typescript` for declarations and `openapi-fetch` for the typed fetch client. From `apps/web`, start the Core API and run:
 
 ~~~sh
-npx openapi-typescript http://127.0.0.1:8000/openapi.json -o apps/web/src/api/generated/schema.d.ts
+npm run api:generate
 ~~~
 
-The frontend should import paths/components from that generated file, or generate an Orval client from the same OpenAPI URL. Generated files are tool output and must not be edited manually. Keep endpoint calls and common error parsing in a small apps/web/src/api client layer; Vue components should consume that client instead of defining transport types. A later frontend tooling task can pin the generator version and add an api:generate package script/CI drift check.
+This writes `src/api/generated/schema.d.ts` from `http://127.0.0.1:8000/openapi.json`. Generated files are tool output and must not be edited manually. Calls, bearer injection, and standard error parsing live in `src/api/client.ts`; Vue pages and stores consume that shared client rather than duplicating response interfaces. Regenerate after changing API schemas and commit the generated diff with the contract change.
 
 Additive, backward-compatible contract changes can stay in v1. Removing/renaming fields, changing field types, or changing resource semantics requires a new /api/v2 contract with an explicit migration/deprecation plan.

@@ -1,4 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createMemoryHistory } from 'vue-router'
 import App from './App.vue'
@@ -7,7 +8,7 @@ import { createAppRouter } from './router'
 async function mountAt(path: string) {
   const router = createAppRouter(createMemoryHistory())
   await router.push(path)
-  const wrapper = mount(App, { global: { plugins: [router] } })
+  const wrapper = mount(App, { global: { plugins: [createPinia(), router] } })
   await router.isReady()
   await flushPromises()
   return wrapper
@@ -32,7 +33,7 @@ describe('application shell', () => {
     const wrapper = await mountAt('/auth/login')
 
     expect(wrapper.find('[data-testid="auth-layout"]').exists()).toBe(true)
-    expect(wrapper.get('h1').text()).toBe('Presensi Praktikum')
+    expect(wrapper.get('h1').text()).toBe('Masuk ke akun')
     wrapper.unmount()
   })
 

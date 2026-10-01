@@ -494,6 +494,90 @@ a:focus-visible {
   line-height: 1.6;
 }
 
+.auth-card__form {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-6);
+  text-align: left;
+}
+
+.auth-card__field {
+  display: grid;
+  gap: 7px;
+}
+
+.auth-card__field label {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.auth-card__field input {
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--bg-surface);
+  font: inherit;
+  font-size: 0.82rem;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.auth-card__field input::placeholder {
+  color: var(--text-disabled);
+}
+
+.auth-card__field input:focus {
+  border-color: var(--primary);
+  outline: 0;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 15%, transparent);
+}
+
+.auth-card__field input:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.auth-card__error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 8%, var(--bg-surface));
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.auth-card__submit {
+  min-height: 42px;
+  margin-top: 2px;
+  padding: 9px 16px;
+  border: 1px solid var(--primary-dk);
+  border-radius: var(--radius-sm);
+  color: #fff;
+  background: var(--primary);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  transition:
+    background-color 120ms ease,
+    opacity 120ms ease;
+}
+
+.auth-card__submit:hover:not(:disabled) {
+  background: var(--primary-dk);
+}
+
+.auth-card__submit:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 .auth-card__status {
   display: inline-flex;
   align-items: center;

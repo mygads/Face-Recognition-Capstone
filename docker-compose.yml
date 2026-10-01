@@ -84,6 +84,7 @@ services:
       - web-node-modules:/workspace/node_modules
     environment:
       CHOKIDAR_USEPOLLING: "true"
+      API_PROXY_TARGET: http://api:8000
     ports:
       - "127.0.0.1:${WEB_PORT:-5173}:5173"
     healthcheck:

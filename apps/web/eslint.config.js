@@ -13,6 +13,7 @@ export default tseslint.config(
       'node_modules/**',
       'playwright-report/**',
       'test-results/**',
+      'src/api/generated/**',
     ],
   },
   eslint.configs.recommended,
