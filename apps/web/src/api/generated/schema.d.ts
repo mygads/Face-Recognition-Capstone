@@ -198,7 +198,7 @@ export interface paths {
         put?: never;
         /**
          * Preview a student CSV/XLSX import
-         * @description Maps three header names explicitly and reports duplicate identifiers, missing names, and unknown classes before any database write.
+         * @description Maps three headers and reports duplicate identifiers, missing names, and unknown classes before database writes.
          */
         post: operations["preview_student_import_api_v1_students_import_preview_post"];
         delete?: never;
@@ -287,6 +287,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/schedules/teachers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List active teachers available for schedules */
+        get: operations["list_schedule_teachers_api_v1_schedules_teachers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/schedules": {
         parameters: {
             query?: never;
@@ -294,21 +311,33 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * List practicum schedules
-         * @description Contract placeholder; currently returns 501.
-         */
+        /** List practicum schedules */
         get: operations["list_schedules_api_v1_schedules_get"];
         put?: never;
-        /**
-         * Create a practicum schedule
-         * @description Contract placeholder; currently returns 501.
-         */
+        /** Create a practicum schedule */
         post: operations["create_schedule_api_v1_schedules_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/schedules/{schedule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a practicum schedule */
+        get: operations["get_schedule_api_v1_schedules__schedule_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update a practicum schedule */
+        patch: operations["update_schedule_api_v1_schedules__schedule_id__patch"];
         trace?: never;
     };
     "/api/v1/sessions": {
@@ -1116,6 +1145,12 @@ export interface components {
             effective_through: string | null;
             /** Is Active */
             is_active: boolean;
+            /** Class Name */
+            class_name: string;
+            /** Laboratory Name */
+            laboratory_name: string;
+            /** Teacher Name */
+            teacher_name: string;
             /**
              * Created At
              * Format: date-time
@@ -1126,6 +1161,41 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** ScheduleTeacherResponse */
+        ScheduleTeacherResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Full Name */
+            full_name: string;
+        };
+        /** ScheduleUpdateRequest */
+        ScheduleUpdateRequest: {
+            /** Class Id */
+            class_id?: string | null;
+            /** Laboratory Id */
+            laboratory_id?: string | null;
+            /** Teacher User Id */
+            teacher_user_id?: string | null;
+            /** Subject */
+            subject?: string | null;
+            /** Weekday */
+            weekday?: number | null;
+            /** Start Time */
+            start_time?: string | null;
+            /** End Time */
+            end_time?: string | null;
+            /** Timezone Name */
+            timezone_name?: string | null;
+            /** Effective From */
+            effective_from?: string | null;
+            /** Effective Through */
+            effective_through?: string | null;
+            /** Is Active */
+            is_active?: boolean | null;
         };
         /** StudentClassResponse */
         StudentClassResponse: {
@@ -4257,11 +4327,153 @@ export interface operations {
             };
         };
     };
+    list_schedule_teachers_api_v1_schedules_teachers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleTeacherResponse"][];
+                };
+            };
+            /** @description The request could not be processed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Authentication is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description You are not allowed to perform this action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The requested resource was not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This method is not allowed for the resource. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The uploaded file exceeds the allowed size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The file extension or media type is not supported. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Request validation failed. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many requests. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description An unexpected server error occurred. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This API operation is not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The service is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     list_schedules_api_v1_schedules_get: {
         parameters: {
             query?: {
                 limit?: number;
                 offset?: number;
+                search?: string | null;
+                weekday?: number | null;
+                is_active?: boolean | null;
+                class_id?: string | null;
+                laboratory_id?: string | null;
             };
             header?: never;
             path?: never;
@@ -4412,6 +4624,288 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleResponse"];
+                };
+            };
+            /** @description The request could not be processed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Authentication is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description You are not allowed to perform this action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The requested resource was not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This method is not allowed for the resource. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The uploaded file exceeds the allowed size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The file extension or media type is not supported. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Request validation failed. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many requests. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description An unexpected server error occurred. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This API operation is not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The service is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_schedule_api_v1_schedules__schedule_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleResponse"];
+                };
+            };
+            /** @description The request could not be processed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Authentication is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description You are not allowed to perform this action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The requested resource was not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This method is not allowed for the resource. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The uploaded file exceeds the allowed size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The file extension or media type is not supported. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Request validation failed. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many requests. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description An unexpected server error occurred. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This API operation is not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The service is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    update_schedule_api_v1_schedules__schedule_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

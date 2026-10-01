@@ -17,6 +17,10 @@ export type LaboratoryCreate = components['schemas']['LaboratoryCreateRequest']
 export type LaboratoryUpdate = components['schemas']['LaboratoryUpdateRequest']
 export type StudentImportPreview = components['schemas']['StudentImportPreviewResponse']
 export type StudentImportCommit = components['schemas']['StudentImportCommitResponse']
+export type Schedule = components['schemas']['ScheduleResponse']
+export type ScheduleCreate = components['schemas']['ScheduleCreateRequest']
+export type ScheduleUpdate = components['schemas']['ScheduleUpdateRequest']
+export type ScheduleTeacher = components['schemas']['ScheduleTeacherResponse']
 type ErrorDetail = components['schemas']['ErrorDetail']
 type ErrorEnvelope = components['schemas']['ErrorEnvelope']
 type Page<T> = {
@@ -204,6 +208,42 @@ export async function updateLaboratory(
     params: { path: { laboratory_id: laboratoryId } },
     body,
   })
+  return unwrap(result)
+}
+
+export async function listSchedules(query: {
+  limit: number
+  offset: number
+  search?: string
+  weekday?: number
+  is_active?: boolean
+}): Promise<Page<Schedule>> {
+  const result = await apiClient.GET('/api/v1/schedules', { params: { query } })
+  return unwrap(result)
+}
+
+export async function getSchedule(scheduleId: string): Promise<Schedule> {
+  const result = await apiClient.GET('/api/v1/schedules/{schedule_id}', {
+    params: { path: { schedule_id: scheduleId } },
+  })
+  return unwrap(result)
+}
+
+export async function createSchedule(body: ScheduleCreate): Promise<Schedule> {
+  const result = await apiClient.POST('/api/v1/schedules', { body })
+  return unwrap(result)
+}
+
+export async function updateSchedule(scheduleId: string, body: ScheduleUpdate): Promise<Schedule> {
+  const result = await apiClient.PATCH('/api/v1/schedules/{schedule_id}', {
+    params: { path: { schedule_id: scheduleId } },
+    body,
+  })
+  return unwrap(result)
+}
+
+export async function listScheduleTeachers(): Promise<ScheduleTeacher[]> {
+  const result = await apiClient.GET('/api/v1/schedules/teachers')
   return unwrap(result)
 }
 

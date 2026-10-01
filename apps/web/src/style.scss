@@ -1213,3 +1213,64 @@ a:focus-visible {
     max-width: none;
   }
 }
+
+.schedule-view__hint {
+  margin: 0 0 var(--space-4);
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.schedule-view__filter select,
+.schedule-view__form select {
+  min-height: 40px;
+  padding: 0 11px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--bg-surface);
+  font: inherit;
+}
+
+.schedule-view__filter select:focus,
+.schedule-view__form select:focus {
+  border-color: var(--primary);
+  outline: 2px solid color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+.schedule-view__form select,
+.schedule-view__form input:not([type='checkbox']) {
+  width: 100%;
+}
+
+.schedule-view__form select:disabled {
+  color: var(--text-secondary);
+  background: var(--body-bg);
+}
+
+.schedule-view__form small {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 400;
+}
+
+.schedule-view__form-error {
+  grid-column: 1 / -1;
+}
+
+.schedule-view__table td small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+}
+
+.schedule-view__details {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+@media (max-width: 760px) {
+  .schedule-view__filter,
+  .schedule-view__filter select {
+    width: 100%;
+  }
+}

@@ -13,6 +13,7 @@ import DashboardView from '../views/DashboardView.vue'
 import ForbiddenView from '../views/ForbiddenView.vue'
 import LoginView from '../views/LoginView.vue'
 import MasterDataView from '../views/MasterDataView.vue'
+import ScheduleView from '../views/ScheduleView.vue'
 
 export const routes: RouteRecordRaw[] = [
   {
@@ -54,6 +55,16 @@ export const routes: RouteRecordRaw[] = [
         meta: {
           title: 'Data master',
           description: 'Kelola data siswa, kelas, dan laboratorium.',
+        },
+      },
+      {
+        path: 'schedules',
+        name: 'schedules',
+        component: ScheduleView,
+        meta: {
+          title: 'Jadwal praktikum',
+          description: 'Atur kelas, laboratorium, guru, dan waktu praktikum.',
+          requiredRoles: ['ADMIN', 'TEACHER'],
         },
       },
       {

@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Generator
 from uuid import UUID
 
 import httpx
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from presensi_api.api.security.dependencies import get_current_user
 from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
+from presensi_api.db.base import Base
+from presensi_api.db.session import get_db_session
 from presensi_api.main import app
 
 
@@ -125,7 +131,20 @@ def test_openapi_documents_oauth_password_login_and_bearer_auth() -> None:
     assert password_flow["tokenUrl"] == "/api/v1/auth/login"
 
 
-def test_placeholder_returns_standard_error_envelope() -> None:
+def test_schedule_endpoint_returns_empty_page_when_no_schedules_exist() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    def override_db() -> Generator[Session, None, None]:
+        with factory() as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_db
     app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
         id=UUID(int=1),
         email="admin@example.edu",
@@ -136,16 +155,12 @@ def test_placeholder_returns_standard_error_envelope() -> None:
         response = send_request("GET", "/api/v1/schedules")
     finally:
         app.dependency_overrides.clear()
+        engine.dispose()
 
-    assert response.status_code == 501
+    assert response.status_code == 200
     assert response.json() == {
-        "error": {
-            "code": "feature_not_implemented",
-            "message": (
-                "The practicum schedules API is a contract placeholder and is "
-                "not implemented."
-            ),
-        }
+        "items": [],
+        "pagination": {"total": 0, "limit": 50, "offset": 0},
     }
 
 

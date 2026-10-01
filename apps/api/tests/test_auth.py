@@ -225,8 +225,8 @@ def test_expired_bearer_token_is_rejected(api_database: sessionmaker[Session]) -
             {"student_number": "S1", "full_name": "Student"},
             403,
         ),
-        ("ADMIN", "GET", "/api/v1/schedules", None, 501),
-        ("TEACHER", "GET", "/api/v1/schedules", None, 501),
+        ("ADMIN", "GET", "/api/v1/schedules", None, 200),
+        ("TEACHER", "GET", "/api/v1/schedules", None, 200),
         ("LABORANT", "GET", "/api/v1/schedules", None, 403),
         (
             "ADMIN",
@@ -243,7 +243,7 @@ def test_expired_bearer_token_is_rejected(api_database: sessionmaker[Session]) -
                 "timezone_name": "Asia/Jakarta",
                 "effective_from": "2026-09-01",
             },
-            501,
+            422,
         ),
         (
             "TEACHER",
@@ -260,7 +260,7 @@ def test_expired_bearer_token_is_rejected(api_database: sessionmaker[Session]) -
                 "timezone_name": "Asia/Jakarta",
                 "effective_from": "2026-09-01",
             },
-            501,
+            422,
         ),
         (
             "LABORANT",

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useAuthStore } from '../stores/auth'
+
 defineOptions({ name: 'AppSidebar' })
 
 defineProps<{
@@ -9,6 +12,10 @@ defineProps<{
 const emit = defineEmits<{
   navigate: []
 }>()
+const auth = useAuthStore()
+const canManageSchedules = computed(
+  () => auth.account?.roles.some((role) => role === 'ADMIN' || role === 'TEACHER') ?? false,
+)
 </script>
 
 <template>
@@ -61,6 +68,21 @@ const emit = defineEmits<{
           <path d="M8 9.5v5M17.5 9.5v5" />
         </svg>
         <span class="app-sidebar__link-label">Data master</span>
+      </RouterLink>
+      <RouterLink
+        v-if="canManageSchedules"
+        class="app-sidebar__link"
+        active-class="app-sidebar__link--active"
+        to="/app/schedules"
+        :aria-label="collapsed ? 'Jadwal praktikum' : undefined"
+        data-testid="schedules-link"
+        @click="emit('navigate')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="3.5" y="5" width="17" height="15.5" rx="2" />
+          <path d="M7.5 3.5v3M16.5 3.5v3M3.5 9h17M7.5 12.5h3M13.5 12.5h3M7.5 16h3" />
+        </svg>
+        <span class="app-sidebar__link-label">Jadwal praktikum</span>
       </RouterLink>
     </nav>
 
