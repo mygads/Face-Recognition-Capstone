@@ -10,6 +10,17 @@ liveness, embedding, gallery matching, and temporal decision in that order. Unsa
 or insufficient frames stop before expensive or sensitive later stages. The temporal
 decision engine owns tracking windows, match thresholds, ambiguity policy, and
 frontal retry behavior; the pipeline foundation leaves those policies replaceable.
+`MultiFrameDecisionEngine` is the configurable local implementation: it samples
+before preprocessing and model inference, aggregates the best-quality frames per
+stable upstream track ID, and resets evidence when the winning identity changes or
+quality is unacceptable. It requires a configured count of agreeing frames, and
+both each evidence frame and the selected-frame averages must pass configured Top-1
+cosine and Top-1 minus Top-2 margin thresholds. Thresholds have no bundled
+production defaults and must be calibrated from local benchmark data.
+
+An ambiguous margin yields domain state `retry_frontal` and machine status
+`NEED_FRONTAL_RETRY`; it never auto-accepts that observation. The engine returns
+recognition state only. Attendance remains a Core API/domain decision.
 
 Stage contracts are Python protocols. OpenCV, ONNX Runtime, or other local inference
 implementations can be swapped while keeping FaceDetection, FaceQuality,

@@ -81,6 +81,7 @@ def test_pipeline_invokes_stages_in_order_and_delegates_temporal_decision() -> N
 
     assert result == decision
     assert calls == [
+        "sample",
         "preprocess",
         "detect",
         "quality",
@@ -135,7 +136,7 @@ def test_quality_rejection_stops_alignment_and_embedding() -> None:
     )
 
     assert result == decision
-    assert calls == ["preprocess", "detect", "quality", "temporal"]
+    assert calls == ["sample", "preprocess", "detect", "quality", "temporal"]
     assert temporal.quality is not None
     assert temporal.quality.reason_codes == ("face_too_small",)
     assert temporal.liveness == LivenessDecision(
@@ -174,7 +175,15 @@ def test_spoof_liveness_stops_embedding_and_matching() -> None:
         any_frame(), (), FrameObservation(TEACHER_TRACK, datetime.now(UTC))
     )
 
-    assert calls == ["preprocess", "detect", "quality", "align", "liveness", "temporal"]
+    assert calls == [
+        "sample",
+        "preprocess",
+        "detect",
+        "quality",
+        "align",
+        "liveness",
+        "temporal",
+    ]
     assert temporal.liveness == LivenessDecision(
         state="spoof",
         confidence=0.99,
@@ -214,6 +223,41 @@ def test_multiple_faces_skip_quality_and_request_temporal_handling() -> None:
         any_frame(), (), FrameObservation(TEACHER_TRACK, datetime.now(UTC))
     )
 
-    assert calls == ["preprocess", "detect", "temporal"]
+    assert calls == ["sample", "preprocess", "detect", "temporal"]
     assert temporal.quality is not None
     assert temporal.quality.reason_codes == ("multiple_faces",)
+
+
+def test_pipeline_sampling_skips_before_preprocess_and_model_work() -> None:
+    calls: list[str] = []
+    decision = TrackDecision(
+        track_id=TEACHER_TRACK,
+        state="collecting",
+        decision=RecognitionDecision(outcome="retry", reason_code="awaiting_consensus"),
+        observation_count=0,
+    )
+    temporal = FakeTemporalDecisionEngine(calls, decision)
+    temporal.sample_result = False
+    pipeline = RecognitionPipeline(
+        preprocessor=FakePreprocessor(calls),
+        detector=FakeFaceDetector(calls, ()),
+        quality_assessor=FakeFaceQualityAssessor(
+            calls,
+            FaceQuality(score=0.9, acceptable=True),
+        ),
+        aligner=FakeFaceAligner(calls),
+        liveness_model=FakeLivenessModel(calls, LivenessDecision(state="live")),
+        embedder=FakeFaceEmbedder(
+            calls,
+            FaceEmbedding((1.0,), "fake-embedder", "test", True),
+        ),
+        matcher=FakeMatcher(calls, ()),
+        temporal_decision=temporal,
+    )
+
+    result = pipeline.process(
+        any_frame(), (), FrameObservation(TEACHER_TRACK, datetime.now(UTC))
+    )
+
+    assert result == decision
+    assert calls == ["sample", "skip"]

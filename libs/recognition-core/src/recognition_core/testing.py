@@ -104,6 +104,17 @@ class FakeTemporalDecisionEngine:
         self.matches: Sequence[CandidateMatch] = ()
         self.quality: FaceQuality | None = None
         self.liveness: LivenessDecision | None = None
+        self.sample_result = True
+
+    def should_sample(self, observation: FrameObservation) -> bool:
+        del observation
+        self.calls.append("sample")
+        return self.sample_result
+
+    def on_skipped(self, observation: FrameObservation) -> TrackDecision:
+        del observation
+        self.calls.append("skip")
+        return self.result
 
     def decide(
         self,

@@ -53,6 +53,10 @@ class Matcher(Protocol):
 
 
 class TemporalDecisionEngine(Protocol):
+    def should_sample(self, observation: FrameObservation) -> bool: ...
+
+    def on_skipped(self, observation: FrameObservation) -> TrackDecision: ...
+
     def decide(
         self,
         observation: FrameObservation,

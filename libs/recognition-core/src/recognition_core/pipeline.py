@@ -52,6 +52,9 @@ class RecognitionPipeline:
         gallery: Sequence[GalleryEntry],
         observation: FrameObservation,
     ) -> TrackDecision:
+        if not self.temporal_decision.should_sample(observation):
+            return self.temporal_decision.on_skipped(observation)
+
         processed = self.preprocessor.preprocess(frame)
         detections = self.detector.detect(processed)
         matches: tuple[CandidateMatch, ...] = ()

@@ -9,6 +9,12 @@ from uuid import UUID
 Point = tuple[float, float]
 DecisionOutcome = Literal["matched", "ambiguous", "no_match", "retry", "error"]
 TrackState = Literal["collecting", "accepted", "retry_frontal", "rejected"]
+TrackStatus = Literal[
+    "COLLECTING",
+    "ACCEPTED",
+    "NEED_FRONTAL_RETRY",
+    "REJECTED",
+]
 LivenessState = Literal["live", "spoof", "inconclusive"]
 
 
@@ -138,6 +144,17 @@ class TrackDecision:
             raise ValueError("Accepted tracks must contain a matched decision.")
         if self.state == "retry_frontal" and not self.needs_frontal_look:
             raise ValueError("Frontal retry state must request a frontal look.")
+
+    @property
+    def status(self) -> TrackStatus:
+        """Expose stable machine status names while preserving domain state names."""
+        if self.state == "collecting":
+            return "COLLECTING"
+        if self.state == "accepted":
+            return "ACCEPTED"
+        if self.state == "retry_frontal":
+            return "NEED_FRONTAL_RETRY"
+        return "REJECTED"
 
 
 @dataclass(frozen=True, slots=True)
