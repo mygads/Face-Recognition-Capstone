@@ -95,7 +95,7 @@ Perintah yang sama berlaku di Linux. Password diminta secara interaktif dan tida
 
 API healthcheck hanya memeriksa kesiapan proses HTTP; migration dijalankan eksplisit sebagai langkah development.
 
-Runbook deployment AI_EDGE production, termasuk Compose API/PostgreSQL tanpa port database publik, reverse proxy HTTPS, model checksum, per-device systemd, backup/restore, dan rollback ada di [docs/deployment/ai-edge.md](docs/deployment/ai-edge.md). `docker-compose.yml` tetap khusus development.
+Runbook production [AI_EDGE](docs/deployment/ai-edge.md) dan [AI_CENTRAL + STB Armbian](docs/deployment/ai-central-stb.md) mencakup Compose server privat, reverse proxy HTTPS, credential perangkat, backup/restore, dan acceptance checklist. `docker-compose.yml` root tetap khusus development.
 
 ## Quality checks
 

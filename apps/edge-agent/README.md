@@ -4,7 +4,9 @@ Select the runtime with the root YAML key `mode`. `AI_EDGE` runs
 `recognition-core` locally. `STB_GATEWAY` is the low-resource ARM64 Armbian
 profile: it loads no local face recognition model, samples the camera at low
 resolution, and sends short JPEG bursts to the authenticated central AI service.
-See `config/stb-gateway.example.yaml` for its separate starting configuration.
+See `config/stb-gateway.example.yaml` for its separate starting configuration
+and the [AI_CENTRAL + STB deployment runbook](../../docs/deployment/ai-central-stb.md)
+for a clean Armbian install, central server, recovery, and acceptance checklists.
 
 ## STB_GATEWAY on Armbian
 
@@ -41,7 +43,7 @@ sudo /opt/presensi-edge-agent/.venv/bin/pip install -e /opt/presensi-edge-agent/
 sudo useradd --system --no-create-home --home-dir /var/lib/presensi-edge-agent --shell /usr/sbin/nologin presensi-edge
 sudo usermod -aG video presensi-edge
 sudo install -d -o root -g presensi-edge -m 0750 /etc/presensi-edge-agent
-sudo install -d -o root -g root -m 0755 /var/lib/presensi-edge-agent
+sudo install -d -o presensi-edge -g presensi-edge -m 0750 /var/lib/presensi-edge-agent
 sudo cp /opt/presensi-edge-agent/apps/edge-agent/config/stb-gateway.example.yaml /etc/presensi-edge-agent/stb-gateway.yaml
 sudo chown root:presensi-edge /etc/presensi-edge-agent/stb-gateway.yaml
 sudo chmod 0640 /etc/presensi-edge-agent/stb-gateway.yaml
@@ -53,7 +55,8 @@ Core API, then provision its device-specific credential using an administrator
 account. Save the one-time token into the path configured by `api.token_file`;
 the STB example points `central_ai.token_file` to the same protected file so
 the same registered device identity is authenticated at both services. The
-file should be owned by `root:presensi-edge` and mode `0440`. Do not commit
+file must be owned by `presensi-edge:presensi-edge` and mode `0600`: the agent
+atomically replaces it when the Core API renews its credential. Do not commit
 credentials. The Core API stores only a hash and device credentials renew
 automatically during heartbeat when loaded from a token file.
 

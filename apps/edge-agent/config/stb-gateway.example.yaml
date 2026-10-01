@@ -10,12 +10,12 @@ api:
   cache_refresh_seconds: 3
   cache_max_offline_seconds: 300
   cache_path: /api/v1/devices/{device_id}/active-session-cache?model_name={model_name}&model_version={model_version}
-  token_file: /etc/presensi-edge-agent/core-api.token
+  token_file: /var/lib/presensi-edge-agent/device.token
 
 central_ai:
-  base_url: https://ai.example.edu
+  base_url: https://ai.attendance.example.edu
   timeout_seconds: 8
-  token_file: /etc/presensi-edge-agent/core-api.token # Same device credential as Core API.
+  token_file: /var/lib/presensi-edge-agent/device.token # Same device credential as Core API.
 
 camera:
   index: 0

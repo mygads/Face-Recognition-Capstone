@@ -1,0 +1,39 @@
+services:
+  ai-service:
+    image: presensi-central-ai:${PRESENSI_RELEASE_TAG:?Set PRESENSI_RELEASE_TAG to the approved source revision}
+    build:
+      context: .
+      dockerfile: infra/docker/ai-service-production.Dockerfile
+    restart: unless-stopped
+    environment:
+      PRESENSI_AI_CORE_API_BASE_URL: ${PRESENSI_AI_CORE_API_BASE_URL:?Set the HTTPS Core API origin}
+      # Empty in production: validate device credentials and sessions against Core API.
+      PRESENSI_AI_DEVICE_TOKENS: ${PRESENSI_AI_DEVICE_TOKENS:-}
+      PRESENSI_AI_YUNET_MODEL_PATH: /models/face_detection_yunet_2023mar.onnx
+      PRESENSI_AI_SFACE_MODEL_PATH: /models/face_recognition_sface_2021dec.onnx
+      PRESENSI_AI_MODEL_VERSION: ${PRESENSI_ENROLLMENT_MODEL_VERSION:?Set the approved SFace model version}
+      PRESENSI_AI_MIN_TOP1_SIMILARITY: ${PRESENSI_AI_MIN_TOP1_SIMILARITY:?Set the locally calibrated Top-1 threshold}
+      PRESENSI_AI_MIN_TOP1_TOP2_MARGIN: ${PRESENSI_AI_MIN_TOP1_TOP2_MARGIN:?Set the locally calibrated Top-1/Top-2 margin}
+      PRESENSI_AI_INFERENCE_TIMEOUT_SECONDS: ${PRESENSI_AI_INFERENCE_TIMEOUT_SECONDS:-5}
+      PRESENSI_AI_RATE_LIMIT_PER_SECOND: ${PRESENSI_AI_RATE_LIMIT_PER_SECOND:-10}
+      PRESENSI_AI_RATE_LIMIT_BURST: ${PRESENSI_AI_RATE_LIMIT_BURST:-20}
+      PRESENSI_AI_GALLERY_MAX_AGE_SECONDS: ${PRESENSI_AI_GALLERY_MAX_AGE_SECONDS:-300}
+      PRESENSI_AI_LIVENESS_ENABLED: ${PRESENSI_AI_LIVENESS_ENABLED:-false}
+      PRESENSI_AI_LIVENESS_REQUIRED: ${PRESENSI_AI_LIVENESS_REQUIRED:-false}
+      PRESENSI_AI_LIVENESS_MIN_SCORE: ${PRESENSI_AI_LIVENESS_MIN_SCORE:-}
+      PRESENSI_AI_LIVENESS_MODEL_PATH: ${PRESENSI_AI_LIVENESS_MODEL_PATH:-}
+      PRESENSI_AI_LIVENESS_MODEL_VERSION: ${PRESENSI_AI_LIVENESS_MODEL_VERSION:-}
+      PRESENSI_AI_BENCHMARK_TIMING_ENABLED: ${PRESENSI_AI_BENCHMARK_TIMING_ENABLED:-false}
+    volumes:
+      - ${PRESENSI_MODELS_DIR:?Set PRESENSI_MODELS_DIR to the approved model directory}:/models:ro
+    ports:
+      - "127.0.0.1:${AI_SERVICE_PORT:-8001}:8001"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=2); assert response.status == 200"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
