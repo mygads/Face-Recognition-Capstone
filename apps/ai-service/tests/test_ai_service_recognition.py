@@ -193,6 +193,67 @@ def test_valid_burst_runs_shared_pipeline_and_returns_only_decision_metadata() -
     assert "embedding" not in response.text
 
 
+def test_opt_in_benchmark_timings_and_process_metrics_are_available() -> None:
+    app = _app(settings=_settings(benchmark_timing_enabled=True))
+
+    async def exercise() -> tuple[httpx.Response, httpx.Response]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            response = await client.post(
+                f"/api/v1/recognition/sessions/{SESSION_ID}/bursts",
+                headers={**_headers(), "X-Benchmark-Timing": "true"},
+                json=_body(),
+            )
+            metrics = await client.get("/metrics")
+            return response, metrics
+
+    response, metrics = asyncio.run(exercise())
+
+    assert response.status_code == 200
+    stage_timings = response.headers["X-Recognition-Stage-Timings-Ms"]
+    assert '"detect"' in stage_timings
+    assert '"embed"' in stage_timings
+    assert response.headers["X-Recognition-Gallery-Template-Count"] == "1"
+    metrics_json = metrics.json()
+    assert metrics_json["stage_latency_ms"]["detect"]["sample_count"] == 1
+    assert metrics_json["process_cpu_seconds"] >= 0
+    assert metrics_json["process_rss_bytes"] > 0
+    assert metrics_json["host_memory_total_bytes"] > 0
+
+
+def test_benchmark_timing_header_is_not_returned_by_default() -> None:
+    app = _app()
+
+    async def exercise() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            return await client.post(
+                f"/api/v1/recognition/sessions/{SESSION_ID}/bursts",
+                headers={**_headers(), "X-Benchmark-Timing": "true"},
+                json=_body(),
+            )
+
+    response = asyncio.run(exercise())
+
+    assert response.status_code == 200
+    assert "X-Recognition-Stage-Timings-Ms" not in response.headers
+    assert "X-Recognition-Gallery-Template-Count" not in response.headers
+
+
+def test_benchmark_timing_configuration_defaults_off_and_is_opt_in() -> None:
+    assert AISettings.from_env({}).benchmark_timing_enabled is False
+    assert (
+        AISettings.from_env(
+            {"PRESENSI_AI_BENCHMARK_TIMING_ENABLED": "true"}
+        ).benchmark_timing_enabled
+        is True
+    )
+
+
 def test_oversized_request_is_rejected_before_json_or_image_decode() -> None:
     app = _app(settings=_settings(max_request_bytes=512, max_frame_bytes=128))
 

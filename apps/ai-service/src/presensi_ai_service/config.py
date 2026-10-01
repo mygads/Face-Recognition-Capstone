@@ -45,6 +45,7 @@ class AISettings:
     liveness_min_score: float | None = None
     liveness_model_path: Path | None = None
     liveness_model_version: str | None = None
+    benchmark_timing_enabled: bool = False
 
     def __post_init__(self) -> None:
         positive_ints = (
@@ -225,4 +226,7 @@ class AISettings:
             liveness_model_path=path_setting("PRESENSI_AI_LIVENESS_MODEL_PATH"),
             liveness_model_version=values.get("PRESENSI_AI_LIVENESS_MODEL_VERSION")
             or None,
+            benchmark_timing_enabled=bool_setting(
+                "PRESENSI_AI_BENCHMARK_TIMING_ENABLED"
+            ),
         )

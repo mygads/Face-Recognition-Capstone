@@ -4,7 +4,7 @@ import asyncio
 import threading
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 from uuid import UUID
 
 from presensi_ai_service.config import AISettings
@@ -52,6 +52,7 @@ class RecognitionRunner:
         frames: tuple[CapturedFrame, ...],
         gallery: SessionGallery,
         timeout_seconds: float,
+        timing_observer: Callable[[str, float], None] | None = None,
     ) -> TrackDecision:
         if not self._slot.acquire(blocking=False):
             raise InferenceBusyError("The inference worker is busy.")
@@ -65,6 +66,7 @@ class RecognitionRunner:
                     track_id,
                     frames,
                     gallery,
+                    timing_observer,
                 )
             finally:
                 self._slot.release()
@@ -90,6 +92,7 @@ class RecognitionRunner:
         track_id: str,
         frames: tuple[CapturedFrame, ...],
         gallery: SessionGallery,
+        timing_observer: Callable[[str, float], None] | None,
     ) -> TrackDecision:
         scoped_track_id = f"{device_id}:{session_id}:{track_id}"
         session_key = (device_id, session_id)
@@ -99,14 +102,23 @@ class RecognitionRunner:
             self.pipeline.max_candidates = max(2, len(gallery.entries))
             decision: TrackDecision | None = None
             for frame in frames:
-                decision = self.pipeline.process(
-                    frame.image,
-                    gallery.entries,
-                    FrameObservation(
-                        track_id=scoped_track_id,
-                        captured_at=frame.captured_at,
-                    ),
+                observation = FrameObservation(
+                    track_id=scoped_track_id,
+                    captured_at=frame.captured_at,
                 )
+                if timing_observer is None:
+                    decision = self.pipeline.process(
+                        frame.image,
+                        gallery.entries,
+                        observation,
+                    )
+                else:
+                    decision = self.pipeline.process(
+                        frame.image,
+                        gallery.entries,
+                        observation,
+                        timing_observer=timing_observer,
+                    )
             if decision is None:
                 raise RuntimeError("An inference burst did not contain frames.")
             self._track_ids.setdefault(session_key, set()).add(scoped_track_id)

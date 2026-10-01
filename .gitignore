@@ -32,6 +32,8 @@ debug-artifacts/
 datasets/private/
 tests/fixtures/private/
 tests/fixtures/biometric/
+tests/deployment-benchmark/datasets/
+tests/deployment-benchmark/reports/runs/
 models/weights/
 apps/edge-agent/config/edge-agent.yaml
 *.embedding

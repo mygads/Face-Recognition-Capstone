@@ -109,6 +109,10 @@ Docker Compose is for development and binds the API to loopback. In production:
    stack. Redact `Authorization`, cookies, upload bodies, base64 image data, and
    query/header values that may contain credentials. Keep application logs at
    metadata level only.
+   Restrict the AI service `/metrics` route to the trusted operations network;
+   it reports aggregate host/process utilization. Keep
+   `PRESENSI_AI_BENCHMARK_TIMING_ENABLED=false` except during a controlled
+   benchmark, then disable it and restart the service.
 6. Keep PostgreSQL private, encrypted at rest, backed up under the same access
    policy, and test encrypted-template key recovery before production.
 

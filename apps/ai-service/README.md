@@ -109,8 +109,16 @@ through the Core API and configure its protected token file on the edge agent.
 
 - `GET /health` reports process health.
 - `GET /metrics` returns in-memory recognition request/error/timeout counters and
-  p50/p95 end-to-end burst latency in milliseconds. The sample window is bounded
-  and contains no device, student, image, or embedding labels.
+  p50/p95 end-to-end burst latency, AI process CPU/RSS, and sampled host CPU/RAM.
+  The sample window is bounded and contains no device, student, image, or
+  embedding labels. Restrict `/metrics` to the trusted operations/benchmark
+  network at the reverse proxy.
+
+Set `PRESENSI_AI_BENCHMARK_TIMING_ENABLED=true` only for a controlled benchmark.
+When a trusted device opts in with `X-Benchmark-Timing: true`, the response adds
+`X-Recognition-Stage-Timings-Ms` with aggregate per-burst pipeline stage times.
+The setting defaults to false and should be turned off after the run. Stage
+names and durations do not include images, templates, or student identifiers.
 
 Metrics reset when the process restarts. They are operational indicators, not a
 substitute for the offline evaluation harness or a hardware throughput test.

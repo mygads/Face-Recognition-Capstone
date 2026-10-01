@@ -180,4 +180,16 @@ latency per tahap, serta aturan dataset lokal ada di
 [tests/ai-benchmark/README.md](tests/ai-benchmark/README.md). Data wajah, bobot
 model, dan laporan benchmark lokal tidak boleh di-commit.
 
+Benchmark deployment AI_EDGE vs AI_CENTRAL mengukur decision p50/p95, latency
+per tahap, CPU/RAM edge/server, bytes HTTP/event, sequential/two-lab throughput,
+serta retry/error rate. Jalankan dari root repository:
+
+```powershell
+py -3 tests/deployment-benchmark/benchmark.py --output-dir tests/deployment-benchmark/reports/runs/bench-01
+```
+
+Di Linux gunakan `python3` menggantikan `py -3`. Tanpa fixture/model/session
+aktif, CSV/JSON/Markdown akan menandai hasil `PENDING HARDWARE`; cara konfigurasi dan batas pengukuran ada di
+[tests/deployment-benchmark/README.md](tests/deployment-benchmark/README.md).
+
 Baca [arsitektur](docs/architecture/overview.md), [ADR-001](docs/adr/ADR-001-shared-recognition-core.md), dan [AGENTS.md](AGENTS.md) sebelum mengubah struktur/domain. Compose hanya untuk development, bukan deployment production.

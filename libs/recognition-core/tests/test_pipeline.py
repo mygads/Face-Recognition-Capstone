@@ -83,8 +83,14 @@ def test_pipeline_invokes_stages_in_order_and_delegates_temporal_decision() -> N
         track_id=TEACHER_TRACK,
         captured_at=datetime.now(UTC),
     )
+    timings: list[tuple[str, float]] = []
 
-    result = pipeline.process(any_frame(), gallery, observation)
+    result = pipeline.process(
+        any_frame(),
+        gallery,
+        observation,
+        timing_observer=lambda stage, elapsed: timings.append((stage, elapsed)),
+    )
 
     assert result == decision
     assert calls == [
@@ -109,6 +115,18 @@ def test_pipeline_invokes_stages_in_order_and_delegates_temporal_decision() -> N
         required=True,
         passed=True,
     )
+    assert [stage for stage, _ in timings] == [
+        "temporal_sampling",
+        "preprocess",
+        "detect",
+        "quality",
+        "align",
+        "liveness",
+        "embed",
+        "match",
+        "temporal_decision",
+    ]
+    assert all(elapsed >= 0 for _, elapsed in timings)
 
 
 def test_quality_rejection_stops_alignment_and_embedding() -> None:

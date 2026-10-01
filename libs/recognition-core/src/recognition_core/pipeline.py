@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Final
+from typing import Callable, Final, TypeVar
 
 from recognition_core.domain import (
     CandidateMatch,
@@ -34,6 +35,21 @@ _NO_DETECTION: Final = "no_face"
 _MULTIPLE_DETECTIONS: Final = "multiple_faces"
 _QUALITY_REJECTED: Final = "quality_rejected"
 _LIVENESS_REJECTED: Final = "liveness_rejected"
+_Result = TypeVar("_Result")
+
+
+def _timed_stage(
+    observer: Callable[[str, float], None] | None,
+    stage: str,
+    operation: Callable[[], _Result],
+) -> _Result:
+    if observer is None:
+        return operation()
+    started = time.perf_counter_ns()
+    try:
+        return operation()
+    finally:
+        observer(stage, (time.perf_counter_ns() - started) / 1_000_000)
 
 
 @dataclass(slots=True)
@@ -60,12 +76,30 @@ class RecognitionPipeline:
         frame: ImageFrame,
         gallery: Sequence[GalleryEntry],
         observation: FrameObservation,
+        *,
+        timing_observer: Callable[[str, float], None] | None = None,
     ) -> TrackDecision:
-        if not self.temporal_decision.should_sample(observation):
-            return self.temporal_decision.on_skipped(observation)
+        if not _timed_stage(
+            timing_observer,
+            "temporal_sampling",
+            lambda: self.temporal_decision.should_sample(observation),
+        ):
+            return _timed_stage(
+                timing_observer,
+                "temporal_decision",
+                lambda: self.temporal_decision.on_skipped(observation),
+            )
 
-        processed = self.preprocessor.preprocess(frame)
-        detections = self.detector.detect(processed)
+        processed = _timed_stage(
+            timing_observer,
+            "preprocess",
+            lambda: self.preprocessor.preprocess(frame),
+        )
+        detections = _timed_stage(
+            timing_observer,
+            "detect",
+            lambda: self.detector.detect(processed),
+        )
         matches: tuple[CandidateMatch, ...] = ()
 
         if len(detections) != 1:
@@ -78,7 +112,11 @@ class RecognitionPipeline:
             liveness = liveness_not_evaluated(self.liveness_config, reason_code=code)
         else:
             detection = detections[0]
-            quality = self.quality_assessor.assess(processed, detection)
+            quality = _timed_stage(
+                timing_observer,
+                "quality",
+                lambda: self.quality_assessor.assess(processed, detection),
+            )
             if not quality.acceptable:
                 quality = FaceQuality(
                     score=quality.score,
@@ -91,28 +129,49 @@ class RecognitionPipeline:
                     reason_code=_QUALITY_REJECTED,
                 )
             else:
-                aligned = self.aligner.align(processed, detection)
+                aligned = _timed_stage(
+                    timing_observer,
+                    "align",
+                    lambda: self.aligner.align(processed, detection),
+                )
                 if self.liveness_config.enabled:
                     assert self.liveness_model is not None
-                    model_result = self.liveness_model.evaluate(aligned)
+                    liveness_model = self.liveness_model
+                    model_result = _timed_stage(
+                        timing_observer,
+                        "liveness",
+                        lambda: liveness_model.evaluate(aligned),
+                    )
                     liveness = apply_liveness_policy(
                         model_result,
                         self.liveness_config,
                     )
                 else:
-                    liveness = apply_liveness_policy(
-                        LivenessDecision(state="inconclusive"),
-                        self.liveness_config,
+                    liveness = _timed_stage(
+                        timing_observer,
+                        "liveness",
+                        lambda: apply_liveness_policy(
+                            LivenessDecision(state="inconclusive"),
+                            self.liveness_config,
+                        ),
                     )
 
                 if not liveness.required or liveness.passed is True:
-                    probe = self.embedder.embed(aligned)
-                    matches = tuple(
-                        self.matcher.match(
-                            probe,
-                            gallery,
-                            limit=self.max_candidates,
-                        )
+                    probe = _timed_stage(
+                        timing_observer,
+                        "embed",
+                        lambda: self.embedder.embed(aligned),
+                    )
+                    matches = _timed_stage(
+                        timing_observer,
+                        "match",
+                        lambda: tuple(
+                            self.matcher.match(
+                                probe,
+                                gallery,
+                                limit=self.max_candidates,
+                            )
+                        ),
                     )
                 elif liveness.reason_code is None:
                     liveness = LivenessDecision(
@@ -123,11 +182,15 @@ class RecognitionPipeline:
                         passed=liveness.passed,
                     )
 
-        decision = self.temporal_decision.decide(
-            observation,
-            matches,
-            quality,
-            liveness,
+        decision = _timed_stage(
+            timing_observer,
+            "temporal_decision",
+            lambda: self.temporal_decision.decide(
+                observation,
+                matches,
+                quality,
+                liveness,
+            ),
         )
         if liveness.required and liveness.passed is not True:
             return self._prevent_required_liveness_bypass(decision, liveness)

@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import math
 import secrets
 import time
-from collections import deque
+from collections import defaultdict, deque
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Literal, cast
 from uuid import UUID
 
+import psutil
 from fastapi import FastAPI, Header, Request, Security
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
@@ -100,6 +102,12 @@ class Metrics(BaseModel):
     timed_out: int
     p50_latency_ms: float | None
     p95_latency_ms: float | None
+    stage_latency_ms: dict[str, dict[str, float | int]]
+    process_cpu_seconds: float
+    process_rss_bytes: int
+    host_cpu_percent: float
+    host_memory_used_bytes: int
+    host_memory_total_bytes: int
 
 
 class ServiceError(Exception):
@@ -172,16 +180,26 @@ class DeviceRateLimiter:
 class BasicMetrics:
     def __init__(self) -> None:
         self._durations: deque[float] = deque(maxlen=1024)
+        self._stage_durations: dict[str, deque[float]] = defaultdict(
+            lambda: deque(maxlen=1024)
+        )
         self.recognition_requests = 0
         self.completed = 0
         self.failed = 0
         self.timed_out = 0
         self._lock = asyncio.Lock()
 
-    async def observe(self, duration_ms: float, outcome: str) -> None:
+    async def observe(
+        self,
+        duration_ms: float,
+        outcome: str,
+        stage_durations_ms: Mapping[str, float] | None = None,
+    ) -> None:
         async with self._lock:
             self.recognition_requests += 1
             self._durations.append(duration_ms)
+            for stage, stage_duration in (stage_durations_ms or {}).items():
+                self._stage_durations[stage].append(stage_duration)
             if outcome == "completed":
                 self.completed += 1
             elif outcome == "timed_out":
@@ -192,6 +210,9 @@ class BasicMetrics:
     async def snapshot(self) -> Metrics:
         async with self._lock:
             values = sorted(self._durations)
+            process = psutil.Process()
+            process_times = process.cpu_times()
+            host_memory = psutil.virtual_memory()
             return Metrics(
                 recognition_requests=self.recognition_requests,
                 completed=self.completed,
@@ -199,6 +220,20 @@ class BasicMetrics:
                 timed_out=self.timed_out,
                 p50_latency_ms=_percentile(values, 0.50),
                 p95_latency_ms=_percentile(values, 0.95),
+                stage_latency_ms={
+                    stage: {
+                        "sample_count": len(samples),
+                        "p50_ms": _percentile(sorted(samples), 0.50) or 0.0,
+                        "p95_ms": _percentile(sorted(samples), 0.95) or 0.0,
+                    }
+                    for stage, samples in self._stage_durations.items()
+                    if samples
+                },
+                process_cpu_seconds=process_times.user + process_times.system,
+                process_rss_bytes=process.memory_info().rss,
+                host_cpu_percent=psutil.cpu_percent(interval=None),
+                host_memory_used_bytes=host_memory.used,
+                host_memory_total_bytes=host_memory.total,
             )
 
 
@@ -314,6 +349,7 @@ def create_app(
     gallery_provider: SessionGalleryProvider | None = None,
 ) -> FastAPI:
     configured = settings or AISettings.from_env()
+    psutil.cpu_percent(interval=None)
     app = FastAPI(
         title="Presensi Central AI Service",
         version="0.2.0",
@@ -453,11 +489,18 @@ def create_app(
     async def recognize_burst(
         session_id: UUID,
         payload: BurstInput,
+        response: Response,
         x_device_id: str | None = Header(default=None, alias="X-Device-ID"),
+        x_benchmark_timing: bool = Header(default=False, alias="X-Benchmark-Timing"),
         credentials: HTTPAuthorizationCredentials | None = Security(bearer_scheme),
     ) -> BurstDecisionResponse:
         started = time.perf_counter()
         outcome = "failed"
+        stage_durations_ms: dict[str, float] = defaultdict(float)
+
+        def observe_stage(stage: str, duration_ms: float) -> None:
+            stage_durations_ms[stage] += duration_ms
+
         try:
             device_id = app.state.authenticator.authenticate(
                 x_device_id,
@@ -632,6 +675,11 @@ def create_app(
                     frames=decoded,
                     gallery=gallery,
                     timeout_seconds=settings_at_request.inference_timeout_seconds,
+                    timing_observer=(
+                        observe_stage
+                        if settings_at_request.benchmark_timing_enabled
+                        else None
+                    ),
                 )
             except InferenceBusyError as exc:
                 raise ServiceError(
@@ -647,6 +695,15 @@ def create_app(
                     "Recognition exceeded the configured time limit.",
                 ) from exc
             outcome = "completed"
+            if settings_at_request.benchmark_timing_enabled and x_benchmark_timing:
+                response.headers["X-Recognition-Stage-Timings-Ms"] = json.dumps(
+                    stage_durations_ms,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                response.headers["X-Recognition-Gallery-Template-Count"] = str(
+                    len(gallery.entries)
+                )
             candidate = None
             if decision.decision.student_id is not None:
                 candidate = CandidateMetadata(
@@ -672,6 +729,9 @@ def create_app(
             await app.state.metrics.observe(
                 (time.perf_counter() - started) * 1000,
                 outcome,
+                stage_durations_ms
+                if app.state.settings.benchmark_timing_enabled
+                else None,
             )
 
     @app.delete(
