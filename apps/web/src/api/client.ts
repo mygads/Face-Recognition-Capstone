@@ -1,5 +1,5 @@
 import createClient, { type Middleware } from 'openapi-fetch'
-import type { components, paths } from './generated/schema'
+import type { components, operations, paths } from './generated/schema'
 
 export type AuthenticatedAccount = components['schemas']['CurrentUserResponse']
 export type AccessToken = components['schemas']['TokenResponse']
@@ -25,6 +25,11 @@ export type ScheduleCreate = components['schemas']['ScheduleCreateRequest']
 export type ScheduleUpdate = components['schemas']['ScheduleUpdateRequest']
 export type ScheduleTeacher = components['schemas']['ScheduleTeacherResponse']
 export type AttendanceSession = components['schemas']['AttendanceSessionResponse']
+export type AttendanceReportQuery =
+  operations['get_attendance_report_api_v1_reports_attendance_get']['parameters']['query']
+export type AttendanceReportSummary = components['schemas']['AttendanceReportResponse']
+export type AttendanceReportRow = components['schemas']['AttendanceReportRow']
+export type AttendanceReportPage = components['schemas']['AttendanceReportPage']
 export type SessionDashboardSnapshot = components['schemas']['SessionDashboardSnapshot']
 export type SessionRecentActivity = components['schemas']['SessionRecentActivity']
 export type SessionDashboardDevice = components['schemas']['SessionDashboardDevice']
@@ -293,6 +298,59 @@ export async function listAttendanceSessions(query: {
 }): Promise<Page<AttendanceSession>> {
   const result = await apiClient.GET('/api/v1/sessions', { params: { query } })
   return unwrap(result)
+}
+
+export async function getAttendanceReportSummary(
+  query: AttendanceReportQuery,
+): Promise<AttendanceReportSummary> {
+  const result = await apiClient.GET('/api/v1/reports/attendance', { params: { query } })
+  return unwrap(result)
+}
+
+export async function listAttendanceReportRows(
+  query: AttendanceReportQuery,
+): Promise<AttendanceReportPage> {
+  const result = await apiClient.GET('/api/v1/reports/attendance/records', {
+    params: { query },
+  })
+  return unwrap(result)
+}
+
+export async function downloadAttendanceReport(
+  query: AttendanceReportQuery,
+  format: 'csv' | 'xlsx',
+): Promise<{ blob: Blob; filename: string }> {
+  const search = new URLSearchParams()
+  Object.entries({ ...query, format }).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) search.set(key, String(value))
+  })
+  const headers = new Headers()
+  const token = authHandlers.getAccessToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+
+  let response: Response
+  try {
+    response = await fetch(`/api/v1/reports/attendance/export?${search.toString()}`, { headers })
+  } catch {
+    throw new ApiError(0, 'network_error', 'Tidak dapat terhubung ke server.')
+  }
+  if (response.status === 401) authHandlers.onUnauthorized()
+  if (!response.ok) {
+    let payload: unknown = null
+    try {
+      payload = await response.json()
+    } catch {
+      // Keep the shared safe error when a proxy returns a non-JSON response.
+    }
+    throw toApiError(response.status, payload)
+  }
+
+  const disposition = response.headers.get('content-disposition') ?? ''
+  const encodedFilename = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+  const filename = encodedFilename
+    ? decodeURIComponent(encodedFilename)
+    : `attendance-${query.starts_on}-${query.ends_on}.${format}`
+  return { blob: await response.blob(), filename }
 }
 
 export async function openAttendanceSession(

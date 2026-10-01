@@ -279,9 +279,9 @@ def test_expired_bearer_token_is_rejected(api_database: sessionmaker[Session]) -
             },
             403,
         ),
-        ("ADMIN", "GET", "/api/v1/devices", None, 501),
+        ("ADMIN", "GET", "/api/v1/devices", None, 200),
         ("TEACHER", "GET", "/api/v1/devices", None, 403),
-        ("LABORANT", "GET", "/api/v1/devices", None, 501),
+        ("LABORANT", "GET", "/api/v1/devices", None, 200),
         (
             "ADMIN",
             "POST",
@@ -428,14 +428,14 @@ def test_expired_bearer_token_is_rejected(api_database: sessionmaker[Session]) -
             "GET",
             "/api/v1/reports/attendance?starts_on=2026-09-01&ends_on=2026-09-30",
             None,
-            501,
+            200,
         ),
         (
             "TEACHER",
             "GET",
             "/api/v1/reports/attendance?starts_on=2026-09-01&ends_on=2026-09-30",
             None,
-            403,
+            200,
         ),
         (
             "LABORANT",

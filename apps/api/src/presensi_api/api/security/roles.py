@@ -44,6 +44,7 @@ ROLE_PERMISSIONS: dict[RoleCode, FrozenSet[Permission]] = {
             Permission.SESSION_OPERATE,
             Permission.ATTENDANCE_READ,
             Permission.ATTENDANCE_CORRECT,
+            Permission.REPORTS_READ,
         }
     ),
     RoleCode.LABORANT: frozenset(

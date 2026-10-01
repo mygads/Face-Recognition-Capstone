@@ -26,6 +26,9 @@ const canManageEnrollment = computed(
 const canViewDevices = computed(
   () => auth.account?.roles.some((role) => role === 'ADMIN' || role === 'LABORANT') ?? false,
 )
+const canViewReports = computed(
+  () => auth.account?.roles.some((role) => role === 'ADMIN' || role === 'TEACHER') ?? false,
+)
 </script>
 
 <template>
@@ -140,6 +143,21 @@ const canViewDevices = computed(
           <path d="M8 21h8M12 18v3M7.5 9h9M7.5 13h4" />
         </svg>
         <span class="app-sidebar__link-label">Perangkat</span>
+      </RouterLink>
+      <RouterLink
+        v-if="canViewReports"
+        class="app-sidebar__link"
+        active-class="app-sidebar__link--active"
+        to="/app/reports"
+        :aria-label="collapsed ? 'Laporan kehadiran' : undefined"
+        data-testid="reports-link"
+        @click="emit('navigate')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M5 20V11M12 20V4M19 20v-7" />
+          <path d="M3 20.5h18" />
+        </svg>
+        <span class="app-sidebar__link-label">Laporan kehadiran</span>
       </RouterLink>
     </nav>
 

@@ -260,6 +260,7 @@ class AttendanceSession(UUIDPrimaryKey, TimestampMixin, Base):
             postgresql_where=text("status = 'active'"),
             sqlite_where=text("status = 'active'"),
         ),
+        Index("ix_attendance_sessions_opened_at", "opened_at"),
         Index("ix_attendance_sessions_opened_by_user_id", "opened_by_user_id"),
     )
 

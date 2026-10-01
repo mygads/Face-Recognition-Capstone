@@ -598,11 +598,42 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get an attendance summary
-         * @description Contract placeholder; currently returns 501.
-         */
+        /** Get an attendance report summary */
         get: operations["get_attendance_report_api_v1_reports_attendance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/attendance/records": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List paginated attendance report rows */
+        get: operations["list_attendance_report_records_api_v1_reports_attendance_records_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/attendance/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export attendance report rows */
+        get: operations["export_attendance_report_api_v1_reports_attendance_export_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -730,6 +761,12 @@ export interface components {
              */
             recorded_at: string;
         };
+        /** AttendanceReportPage */
+        AttendanceReportPage: {
+            /** Items */
+            items: components["schemas"]["AttendanceReportRow"][];
+            pagination: components["schemas"]["Pagination"];
+        };
         /** AttendanceReportResponse */
         AttendanceReportResponse: {
             /**
@@ -742,8 +779,8 @@ export interface components {
              * Format: date
              */
             ends_on: string;
-            /** Total Students */
-            total_students: number;
+            /** Total Rows */
+            total_rows: number;
             /** Present Count */
             present_count: number;
             /** Late Count */
@@ -752,11 +789,68 @@ export interface components {
             absent_count: number;
             /** Excused Count */
             excused_count: number;
+            /** Not Recorded Count */
+            not_recorded_count: number;
             /**
              * Generated At
              * Format: date-time
              */
             generated_at: string;
+        };
+        /** AttendanceReportRow */
+        AttendanceReportRow: {
+            /** Attendance Record Id */
+            attendance_record_id: string | null;
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /**
+             * Student Id
+             * Format: uuid
+             */
+            student_id: string;
+            /** Student Number */
+            student_number: string;
+            /** Student Name */
+            student_name: string;
+            /**
+             * Class Id
+             * Format: uuid
+             */
+            class_id: string;
+            /** Class Code */
+            class_code: string;
+            /** Class Name */
+            class_name: string;
+            /**
+             * Laboratory Id
+             * Format: uuid
+             */
+            laboratory_id: string;
+            /** Laboratory Code */
+            laboratory_code: string;
+            /** Laboratory Name */
+            laboratory_name: string;
+            /** Subject */
+            subject: string;
+            /** Teacher Name */
+            teacher_name: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "present" | "late" | "absent" | "excused" | "not_recorded";
+            /** Source */
+            source: ("face_recognition" | "manual" | "system") | null;
+            /**
+             * Session Opened At
+             * Format: date-time
+             */
+            session_opened_at: string;
+            /** Recorded At */
+            recorded_at: string | null;
         };
         /** AttendanceSessionCreateRequest */
         AttendanceSessionCreateRequest: {
@@ -7617,8 +7711,15 @@ export interface operations {
             query: {
                 starts_on: string;
                 ends_on: string;
+                student_id?: string | null;
+                student_number?: string | null;
                 class_id?: string | null;
                 laboratory_id?: string | null;
+                session_id?: string | null;
+                status?: ("present" | "late" | "absent" | "excused" | "not_recorded") | null;
+                timezone_name?: string;
+                limit?: number;
+                offset?: number;
             };
             header?: never;
             path?: never;
@@ -7633,6 +7734,306 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AttendanceReportResponse"];
+                };
+            };
+            /** @description The request could not be processed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Authentication is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description You are not allowed to perform this action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The requested resource was not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This method is not allowed for the resource. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The uploaded file exceeds the allowed size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The file extension or media type is not supported. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Request validation failed. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many requests. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description An unexpected server error occurred. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This API operation is not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The service is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_attendance_report_records_api_v1_reports_attendance_records_get: {
+        parameters: {
+            query: {
+                starts_on: string;
+                ends_on: string;
+                student_id?: string | null;
+                student_number?: string | null;
+                class_id?: string | null;
+                laboratory_id?: string | null;
+                session_id?: string | null;
+                status?: ("present" | "late" | "absent" | "excused" | "not_recorded") | null;
+                timezone_name?: string;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttendanceReportPage"];
+                };
+            };
+            /** @description The request could not be processed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Authentication is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description You are not allowed to perform this action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The requested resource was not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This method is not allowed for the resource. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The uploaded file exceeds the allowed size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The file extension or media type is not supported. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Request validation failed. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many requests. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description An unexpected server error occurred. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This API operation is not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The service is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    export_attendance_report_api_v1_reports_attendance_export_get: {
+        parameters: {
+            query: {
+                starts_on: string;
+                ends_on: string;
+                student_id?: string | null;
+                student_number?: string | null;
+                class_id?: string | null;
+                laboratory_id?: string | null;
+                session_id?: string | null;
+                status?: ("present" | "late" | "absent" | "excused" | "not_recorded") | null;
+                timezone_name?: string;
+                limit?: number;
+                offset?: number;
+                format: "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description CSV or XLSX attendance report download. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": string;
                 };
             };
             /** @description The request could not be processed. */

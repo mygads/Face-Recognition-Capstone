@@ -15,6 +15,7 @@ import EnrollmentView from '../views/EnrollmentView.vue'
 import ForbiddenView from '../views/ForbiddenView.vue'
 import LoginView from '../views/LoginView.vue'
 import MasterDataView from '../views/MasterDataView.vue'
+import ReportsView from '../views/ReportsView.vue'
 import ScheduleView from '../views/ScheduleView.vue'
 import SessionsView from '../views/SessionsView.vue'
 
@@ -68,6 +69,16 @@ export const routes: RouteRecordRaw[] = [
           title: 'Perangkat',
           description: 'Kelola penempatan dan pantau kondisi perangkat presensi.',
           requiredRoles: ['ADMIN', 'LABORANT'],
+        },
+      },
+      {
+        path: 'reports',
+        name: 'reports',
+        component: ReportsView,
+        meta: {
+          title: 'Laporan kehadiran',
+          description: 'Tinjau kehadiran berdasarkan siswa, kelas, lab, sesi, dan periode.',
+          requiredRoles: ['ADMIN', 'TEACHER'],
         },
       },
       {

@@ -17,14 +17,14 @@ Successful and failed password logins write `auth.login.succeeded` or `auth.logi
 | Role | Route permissions |
 | --- | --- |
 | `ADMIN` | All listed permissions: master data, accounts, settings, roster/laboratory/device, schedules/sessions, enrollment, attendance read/correction, reports. |
-| `TEACHER` | Read roster/laboratories/schedules, manage schedules and sessions, read attendance, request attendance corrections. |
+| `TEACHER` | Read roster/laboratories/schedules, manage schedules and sessions, read attendance and reports for owned schedules, request attendance corrections. |
 | `LABORANT` | Read roster/laboratories, operate devices/sessions, manage enrollment, read relevant attendance. |
 
-Attendance report access is ADMIN-only until a narrower reporting scope is defined.
+Attendance report list, summary, and export endpoints constrain a teacher to schedules assigned to their account; `ADMIN` can read all schedules. Other roles cannot access reports.
 
 Reusable `require_permissions(...)` dependencies enforce route-level policy. User roles are stored in `roles` and `user_roles`; a role not in the baseline enum gives no implicit permission. Settings permission is defined for future settings handlers; there is not yet a settings endpoint.
 
-Current business routers are still placeholders. Guard checks prove that a role may reach the route, after which the placeholder returns 501. Before any list/detail or mutation handler returns or changes data, it must also enforce resource scope: teachers may access or manage only their assigned classes/schedules, and laborants only their relevant laboratory/devices/sessions/attendance. Teacher correction policy (including any approval workflow) remains a domain rule to specify before implementing corrections. Route permission alone is not a substitute for row-level authorization.
+Several protected operations remain placeholders and return 501 after route authorization. Implemented handlers enforce resource scope: teachers may access or manage only their assigned classes/schedules and laborants only their relevant laboratory/devices/sessions/attendance. Teacher correction policy (including any approval workflow) remains a domain rule to specify before implementing corrections. Route permission alone is not a substitute for row-level authorization.
 
 Enrollment/template metadata routes require `ADMIN` or `LABORANT`, including while they return 501. The API contract accepts no image, blob, or embedding. See the [biometric data boundary](database-schema.md#recognition-and-privacy-boundary).
 
