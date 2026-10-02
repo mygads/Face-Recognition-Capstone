@@ -27,7 +27,7 @@ function ConvertTo-Origin([string]$Value, [bool]$AllowLocalHttp) {
     if (-not [Uri]::TryCreate($Value.Trim(), [UriKind]::Absolute, [ref]$parsed)) {
         throw 'URL harus berupa origin penuh, misalnya https://presensi.sekolah.id.'
     }
-    $loopback = [Uri]::IsLoopback($parsed)
+    $loopback = $parsed.IsLoopback
     if (
         $parsed.Scheme -notin @('https', 'http') -or
         ($parsed.Scheme -eq 'http' -and (-not $AllowLocalHttp -or -not $loopback)) -or

@@ -18,11 +18,15 @@ if ($bundle.deployment_profile -ne 'AI_EDGE') {
     throw 'This Windows installer supports AI_EDGE only. STB_GATEWAY must be installed on its supported Linux gateway.'
 }
 
-$pythonVersion = & py -3 -c 'import sys; print("%s.%s" % sys.version_info[:2])'
+$pythonVersion = & py -3 -c 'import sys; print(sys.version_info[0], sys.version_info[1])'
 if ($LASTEXITCODE -ne 0) {
     throw 'Python 3.11 or newer is required. Install Python and the Windows py launcher, then retry.'
 }
-$version = [version]$pythonVersion
+$pythonVersionParts = ([string]$pythonVersion).Trim() -split '\s+'
+if ($pythonVersionParts.Count -ne 2) {
+    throw 'Could not determine the selected Python version.'
+}
+$version = [version]::new([int]$pythonVersionParts[0], [int]$pythonVersionParts[1])
 if ($version -lt [version]'3.11') {
     throw "Python 3.11 or newer is required. The selected runtime is $pythonVersion."
 }

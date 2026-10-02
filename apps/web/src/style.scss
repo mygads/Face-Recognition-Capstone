@@ -1991,18 +1991,28 @@ a:focus-visible {
   position: fixed;
   z-index: 80;
   inset: 0;
-  display: grid;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
   overflow-y: auto;
-  place-items: center;
+  overflow-x: hidden;
   padding: 24px;
   background: rgb(9 17 28 / 58%);
+  overscroll-behavior: contain;
 }
 
 .devices-view__credential-modal {
   display: grid;
-  width: min(100%, 680px);
-  max-height: min(90vh, 860px);
+  grid-template-columns: minmax(0, 1fr);
+  box-sizing: border-box;
+  width: min(680px, 100%);
+  min-width: 0;
+  max-width: 100%;
+  max-height: min(calc(100vh - 48px), 860px);
+  max-height: min(calc(100dvh - 48px), 860px);
+  margin-block: auto;
   gap: var(--space-4);
+  overflow-x: hidden;
   overflow-y: auto;
   padding: var(--space-5);
   border: 1px solid var(--border-color-light);
@@ -2010,6 +2020,11 @@ a:focus-visible {
   color: var(--text);
   background: var(--bg-surface);
   box-shadow: 0 20px 60px rgb(9 17 28 / 28%);
+  overscroll-behavior: contain;
+}
+
+.devices-view__credential-modal > * {
+  min-width: 0;
 }
 
 .devices-view__credential-heading {
@@ -2113,10 +2128,21 @@ a:focus-visible {
 
 .devices-view__credential-commands pre {
   max-width: 100%;
+  min-width: 0;
   margin: 0;
-  overflow-x: auto;
+  overflow-x: hidden;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.devices-view__credential-modal pre {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .devices-view__credential-actions {
@@ -2126,6 +2152,7 @@ a:focus-visible {
 
 .devices-view__bundle-form {
   display: grid;
+  min-width: 0;
   gap: 8px;
   padding: 14px;
   border: 1px solid var(--border-color-light);
@@ -2206,7 +2233,9 @@ a:focus-visible {
   }
 
   .devices-view__credential-modal {
-    max-height: 96vh;
+    width: 100%;
+    max-height: calc(100vh - 20px);
+    max-height: calc(100dvh - 20px);
     padding: var(--space-4);
   }
 
