@@ -1,6 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
+import { stubNoActiveBrowserSession } from './session-fixture'
 
 async function loginAsTeacher(page: Page): Promise<void> {
+  await stubNoActiveBrowserSession(page)
   await page.route('**/api/v1/auth/login', (route) =>
     route.fulfill({
       status: 200,

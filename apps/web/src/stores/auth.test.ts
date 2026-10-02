@@ -1,6 +1,13 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, changePassword, getCurrentAccount, loginWithPassword } from '../api/client'
+import {
+  ApiError,
+  changePassword,
+  endOperatorSession,
+  getCurrentAccount,
+  loginWithPassword,
+  refreshOperatorSession,
+} from '../api/client'
 import { useAuthStore } from './auth'
 
 vi.mock('../api/client', async (importOriginal) => {
@@ -8,8 +15,10 @@ vi.mock('../api/client', async (importOriginal) => {
   return {
     ...actual,
     changePassword: vi.fn(),
+    endOperatorSession: vi.fn(),
     getCurrentAccount: vi.fn(),
     loginWithPassword: vi.fn(),
+    refreshOperatorSession: vi.fn(),
   }
 })
 
@@ -26,10 +35,11 @@ describe('auth store', () => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     localStorage.clear()
+    vi.mocked(endOperatorSession).mockResolvedValue()
   })
 
-  afterEach(() => {
-    useAuthStore().logout()
+  afterEach(async () => {
+    await useAuthStore().logout()
   })
 
   it('keeps a successful session in memory and loads the current account', async () => {
@@ -65,6 +75,38 @@ describe('auth store', () => {
     expect(auth.account).toBeNull()
     expect(auth.hasActiveSession()).toBe(true)
     expect(getCurrentAccount).not.toHaveBeenCalled()
+  })
+
+  it('restores a session from the HttpOnly cookie after a page reload', async () => {
+    vi.mocked(refreshOperatorSession).mockResolvedValue({
+      access_token: 'unit-fixture-refreshed-token',
+      token_type: 'bearer',
+      expires_in_seconds: 900,
+      password_change_required: false,
+    })
+    vi.mocked(getCurrentAccount).mockResolvedValue(accountFixture)
+    const auth = useAuthStore()
+
+    await auth.restoreSession()
+
+    expect(refreshOperatorSession).toHaveBeenCalledOnce()
+    expect(auth.account?.email).toBe('teacher@example.test')
+    expect(auth.getValidAccessToken()).toBe('unit-fixture-refreshed-token')
+    expect(auth.hasActiveSession()).toBe(true)
+    expect(localStorage.length).toBe(0)
+  })
+
+  it('does not restore a session when the server rejects the cookie', async () => {
+    vi.mocked(refreshOperatorSession).mockRejectedValue(
+      new ApiError(401, 'unauthorized', 'Authentication is required.'),
+    )
+    const auth = useAuthStore()
+
+    await auth.restoreSession()
+
+    expect(refreshOperatorSession).toHaveBeenCalledOnce()
+    expect(auth.hasActiveSession()).toBe(false)
+    expect(auth.account).toBeNull()
   })
 
   it('changes the password through the API then clears the current session', async () => {

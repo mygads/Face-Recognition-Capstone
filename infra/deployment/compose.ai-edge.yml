@@ -27,6 +27,7 @@ services:
       dockerfile: infra/docker/api-production.Dockerfile
     restart: unless-stopped
     environment:
+      APP_ENV: production
       DATABASE_HOST: db
       DATABASE_PORT: "5432"
       DATABASE_NAME: ${POSTGRES_DB:?Set POSTGRES_DB in .env.ai-edge}
@@ -34,6 +35,8 @@ services:
       DATABASE_PASSWORD: ${PRESENSI_APP_DB_PASSWORD:?Set PRESENSI_APP_DB_PASSWORD in .env.ai-edge}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.ai-edge}
       JWT_ACCESS_TOKEN_TTL_MINUTES: ${JWT_ACCESS_TOKEN_TTL_MINUTES:-15}
+      JWT_SESSION_TTL_HOURS: ${JWT_SESSION_TTL_HOURS:-24}
+      JWT_SESSION_COOKIE_SECURE: ${JWT_SESSION_COOKIE_SECURE:-true}
       PRESENSI_DEVICE_HEARTBEAT_TIMEOUT_SECONDS: ${PRESENSI_DEVICE_HEARTBEAT_TIMEOUT_SECONDS:-60}
       PRESENSI_FACE_TEMPLATE_KEYS: ${PRESENSI_FACE_TEMPLATE_KEYS:?Set the encrypted-template keyring in .env.ai-edge}
       PRESENSI_FACE_TEMPLATE_ACTIVE_KEY_ID: ${PRESENSI_FACE_TEMPLATE_ACTIVE_KEY_ID:?Set the active template key ID in .env.ai-edge}

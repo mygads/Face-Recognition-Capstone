@@ -172,8 +172,9 @@ export function createAppRouter(history: RouterHistory = createWebHistory()): Ro
 }
 
 export function installAuthGuard(router: Router, pinia: Pinia): void {
-  router.beforeEach((to) => {
+  router.beforeEach(async (to) => {
     const auth = useAuthStore(pinia)
+    await auth.restoreSession()
     const requiresAuth = to.matched.some((record) => record.meta.requiresAuth)
     const hasSession = auth.hasActiveSession()
 
@@ -195,7 +196,11 @@ export function installAuthGuard(router: Router, pinia: Pinia): void {
     }
 
     if (to.name === 'login' && hasSession) {
-      return { name: auth.passwordChangeRequired ? 'change-password' : 'dashboard' }
+      if (auth.passwordChangeRequired) return { name: 'change-password' }
+      const requestedRoute = to.query.redirect
+      return typeof requestedRoute === 'string' && requestedRoute.startsWith('/')
+        ? requestedRoute
+        : { name: 'dashboard' }
     }
     return true
   })

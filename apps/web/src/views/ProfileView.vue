@@ -7,7 +7,7 @@ const auth = useAuthStore()
 const router = useRouter()
 
 async function finishPasswordChange(): Promise<void> {
-  auth.logout()
+  await auth.logout()
   await router.replace({ name: 'login', query: { passwordChanged: '1' } })
 }
 </script>

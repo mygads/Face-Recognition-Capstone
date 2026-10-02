@@ -65,8 +65,11 @@ fixtures.
   rate limit at the trusted ingress/reverse proxy as well.
 - The API does not enable wildcard CORS. `PRESENSI_CORS_ALLOWED_ORIGINS` accepts
   exact origins only; remote origins must use HTTPS. Leave it empty when the web
-  app uses the same-origin Vite proxy. Credentials/cookies are not enabled for
-  CORS.
+  app uses the same-origin Vite proxy. Credentialed CORS is enabled only for
+  those exact origins so the HttpOnly 24-hour browser session cookie can refresh
+  access tokens. The cookie is host-only, `SameSite=Lax`, `Secure` outside
+  development/test, and scoped to the auth routes. Browser refresh/logout also
+  require a custom request header to prevent form-based cross-site requests.
 - Secrets are supplied through environment variables for local development and
   a secret manager for production. `.env` is ignored by Git; `.env.example`
   contains no actual secrets. Do not pass secrets as command-line arguments or

@@ -59,9 +59,14 @@ def add_restrictive_cors(app: Starlette, allowed_origins: tuple[str, ...]) -> No
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(allowed_origins),
-        allow_credentials=False,
+        allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Device-ID"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "X-Device-ID",
+            "X-Presensi-Session",
+        ],
         expose_headers=["Retry-After"],
         max_age=600,
     )

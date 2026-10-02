@@ -1,8 +1,10 @@
 import { expect, test, type Page, type WebSocketRoute } from '@playwright/test'
+import { stubNoActiveBrowserSession } from './session-fixture'
 
 const timestamp = '2026-10-01T10:00:00Z'
 
 async function loginAsTeacher(page: Page): Promise<void> {
+  await stubNoActiveBrowserSession(page)
   await page.route('**/api/v1/auth/login', (route) =>
     route.fulfill({
       status: 200,

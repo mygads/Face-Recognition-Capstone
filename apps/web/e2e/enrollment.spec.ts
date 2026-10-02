@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { stubNoActiveBrowserSession } from './session-fixture'
 
 const classId = 'class-enrollment-1'
 const roster = [
@@ -20,6 +21,7 @@ const roster = [
 ]
 
 async function loginAsLaborant(page: Page): Promise<void> {
+  await stubNoActiveBrowserSession(page)
   await page.route('**/api/v1/sessions?**', (route) =>
     route.fulfill({
       status: 200,

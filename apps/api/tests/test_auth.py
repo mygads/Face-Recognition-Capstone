@@ -22,7 +22,7 @@ from presensi_api.auth.bootstrap_admin import (
     bootstrap_development_admin,
 )
 from presensi_api.db.base import Base
-from presensi_api.db.models import AuditLog, Role, User, UserRole
+from presensi_api.db.models import AuditLog, AuthSession, Role, User, UserRole
 from presensi_api.db.seed_roles import seed_roles
 from presensi_api.db.session import get_db_session
 from presensi_api.main import app
@@ -45,8 +45,11 @@ def api_database(
             yield session
 
     app.dependency_overrides[get_db_session] = override_db
+    monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("JWT_SECRET", secrets.token_hex(32))
     monkeypatch.setenv("JWT_ACCESS_TOKEN_TTL_MINUTES", "15")
+    monkeypatch.setenv("JWT_SESSION_TTL_HOURS", "24")
+    monkeypatch.delenv("JWT_SESSION_COOKIE_SECURE", raising=False)
     yield factory
     app.dependency_overrides.clear()
     engine.dispose()
@@ -59,14 +62,24 @@ def request(
     body: dict[str, object] | None = None,
     form: dict[str, str] | None = None,
     token: str | None = None,
+    cookies: dict[str, str] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> httpx.Response:
     async def send() -> httpx.Response:
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://testserver"
         ) as client:
-            headers = {"Authorization": f"Bearer {token}"} if token else None
+            request_headers = dict(headers or {})
+            if token:
+                request_headers["Authorization"] = f"Bearer {token}"
+            for cookie_name, cookie_value in (cookies or {}).items():
+                client.cookies.set(cookie_name, cookie_value)
             return await client.request(
-                method, path, json=body, data=form, headers=headers
+                method,
+                path,
+                json=body,
+                data=form,
+                headers=request_headers,
             )
 
     return asyncio.run(send())
@@ -110,6 +123,7 @@ def test_oauth_login_issues_expiring_access_token_and_me(
             "username": "TEACHER@example.edu",
             "password": password,
         },
+        headers={"X-Presensi-Session": "browser"},
     )
 
     assert response.status_code == 200
@@ -118,6 +132,22 @@ def test_oauth_login_issues_expiring_access_token_and_me(
     assert token_data["expires_in_seconds"] == 900
     assert token_data["password_change_required"] is False
     assert "refresh_token" not in token_data
+    assert "session_token" not in token_data
+    session_cookie = response.cookies.get("presensi_session")
+    assert session_cookie
+    set_cookie = response.headers["set-cookie"]
+    assert "HttpOnly" in set_cookie
+    assert "SameSite=lax" in set_cookie
+    assert "Path=/api/v1/auth" in set_cookie
+    assert "Secure" not in set_cookie
+    browser_claims = jwt.decode(
+        session_cookie,
+        os.environ["JWT_SECRET"],
+        algorithms=["HS256"],
+        issuer="presensi-core-api",
+    )
+    assert browser_claims["token_use"] == "browser_session"
+    assert browser_claims["exp"] - browser_claims["iat"] == 24 * 60 * 60
     claims = jwt.decode(
         token_data["access_token"],
         os.environ["JWT_SECRET"],
@@ -144,6 +174,165 @@ def test_oauth_login_issues_expiring_access_token_and_me(
     assert events[0].after_state == {"method": "password", "result": "success"}
     assert password not in str(events[0].after_state)
     assert token_data["access_token"] not in str(events[0].after_state)
+    with api_database() as session:
+        auth_session = session.get(AuthSession, UUID(browser_claims["jti"]))
+    assert auth_session is not None
+    assert auth_session.user_id == user.id
+
+
+def test_bearer_login_without_browser_header_does_not_issue_a_cookie_session(
+    api_database: sessionmaker[Session],
+) -> None:
+    password = secrets.token_urlsafe(24)
+    user = add_user(api_database, password)
+    response = request(
+        "POST",
+        "/api/v1/auth/login",
+        form={"username": "teacher@example.edu", "password": password},
+    )
+
+    assert response.status_code == 200
+    assert "set-cookie" not in response.headers
+    with api_database() as session:
+        browser_sessions = session.scalars(
+            select(AuthSession).where(AuthSession.user_id == user.id)
+        ).all()
+    assert browser_sessions == []
+
+
+def test_browser_cookie_is_secure_outside_local_development(
+    api_database: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    password = secrets.token_urlsafe(24)
+    add_user(api_database, password)
+    response = request(
+        "POST",
+        "/api/v1/auth/login",
+        form={"username": "teacher@example.edu", "password": password},
+        headers={"X-Presensi-Session": "browser"},
+    )
+
+    assert response.status_code == 200
+    assert "Secure" in response.headers["set-cookie"]
+
+
+def test_browser_session_refresh_survives_access_token_expiration(
+    api_database: sessionmaker[Session],
+) -> None:
+    password = secrets.token_urlsafe(24)
+    user = add_user(api_database, password)
+    login_response = request(
+        "POST",
+        "/api/v1/auth/login",
+        form={"username": "teacher@example.edu", "password": password},
+        headers={"X-Presensi-Session": "browser"},
+    )
+    session_cookie = login_response.cookies.get("presensi_session")
+    assert session_cookie is not None
+
+    missing_header = request(
+        "POST",
+        "/api/v1/auth/refresh",
+        cookies={"presensi_session": session_cookie},
+    )
+    assert missing_header.status_code == 403
+
+    refreshed = request(
+        "POST",
+        "/api/v1/auth/refresh",
+        cookies={"presensi_session": session_cookie},
+        headers={"X-Presensi-Session": "browser"},
+    )
+    assert refreshed.status_code == 200
+    data = refreshed.json()
+    assert data["expires_in_seconds"] == 900
+    assert data["access_token"] != login_response.json()["access_token"]
+    assert "presensi_session" not in data
+    assert (
+        request("GET", "/api/v1/auth/me", token=data["access_token"]).status_code == 200
+    )
+
+    with api_database() as session:
+        auth_session = session.scalar(
+            select(AuthSession).where(AuthSession.user_id == user.id)
+        )
+    assert auth_session is not None
+    assert auth_session.last_used_at is not None
+
+
+def test_logout_revokes_browser_session_and_clears_cookie(
+    api_database: sessionmaker[Session],
+) -> None:
+    password = secrets.token_urlsafe(24)
+    user = add_user(api_database, password)
+    login_response = request(
+        "POST",
+        "/api/v1/auth/login",
+        form={"username": "teacher@example.edu", "password": password},
+        headers={"X-Presensi-Session": "browser"},
+    )
+    session_cookie = login_response.cookies.get("presensi_session")
+    assert session_cookie is not None
+
+    logged_out = request(
+        "POST",
+        "/api/v1/auth/logout",
+        cookies={"presensi_session": session_cookie},
+        headers={"X-Presensi-Session": "browser"},
+    )
+    assert logged_out.status_code == 204
+    assert "Max-Age=0" in logged_out.headers["set-cookie"]
+    assert (
+        request(
+            "POST",
+            "/api/v1/auth/refresh",
+            cookies={"presensi_session": session_cookie},
+            headers={"X-Presensi-Session": "browser"},
+        ).status_code
+        == 401
+    )
+
+    with api_database() as session:
+        auth_session = session.scalar(
+            select(AuthSession).where(AuthSession.user_id == user.id)
+        )
+        logout_audit = session.scalar(
+            select(AuditLog).where(AuditLog.action == "auth.logout.succeeded")
+        )
+    assert auth_session is not None and auth_session.revoked_at is not None
+    assert logout_audit is not None
+    assert logout_audit.after_state == {"result": "success"}
+
+
+def test_browser_session_expiry_is_checked_in_database(
+    api_database: sessionmaker[Session],
+) -> None:
+    password = secrets.token_urlsafe(24)
+    user = add_user(api_database, password)
+    login_response = request(
+        "POST",
+        "/api/v1/auth/login",
+        form={"username": "teacher@example.edu", "password": password},
+        headers={"X-Presensi-Session": "browser"},
+    )
+    session_cookie = login_response.cookies.get("presensi_session")
+    assert session_cookie is not None
+    with api_database.begin() as session:
+        auth_session = session.scalar(
+            select(AuthSession).where(AuthSession.user_id == user.id)
+        )
+        assert auth_session is not None
+        auth_session.created_at = datetime.now(UTC) - timedelta(hours=25)
+        auth_session.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+
+    response = request(
+        "POST",
+        "/api/v1/auth/refresh",
+        cookies={"presensi_session": session_cookie},
+        headers={"X-Presensi-Session": "browser"},
+    )
+    assert response.status_code == 401
 
 
 def test_development_bootstrap_requires_password_change_before_app_access(
@@ -161,6 +350,7 @@ def test_development_bootstrap_requires_password_change_before_app_access(
         "POST",
         "/api/v1/auth/login",
         form={"username": BOOTSTRAP_EMAIL, "password": temporary_password},
+        headers={"X-Presensi-Session": "browser"},
     )
     assert login_response.status_code == 200
     login_data = login_response.json()
@@ -185,6 +375,17 @@ def test_development_bootstrap_requires_password_change_before_app_access(
         "sign_in_again": True,
     }
     assert request("GET", "/api/v1/auth/me", token=restricted_token).status_code == 401
+    with api_database() as session:
+        changed_user = session.scalar(select(User).where(User.email == BOOTSTRAP_EMAIL))
+        browser_session = (
+            session.scalar(
+                select(AuthSession).where(AuthSession.user_id == changed_user.id)
+            )
+            if changed_user is not None
+            else None
+        )
+    assert browser_session is not None
+    assert browser_session.revoked_at is not None
 
     new_login = request(
         "POST",

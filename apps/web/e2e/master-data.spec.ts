@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { stubNoActiveBrowserSession } from './session-fixture'
 
 type ApiStudent = {
   id: string
@@ -23,6 +24,7 @@ type ApiClass = {
 }
 
 async function loginAsAdmin(page: Page): Promise<void> {
+  await stubNoActiveBrowserSession(page)
   await page.route('**/api/v1/sessions?**', (route) =>
     route.fulfill({
       status: 200,

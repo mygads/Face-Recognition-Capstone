@@ -61,7 +61,11 @@ def test_cors_middleware_allows_only_the_configured_origin() -> None:
     assert (
         allowed.headers["access-control-allow-origin"] == "https://school.example.edu"
     )
-    assert allowed.headers.get("access-control-allow-credentials") is None
+    assert allowed.headers.get("access-control-allow-credentials") == "true"
+    assert (
+        "x-presensi-session"
+        in allowed.headers["access-control-allow-headers"].casefold()
+    )
     assert "access-control-allow-origin" not in denied.headers
 
 

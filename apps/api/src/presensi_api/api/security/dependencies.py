@@ -58,6 +58,59 @@ def issue_access_token(
 
 
 @dataclass(frozen=True)
+class BrowserSessionClaims:
+    user_id: UUID
+    session_id: UUID
+    token_version: int
+
+
+def issue_browser_session_token(
+    subject: UUID,
+    session_id: UUID,
+    settings: AuthSettings,
+    *,
+    token_version: int = 0,
+    now: datetime | None = None,
+) -> str:
+    issued_at = now or datetime.now(UTC)
+    claims = {
+        "sub": str(subject),
+        "iat": issued_at,
+        "exp": issued_at + timedelta(hours=settings.session_ttl_hours),
+        "jti": str(session_id),
+        "iss": settings.issuer,
+        "token_use": "browser_session",
+        "token_version": token_version,
+    }
+    return jwt.encode(claims, settings.signing_secret, algorithm="HS256")
+
+
+def decode_browser_session_token(
+    token: str, settings: AuthSettings
+) -> BrowserSessionClaims | None:
+    try:
+        claims = jwt.decode(
+            token,
+            settings.signing_secret,
+            algorithms=["HS256"],
+            issuer=settings.issuer,
+            options={"require": ["sub", "iat", "exp", "jti", "iss", "token_use"]},
+        )
+        if claims.get("token_use") != "browser_session":
+            return None
+        token_version = claims.get("token_version", 0)
+        if type(token_version) is not int or token_version < 0:
+            return None
+        return BrowserSessionClaims(
+            user_id=UUID(claims["sub"]),
+            session_id=UUID(claims["jti"]),
+            token_version=token_version,
+        )
+    except (jwt.InvalidTokenError, KeyError, TypeError, ValueError):
+        return None
+
+
+@dataclass(frozen=True)
 class AccessTokenClaims:
     user_id: UUID
     password_change_only: bool

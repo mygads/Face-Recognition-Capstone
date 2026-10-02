@@ -1,10 +1,12 @@
 import { expect, test } from '@playwright/test'
+import { stubNoActiveBrowserSession } from './session-fixture'
 
 const temporaryPassword = 'synthetic-one-time-password'
 const newPassword = 'synthetic-long-password-123'
 
 test('bootstrap admin changes its temporary password before entering the app', async ({ page }) => {
   let changeRequest: Record<string, string> | undefined
+  await stubNoActiveBrowserSession(page)
   await page.route('**/api/v1/auth/login', (route) =>
     route.fulfill({
       status: 200,
@@ -46,6 +48,7 @@ test('bootstrap admin changes its temporary password before entering the app', a
 
 test('profile offers password change to an authenticated user', async ({ page }) => {
   let changeRequest: Record<string, string> | undefined
+  await stubNoActiveBrowserSession(page)
   await page.route('**/api/v1/sessions**', (route) =>
     route.fulfill({
       status: 200,

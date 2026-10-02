@@ -2,13 +2,13 @@
 
 ## Authentication flow
 
-The Core API uses FastAPI's OAuth2 password form (`application/x-www-form-urlencoded`) at `POST /api/v1/auth/login`. The `username` form field is the account email. Passwords are hashed with Argon2 through `pwdlib`; plaintext values are never persisted. Unknown accounts use a process-local dummy Argon2 hash so a login attempt still performs a password verification.
+The Core API uses FastAPI's OAuth2 password form (`application/x-www-form-urlencoded`) at `POST /api/v1/auth/login`. The `username` form field is the account email. Browser login includes the `X-Presensi-Session: browser` header to request an HttpOnly session cookie; non-browser OAuth bearer clients can omit it and receive no cookie session. Passwords are hashed with Argon2 through `pwdlib`; plaintext values are never persisted. Unknown accounts use a process-local dummy Argon2 hash so a login attempt still performs a password verification.
 
-A successful login returns a signed HS256 bearer access token with `sub`, `iat`, `exp`, `jti`, `iss`, and `token_use=access` claims. The default lifetime is 15 minutes and the configured range is 5–60 minutes. There is no refresh token; the client must log in again after expiry. `GET /api/v1/auth/me` returns a Pydantic DTO for the authenticated user. Active account and roles are loaded from the database on each request, so deactivation and role changes take effect without waiting for token expiry.
+A successful login returns a signed HS256 bearer access token with `sub`, `iat`, `exp`, `jti`, `iss`, and `token_use=access` claims. Its default lifetime remains 15 minutes (configurable from 5–60 minutes). The same response sets an opaque-to-JavaScript, HttpOnly `presensi_session` cookie with a signed session identifier. The session has an absolute 24-hour lifetime by default, is stored server-side in `auth_sessions`, and is revoked on logout or password change. The access token is renewed through `POST /api/v1/auth/refresh`; the cookie is not returned in JSON. `GET /api/v1/auth/me` returns a Pydantic DTO for the authenticated user. Active account and roles are loaded from the database on each request, so deactivation and role changes take effect without waiting for token expiry.
 
-The Vue client keeps the bearer token in Pinia memory only; it does not write tokens to local storage, session storage, URLs, or logs. Reloading the tab requires a new login. The shared OpenAPI client adds the bearer header to authenticated requests, converts API/network failures into a safe error type, and clears the session on an authenticated `401`. Route guards improve navigation UX but do not replace backend permission checks.
+The Vue client keeps the short-lived bearer token in Pinia memory only; it does not write tokens to local storage, session storage, URLs, or logs. On a reload, it silently exchanges the HttpOnly session cookie for a new access token, so navigation and refresh do not prompt for a password during the 24-hour session. The session cookie is `SameSite=Lax`, host-only, scoped to `/api/v1/auth`, and `Secure` outside development/test. Refresh and logout require a custom browser header, and configured CORS origins are exact and credentialed. The shared OpenAPI client adds the bearer header to authenticated requests, converts API/network failures into a safe error type, and clears local access state on an authenticated `401`. Route guards improve navigation UX but do not replace backend permission checks.
 
-`JWT_SECRET` must be at least 32 bytes. It is excluded from Git. `scripts/dev.py` generates a random local key in the ignored `.env` file when blank; production/shared environments must supply a private secret through their secret manager. `.env.example` intentionally contains empty `JWT_SECRET` and `POSTGRES_PASSWORD` values; the task runner generates both before starting Compose.
+`JWT_SECRET` must be at least 32 bytes. It is excluded from Git. `JWT_ACCESS_TOKEN_TTL_MINUTES` defaults to 15 (5–60); `JWT_SESSION_TTL_HOURS` defaults to 24 (1–168); and `JWT_SESSION_COOKIE_SECURE` defaults to false only in development/test and true elsewhere. `scripts/dev.py` generates a random local key in the ignored `.env` file when blank; production/shared environments must supply a private secret through their secret manager. `.env.example` intentionally contains empty `JWT_SECRET` and `POSTGRES_PASSWORD` values; the task runner generates both before starting Compose.
 
 Successful and failed password logins write `auth.login.succeeded` or `auth.login.failed` audit actions. Audit state records only authentication method/result; it excludes the submitted email, password, token, signing key, IP address, and biometric data. Invalid email/password, inactive account, and accounts without a supported role share the same outward login error.
 
@@ -67,9 +67,10 @@ the new user must change it before accessing normal application routes.
 Authenticated users can change their password at POST
 /api/v1/auth/change-password or from the Profil page. The current password is
 verified, the new password must contain at least 12 characters, and successful
-changes invalidate all existing access tokens. The audit event excludes
-password values. A bootstrap-only token remains restricted after password
-change, so the user must sign in again to obtain a normal access token.
+changes invalidate all existing access tokens and revoke all browser sessions.
+The audit event excludes password values. A bootstrap-only token remains
+restricted after password change, so the user must sign in again to obtain a
+normal access token.
 
 ## Error behavior
 

@@ -74,6 +74,28 @@ class User(UUIDPrimaryKey, TimestampMixin, Base):
     )
 
 
+class AuthSession(UUIDPrimaryKey, Base):
+    __tablename__ = "auth_sessions"
+    __table_args__ = (
+        CheckConstraint(
+            "expires_at > created_at", name="auth_session_expiry_after_create"
+        ),
+        Index("ix_auth_sessions_user_id_expires_at", "user_id", "expires_at"),
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Role(UUIDPrimaryKey, TimestampMixin, Base):
     __tablename__ = "roles"
     __table_args__ = (UniqueConstraint("code", name="uq_roles_code"),)

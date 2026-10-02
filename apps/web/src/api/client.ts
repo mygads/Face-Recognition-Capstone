@@ -89,7 +89,10 @@ const authMiddleware: Middleware = {
     return request
   },
   onResponse({ response, schemaPath }) {
-    if (response.status === 401 && schemaPath !== '/api/v1/auth/login') {
+    if (
+      response.status === 401 &&
+      !['/api/v1/auth/login', '/api/v1/auth/refresh', '/api/v1/auth/logout'].includes(schemaPath)
+    ) {
       authHandlers.onUnauthorized()
     }
   },
@@ -98,7 +101,10 @@ const authMiddleware: Middleware = {
   },
 }
 
-const apiClient = createClient<paths>({ baseUrl: '' })
+const apiClient = createClient<paths>({
+  baseUrl: '',
+  fetch: (request) => fetch(request, { credentials: 'include' }),
+})
 apiClient.use(authMiddleware)
 
 type ApiResult<T> = {
@@ -134,9 +140,26 @@ function unwrap<T>(result: ApiResult<T>): T {
 export async function loginWithPassword(email: string, password: string): Promise<AccessToken> {
   const result = await apiClient.POST('/api/v1/auth/login', {
     body: { username: email.trim(), password, scope: '' },
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'X-Presensi-Session': 'browser',
+    },
   })
   return unwrap(result)
+}
+
+export async function refreshOperatorSession(): Promise<AccessToken> {
+  const result = await apiClient.POST('/api/v1/auth/refresh', {
+    headers: { 'X-Presensi-Session': 'browser' },
+  })
+  return unwrap(result)
+}
+
+export async function endOperatorSession(): Promise<void> {
+  const result = await apiClient.POST('/api/v1/auth/logout', {
+    headers: { 'X-Presensi-Session': 'browser' },
+  })
+  if (!result.response.ok) throw toApiError(result.response.status, result.error)
 }
 
 export async function getCurrentAccount(): Promise<AuthenticatedAccount> {
@@ -430,7 +453,10 @@ export async function downloadAttendanceReport(
 
   let response: Response
   try {
-    response = await fetch(`/api/v1/reports/attendance/export?${search.toString()}`, { headers })
+    response = await fetch(`/api/v1/reports/attendance/export?${search.toString()}`, {
+      headers,
+      credentials: 'include',
+    })
   } catch {
     throw new ApiError(0, 'network_error', 'Tidak dapat terhubung ke server.')
   }
