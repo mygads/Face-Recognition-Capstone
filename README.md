@@ -14,29 +14,48 @@ oleh OS. Webcam tidak dipasang ke Docker Compose default.
 | Bagian | Windows | Ubuntu |
 | --- | --- | --- |
 | Prasyarat | Docker Desktop + WSL2, Python 3.11+, Node sesuai engines di apps/web/package.json, npm 10+ | Docker Engine + Compose plugin, Python 3.11+, Node sesuai engines di apps/web/package.json, npm 10+ |
-| Server | py -3 scripts/dev.py dev-up | python3 scripts/dev.py dev-up |
-| Setup database dan admin lokal | Otomatis oleh scripts/dev.py dev-up | Otomatis oleh scripts/dev.py dev-up |
-| Web | npm ci --prefix apps/web lalu npm --prefix apps/web run dev | Perintah yang sama |
+| Jalankan API, database, dan web | `py -3 scripts/start-local.py` | `python3 scripts/start-local.py` |
+| Setup database dan admin lokal | Otomatis; `.env` lokal dibuat dengan secret acak | Otomatis; `.env` lokal dibuat dengan secret acak |
+| Web | Dependency dipasang otomatis bila perlu; Vite native untuk HMR | Sama |
 | URL | Web http://127.0.0.1:5173, API http://127.0.0.1:8000 | Sama |
 
-Task runner membuat .env lokal jika belum ada, menghasilkan secret development,
-menjalankan migration dan role seed, lalu membuat akun admin lokal hanya jika
-belum ada akun pada database. Untuk instalasi lokal, login dengan
+Clone lalu jalankan satu command ini dari PowerShell/terminal:
+
+```powershell
+git clone https://github.com/mygads/Face-Recognition-Capstone.git
+cd Face-Recognition-Capstone
+py -3 scripts/start-local.py
+```
+
+Di Ubuntu, command terakhirnya `python3 scripts/start-local.py`.
+Untuk menambahkan service AI Central saat menguji profile STB di satu host,
+gunakan `py -3 scripts/start-local.py --central` di Windows atau
+`python3 scripts/start-local.py --central` di Ubuntu. File model dan threshold
+AI Central tetap harus dikonfigurasi/dikalibrasi.
+
+Satu command startup membuat `.env` lokal jika belum ada, menghasilkan secret
+development, menjalankan migration dan role seed, membuat akun admin lokal
+hanya jika belum ada akun, memasang dependency web bila perlu, lalu menjalankan
+Vite. Buka terminal di root repository. Untuk instalasi lokal, login dengan
 `admin@local.test` / `123456789abcd`; aplikasi wajib mengganti kata sandi pada
 login pertama. Kredensial tetap ini hanya untuk Compose development di mesin
 lokal. Jangan expose server sebelum kata sandi diganti dan jangan gunakan
 bootstrap development untuk deployment production. Production tidak membuat
 akun bawaan.
 
+Prasyarat Windows: Git, Docker Desktop dengan WSL2, Python 3.11+, dan Node/npm
+sesuai `apps/web/package.json`. Jika Python belum tersedia, jalankan `py install 3.12`, buka ulang PowerShell, lalu gunakan `py -3` (jangan pin `py -3.12` jika
+runtime itu belum terpasang). Prasyarat Ubuntu: Git, Docker Engine + Compose,
+Python 3.11+, dan Node/npm sesuai package web. Perintah startup memeriksa tool
+host yang hilang dan menampilkan nama yang harus dipasang. Tekan Ctrl+C untuk
+menghentikan Vite; jalankan `py -3 scripts/dev.py dev-down` di Windows atau
+`python3 scripts/dev.py dev-down` di Ubuntu untuk menghentikan API/database.
+
 Setelah login sebagai admin, buka menu **Kelola akun staf** untuk membuat akun
 Guru atau Laboran tanpa command line. Sistem membuat kata sandi acak sementara
 dan hanya menampilkannya setelah akun dibuat; berikan kepada pemilik akun agar
 mereka menggantinya saat login pertama. Menu **Profil** dapat digunakan untuk
 mengganti kata sandi setelahnya.
-Untuk menghentikan database dan API gunakan py -3 scripts/dev.py dev-down di
-Windows atau python3 scripts/dev.py dev-down di Ubuntu. Volume database tetap
-tersimpan.
-
 Unduh model evaluasi checksum-pinned dengan `python scripts/download_face_models.py`.
 Threshold tetap harus dikalibrasi. Lihat
 [panduan kamera dan model](docs/camera-usage.md) serta
@@ -72,9 +91,58 @@ terkontrol, HTTPS/reverse proxy, backup, retensi, dan service restart saat boot.
 Lihat [development dan deployment satu komputer](docs/deployment/single-pc.md)
 serta [index runbook deployment](docs/deployment/README.md).
 
-Tidak ada installer satu-perintah yang aman untuk semua OS. Satu command
-menyalakan Compose setelah Docker dan tool host terpasang. Model, device
-credential, izin webcam, threshold, domain, dan kebijakan data disiapkan terpisah.
+### Urutan setup pertama dan perangkat kamera
+
+1. Clone repository, pasang prasyarat host, lalu jalankan satu command startup
+   development di atas. Itu menyiapkan `.env` lokal, database, migrasi, role,
+   admin awal, dependency web, dan server Vite.
+2. Login admin. Buat laboratorium, kelas/tahun ajaran, data siswa, dan akun
+   TEACHER/LABORANT melalui UI. Untuk uji kamera gunakan data sintetis atau
+   relawan dewasa yang setuju.
+3. Jika enrollment/recognition akan diuji, unduh model evaluasi. `.env.example`
+   sudah memakai path/version standar; setelah mengubah nilai `.env`, restart
+   API. Weight perlu ditinjau untuk izin pemakaian. Untuk AI_EDGE, file model
+   yang sama harus ada pada server enrollment dan komputer edge. Threshold
+   recognition masih perlu kalibrasi.
+
+   ```powershell
+   # Windows
+   py -3 scripts/download_face_models.py
+   ```
+
+   ```bash
+   # Ubuntu
+   python3 scripts/download_face_models.py
+   ```
+4. Buka **Perangkat**, daftarkan device dengan laboratorium dan profile yang
+   benar, lalu buat kredensial. Pilih **Unduh paket setup perangkat** dan isi
+   URL Core API yang dapat dijangkau kamera. Untuk `STB_GATEWAY`, isi juga URL
+   AI Central. File JSON hasil unduhan memuat token device sekali tampil;
+   pindahkan lewat media/kanal tepercaya dan hapus setelah setup.
+5. Clone repository pada host kamera dan jalankan installer yang sesuai dengan
+   OS menggunakan paket JSON. Installer memasang runtime agent, memilih
+   konfigurasi `AI_EDGE` atau `STB_GATEWAY` dari bundle, menulis token ke lokasi
+   lokal terlindungi, memeriksa kamera/status, lalu menawarkan menjalankan
+   agent pada terminal untuk melihat koneksi/heartbeat. Installer tidak
+   mengarang threshold atau menyalakan pengenalan yang belum siap.
+6. Untuk `AI_EDGE`, provision YuNet/SFace di komputer edge dan isi threshold
+   Top-1 serta margin dari kalibrasi lokal sebelum menjalankan presensi. Untuk
+   `STB_GATEWAY`, pastikan AI Central dan Core API sehat serta STB menjangkau
+   keduanya melalui LAN. Setelah heartbeat muncul **Online**, buat jadwal, buka
+   sesi sebagai guru, lalu uji event dan dashboard.
+
+Pada dev single-PC, URL kamera harus `http://127.0.0.1:8000` dan agent harus
+berjalan di komputer yang sama. API dev sengaja hanya bind ke loopback. Untuk
+kamera di host lain, deploy server dengan LAN/DNS dan reverse proxy HTTPS
+terlebih dahulu; jangan membuka port API development ke jaringan publik.
+
+Lihat [panduan instalasi kamera](apps/edge-agent/README.md) untuk perintah
+Windows/Ubuntu/Armbian. Ini adalah installer commissioning yang menyiapkan
+agent dan konfigurasi lokal. Untuk layanan produksi yang berjalan setelah reboot,
+ikuti runbook systemd AI_EDGE atau STB. Tidak ada installer produksi satu
+perintah yang otomatis memilih domain, TLS, secret store, firewall, backup,
+model, threshold, dan kebijakan sekolah; langkah server production tetap
+terkendali di [runbook deployment](docs/deployment/README.md).
 
 ## Status kesiapan pengenalan wajah
 

@@ -221,27 +221,34 @@ Tidak boleh ada listener host `5432`; `8000`/`8001` hanya loopback; jaringan
 hanya masuk melalui `443` sesuai allowlist. Dari VLAN STB, DNS mengarah ke IP LAN
 server dan sertifikat HTTPS tervalidasi.
 
-## 3. Daftarkan dan provision credential STB
+## 3. Daftarkan dan siapkan paket konfigurasi STB
 
 Untuk tiap STB, ADMIN membuat device di `/app/devices` bertipe `camera_gateway`,
-profile `STB_GATEWAY`, lab yang tepat. Catat UUID, hostname, MAC, IP reservation,
-posisi kamera, dan rilis.
+profile `STB_GATEWAY`, dan laboratorium yang tepat. Catat UUID, hostname, MAC,
+IP reservation, posisi kamera, dan rilis.
 
-UI belum mempunyai aksi credential satu-kali. Dari workstation operator, buat
-SSH tunnel ke API loopback (jangan expose `/docs`):
+Di baris device pilih **Kredensial**, buat token pertama, isi origin Core API
+yang dapat dijangkau STB dari LAN (misalnya `https://presensi.lan.sekolah.id`)
+dan origin AI Central (misalnya `https://ai.lan.sekolah.id`), lalu unduh paket
+setup. Paket JSON memuat secret raw satu kali. Transfer ke STB melalui kanal
+tepercaya, jalankan installer commissioning:
 
 ```bash
-ssh -N -L 18000:127.0.0.1:8000 admin@attendance-server.example.edu
+bash scripts/install-camera-device.sh /path/to/presensi-device-setup.json
 ```
 
-Dalam sesi tunnel, buka `http://127.0.0.1:18000/docs`, authorize sebagai ADMIN,
-lalu jalankan `POST /api/v1/devices/{device_id}/credentials`. Respons memberi
-token raw sekali saja. Jangan salin token ke chat, shell argument, screenshot,
-tiket, log, atau env Compose. Bagian 5 memasangnya ke token file STB. Token yang
-sama dipakai API dan AI, lalu diperbarui otomatis saat heartbeat mendekati
-expiry. Jika token hilang, ADMIN dapat membuat token baru melalui
-`POST /api/v1/devices/{device_id}/credentials/rotate`; STB pengganti perlu UUID
-dan credential baru, jangan clone identitas.
+Hapus paket setelah konfigurasi berhasil. Installer memilih `STB_GATEWAY`
+berdasarkan bundle dan menulis URL, UUID, serta token ke konfigurasi lokal.
+Untuk API dan AI, agent memakai credential device yang sama; API dapat
+memperbaruinya saat heartbeat jika token berada dalam file yang writable oleh
+service.
+
+Installer commissioning tidak memasang hardened systemd unit production.
+Gunakan bagian 5 untuk memindahkan konfigurasi/credential ke path service dengan
+owner dan permission yang tepat, memasang unit systemd, lalu menjalankan
+acceptance checklist. Jika token hilang, ADMIN harus memutar credential melalui
+UI dengan alasan audit. STB pengganti perlu UUID dan credential baru; jangan
+clone identitas.
 
 ## 4. Siapkan STB Armbian baru
 

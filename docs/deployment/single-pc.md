@@ -32,9 +32,11 @@ edge capture at the same time if the webcam driver only allows one application.
 | Allow desktop applications to access the camera in Windows Privacy settings. | Give the interactive user/service access to the camera device; check V4L2 permissions. |
 | Use a terminal with access to the cloned repository. | Use a desktop session for the calibration preview; a headless session cannot open its GUI window. |
 
-The repository declares its Node range in apps/web/package.json. Node 23 is
-outside that range even if Vite happens to start. If changing the host Node
-installation is inconvenient, the optional web container uses Node 24:
+The repository declares its Node range in `apps/web/package.json`. Node 23 is
+outside that range even if Vite happens to start. The default one-command
+development startup uses native Vite and installs the locked web dependencies
+when needed. If changing the host Node installation is inconvenient, the
+optional web container uses Node 24:
 
 ~~~powershell
 py -3 scripts/dev.py dev-up --web-container
@@ -43,21 +45,44 @@ py -3 scripts/dev.py dev-up --web-container
 Use either native Vite or the web container on port 5173 at a time; stop the
 existing Vite terminal before starting the container profile.
 
-### Start database and Core API
+### One-command development startup
 
-From the repository root:
+After cloning and installing the host prerequisites, run this from the
+repository root. It creates local `.env` secrets if needed, starts PostgreSQL
+and FastAPI through Compose, runs migrations/role seed/local admin bootstrap,
+installs web dependencies when needed, then keeps the native Vue dev server in
+the foreground:
 
 ~~~powershell
 # Windows PowerShell
-py -3 scripts/dev.py dev-up
+py -3 scripts/start-local.py
 ~~~
 
 ~~~bash
 # Ubuntu
-python3 scripts/dev.py dev-up
+python3 scripts/start-local.py
 ~~~
 
-The task runner copies .env.example to .env if needed and fills blank local
+Open `http://127.0.0.1:5173`. Press Ctrl+C to stop Vite. The API/database
+continue in Docker so that they can be reused; stop them when finished:
+
+~~~powershell
+py -3 scripts/dev.py dev-down
+~~~
+
+~~~bash
+python3 scripts/dev.py dev-down
+~~~
+
+If Python is missing on Windows and the `py` launcher suggests that no runtime
+is installed, install Python 3.12 with `py install 3.12`, reopen PowerShell, and
+use `py -3`. Do not use `py -3.12` until that specific runtime has been
+installed.
+
+For server-only startup without Vite, use `py -3 scripts/dev.py dev-up` on
+Windows or `python3 scripts/dev.py dev-up` on Ubuntu.
+
+The task runner copies `.env.example` to `.env` if needed and fills blank local
 database/JWT/encrypted-template secrets, applies migrations, seeds roles, and
 creates a local administrator only when the user table is empty. Sign in as
 `admin@local.test` with `123456789abcd` and change it at first sign-in. This
@@ -67,18 +92,15 @@ the local generated keyring with the database volume; losing it makes encrypted
 templates in that volume unusable. These development secrets are not production
 secrets.
 
-The database persists in the named postgres-data volume. The API and database
-host ports bind to loopback. Migration is explicit; API process health does not
-mean that a migration has been run.
+The database persists in the named `postgres-data` volume. The API and database
+host ports bind to loopback. The `scripts/dev.py dev-up` task called by
+`start-local.py` runs migrations; if you start containers directly with Docker
+Compose, run the documented migration/seed commands yourself. API process
+health alone does not mean that the schema is current.
 
-### Start web, create a local account, and check health
+### Sign in and prepare local records
 
-~~~sh
-npm ci --prefix apps/web
-npm --prefix apps/web run dev
-~~~
-
-Open http://127.0.0.1:5173. Check API health at
+The web app is already available after `start-local.py`. Check API health at
 http://127.0.0.1:8000/health and the versioned endpoint at
 http://127.0.0.1:8000/api/v1/health.
 
@@ -87,6 +109,11 @@ TEACHER or LABORANT account. The page shows the generated temporary password
 once; share it directly with the account owner. They must set their own
 password at first sign-in. Use only fictional master-data records and an adult
 volunteer who agrees to a local camera test.
+
+Recommended setup order: create laboratories, classes and school years, import
+or add students, create teacher/laborant accounts, configure enrollment models,
+then register a camera device. A teacher creates a schedule and opens a session
+only after its class roster is ready; opening a session snapshots that roster.
 
 ### Test the webcam and prepare recognition
 
@@ -131,9 +158,10 @@ presensi-camera-calibration --yunet-model C:/Presensi/models/face_detection_yune
 Do not use a student/minor image as a calibration fixture. The displayed
 brightness and FPS are diagnostic proxies, not lux or guaranteed capture FPS.
 
-For backend enrollment, the Core API container sees weights at /models because
-Compose mounts the model directory read-only. Set these non-secret .env values
-after placing the files:
+For backend enrollment, the Core API container sees weights at `/models` because
+Compose mounts the model directory read-only. A fresh `.env` already contains
+these non-secret local evaluation paths and model version; confirm them if this
+checkout has an older `.env`:
 
 ~~~dotenv
 PRESENSI_AI_MODELS_DIR=./models/weights
@@ -148,19 +176,46 @@ Recreate the API container after changing Compose environment:
 docker compose up -d --no-deps --force-recreate api
 ~~~
 
-The host AI_EDGE config uses host-visible model paths instead of /models.
-Use apps/edge-agent/config/edge-agent.example.yaml as a template; keep a
-machine-specific config and device token out of Git. Recognition thresholds
-min_top1_similarity and min_top1_top2_margin intentionally have no final
-defaults. Calibrate and record them using the harness and approved local
-conditions; do not copy a threshold from an article or another camera.
+The host AI_EDGE config uses host-visible model paths instead of `/models`.
+Register an `AI_EDGE` device at **Perangkat**, assign its laboratory, create its
+one-time credential, enter `http://127.0.0.1:8000` as the Core API URL, then
+download the setup bundle. On the same computer, run the installer from the
+repository root:
 
-Follow [edge-agent setup](../../apps/edge-agent/README.md) to install the
-headless runtime, register an AI_EDGE device, assign its laboratory, provision
-its one-time credential from `/app/devices` into a protected token file, enroll
-the adult demo identity, create a schedule, open an active session, and start the
-agent. The backend will not create final attendance unless device, laboratory,
-session, roster, model, liveness policy, grace period, and idempotency checks pass.
+~~~powershell
+.\scripts\install-camera-device.ps1 -BundlePath "$HOME\Downloads\presensi-device-setup.json"
+~~~
+
+~~~bash
+bash scripts/install-camera-device.sh "$HOME/Downloads/presensi-device-setup.json"
+~~~
+
+It creates the local agent environment, selects `AI_EDGE` from the bundle,
+writes `apps/edge-agent/config/edge-agent.yaml` and a protected token file, and
+checks camera/config readiness. If the camera PC is a different computer, also
+download the checksum-pinned model files into that checkout before `run`:
+
+~~~powershell
+py -3 scripts/download_face_models.py
+~~~
+
+~~~bash
+python3 scripts/download_face_models.py
+~~~
+
+Remove the setup bundle after confirming the device. For a camera on a different
+computer, use that computer's LAN/DNS API address; `127.0.0.1` only works when
+the API is on the same machine. The local development API is bound to loopback,
+so it cannot serve a second computer; for remote cameras use an intentionally
+configured private LAN server/reverse proxy from the deployment runbook. Never
+expose the raw development API port directly to the Internet.
+
+Recognition thresholds `min_top1_similarity` and `min_top1_top2_margin`
+intentionally have no final defaults. The installer reports this as a
+readiness blocker and does not invent values. Calibrate locally under approved
+conditions before running attendance. For the first webcam test, use the
+camera calibration preview, then close it before running the edge-agent because
+many webcams allow only one process at a time. See [edge-agent setup](../../apps/edge-agent/README.md).
 
 ### Optional central-profile development on the same host
 
@@ -168,15 +223,17 @@ Run the development AI service only when explicitly testing AI_CENTRAL:
 
 ~~~powershell
 # Windows
-py -3 scripts/dev.py dev-up --central
+py -3 scripts/start-local.py --central
 ~~~
 
 ~~~bash
 # Ubuntu
-python3 scripts/dev.py dev-up --central
+python3 scripts/start-local.py --central
 ~~~
 
-Before starting it, set the central YuNet/SFace paths and model version in .env.
+Before starting it, place the model files and set the central YuNet/SFace paths
+and model version in `.env` (fresh `.env.example` already contains local paths
+and the baseline version).
 Both Top-1 and Top-1/Top-2 margin values must come from approved local
 calibration; there are no production defaults. The camera-side process must use
 STB_GATEWAY mode and send bursts to the service. A webcam on the same laptop is
@@ -188,8 +245,8 @@ does not run a face identity model.
 
 ### Stop development services
 
-Stop the native Vite and edge-agent processes with Ctrl+C in their terminals.
-Then stop Compose while preserving the PostgreSQL volume:
+Stop the native Vite and edge-agent processes with Ctrl+C in their terminals,
+then stop Compose while preserving the PostgreSQL volume:
 
 ~~~powershell
 py -3 scripts/dev.py dev-down

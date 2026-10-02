@@ -8,6 +8,51 @@ See `config/stb-gateway.example.yaml` for its separate starting configuration
 and the [AI_CENTRAL + STB deployment runbook](../../docs/deployment/ai-central-stb.md)
 for a clean Armbian install, central server, recovery, and acceptance checklists.
 
+## Quick setup from the device registry
+
+For a development/commissioning install, register one device per physical
+camera under **Perangkat**, set its lab and deployment profile, then open its
+credential panel. Create a credential and download **Paket setup perangkat**.
+The downloaded JSON includes a one-time secret. Transfer it only through a
+trusted channel, run the installer below from the cloned repository on the
+camera host, and delete the bundle after the device is configured. Never put
+the bundle in Git, chat, a ticket, or a screenshot.
+
+Windows supports `AI_EDGE` only:
+
+```powershell
+git clone https://github.com/mygads/Face-Recognition-Capstone.git
+cd Face-Recognition-Capstone
+.\scripts\install-camera-device.ps1 -BundlePath "$HOME\Downloads\presensi-device-setup.json"
+```
+
+Ubuntu x86-64 can install either `AI_EDGE` or `STB_GATEWAY`; Armbian ARM64 uses
+the lightweight `STB_GATEWAY` profile:
+
+```bash
+git clone https://github.com/mygads/Face-Recognition-Capstone.git
+cd Face-Recognition-Capstone
+bash scripts/install-camera-device.sh "$HOME/Downloads/presensi-device-setup.json"
+```
+
+The installer reads the profile from the bundle, installs the Python runtime,
+sets the Core API URL and (for STB) Central AI URL, writes a protected token
+file, creates a local config, and checks camera/API readiness. It does not
+install a background service. If checks pass, it offers to run the agent in the
+current terminal so the first heartbeat and connection can be observed; press
+Ctrl+C to stop that commissioning run. `AI_EDGE` requires local YuNet/SFace
+model files and calibrated Top-1/margin thresholds before `run` can start; the
+installer will not choose threshold values. A successful install can still
+report a missing model, threshold, network path, or camera as `degraded`. For
+reboot survival in production, follow the hardened systemd steps in the
+deployment runbook after commissioning.
+
+The downloaded bundle's Core API URL must be reachable from the camera host.
+Use a LAN IP/DNS or HTTPS origin for another computer; `localhost` and
+`127.0.0.1` refer to the camera device itself. For `STB_GATEWAY`, enter the AI
+Central origin as well. The registry profile automatically selects whether
+inference runs locally or is forwarded to Central AI.
+
 ## STB_GATEWAY on Armbian
 
 The gateway example requests 640×360 at 10 FPS and runtime validation caps the

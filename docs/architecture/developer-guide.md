@@ -193,18 +193,26 @@ before planning an integration around one.
 ## Developer startup
 
 1. Read this guide, [overview](overview.md), and the relevant ADR.
-2. Install the OS prerequisites and start the development stack using
-   [single-PC development](../deployment/single-pc.md).
-3. Apply Alembic migrations and seed roles. Create a local administrator with
-   the interactive password command in the root README.
+2. Install Docker, Python, Node/npm and Git for the host OS. Start the local
+   stack with `py -3 scripts/start-local.py` on Windows or
+   `python3 scripts/start-local.py` on Ubuntu. This command applies Alembic
+   migrations, seeds roles, bootstraps the local administrator if needed,
+   installs web dependencies, and starts Vite.
+3. Sign in with `admin@local.test` / `123456789abcd`, then change the password
+   at first sign-in. Add school records and staff accounts from the UI.
 4. Run scripts/check.py and the synthetic scenario scripts/regression.py. These
    checks do not use face images or a webcam.
-5. For manual camera work, see the edge-agent camera-calibration section and
-   use only non-sensitive legal fixtures/adult volunteers with consent.
+5. For manual camera work, provision models only for evaluation, register the
+   device in **Perangkat**, download its one-time setup bundle, and use the
+   matching installer in [edge-agent setup](../../apps/edge-agent/README.md).
+   See the camera-calibration section and use only non-sensitive legal
+   fixtures/adult volunteers with consent.
 
-The first setup has one-time package installation, while the development task
-runner is one command afterward. It intentionally does not download model
-weights, provision devices, choose a threshold, or publish ports/domains.
+Host OS prerequisites are installed once. The local startup command does not
+download model weights, choose a threshold, or publish ports/domains. Device
+credentials are issued in the admin UI and transferred in a secret setup
+bundle; production service setup and public networking stay in the deployment
+runbooks.
 
 ## Repository map
 

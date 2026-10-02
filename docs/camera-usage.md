@@ -155,7 +155,7 @@ PRESENSI_AI_MIN_TOP1_TOP2_MARGIN=
 Jalankan development central stack dengan:
 
 ```sh
-python scripts/dev.py dev-up --central
+python scripts/start-local.py --central
 ```
 
 Untuk production, lihat runbook [AI_EDGE](deployment/ai-edge.md)

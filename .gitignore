@@ -38,6 +38,8 @@ tests/deployment-benchmark/datasets/
 tests/deployment-benchmark/reports/runs/
 models/weights/
 apps/edge-agent/config/edge-agent.yaml
+apps/edge-agent/config/stb-gateway.yaml
+presensi-device-setup*.json
 camera-calibration*.json
 *.embedding
 *.embeddings

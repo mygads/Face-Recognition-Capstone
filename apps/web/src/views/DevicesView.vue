@@ -44,6 +44,10 @@ const issuedCredential = ref<DeviceCredential | null>(null)
 const credentialError = ref<string | null>(null)
 const credentialCopyMessage = ref<string | null>(null)
 const rotationReason = ref('')
+const coreApiUrl = ref('')
+const centralAiUrl = ref('')
+const modelVersion = ref('opencv-zoo-sface-2021dec')
+const bundleMessage = ref<string | null>(null)
 const isCredentialLoading = ref(false)
 const isRotationOpen = ref(false)
 let refreshTimer: ReturnType<typeof setInterval> | undefined
@@ -78,6 +82,13 @@ function formatCredentialExpiry(value: string): string {
   return new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(
     new Date(value),
   )
+}
+
+function defaultCoreApiUrl(): string {
+  if (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost') {
+    return 'http://127.0.0.1:8000'
+  }
+  return window.location.origin
 }
 
 function healthLabel(status: Device['health_status']): string {
@@ -188,6 +199,10 @@ function openCredential(device: Device): void {
   credentialError.value = null
   credentialCopyMessage.value = null
   rotationReason.value = ''
+  coreApiUrl.value = defaultCoreApiUrl()
+  centralAiUrl.value = ''
+  modelVersion.value = 'opencv-zoo-sface-2021dec'
+  bundleMessage.value = null
   isRotationOpen.value = false
 }
 
@@ -197,6 +212,7 @@ function closeCredential(): void {
   credentialDevice.value = null
   credentialError.value = null
   credentialCopyMessage.value = null
+  bundleMessage.value = null
   rotationReason.value = ''
   isRotationOpen.value = false
 }
@@ -263,6 +279,66 @@ function downloadCredential(): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 0)
   credentialCopyMessage.value =
     'File device.token diunduh. Pindahkan ke folder token agent pada komputer perangkat.'
+}
+
+function normalizeServerOrigin(value: string, label: string): string {
+  let parsed: URL
+  try {
+    parsed = new URL(value.trim())
+  } catch {
+    throw new Error(`${label} harus berupa URL lengkap, misalnya https://server.sekolah.id.`)
+  }
+  if (
+    !['http:', 'https:'].includes(parsed.protocol) ||
+    !parsed.hostname ||
+    parsed.username ||
+    parsed.password ||
+    !['', '/'].includes(parsed.pathname) ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new Error(`${label} harus berupa alamat origin HTTP(S) tanpa path atau secret.`)
+  }
+  return parsed.origin
+}
+
+function downloadSetupBundle(): void {
+  const device = credentialDevice.value
+  const credential = issuedCredential.value
+  if (!device || !credential) return
+  bundleMessage.value = null
+  try {
+    const bundle = {
+      schema_version: 1,
+      device_id: device.device_id,
+      device_name: device.name,
+      laboratory_id: device.laboratory_id,
+      deployment_profile: device.deployment_profile,
+      core_api_url: normalizeServerOrigin(coreApiUrl.value, 'URL Core API'),
+      central_ai_url:
+        device.deployment_profile === 'STB_GATEWAY'
+          ? normalizeServerOrigin(centralAiUrl.value, 'URL AI Central')
+          : null,
+      model_version: device.deployment_profile === 'AI_EDGE' ? modelVersion.value.trim() : null,
+      token: credential.token,
+    }
+    if (device.deployment_profile === 'AI_EDGE' && !bundle.model_version) {
+      throw new Error('Versi model diperlukan untuk profil AI_EDGE.')
+    }
+    const file = new Blob([`${JSON.stringify(bundle, null, 2)}\n`], {
+      type: 'application/json;charset=utf-8',
+    })
+    const url = URL.createObjectURL(file)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'presensi-device-setup.json'
+    link.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+    bundleMessage.value =
+      'Paket setup diunduh. Paket ini memuat secret; pindahkan secara aman dan hapus setelah agent berhasil dipasang.'
+  } catch (error) {
+    bundleMessage.value = error instanceof Error ? error.message : 'Paket setup tidak dapat dibuat.'
+  }
 }
 
 function onRotationToggle(event: Event): void {
@@ -526,9 +602,66 @@ onBeforeUnmount(() => {
           <p v-if="credentialCopyMessage" class="devices-view__credential-status" role="status">
             {{ credentialCopyMessage }}
           </p>
+          <section class="devices-view__bundle-form" aria-label="Paket instalasi perangkat">
+            <h3>Siapkan paket instalasi</h3>
+            <label for="device-core-api-url">URL Core API yang bisa dijangkau kamera</label>
+            <input
+              id="device-core-api-url"
+              v-model="coreApiUrl"
+              type="url"
+              required
+              autocomplete="url"
+              placeholder="https://presensi.sekolah.id"
+            />
+            <p>
+              Gunakan alamat server/LAN yang dapat diakses perangkat kamera. Untuk laptop yang
+              menjalankan server lokal, gunakan http://127.0.0.1:8000. Jangan isi localhost jika
+              kamera ada di komputer lain.
+            </p>
+            <p>
+              Stack development hanya membuka API pada komputer lokal. Kamera di komputer lain
+              membutuhkan server LAN/production dan HTTPS melalui reverse proxy; jangan membuka port
+              API development langsung ke internet.
+            </p>
+            <label
+              v-if="credentialDevice.deployment_profile === 'STB_GATEWAY'"
+              for="device-central-ai-url"
+            >
+              URL AI Central
+            </label>
+            <input
+              v-if="credentialDevice.deployment_profile === 'STB_GATEWAY'"
+              id="device-central-ai-url"
+              v-model="centralAiUrl"
+              type="url"
+              required
+              autocomplete="url"
+              placeholder="https://ai.sekolah.id"
+            />
+            <template v-if="credentialDevice.deployment_profile === 'AI_EDGE'">
+              <label for="device-model-version">Versi model</label>
+              <input
+                id="device-model-version"
+                v-model="modelVersion"
+                required
+                maxlength="128"
+                autocomplete="off"
+              />
+              <p>
+                Harus sama dengan versi YuNet/SFace yang digunakan saat enrollment template siswa.
+              </p>
+            </template>
+            <p v-if="bundleMessage" class="devices-view__credential-status" role="status">
+              {{ bundleMessage }}
+            </p>
+            <button class="button button--primary" type="button" @click="downloadSetupBundle">
+              Unduh paket setup perangkat
+            </button>
+          </section>
           <p class="devices-view__credential-instructions">
-            Simpan file sebagai
-            <code>%ProgramData%\Presensi\device.token</code> pada komputer agent. Jangan masukkan
+            Installer menyimpan token ke folder lokal terlindungi:
+            <code>%LOCALAPPDATA%\Presensi\device.token</code> di Windows atau
+            <code>~/.local/share/presensi-edge-agent/device.token</code> di Linux. Jangan masukkan
             token ke chat, screenshot, atau perintah shell.
           </p>
           <div class="devices-view__credential-meta">
@@ -542,9 +675,16 @@ onBeforeUnmount(() => {
             class="devices-view__credential-commands"
             aria-label="Variabel konfigurasi perangkat"
           >
-            <p>Di PowerShell perangkat, gunakan ID dan lokasi file token berikut:</p>
-            <pre><code>$env:PRESENSI_EDGE_DEVICE_ID = "{{ credentialDevice.device_id }}"
-$env:PRESENSI_EDGE_API_TOKEN_FILE = "$env:ProgramData\Presensi\device.token"</code></pre>
+            <p>Setelah clone repository di komputer kamera, jalankan installer sesuai OS:</p>
+            <pre
+              v-if="credentialDevice.deployment_profile === 'AI_EDGE'"
+            ><code>Windows: .\scripts\install-camera-device.ps1
+Ubuntu:  bash scripts/install-camera-device.sh</code></pre>
+            <pre v-else><code>Armbian/Linux: bash scripts/install-camera-device.sh</code></pre>
+            <p>
+              Installer meminta lokasi file paket ini, memasang dependency yang tersedia, memilih
+              profil {{ credentialDevice.deployment_profile }}, lalu membuat config dan token file.
+            </p>
           </div>
           <div class="master-data__form-actions">
             <button class="button button--primary" type="button" @click="closeCredential">

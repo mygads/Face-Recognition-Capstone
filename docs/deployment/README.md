@@ -35,11 +35,20 @@ acceptance on that OS. See the [Ubuntu release lifecycle](https://ubuntu.com/abo
 | Native edge-agent/webcam; optional AI service Compose profile. | Edge/STB native service, model checksums, device-specific credential, systemd/restart policy, acceptance checks. |
 | No real student/minor face dataset. | School-approved biometric purpose, notice/legal basis, access, retention, manual fallback and incident policy required. |
 
-A single command can start already-installed local development services. There
-is intentionally no universal installer that silently installs Docker, system
-packages, downloads biometric models, makes accounts, writes secrets, opens
-ports, and configures a public domain. These decisions differ by OS, board,
-network, and school policy.
+For development, `py -3 scripts/start-local.py` (Windows) or
+`python3 scripts/start-local.py` (Ubuntu) creates local secrets, starts the
+database/API, applies migrations and seeds, bootstraps the development admin,
+installs web dependencies when needed, and starts Vite. Host prerequisites
+still need to be installed first. The Devices page can issue a one-time setup
+bundle with the selected profile, reachable service URL(s), device UUID, and
+credential; `scripts/install-camera-device.ps1` or
+`scripts/install-camera-device.sh` prepares the matching native agent config.
+The profile in the registry selects local AI_EDGE versus STB_GATEWAY forwarding.
+
+Production server provisioning remains in the runbooks. Domain, TLS, firewall,
+secret-store, backup, model approval, calibration, and school policy are
+installation-specific. The camera installer is for commissioning and does not
+replace the hardened systemd service setup in the AI_EDGE/STB runbooks.
 
 ## Required environment and artifacts
 
