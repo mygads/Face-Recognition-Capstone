@@ -102,6 +102,8 @@ Database tidak boleh diakses dari Internet. Untuk domain dan tunnel, baca
 Development menggunakan hot reload, port localhost, dan secret acak lokal.
 Deployment menggunakan rilis yang disetujui, secret terlindungi, migration
 terkontrol, HTTPS/reverse proxy, backup, retensi, dan service restart saat boot.
+Untuk uraian komponen dan konfigurasi dari clone sampai production, lihat
+[panduan instalasi dan konfigurasi](docs/deployment/installation-and-configuration.md).
 Lihat [development dan deployment satu komputer](docs/deployment/single-pc.md)
 serta [index runbook deployment](docs/deployment/README.md).
 

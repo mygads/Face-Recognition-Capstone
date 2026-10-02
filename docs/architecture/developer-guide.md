@@ -202,14 +202,14 @@ before planning an integration around one.
    at first sign-in. Add school records and staff accounts from the UI.
 4. Run scripts/check.py and the synthetic scenario scripts/regression.py. These
    checks do not use face images or a webcam.
-5. For manual camera work, provision models only for evaluation, register the
-   device in **Perangkat**, download its one-time setup bundle, and use the
-   matching installer in [edge-agent setup](../../apps/edge-agent/README.md).
-   See the camera-calibration section and use only non-sensitive legal
-   fixtures/adult volunteers with consent.
+5. For manual camera work, use the checksum-pinned model setup, register the
+   device in **Perangkat**, and use the device bootstrap/installer. Camera
+   calibration and profile setup are documented in
+   [installation and configuration](../deployment/installation-and-configuration.md)
+   and [edge-agent setup](../../apps/edge-agent/README.md). Use only non-sensitive
+   legal fixtures/adult volunteers with consent.
 
-Host OS prerequisites are installed once. The local startup command does not
-download model weights, choose a threshold, or publish ports/domains. Device
+Host OS prerequisites are installed once. Local startup downloads and checksum-verifies YuNet/SFace on first setup unless model download is explicitly skipped; the AI_EDGE camera installer also provisions them. Startup does not choose recognition thresholds or publish ports/domains. Device
 credentials are issued in the admin UI and transferred in a secret setup
 bundle; production service setup and public networking stay in the deployment
 runbooks.

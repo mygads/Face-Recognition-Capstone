@@ -41,8 +41,20 @@ locally. Expected baseline filenames are:
 | Detection | `face_detection_yunet_2023mar.onnx` | Exact approved asset filename/release |
 | Embedding | `face_recognition_sface_2021dec.onnx` | `opencv-zoo-sface-2021dec` |
 
-No model binary or trusted SHA-256 value is included here. Compare each received
-file to a checksum from the separately reviewed artifact channel, then record
+For the repository-pinned OpenCV Zoo baseline, the checksum downloader can
+provision files into the API host model directory. Use the same files/version on
+each AI_EDGE PC and verify after installation:
+
+```bash
+cd /opt/presensi/server
+python3 scripts/download_face_models.py --directory /srv/presensi/models
+python3 scripts/download_face_models.py --directory /srv/presensi/models --check
+```
+
+The AI_EDGE camera installer downloads the pinned baseline into its local
+checkout. The server enrollment API still needs its own copy under
+`/srv/presensi/models`. For any replacement/alternate model, compare it to an
+independently reviewed artifact checksum and record
 the filename, model version, SHA-256, source, device/lab, and verification date
 in the deployment record. Calculating a checksum from an unreviewed file does
 not establish its provenance. Once verified, these commands detect later file

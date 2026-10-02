@@ -1,5 +1,8 @@
 # Deployment guide index
 
+For the configuration matrix and complete progression from a fresh clone to
+production, read [installation and configuration](installation-and-configuration.md).
+
 ## Choose a topology
 
 The app has two recognition profiles. A single-computer setup is a local
