@@ -244,6 +244,96 @@ def test_managed_edge_config_rejects_partial_or_uncalibrated_thresholds() -> Non
         apply_managed_configuration(config, revision=1, settings=settings)
 
 
+def test_local_calibration_sample_never_enqueues_attendance(
+    tmp_path: Path,
+) -> None:
+    config = load_config(
+        EXAMPLE_CONFIG, environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)}
+    )
+    bundle = parse_session_cache(
+        sample_bundle_payload(),
+        device_id=DEVICE_ID,
+        model_name=MODEL_NAME,
+        model_version=MODEL_VERSION,
+    )
+
+    class FakeCamera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            return False, None
+
+        def close(self) -> None: ...
+
+    class FakeApi:
+        def close(self) -> None: ...
+
+    class FakeRecognizer:
+        process_calls = 0
+
+        def process(self, _frame, _gallery, _captured_at) -> TrackDecision:
+            self.process_calls += 1
+            raise AssertionError("Diagnostic frames must bypass live recognition.")
+
+        def reset(self) -> None: ...
+
+    class DiagnosticRecognizer:
+        process_calls = 0
+        reset_calls = 0
+
+        def process(self, _frame, _gallery, _captured_at) -> TrackDecision:
+            self.process_calls += 1
+            return TrackDecision(
+                track_id="local-diagnostic",
+                state="accepted",
+                decision=RecognitionDecision(
+                    outcome="matched",
+                    student_id=STUDENT_ID,
+                    confidence=0.9,
+                    margin=0.1,
+                ),
+                observation_count=3,
+            )
+
+        def reset(self) -> None:
+            self.reset_calls += 1
+
+    outbox = EventOutbox(tmp_path / "diagnostic-outbox.sqlite3", max_pending=10)
+    normal_recognizer = FakeRecognizer()
+    service = EdgeService(
+        config,
+        FakeCamera(),
+        FakeApi(),  # type: ignore[arg-type]
+        outbox,
+        normal_recognizer,  # type: ignore[arg-type]
+        lambda: {},
+    )
+    diagnostic_recognizer = DiagnosticRecognizer()
+    service._create_calibration_recognizer = lambda: diagnostic_recognizer  # type: ignore[method-assign]
+    service.cache.replace(bundle)
+    try:
+        service._process_frame(object())
+        assert service.preview is not None
+        service.preview.update_status(camera_open=True, session_active=True)
+        assert (
+            service.preview.request_calibration_sample("genuine", str(STUDENT_ID))
+            is None
+        )
+
+        service._process_frame(object())
+
+        assert diagnostic_recognizer.process_calls == 1
+        assert diagnostic_recognizer.reset_calls == 1
+        assert normal_recognizer.process_calls == 0
+        assert outbox.counts() == (0, 0)
+        calibration = service.preview.status()["calibration"]
+        assert isinstance(calibration, dict)
+        assert calibration["genuine"]["sample_count"] == 1
+        assert calibration["genuine"]["identity_match_count"] == 1
+    finally:
+        outbox.close()
+
+
 def test_config_rejects_liveness_required_without_enabling_it(tmp_path: Path) -> None:
     config_path = tmp_path / "edge.yaml"
     config_path.write_text(

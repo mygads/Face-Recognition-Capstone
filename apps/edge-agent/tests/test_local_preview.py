@@ -10,6 +10,7 @@ from http.client import HTTPResponse
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from uuid import UUID
 
 import httpx
 import pytest
@@ -47,12 +48,20 @@ def _request(
     method: str = "GET",
     token: str | None = None,
     origin: str = ORIGIN,
+    payload: dict[str, object] | None = None,
 ) -> HTTPResponse:
     headers = {"Origin": origin}
     if token is not None:
         headers["X-Presensi-Preview-Token"] = token
+    data = None
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
-        f"http://127.0.0.1:{port}{path}", headers=headers, method=method
+        f"http://127.0.0.1:{port}{path}",
+        headers=headers,
+        data=data,
+        method=method,
     )
     return cast(HTTPResponse, urllib.request.urlopen(request, timeout=2))
 
@@ -172,6 +181,134 @@ def test_preview_encodes_only_an_in_memory_downscaled_frame(
         with pytest.raises(urllib.error.HTTPError) as unavailable:
             _request(port, "/v1/frame.jpg", token=token)
         assert unavailable.value.code == 503
+    finally:
+        preview.stop()
+
+
+def test_local_diagnostics_keep_only_aggregate_scores_and_hide_unusable_margin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview, port, token = _start_preview(monkeypatch, ["ADMIN"])
+    student_id = UUID("33000000-0000-4000-8000-000000000003")
+    try:
+        preview.update_status(camera_open=True, session_active=True)
+        preview.update_calibration_students(
+            ((student_id, "Synthetic Adult Volunteer"),),
+            gallery_identity_count=1,
+        )
+        response = _request(
+            port,
+            "/v1/calibration-sample",
+            method="POST",
+            token=token,
+            payload={"phase": "genuine", "student_id": str(student_id)},
+        )
+        assert response.status == 202
+        preview.complete_calibration_sample(
+            top1_similarity=0.81,
+            top1_top2_margin=1.81,
+            expected_identity_match=True,
+        )
+
+        response = _request(port, "/v1/status", token=token)
+        status = json.loads(response.read())
+        calibration = status["calibration"]
+        assert calibration["gallery_identity_count"] == 1
+        assert calibration["margin_interpretable"] is False
+        assert calibration["genuine"] == {
+            "sample_count": 1,
+            "top1_min": 0.81,
+            "top1_mean": 0.81,
+            "top1_max": 0.81,
+            "identity_match_count": 1,
+        }
+        serialized = json.dumps(calibration)
+        assert "embedding" not in serialized.lower()
+        assert "values" not in calibration["genuine"]
+        assert "photo" not in serialized.lower()
+    finally:
+        preview.stop()
+
+
+def test_local_diagnostic_sample_requires_active_session_and_operator_preview(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview, port, token = _start_preview(monkeypatch, ["LABORANT"])
+    student_id = UUID("33000000-0000-4000-8000-000000000003")
+    try:
+        with pytest.raises(urllib.error.HTTPError) as unauthorized:
+            _request(
+                port,
+                "/v1/calibration-sample",
+                method="POST",
+                payload={"phase": "impostor"},
+            )
+        assert unauthorized.value.code == 401
+
+        preview.update_calibration_students(
+            ((student_id, "Synthetic Adult Volunteer"),),
+            gallery_identity_count=1,
+        )
+        with pytest.raises(urllib.error.HTTPError) as inactive:
+            _request(
+                port,
+                "/v1/calibration-sample",
+                method="POST",
+                token=token,
+                payload={"phase": "impostor"},
+            )
+        assert inactive.value.code == 400
+        assert json.loads(inactive.value.read()) == {"error": "session_unavailable"}
+    finally:
+        preview.stop()
+
+
+def test_local_diagnostics_show_margin_only_for_multiple_template_identities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview, port, token = _start_preview(monkeypatch, ["ADMIN"])
+    first_student = UUID("33000000-0000-4000-8000-000000000003")
+    second_student = UUID("33000000-0000-4000-8000-000000000004")
+    try:
+        preview.update_status(camera_open=True, session_active=True)
+        preview.update_calibration_students(
+            ((first_student, "Synthetic Adult Volunteer"),),
+            gallery_identity_count=1,
+        )
+        assert preview.request_calibration_sample("genuine", str(first_student)) is None
+        preview.complete_calibration_sample(
+            top1_similarity=0.81,
+            top1_top2_margin=1.81,
+            expected_identity_match=True,
+        )
+
+        preview.update_calibration_students(
+            (
+                (first_student, "Synthetic Adult Volunteer"),
+                (second_student, "Another Synthetic Adult Volunteer"),
+            ),
+            gallery_identity_count=2,
+        )
+        assert preview.request_calibration_sample("impostor", None) is None
+        preview.complete_calibration_sample(
+            top1_similarity=0.54,
+            top1_top2_margin=0.08,
+            expected_identity_match=None,
+        )
+
+        status = json.loads(_request(port, "/v1/status", token=token).read())
+        calibration = status["calibration"]
+        assert calibration["margin_interpretable"] is True
+        assert calibration["genuine"]["sample_count"] == 0
+        assert calibration["impostor"] == {
+            "sample_count": 1,
+            "top1_min": 0.54,
+            "top1_mean": 0.54,
+            "top1_max": 0.54,
+            "margin_min": 0.08,
+            "margin_mean": 0.08,
+            "margin_max": 0.08,
+        }
     finally:
         preview.stop()
 

@@ -1,16 +1,64 @@
 from __future__ import annotations
 
 import json
+import math
 import secrets
 import threading
 import time
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, cast
+from typing import Any, Literal, cast
 from urllib.parse import urlsplit
+from uuid import UUID
 
 import httpx
 
 from presensi_edge_agent.config import EdgeConfig, PreviewSettings
+
+
+@dataclass(slots=True)
+class _CalibrationAggregate:
+    sample_count: int = 0
+    top1_min: float | None = None
+    top1_sum: float = 0.0
+    top1_max: float | None = None
+    margin_min: float | None = None
+    margin_sum: float = 0.0
+    margin_max: float | None = None
+    identity_match_count: int = 0
+
+    def add(
+        self,
+        *,
+        top1_similarity: float,
+        top1_top2_margin: float,
+        expected_identity_match: bool | None,
+    ) -> None:
+        self.sample_count += 1
+        self.top1_min = (
+            top1_similarity
+            if self.top1_min is None
+            else min(self.top1_min, top1_similarity)
+        )
+        self.top1_sum += top1_similarity
+        self.top1_max = (
+            top1_similarity
+            if self.top1_max is None
+            else max(self.top1_max, top1_similarity)
+        )
+        self.margin_min = (
+            top1_top2_margin
+            if self.margin_min is None
+            else min(self.margin_min, top1_top2_margin)
+        )
+        self.margin_sum += top1_top2_margin
+        self.margin_max = (
+            top1_top2_margin
+            if self.margin_max is None
+            else max(self.margin_max, top1_top2_margin)
+        )
+        if expected_identity_match is True:
+            self.identity_match_count += 1
 
 
 class LocalCameraPreview:
@@ -32,8 +80,279 @@ class LocalCameraPreview:
             "updated_at": None,
         }
         self._sessions: dict[str, float] = {}
+        self._calibration_students: tuple[tuple[str, str], ...] = ()
+        self._calibration_gallery_identity_count = 0
+        self._calibration_request: dict[str, str | None] | None = None
+        self._calibration_samples = {
+            "genuine": _CalibrationAggregate(),
+            "impostor": _CalibrationAggregate(),
+        }
+        self._calibration_last_result: dict[str, object] | None = None
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
+
+    def status(self) -> dict[str, object]:
+        with self._lock:
+            payload = dict(self._status)
+            payload["calibration"] = self._calibration_status_locked()
+            return payload
+
+    def update_calibration_students(
+        self,
+        students: tuple[tuple[UUID, str], ...],
+        *,
+        gallery_identity_count: int,
+    ) -> None:
+        with self._lock:
+            gallery_changed = (
+                gallery_identity_count != self._calibration_gallery_identity_count
+            )
+            samples_exist = any(
+                aggregate.sample_count > 0
+                for aggregate in self._calibration_samples.values()
+            )
+            self._calibration_students = tuple(
+                (str(student_id), name) for student_id, name in students
+            )
+            self._calibration_gallery_identity_count = gallery_identity_count
+            if gallery_changed and self._calibration_request is not None:
+                self._calibration_request = None
+                self._calibration_last_result = {
+                    "phase": "calibration",
+                    "result": "cancelled",
+                    "message": (
+                        "Roster template berubah; mulai ulang pengambilan sampel."
+                    ),
+                }
+            elif gallery_changed and samples_exist:
+                self._calibration_samples = {
+                    "genuine": _CalibrationAggregate(),
+                    "impostor": _CalibrationAggregate(),
+                }
+                self._calibration_last_result = {
+                    "phase": "calibration",
+                    "result": "reset",
+                    "message": (
+                        "Jumlah identitas bertemplate berubah; ringkasan direset "
+                        "agar perbandingan tetap konsisten."
+                    ),
+                }
+            if self._calibration_request is not None and self._calibration_request[
+                "student_id"
+            ] not in {student_id for student_id, _name in self._calibration_students}:
+                self._calibration_request = None
+                self._calibration_last_result = {
+                    "phase": "genuine",
+                    "result": "cancelled",
+                    "message": "Siswa tidak lagi ada pada roster sesi aktif.",
+                }
+
+    def clear_calibration_session(self) -> None:
+        """Discard in-memory diagnostics when the active session is lost or changes."""
+        with self._lock:
+            self._calibration_request = None
+            self._calibration_samples = {
+                "genuine": _CalibrationAggregate(),
+                "impostor": _CalibrationAggregate(),
+            }
+            self._calibration_last_result = None
+            self._calibration_students = ()
+            self._calibration_gallery_identity_count = 0
+
+    def request_calibration_sample(
+        self, phase: str, student_id: str | None
+    ) -> str | None:
+        with self._lock:
+            if self._calibration_request is not None:
+                return "sample_in_progress"
+            if not self._status["camera_open"] or not self._status["session_active"]:
+                return "session_unavailable"
+            if phase not in {"genuine", "impostor"}:
+                return "invalid_phase"
+            if phase == "genuine":
+                if student_id is None:
+                    return "student_required"
+                try:
+                    normalized_student_id = str(UUID(student_id))
+                except ValueError:
+                    return "invalid_student"
+                if normalized_student_id not in {
+                    item_id for item_id, _name in self._calibration_students
+                }:
+                    return "student_not_in_session"
+                student_id = normalized_student_id
+            elif student_id is not None:
+                return "unexpected_student"
+            if self._calibration_samples[phase].sample_count >= 100:
+                return "sample_limit"
+            self._calibration_request = {
+                "phase": phase,
+                "student_id": student_id,
+            }
+            self._calibration_last_result = {
+                "phase": phase,
+                "result": "pending",
+                "message": "Menunggu satu frame berkualitas untuk dinilai.",
+            }
+            return None
+
+    def calibration_request(self) -> dict[str, str | None] | None:
+        with self._lock:
+            return (
+                dict(self._calibration_request)
+                if self._calibration_request is not None
+                else None
+            )
+
+    def complete_calibration_sample(
+        self,
+        *,
+        top1_similarity: float,
+        top1_top2_margin: float,
+        expected_identity_match: bool | None,
+    ) -> None:
+        if (
+            not math.isfinite(top1_similarity)
+            or not -1 <= top1_similarity <= 1
+            or not math.isfinite(top1_top2_margin)
+            or not 0 <= top1_top2_margin <= 2
+        ):
+            self.fail_calibration_sample("invalid_score")
+            return
+        with self._lock:
+            request = self._calibration_request
+            if request is None:
+                return
+            phase = cast(Literal["genuine", "impostor"], request["phase"])
+            if (phase == "genuine") != (expected_identity_match is not None):
+                self._calibration_request = None
+                self._calibration_last_result = {
+                    "phase": phase,
+                    "result": "retry",
+                    "message": "Sampel tidak siap; atur posisi lalu coba lagi.",
+                }
+                return
+            self._calibration_samples[phase].add(
+                top1_similarity=top1_similarity,
+                top1_top2_margin=top1_top2_margin,
+                expected_identity_match=expected_identity_match,
+            )
+            self._calibration_request = None
+            self._calibration_last_result = {
+                "phase": phase,
+                "result": "sampled",
+                "message": (
+                    "Sampel siswa cocok dengan identitas yang dipilih."
+                    if expected_identity_match is True
+                    else "Sampel siswa tidak cocok dengan identitas yang dipilih."
+                    if expected_identity_match is False
+                    else "Skor relawan non-terdaftar tercatat untuk evaluasi lokal."
+                ),
+            }
+
+    def fail_calibration_sample(self, reason_code: str) -> None:
+        safe_reasons = {
+            "no_face",
+            "multiple_faces",
+            "face_too_small",
+            "blurred_face",
+            "face_too_dark",
+            "face_too_bright",
+            "liveness_inconclusive",
+            "spoof",
+            "face_crop_empty",
+            "frame_blurry",
+            "lighting_out_of_range",
+            "no_candidate",
+            "session_unavailable",
+            "invalid_score",
+            "calibration_error",
+        }
+        reason = reason_code if reason_code in safe_reasons else "try_again"
+        with self._lock:
+            request = self._calibration_request
+            if request is None:
+                return
+            phase = request["phase"]
+            self._calibration_request = None
+            self._calibration_last_result = {
+                "phase": phase,
+                "result": "retry",
+                "message": self._calibration_message(reason),
+            }
+
+    def reset_calibration(self) -> bool:
+        with self._lock:
+            if self._calibration_request is not None:
+                return False
+            self._calibration_samples = {
+                "genuine": _CalibrationAggregate(),
+                "impostor": _CalibrationAggregate(),
+            }
+            self._calibration_last_result = None
+            return True
+
+    def _calibration_status_locked(self) -> dict[str, object]:
+        return {
+            "students": [
+                {"student_id": student_id, "full_name": name}
+                for student_id, name in self._calibration_students
+            ],
+            "sample_pending": self._calibration_request is not None,
+            "gallery_identity_count": self._calibration_gallery_identity_count,
+            "margin_interpretable": self._calibration_gallery_identity_count >= 2,
+            "last_result": self._calibration_last_result,
+            "genuine": self._calibration_group_summary("genuine"),
+            "impostor": self._calibration_group_summary("impostor"),
+        }
+
+    def _calibration_group_summary(self, phase: str) -> dict[str, object]:
+        aggregate = self._calibration_samples[phase]
+        summary: dict[str, object] = {"sample_count": aggregate.sample_count}
+        if aggregate.sample_count == 0:
+            return summary
+        summary.update(
+            {
+                "top1_min": aggregate.top1_min,
+                "top1_mean": aggregate.top1_sum / aggregate.sample_count,
+                "top1_max": aggregate.top1_max,
+            }
+        )
+        if self._calibration_gallery_identity_count >= 2:
+            summary.update(
+                {
+                    "margin_min": aggregate.margin_min,
+                    "margin_mean": aggregate.margin_sum / aggregate.sample_count,
+                    "margin_max": aggregate.margin_max,
+                }
+            )
+        if phase == "genuine":
+            summary["identity_match_count"] = aggregate.identity_match_count
+        return summary
+
+    @staticmethod
+    def _calibration_message(reason: str) -> str:
+        messages = {
+            "no_face": (
+                "Model belum menemukan satu wajah; hadapkan wajah ke lensa "
+                "dan posisikan utuh di tengah."
+            ),
+            "multiple_faces": "Pastikan hanya satu orang berada di frame.",
+            "face_too_small": "Dekatkan wajah ke kamera.",
+            "blurred_face": "Tahan posisi agar gambar lebih tajam.",
+            "face_too_dark": "Tambah pencahayaan pada wajah.",
+            "face_too_bright": "Kurangi cahaya langsung ke wajah.",
+            "spoof": "Sampel ditolak oleh pemeriksaan liveness.",
+            "liveness_inconclusive": "Pemeriksaan liveness belum meyakinkan.",
+            "face_crop_empty": "Wajah tidak terbaca dengan utuh; atur posisi kamera.",
+            "frame_blurry": "Tahan posisi agar gambar lebih tajam.",
+            "lighting_out_of_range": "Sesuaikan pencahayaan pada wajah.",
+            "no_candidate": "Tidak ada template yang dapat dibandingkan.",
+            "session_unavailable": "Sesi praktikum sudah tidak aktif.",
+            "invalid_score": "Sampel tidak menghasilkan skor yang valid.",
+            "calibration_error": "Uji diagnostik gagal; coba lagi.",
+        }
+        return messages.get(reason, "Sampel tidak siap; atur posisi lalu coba lagi.")
 
     def start(self) -> None:
         if not self.settings.enabled or self._server is not None:
@@ -94,6 +413,23 @@ class LocalCameraPreview:
                     origin,
                 )
 
+            def _read_json_body(self) -> dict[str, object] | int | None:
+                try:
+                    content_length = int(self.headers.get("Content-Length", "0"))
+                except ValueError:
+                    return None
+                if content_length < 0 or content_length > 2048:
+                    return 413
+                try:
+                    payload = json.loads(self.rfile.read(content_length))
+                except ValueError:
+                    return None
+                if not isinstance(payload, dict) or not all(
+                    isinstance(key, str) for key in payload
+                ):
+                    return None
+                return cast(dict[str, object], payload)
+
             def _authorized(self) -> bool:
                 supplied = self.headers.get("X-Presensi-Preview-Token", "")
                 now = time.monotonic()
@@ -120,7 +456,39 @@ class LocalCameraPreview:
                 if origin is None:
                     return
                 if self.path != "/v1/session":
-                    self._send_json(404, {"error": "not_found"}, origin)
+                    if self.path != "/v1/calibration-sample":
+                        self._send_json(404, {"error": "not_found"}, origin)
+                        return
+                    if not self._authorized():
+                        self._send_json(401, {"error": "unauthorized"}, origin)
+                        return
+                    payload = self._read_json_body()
+                    if isinstance(payload, int):
+                        self._send_json(payload, {"error": "request_too_large"}, origin)
+                        return
+                    if payload is None:
+                        self._send_json(400, {"error": "invalid_request"}, origin)
+                        return
+                    phase = payload.get("phase")
+                    raw_student_id = payload.get("student_id")
+                    student_id = (
+                        raw_student_id if isinstance(raw_student_id, str) else None
+                    )
+                    if raw_student_id is not None and student_id is None:
+                        self._send_json(400, {"error": "invalid_student"}, origin)
+                        return
+                    error = preview.request_calibration_sample(
+                        phase if isinstance(phase, str) else "", student_id
+                    )
+                    if error is not None:
+                        status = (
+                            409
+                            if error in {"sample_in_progress", "sample_limit"}
+                            else 400
+                        )
+                        self._send_json(status, {"error": error}, origin)
+                        return
+                    self._send_json(202, {"queued": True}, origin)
                     return
                 authorization = self.headers.get("Authorization", "")
                 scheme, separator, operator_token = authorization.partition(" ")
@@ -169,13 +537,22 @@ class LocalCameraPreview:
                 origin = self._origin()
                 if origin is None:
                     return
-                if self.path != "/v1/session" or not self._authorized():
+                if not self._authorized():
                     self._send_json(401, {"error": "unauthorized"}, origin)
                     return
-                supplied = self.headers.get("X-Presensi-Preview-Token", "")
-                with preview._lock:
-                    preview._sessions.pop(supplied, None)
-                self._send_json(200, {"closed": True}, origin)
+                if self.path == "/v1/session":
+                    supplied = self.headers.get("X-Presensi-Preview-Token", "")
+                    with preview._lock:
+                        preview._sessions.pop(supplied, None)
+                    self._send_json(200, {"closed": True}, origin)
+                    return
+                if self.path != "/v1/calibration":
+                    self._send_json(404, {"error": "not_found"}, origin)
+                    return
+                if not preview.reset_calibration():
+                    self._send_json(409, {"error": "sample_in_progress"}, origin)
+                    return
+                self._send_json(200, {"cleared": True}, origin)
 
             def do_GET(self) -> None:
                 origin = self._origin()
@@ -185,8 +562,7 @@ class LocalCameraPreview:
                     self._send_json(401, {"error": "unauthorized"}, origin)
                     return
                 if self.path == "/v1/status":
-                    with preview._lock:
-                        payload = dict(preview._status)
+                    payload = preview.status()
                     self._send_json(200, payload, origin)
                     return
                 if self.path == "/v1/frame.jpg":

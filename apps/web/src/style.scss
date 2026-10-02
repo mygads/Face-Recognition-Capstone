@@ -2653,6 +2653,139 @@ a:focus-visible {
   line-height: 1.55;
 }
 
+.camera-preview-view__diagnostics {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+}
+
+.camera-preview-view__diagnostics-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.camera-preview-view__diagnostics-heading h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 1.05rem;
+}
+
+.camera-preview-view__diagnostics-heading p:last-child {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.camera-preview-view__diagnostic-badge {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border-radius: 99px;
+  color: var(--orange, #c27816);
+  background: color-mix(in srgb, var(--orange, #c27816) 12%, transparent);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.camera-preview-view__diagnostic-warning {
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--orange, #c27816) 28%, transparent);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  background: color-mix(in srgb, var(--orange, #c27816) 7%, var(--bg-surface));
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.camera-preview-view__diagnostic-controls {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.camera-preview-view__diagnostic-controls > label:first-child {
+  display: grid;
+  min-width: min(280px, 100%);
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.camera-preview-view__diagnostic-controls select {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  background: var(--bg-surface);
+}
+
+.camera-preview-view__consent {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 520px;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.camera-preview-view__consent input {
+  flex: 0 0 auto;
+}
+
+.camera-preview-view__sample-status,
+.camera-preview-view__diagnostic-limit {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.camera-preview-view__sample-status.is-complete {
+  color: var(--green);
+}
+
+.camera-preview-view__sample-status.is-retry {
+  color: var(--orange, #c27816);
+}
+
+.camera-preview-view__diagnostic-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.camera-preview-view__diagnostic-table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  color: var(--text);
+  font-size: 0.76rem;
+}
+
+.camera-preview-view__diagnostic-table th,
+.camera-preview-view__diagnostic-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color-light);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.camera-preview-view__diagnostic-table thead th {
+  color: var(--text-secondary);
+  font-weight: 650;
+}
+
+.camera-preview-view__diagnostic-limit {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-color-light);
+}
+
 @media (max-width: 650px) {
   .session-view__schedule-card {
     align-items: stretch;
@@ -2696,5 +2829,13 @@ a:focus-visible {
   .camera-preview-view__frame,
   .camera-preview-view__identity {
     padding: var(--space-3);
+  }
+
+  .camera-preview-view__diagnostics {
+    padding: var(--space-3);
+  }
+
+  .camera-preview-view__diagnostics-heading {
+    flex-direction: column;
   }
 }

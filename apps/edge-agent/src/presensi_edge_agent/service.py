@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
@@ -84,6 +85,7 @@ class EdgeService:
         self._active_bundle: SessionCacheBundle | None = None
         self._gallery: tuple[GalleryEntry, ...] = ()
         self._last_decision: tuple[str, str | None, str | None] | None = None
+        self._calibration_recognizer: FrameRecognizer | None = None
         self._camera_open = False
         self.preview = (
             LocalCameraPreview(config)
@@ -235,6 +237,7 @@ class EdgeService:
         bundle = self.cache.current()
         if bundle is None:
             if self.preview is not None:
+                self.preview.clear_calibration_session()
                 self.preview.update_status(
                     session_active=False,
                     recognition_state="waiting_for_session",
@@ -279,6 +282,7 @@ class EdgeService:
                 ),
             )
             if self.preview is not None:
+                self.preview.clear_calibration_session()
                 self.preview.update_status(
                     session_active=True,
                     recognition_state="waiting_for_calibration"
@@ -288,8 +292,25 @@ class EdgeService:
                     display_name=None,
                 )
         if cache_changed:
+            if self._calibration_recognizer is not None:
+                self._calibration_recognizer.reset()
+                self._calibration_recognizer = None
             self._gallery = bundle.gallery()
+            if self.preview is not None:
+                self.preview.update_calibration_students(
+                    tuple(
+                        (student.student_id, student.full_name)
+                        for student in bundle.students
+                        if student.templates
+                    ),
+                    gallery_identity_count=len(
+                        {entry.student_id for entry in self._gallery}
+                    ),
+                )
         self._active_bundle = bundle
+        if self.preview is not None and self.preview.calibration_request() is not None:
+            self._process_calibration_frame(frame)
+            return
         if (
             self.config.recognition.min_top1_similarity is None
             or self.config.recognition.min_top1_top2_margin is None
@@ -367,6 +388,76 @@ class EdgeService:
             recognition_outcome=str(payload["outcome"]),
             pending_events=pending,
         )
+
+    def _process_calibration_frame(self, frame: object) -> None:
+        preview = self.preview
+        if preview is None:
+            return
+        try:
+            if self._calibration_recognizer is None:
+                self._calibration_recognizer = self._create_calibration_recognizer()
+            decision = self._calibration_recognizer.process(
+                frame,
+                self._gallery,
+                datetime.now(UTC),
+            )
+        except Exception:
+            preview.fail_calibration_sample("calibration_error")
+            self._calibration_recognizer = None
+            log_event(logger, logging.ERROR, "local_calibration_probe_failed")
+            return
+        if decision.state == "collecting":
+            return
+        try:
+            request = preview.calibration_request()
+            if request is None:
+                return
+            if decision.state != "accepted" or decision.decision.student_id is None:
+                preview.fail_calibration_sample(
+                    decision.decision.reason_code
+                    or (
+                        "no_candidate"
+                        if decision.state == "rejected"
+                        else "liveness_inconclusive"
+                        if decision.state == "retry_frontal"
+                        else "try_again"
+                    )
+                )
+                return
+            confidence = decision.decision.confidence
+            margin = decision.decision.margin
+            if confidence is None or margin is None:
+                preview.fail_calibration_sample("invalid_score")
+                return
+            phase = request["phase"]
+            expected_student_id = request["student_id"]
+            expected_identity_match = (
+                str(decision.decision.student_id) == expected_student_id
+                if phase == "genuine"
+                else None
+            )
+            preview.complete_calibration_sample(
+                top1_similarity=2 * confidence - 1,
+                top1_top2_margin=2 * margin,
+                expected_identity_match=expected_identity_match,
+            )
+        finally:
+            if self._calibration_recognizer is not None:
+                self._calibration_recognizer.reset()
+
+    def _create_calibration_recognizer(self) -> FrameRecognizer:
+        """Build an ephemeral permissive probe; it never submits attendance events."""
+        if self.config.device_id is None:
+            raise ValueError("device_id is required for local calibration.")
+        from presensi_edge_agent.recognition import LocalRecognizer, build_pipeline
+
+        diagnostic_recognition = replace(
+            self.config.recognition,
+            min_top1_similarity=-1.0,
+            min_top1_top2_margin=0.0,
+        )
+        diagnostic_config = replace(self.config, recognition=diagnostic_recognition)
+        return LocalRecognizer(build_pipeline(diagnostic_config), self.device_id)
 
     def _sync_worker(self) -> None:
         next_heartbeat = 0.0

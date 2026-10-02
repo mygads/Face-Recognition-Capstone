@@ -159,6 +159,24 @@ Jika dashboard development berjalan pada origin/port lain, tambahkan origin
 localhost yang persis pada `preview.allowed_origins`; jangan gunakan wildcard
 atau bind address `0.0.0.0`.
 
+Pada halaman yang sama, **Uji kecocokan kamera** dapat mengambil satu rangkaian
+frame per klik untuk membandingkan siswa terdaftar dengan relawan dewasa yang
+setuju ikut uji. Gunakan sesi aktif, tandai konfirmasi identitas sebelum sampel
+siswa dan konfirmasi relawan sebelum sampel non-terdaftar. UI hanya menampilkan
+jumlah serta min/rata-rata/max skor; gambar dan embedding tidak ditulis, dan
+ringkasan sementara berada di memori agent sampai sesi berganti atau agent
+dimulai ulang. Sampel diagnostik tidak mengubah konfigurasi threshold dan jalur
+sampel itu sendiri tidak membuat recognition event. Saat threshold produksi
+sudah aktif, attendance normal untuk frame di luar sampel tetap mengikuti
+konfigurasi yang sudah diterapkan.
+
+> Margin Top‑1/Top‑2 tidak ditampilkan jika gallery aktif hanya berisi satu
+> identitas dengan template. Dalam kondisi itu tidak ada kandidat identitas
+> kedua untuk perbandingan yang bermakna. Kumpulkan uji lintas identitas dan
+> gunakan harness benchmark untuk evaluasi yang lebih luas; sedikit relawan pada
+> satu kamera tidak cukup untuk menyimpulkan false-accept rate atau menetapkan
+> nilai produksi.
+
 Preview tetap menampilkan kamera ketika recognition belum siap. Dalam status
 `waiting_for_calibration`, belum ada nama yang ditampilkan atau recognition
 event yang dibuat. Setelah sesi aktif, template model/version cocok, dan admin
@@ -205,13 +223,13 @@ Untuk production, lihat runbook [AI_EDGE](deployment/ai-edge.md)
 atau [AI_CENTRAL + STB](deployment/ai-central-stb.md) untuk provisioning
 credential, service systemd, dan upgrade.
 
-Untuk produksi, systemd menjalankan agent headless setelah boot. Tidak ada
-endpoint live-preview pada dashboard atau systemd service. Jalankan utility
-calibration secara manual pada sesi desktop lokal sebelum menyalakan service;
-hentikan service terlebih dahulu bila ia sedang memegang webcam. Pada STB
-gateway, gunakan capture hemat CPU dari contoh `STB_GATEWAY`; STB tidak memuat
-SFace/YuNet untuk inference. Preview diagnostik tetap alat lokal terpisah, bukan
-stream jaringan.
+Untuk produksi, systemd menjalankan agent headless setelah boot. Pada AI_EDGE,
+preview lokal tetap hanya bind ke loopback dan membutuhkan otorisasi operator;
+preview tidak tersedia melalui jaringan. Jalankan utility calibration secara
+manual pada sesi desktop lokal sebelum menyalakan service; hentikan service
+terlebih dahulu bila ia sedang memegang webcam. Pada STB gateway, gunakan
+capture hemat CPU dari contoh `STB_GATEWAY`; STB tidak memuat SFace/YuNet untuk
+inference. Preview diagnostik tetap alat lokal, bukan stream jaringan.
 
 Menu **AI & kamera** di dashboard mengelola kualitas enrollment, kualitas frame,
 sampling, jumlah frame yang perlu sepakat, threshold terkalibrasi untuk AI_EDGE
