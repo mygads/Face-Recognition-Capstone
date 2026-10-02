@@ -59,9 +59,12 @@ API connectivity again. There is no public gallery upload route.
 ## Configuration and deployment
 
 Model files are local provisioned YuNet/SFace assets; service startup never
-downloads weights. Recognition thresholds must be explicitly set from local
-evaluation. The AI Compose profile installs the inference dependencies and the
-shared recognition-core package. For LAN access, bind the service to the central
+downloads weights. The local setup command can explicitly download the pinned
+files. If paths are configured but thresholds are blank, the service starts in
+degraded mode without a recognition runner. Recognition thresholds must be
+explicitly set from local evaluation before inference is enabled. The AI Compose
+profile installs the inference dependencies and the shared recognition-core
+package. For LAN access, bind the service to the central
 server's lab-network interface and place it behind TLS or an equivalent trusted
 transport boundary. Development Compose binds to loopback by default.
 

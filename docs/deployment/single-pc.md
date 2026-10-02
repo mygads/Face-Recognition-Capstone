@@ -69,6 +69,14 @@ service). Pilihan disimpan di `.env`. Untuk mengganti pilihan di kemudian hari,
 jalankan `scripts/start-local.py --profile edge` atau
 `scripts/start-local.py --profile central`.
 
+Jika file YuNet/SFace belum ada atau checksum berbeda, startup menawarkan
+download checksum-pinned (~39 MB) atau melewatinya. Pilihan lewati tersimpan di
+`.env`; download kemudian dengan `py -3 scripts/start-local.py --download-models`
+atau `python3 scripts/start-local.py --download-models`. File disimpan ke
+`models/weights/`. Untuk AI_CENTRAL, startup mengisi path model setelah file
+terverifikasi, tetapi service tetap menolak inference sampai threshold dikalibrasi.
+SFace masih untuk evaluasi lokal sampai sekolah meninjau izin penggunaannya.
+
 Open `http://127.0.0.1:5173`. Press Ctrl+C to stop Vite. The API/database
 continue in Docker so that they can be reused; stop them when finished:
 

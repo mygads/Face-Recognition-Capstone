@@ -86,6 +86,22 @@ def provision_asset(asset: ModelAsset, directory: Path) -> Path:
     return destination
 
 
+def assets_are_verified(directory: Path) -> bool:
+    """Return true only when every pinned model file is present and intact."""
+    valid = True
+    for asset in ASSETS:
+        path = directory / asset.filename
+        if not path.is_file():
+            print(f"Missing model asset: {path}")
+            valid = False
+        elif (
+            path.stat().st_size != asset.size_bytes or sha256_file(path) != asset.sha256
+        ):
+            print(f"Model asset failed checksum/size verification: {path}")
+            valid = False
+    return valid
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Download checksum-pinned OpenCV Zoo YuNet and SFace models."
@@ -96,7 +112,15 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_OUTPUT,
         help=f"Destination directory (default: {DEFAULT_OUTPUT})",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="verify all pinned files without downloading",
+    )
     args = parser.parse_args(argv)
+
+    if args.check:
+        return 0 if assets_are_verified(args.directory) else 2
 
     try:
         for asset in ASSETS:

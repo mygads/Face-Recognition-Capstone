@@ -35,6 +35,17 @@ Windows; di Ubuntu gunakan `python3 scripts/start-local.py --profile edge` atau
 `--profile central`. Flag lama `--central` tetap tersedia. Model dan threshold
 AI Central tetap harus diprovisikan/dikalibrasi sebelum inference dapat dipakai.
 
+Jika YuNet/SFace belum ada atau checksum-nya tidak cocok, startup juga
+menawarkan **1 — unduh sekarang** (~39 MB, checksum diverifikasi) atau
+**2 — lewati**. Pilihan lewati disimpan di `.env`; untuk mengubahnya nanti,
+jalankan `py -3 scripts/start-local.py --download-models` di Windows atau
+`python3 scripts/start-local.py --download-models` di Ubuntu. Model dipasang ke
+`models/weights/`. Download ini untuk evaluasi lokal; SFace belum disetujui untuk
+deployment operasional sekolah. Threshold recognition tetap harus dikalibrasi.
+Untuk AI_CENTRAL, model paths di `.env` diisi setelah verifikasi, tetapi
+inference tetap degraded sampai threshold dikonfigurasi. Model tidak diunduh
+otomatis saat clone.
+
 Satu command startup menyimpan pilihan profile, membuat `.env` lokal jika belum
 ada, menghasilkan secret development, menjalankan migration dan role seed,
 membuat akun admin lokal hanya jika belum ada akun, memasang dependency web bila

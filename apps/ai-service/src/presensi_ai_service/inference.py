@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from dataclasses import dataclass
 from datetime import datetime
@@ -17,6 +18,8 @@ from recognition_core.opencv_quality import OpenCVFaceQualityAssessor
 from recognition_core.pipeline import RecognitionPipeline
 from recognition_core.protocols import ImageFrame
 from recognition_core.temporal import MultiFrameDecisionEngine, TemporalDecisionConfig
+
+logger = logging.getLogger(__name__)
 
 
 class InferenceBusyError(RuntimeError):
@@ -144,9 +147,11 @@ def build_model_runner(settings: AISettings) -> RecognitionRunner | None:
     if not settings.model_version:
         raise ValueError("PRESENSI_AI_MODEL_VERSION must be configured.")
     if settings.min_top1_similarity is None or settings.min_top1_top2_margin is None:
-        raise ValueError(
-            "Recognition thresholds must be explicitly calibrated in configuration."
+        logger.warning(
+            "Local AI models are installed, but inference is disabled until "
+            "calibrated similarity and margin thresholds are configured."
         )
+        return None
     yunet_path, sface_path = model_paths
     assert yunet_path is not None and sface_path is not None
     sface = SFaceModel(sface_path, model_version=settings.model_version)

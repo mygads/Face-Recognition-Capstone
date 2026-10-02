@@ -12,6 +12,13 @@ WEB_ROOT = ROOT / "apps" / "web"
 ENV_FILE = ROOT / ".env"
 ENV_EXAMPLE = ROOT / ".env.example"
 LOCAL_AI_PROFILE_KEY = "PRESENSI_LOCAL_AI_PROFILE"
+LOCAL_MODEL_SETUP_KEY = "PRESENSI_LOCAL_MODEL_SETUP"
+MODEL_DOWNLOAD_SCRIPT = "scripts/download_face_models.py"
+CENTRAL_MODEL_SETTINGS = {
+    "PRESENSI_AI_YUNET_MODEL_PATH": "/models/face_detection_yunet_2023mar.onnx",
+    "PRESENSI_AI_SFACE_MODEL_PATH": "/models/face_recognition_sface_2021dec.onnx",
+    "PRESENSI_AI_MODEL_VERSION": "opencv-zoo-sface-2021dec",
+}
 
 
 def run(command: list[str], *, cwd: Path = ROOT) -> int:
@@ -53,19 +60,103 @@ def read_local_ai_profile() -> str | None:
 
 
 def save_local_ai_profile(profile: str) -> None:
+    save_local_env_setting(LOCAL_AI_PROFILE_KEY, profile)
+
+
+def read_local_env_setting(name: str) -> str | None:
+    if not ENV_FILE.exists():
+        return None
+    for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.strip() == name:
+            return value.strip()
+    return None
+
+
+def save_local_env_setting(name: str, value: str) -> None:
     if not ENV_FILE.exists():
         ENV_FILE.write_text(ENV_EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
         print("Created .env from .env.example.")
     lines = ENV_FILE.read_text(encoding="utf-8").splitlines()
-    replacement = f"{LOCAL_AI_PROFILE_KEY}={profile}"
+    replacement = f"{name}={value}"
     for index, line in enumerate(lines):
         key, separator, _value = line.partition("=")
-        if separator and key.strip() == LOCAL_AI_PROFILE_KEY:
+        if separator and key.strip() == name:
             lines[index] = replacement
             break
     else:
         lines.append(replacement)
     ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def local_models_are_verified() -> bool:
+    return run([sys.executable, MODEL_DOWNLOAD_SCRIPT, "--check"]) == 0
+
+
+def download_local_models() -> bool:
+    return run([sys.executable, MODEL_DOWNLOAD_SCRIPT]) == 0
+
+
+def configure_central_model_paths() -> None:
+    for name, default_value in CENTRAL_MODEL_SETTINGS.items():
+        if not read_local_env_setting(name):
+            save_local_env_setting(name, default_value)
+
+
+def setup_local_models(profile: str, requested: str | None) -> bool:
+    if local_models_are_verified():
+        if profile == "central":
+            configure_central_model_paths()
+        print("Checksum-pinned YuNet/SFace models are ready in models/weights.")
+        return True
+
+    previous_choice = read_local_env_setting(LOCAL_MODEL_SETUP_KEY)
+    if requested == "skip":
+        save_local_env_setting(LOCAL_MODEL_SETUP_KEY, "skipped")
+        print(
+            "Model download skipped. Later run `py -3 scripts/start-local.py "
+            "--download-models` (or python3 on Ubuntu)."
+        )
+        return False
+    if requested is None and previous_choice == "skipped":
+        print(
+            "Model download skipped. Later run `py -3 scripts/start-local.py "
+            "--download-models` (or python3 on Ubuntu)."
+        )
+        return False
+
+    should_download = requested == "download"
+    if requested is None and previous_choice != "skipped" and sys.stdin.isatty():
+        print("Model YuNet + SFace belum tersedia atau checksum-nya tidak cocok.")
+        print(
+            "  1. Unduh sekarang (~39 MB, checksum diverifikasi; evaluasi lokal saja)"
+        )
+        print("  2. Lewati dan unduh nanti")
+        choice = input("Pilih 1 atau 2 [2]: ").strip()
+        if choice not in {"", "1", "2"}:
+            raise ValueError("Pilihan harus 1 (unduh model) atau 2 (lewati).")
+        should_download = choice == "1"
+
+    if not should_download:
+        save_local_env_setting(LOCAL_MODEL_SETUP_KEY, "skipped")
+        print(
+            "Model belum diunduh. Web/API tetap dapat dijalankan; enrollment dan "
+            "recognition perlu model lokal."
+        )
+        return False
+
+    print(
+        "Mengunduh YuNet + SFace untuk evaluasi lokal. SFace belum disetujui "
+        "untuk deployment operasional sekolah."
+    )
+    if not download_local_models():
+        print("Download model gagal; web/API tetap akan dijalankan tanpa inference.")
+        return False
+
+    save_local_env_setting(LOCAL_MODEL_SETUP_KEY, "downloaded")
+    if profile == "central":
+        configure_central_model_paths()
+    return True
 
 
 def choose_local_ai_profile(requested: str | None) -> str:
@@ -111,6 +202,21 @@ def main() -> int:
         choices=("edge", "central"),
         help="select which inference service to start locally",
     )
+    model_group = parser.add_mutually_exclusive_group()
+    model_group.add_argument(
+        "--download-models",
+        dest="model_setup",
+        action="store_const",
+        const="download",
+        help="download and checksum-verify local YuNet/SFace assets",
+    )
+    model_group.add_argument(
+        "--skip-model-download",
+        dest="model_setup",
+        action="store_const",
+        const="skip",
+        help="skip the first-run model download prompt",
+    )
     args = parser.parse_args()
 
     missing = [tool for tool in ("docker", "node", "npm") if shutil.which(tool) is None]
@@ -130,6 +236,22 @@ def main() -> int:
         print(error, file=sys.stderr)
         return 2
 
+    try:
+        models_ready = setup_local_models(local_profile, args.model_setup)
+    except ValueError as error:
+        print(error, file=sys.stderr)
+        return 2
+    if not models_ready:
+        print(
+            "Recognition/enrollment will stay unavailable until the model files "
+            "are provisioned. Recognition also needs calibrated thresholds."
+        )
+    else:
+        print(
+            "Model files are checksum-verified. Recognition still needs local "
+            "threshold calibration; SFace is for evaluation pending school review."
+        )
+
     print(
         "Starting local PostgreSQL and FastAPI, applying migrations, then "
         "starting Vue Vite."
@@ -143,7 +265,10 @@ def main() -> int:
             "thresholds are configured."
         )
     else:
-        print("AI_CENTRAL is disabled; local AI_EDGE devices run inference themselves.")
+        print(
+            "AI_CENTRAL is disabled; AI_EDGE devices use local inference after "
+            "their model files and thresholds are configured."
+        )
     if run(dev_command) != 0:
         return 1
     if not ensure_web_dependencies():

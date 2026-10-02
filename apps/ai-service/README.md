@@ -68,9 +68,12 @@ PRESENSI_AI_MIN_TOP1_SIMILARITY=<locally calibrated value>
 PRESENSI_AI_MIN_TOP1_TOP2_MARGIN=<locally calibrated value>
 ```
 
-The service does not download pretrained models at startup. Both model files,
-model version, and calibrated thresholds are required before it builds the
-recognizer. Thresholds have no preset acceptance values. Model provenance and
+The service does not download pretrained models at startup. The local setup
+script can download checksum-pinned files explicitly and fill the central model
+paths. If model files are present but calibrated thresholds are blank, the AI
+service remains available in degraded mode and does not build a recognizer.
+Both files, model version, and calibrated thresholds are required before it can
+infer. Thresholds have no preset acceptance values. Model provenance and
 deployment license notes are in [`docs/models.md`](../../docs/models.md).
 Compose mounts the ignored local `models/weights` folder read-only at `/models`;
 for a native run, set model paths to files on the host instead.

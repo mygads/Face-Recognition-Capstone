@@ -52,7 +52,12 @@ registry selects local AI_EDGE versus STB_GATEWAY forwarding.
 On the first local launch, choose whether this computer also runs AI_CENTRAL.
 The choice is stored in ignored `.env`; change it later with
 `scripts/start-local.py --profile edge` or `--profile central`. Starting this
-service does not download model weights or calibrate decision thresholds.
+service asks separately whether to download missing YuNet/SFace assets (~39 MB,
+checksum verified) or skip them. The choice to skip is saved in `.env`; use
+`scripts/start-local.py --download-models` to download them later. AI_CENTRAL
+model paths are filled only after model checksums pass, and inference remains
+disabled until thresholds are calibrated. SFace remains evaluation-only pending
+school license/provenance review.
 
 Production server provisioning remains in the runbooks. Domain, TLS, firewall,
 secret-store, backup, model approval, calibration, and school policy are
