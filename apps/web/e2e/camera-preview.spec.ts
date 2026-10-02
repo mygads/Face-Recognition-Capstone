@@ -127,6 +127,7 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
             ? {
                 decision: 'recorded',
                 attendance_status: 'present',
+                display_name: 'Yoga',
                 updated_at: Date.now() / 1000,
               }
             : null,
@@ -202,8 +203,8 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
   await expect(page.getByRole('heading', { name: 'Memeriksa presensi' })).toBeVisible()
   await expect(page.locator('.camera-preview-view__identity h3')).not.toHaveText('Yoga')
   attendanceRecorded = true
-  await expect(page.getByRole('heading', { name: 'Presensi tercatat' })).toBeVisible({
+  await expect(page.getByRole('heading', { name: 'Yoga' })).toBeVisible({
     timeout: 5000,
   })
-  await expect(page.getByText('Presensi tercatat sebagai hadir')).toBeVisible()
+  await expect(page.getByText('Terima kasih, Yoga. Presensi tercatat sebagai hadir.')).toBeVisible()
 })

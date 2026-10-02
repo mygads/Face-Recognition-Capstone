@@ -733,7 +733,10 @@ class LocalCameraPreview:
             self._status["updated_at"] = time.time()
 
     def update_attendance_result(
-        self, decision: str | None, attendance_status: str | None = None
+        self,
+        decision: str | None,
+        attendance_status: str | None = None,
+        display_name: str | None = None,
     ) -> None:
         result: dict[str, str | float | None] | None
         if decision is None:
@@ -742,6 +745,11 @@ class LocalCameraPreview:
             result = {"decision": decision, "attendance_status": None}
         elif decision == "recorded" and attendance_status in {"present", "late"}:
             result = {"decision": decision, "attendance_status": attendance_status}
+            if isinstance(display_name, str):
+                safe_name = "".join(char for char in display_name if char.isprintable())
+                safe_name = safe_name.strip()[:120]
+                if safe_name:
+                    result["display_name"] = safe_name
         elif decision == "not_recorded":
             result = {"decision": decision, "attendance_status": None}
         else:

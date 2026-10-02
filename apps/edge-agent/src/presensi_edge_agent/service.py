@@ -744,9 +744,29 @@ class EdgeService:
         if decision == "attendance_recorded":
             attendance = response.get("attendance")
             status = attendance.get("status") if isinstance(attendance, dict) else None
+            student_id = (
+                attendance.get("student_id") if isinstance(attendance, dict) else None
+            )
+            bundle = self._active_bundle
+            display_name = None
+            if (
+                status in {"present", "late"}
+                and isinstance(student_id, str)
+                and bundle is not None
+                and bundle.session_id == self._active_session_id
+            ):
+                display_name = next(
+                    (
+                        student.full_name
+                        for student in bundle.students
+                        if str(student.student_id) == student_id
+                    ),
+                    None,
+                )
             preview.update_attendance_result(
                 "recorded",
                 status if status in {"present", "late"} else None,
+                display_name,
             )
         elif decision == "no_attendance":
             preview.update_attendance_result("not_recorded")

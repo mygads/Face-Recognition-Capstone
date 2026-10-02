@@ -142,6 +142,36 @@ def test_preview_requires_operator_session_and_serves_no_store_status(
         preview.stop()
 
 
+def test_preview_exposes_name_only_for_confirmed_attendance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview, port, token = _start_preview(monkeypatch, ["ADMIN"])
+    try:
+        preview.update_attendance_result(
+            "pending", attendance_status=None, display_name="Must stay hidden"
+        )
+        pending = json.loads(_request(port, "/v1/status", token=token).read())
+        assert "display_name" not in pending["attendance_result"]
+
+        preview.update_attendance_result(
+            "recorded",
+            attendance_status="present",
+            display_name=" Synthetic Adult Volunteer\n",
+        )
+        recorded = json.loads(_request(port, "/v1/status", token=token).read())
+        assert (
+            recorded["attendance_result"]["display_name"] == "Synthetic Adult Volunteer"
+        )
+
+        preview.update_attendance_result(
+            "recorded", attendance_status="present", display_name="X" * 150
+        )
+        bounded = json.loads(_request(port, "/v1/status", token=token).read())
+        assert len(bounded["attendance_result"]["display_name"]) == 120
+    finally:
+        preview.stop()
+
+
 def test_preview_rejects_non_local_origins_and_unauthorized_roles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

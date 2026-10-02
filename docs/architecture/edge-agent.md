@@ -151,8 +151,11 @@ the current frame passes the configured face-size, sharpness, and brightness
 checks; amber asks the operator to adjust framing or lighting. Green does not
 mean an identity match or an attendance record. This observation contains only
 normalized face boxes and quality signals, never a name, embedding, or image.
-The full-screen student display hides diagnostics and candidate names. It shows
-an attendance result only after Core API returns its final attendance decision.
+The full-screen student display hides diagnostics and tentative candidate names.
+It shows the roster name and attendance result only after Core API confirms a
+final attendance record, and only when that returned student belongs to the
+active session's cached roster. Candidate matches and frame-quality checks
+never reveal a name on the student display.
 Missing calibrated identity thresholds continue to pause AI_EDGE recognition;
 the preview does not loosen enrollment or attendance quality rules.
 

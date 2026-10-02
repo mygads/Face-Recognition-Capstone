@@ -38,6 +38,7 @@ type CameraObservation = {
 type AttendanceResult = {
   decision: 'pending' | 'recorded' | 'not_recorded'
   attendance_status: 'present' | 'late' | null
+  display_name?: string | null
   updated_at: number
 }
 
@@ -108,7 +109,9 @@ const identityTitle = computed(() => {
       ? (previewStatus.value.display_name ?? 'Identitas cocok')
       : 'Belum teridentifikasi'
   }
-  if (recentAttendanceResult.value?.decision === 'recorded') return 'Presensi tercatat'
+  if (recentAttendanceResult.value?.decision === 'recorded') {
+    return recentAttendanceResult.value.display_name ?? 'Presensi tercatat'
+  }
   if (recentAttendanceResult.value?.decision === 'not_recorded') return 'Presensi belum tercatat'
   if (
     recentAttendanceResult.value?.decision === 'pending' ||
@@ -133,9 +136,11 @@ const identityDisplayMessage = computed(() => {
   }
   if (!previewStatus.value?.session_active) return 'Sesi praktikum belum dibuka.'
   if (recentAttendanceResult.value?.decision === 'recorded') {
+    const name = recentAttendanceResult.value.display_name
+    const thanks = name ? `Terima kasih, ${name}.` : 'Terima kasih.'
     return recentAttendanceResult.value.attendance_status === 'late'
-      ? 'Terima kasih. Presensi tercatat sebagai terlambat.'
-      : 'Terima kasih. Presensi tercatat sebagai hadir.'
+      ? `${thanks} Presensi tercatat sebagai terlambat.`
+      : `${thanks} Presensi tercatat sebagai hadir.`
   }
   if (recentAttendanceResult.value?.decision === 'not_recorded') {
     return 'Presensi belum tercatat. Silakan minta bantuan petugas.'
@@ -464,8 +469,7 @@ onBeforeUnmount(() => {
         </dl>
         <p class="camera-preview-view__privacy">
           <template v-if="isFullscreen">
-            Layar siswa tidak menampilkan nama atau kandidat. Status berhasil hanya tampil setelah
-            Core API mengonfirmasi presensi.
+            Nama dan status hanya tampil setelah Core API mengonfirmasi presensi.
           </template>
           <template v-else>
             Nama kandidat hanya tampil pada halaman operator setelah kebijakan pengenalan cocok.

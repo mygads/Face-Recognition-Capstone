@@ -17,7 +17,9 @@ from presensi_edge_agent import cli as cli_module
 from presensi_edge_agent.api import ApiCallError, ApiHealth, CoreApiClient
 from presensi_edge_agent.cache import (
     ActiveSessionCache,
+    CachedStudent,
     CacheSchemaError,
+    SessionCacheBundle,
     parse_session_cache,
 )
 from presensi_edge_agent.config import (
@@ -422,7 +424,7 @@ def test_camera_preview_skips_face_detection_without_an_active_viewer(
         outbox.close()
 
 
-def test_confirmed_attendance_feedback_contains_status_without_student_identity(
+def test_confirmed_attendance_feedback_shows_only_roster_verified_student_name(
     tmp_path: Path,
 ) -> None:
     config = load_config(
@@ -454,6 +456,25 @@ def test_confirmed_attendance_feedback_contains_status_without_student_identity(
         lambda: {},
     )
     service._active_session_id = SESSION_ID
+    now = datetime.now(UTC)
+    service._active_bundle = SessionCacheBundle(
+        device_id=DEVICE_ID,
+        session_id=SESSION_ID,
+        session_status="active",
+        generated_at=now,
+        session_ends_at=now + timedelta(hours=1),
+        expires_at=now + timedelta(minutes=5),
+        model_name=MODEL_NAME,
+        model_version=MODEL_VERSION,
+        students=(
+            CachedStudent(
+                student_id=STUDENT_ID,
+                student_number="synthetic-001",
+                full_name="Synthetic Adult Volunteer",
+                templates=(),
+            ),
+        ),
+    )
     try:
         service._update_preview_attendance_result(
             {"session_id": str(SESSION_ID)},
@@ -470,7 +491,22 @@ def test_confirmed_attendance_feedback_contains_status_without_student_identity(
         status = service.preview.status()
         assert status["attendance_result"]["decision"] == "recorded"  # type: ignore[index]
         assert status["attendance_result"]["attendance_status"] == "present"  # type: ignore[index]
+        assert (
+            status["attendance_result"]["display_name"]  # type: ignore[index]
+            == "Synthetic Adult Volunteer"
+        )
         assert str(STUDENT_ID) not in json.dumps(status["attendance_result"])
+
+        service._active_bundle = None
+        service._update_preview_attendance_result(
+            {"session_id": str(SESSION_ID)},
+            {
+                "decision": "attendance_recorded",
+                "attendance": {"status": "present", "student_id": str(STUDENT_ID)},
+            },
+        )
+        result_without_roster = service.preview.status()["attendance_result"]
+        assert "display_name" not in result_without_roster  # type: ignore[operator]
     finally:
         outbox.close()
 
