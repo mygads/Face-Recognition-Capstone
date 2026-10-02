@@ -71,6 +71,15 @@ until it receives a valid policy. `STB_GATEWAY` does not install local face-
 recognition models. For
 reboot survival, use the hardened systemd steps in the deployment runbook.
 
+When running as `AI_EDGE`, the agent serves one authenticated local preview at
+`http://127.0.0.1:8765` for the dashboard on the same computer. Go to
+**Perangkat → Preview kamera** while signed in as ADMIN/LABORANT. It shows the
+frame already captured by the agent, so it does not open a second camera. Stop
+the agent before using enrollment or the separate calibration-window command on
+that same webcam. Preview frames stay in memory, are downscaled, and are never
+written to disk. In waiting-for-calibration mode the image is visible but the
+agent will not display a name or create attendance decisions.
+
 The downloaded bundle's Core API URL must be reachable from the camera host.
 Use a LAN IP/DNS or HTTPS origin for another computer; `localhost` and
 `127.0.0.1` refer to the camera device itself. For `STB_GATEWAY`, enter the AI

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import ipaddress
 import math
 import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Mapping, cast
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import yaml
@@ -104,6 +106,16 @@ class GatewaySettings:
 
 
 @dataclass(frozen=True, slots=True)
+class PreviewSettings:
+    enabled: bool
+    bind_host: str
+    port: int
+    allowed_origins: tuple[str, ...]
+    max_width: int
+    jpeg_quality: int
+
+
+@dataclass(frozen=True, slots=True)
 class EdgeConfig:
     config_path: Path
     device_id: UUID | None
@@ -122,6 +134,16 @@ class EdgeConfig:
     gateway: GatewaySettings = field(
         default_factory=lambda: GatewaySettings(
             None, None, None, 7.0, 30.0, 5.0, 3, 0.2, 75, 20.0, 240.0, 8.0
+        )
+    )
+    preview: PreviewSettings = field(
+        default_factory=lambda: PreviewSettings(
+            True,
+            "127.0.0.1",
+            8765,
+            ("http://127.0.0.1:5173", "http://localhost:5173"),
+            640,
+            70,
         )
     )
 
@@ -352,6 +374,7 @@ def load_config(
     runtime_raw = _mapping(data.get("runtime"), "runtime")
     central_ai_raw = _mapping(data.get("central_ai"), "central_ai")
     gateway_raw = _mapping(data.get("gateway"), "gateway")
+    preview_raw = _mapping(data.get("preview"), "preview")
 
     mode = str(data.get("mode", "AI_EDGE")).upper()
     if mode not in {"AI_EDGE", "STB_GATEWAY"}:
@@ -495,6 +518,53 @@ def load_config(
     if gateway.min_brightness >= gateway.max_brightness:
         raise EdgeConfigError("gateway.min_brightness must be below max_brightness.")
 
+    preview_host = str(preview_raw.get("bind_host", "127.0.0.1"))
+    try:
+        parsed_host = ipaddress.ip_address(preview_host)
+    except ValueError as exc:
+        raise EdgeConfigError(
+            "preview.bind_host must be a loopback IP address."
+        ) from exc
+    if not parsed_host.is_loopback:
+        raise EdgeConfigError("preview.bind_host must be a loopback IP address.")
+    origins_raw = preview_raw.get(
+        "allowed_origins",
+        ["http://127.0.0.1:5173", "http://localhost:5173"],
+    )
+    if not isinstance(origins_raw, list) or not origins_raw:
+        raise EdgeConfigError("preview.allowed_origins must be a non-empty list.")
+    allowed_origins: list[str] = []
+    for origin in origins_raw:
+        if not isinstance(origin, str):
+            raise EdgeConfigError("preview.allowed_origins entries must be URLs.")
+        parsed_origin = urlsplit(origin)
+        if (
+            parsed_origin.scheme not in {"http", "https"}
+            or parsed_origin.hostname not in {"localhost", "127.0.0.1", "::1"}
+            or parsed_origin.path
+            or parsed_origin.query
+            or parsed_origin.fragment
+            or parsed_origin.username
+            or parsed_origin.password
+        ):
+            raise EdgeConfigError(
+                "preview.allowed_origins may contain only exact localhost origins."
+            )
+        normalized = f"{parsed_origin.scheme}://{parsed_origin.netloc}"
+        if normalized != origin.rstrip("/"):
+            raise EdgeConfigError("preview.allowed_origins must be canonical origins.")
+        allowed_origins.append(normalized)
+    preview = PreviewSettings(
+        enabled=_boolean(preview_raw, "enabled", mode == "AI_EDGE"),
+        bind_host=preview_host,
+        port=_integer(preview_raw, "port", 8765),
+        allowed_origins=tuple(allowed_origins),
+        max_width=_integer(preview_raw, "max_width", 640, minimum=160),
+        jpeg_quality=_integer(preview_raw, "jpeg_quality", 70),
+    )
+    if preview.port > 65535 or preview.jpeg_quality > 95:
+        raise EdgeConfigError("preview.port or preview.jpeg_quality is out of range.")
+
     models = ModelSettings(
         yunet_path=_path(base, models_raw.get("yunet_path"), "models.yunet_path"),
         sface_path=_path(base, models_raw.get("sface_path"), "models.sface_path"),
@@ -607,6 +677,7 @@ def load_config(
         liveness=liveness,
         runtime=runtime,
         gateway=gateway,
+        preview=preview,
     )
 
 

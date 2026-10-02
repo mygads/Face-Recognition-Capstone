@@ -48,6 +48,17 @@ liveness:
   required: false
   min_live_score: null
 
+preview:
+  enabled: true
+  # Loopback only: the dashboard preview uses this agent's existing webcam feed.
+  bind_host: 127.0.0.1
+  port: 8765
+  allowed_origins:
+    - http://127.0.0.1:5173
+    - http://localhost:5173
+  max_width: 640
+  jpeg_quality: 70
+
 runtime:
   outbox_path: /var/lib/presensi-edge-agent/edge-events.sqlite3
   max_outbox_events: 50000

@@ -135,6 +135,15 @@ policy is managed from the admin dashboard; camera selection, capture mode,
 model files, endpoint, and credentials stay local to the host. Camera access is
 native and intentionally excluded from default Docker Compose.
 
+For `AI_EDGE`, the agent also exposes a temporary loopback-only preview endpoint
+on `127.0.0.1:8765`. The same camera frame is downscaled in memory and displayed
+by the dashboard only when the operator browser is on that AI_EDGE host and the
+operator is ADMIN/LABORANT. The preview uses a short-lived local token after
+validating the operator bearer token with Core API; it does not forward preview
+frames to Core API or persist them. No preview listener starts for
+`STB_GATEWAY`. The dashboard must use a localhost origin listed in
+`preview.allowed_origins`.
+
 Liveness is disabled in the sample config. That mode requires documented
 physical/session controls at the lab station. The available anti-spoof model
 candidate still has a deployment-license warning; do not enable it in a

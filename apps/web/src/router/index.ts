@@ -22,6 +22,7 @@ import ReportsView from '../views/ReportsView.vue'
 import ScheduleView from '../views/ScheduleView.vue'
 import SessionsView from '../views/SessionsView.vue'
 import AiSetupView from '../views/AiSetupView.vue'
+import CameraPreviewView from '../views/CameraPreviewView.vue'
 
 export const routes: RouteRecordRaw[] = [
   {
@@ -98,6 +99,16 @@ export const routes: RouteRecordRaw[] = [
           title: 'AI & kamera',
           description: 'Periksa kesiapan model AI, threshold, dan kamera perangkat.',
           requiredRoles: ['ADMIN'],
+        },
+      },
+      {
+        path: 'camera-preview',
+        name: 'camera-preview',
+        component: CameraPreviewView,
+        meta: {
+          title: 'Preview kamera',
+          description: 'Lihat kamera AI_EDGE dan identitas yang telah cocok pada sesi aktif.',
+          requiredRoles: ['ADMIN', 'LABORANT'],
         },
       },
       {

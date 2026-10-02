@@ -34,6 +34,7 @@ from presensi_edge_agent.config import (
 )
 from presensi_edge_agent.events import event_payload
 from presensi_edge_agent.logging import JsonLogFormatter
+from presensi_edge_agent.managed_config import apply_managed_configuration
 from presensi_edge_agent.outbox import (
     EventOutbox,
     OutboxEventConflict,
@@ -185,6 +186,62 @@ def test_status_allows_safe_edge_start_while_thresholds_wait_for_calibration(
     assert result["recognition_ready"] is False
     assert result["selected_camera_available"] is True
     assert result["configuration_error"] is None
+
+
+def test_managed_edge_defaults_can_apply_without_enabling_recognition() -> None:
+    config = load_config(
+        EXAMPLE_CONFIG, environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)}
+    )
+    settings: dict[str, object] = {
+        "min_face_pixels": 80,
+        "min_laplacian_variance": 45.0,
+        "min_brightness": 25.0,
+        "max_brightness": 235.0,
+        "min_top1_similarity": None,
+        "min_top1_top2_margin": None,
+        "minimum_agreeing_frames": 3,
+        "sample_every_n_frames": 5,
+        "best_frame_count": 5,
+        "max_history_frames": 10,
+        "calibration_reference": None,
+    }
+
+    updated = apply_managed_configuration(config, revision=1, settings=settings)
+    recognizer = LocalRecognizer(None, DEVICE_ID)
+    recognizer.apply_configuration(updated)
+
+    assert updated.runtime_config_revision == 1
+    assert updated.quality.min_face_pixels == 80
+    assert updated.recognition.sample_every_n_frames == 5
+    assert updated.recognition.min_top1_similarity is None
+    assert updated.recognition.min_top1_top2_margin is None
+    assert recognizer.pipeline is None
+
+
+def test_managed_edge_config_rejects_partial_or_uncalibrated_thresholds() -> None:
+    config = load_config(
+        EXAMPLE_CONFIG, environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)}
+    )
+    settings: dict[str, object] = {
+        "min_face_pixels": 80,
+        "min_laplacian_variance": 45.0,
+        "min_brightness": 25.0,
+        "max_brightness": 235.0,
+        "min_top1_similarity": 0.7,
+        "min_top1_top2_margin": None,
+        "minimum_agreeing_frames": 3,
+        "sample_every_n_frames": 5,
+        "best_frame_count": 5,
+        "max_history_frames": 10,
+        "calibration_reference": None,
+    }
+
+    with pytest.raises(EdgeConfigError, match="not usable"):
+        apply_managed_configuration(config, revision=1, settings=settings)
+
+    settings["min_top1_top2_margin"] = 0.12
+    with pytest.raises(EdgeConfigError, match="not usable"):
+        apply_managed_configuration(config, revision=1, settings=settings)
 
 
 def test_config_rejects_liveness_required_without_enabling_it(tmp_path: Path) -> None:
@@ -924,6 +981,9 @@ def test_ten_offline_events_survive_restart_and_reconnect_in_fifo_idempotently(
     for _ in range(10):
         first_process._process_frame(object())
     assert recognizer.processed == 10
+    assert first_process.preview is not None
+    assert first_process.preview._status["recognition_state"] == "accepted"
+    assert first_process.preview._status["display_name"] == "Not Enrolled"
     assert outbox.counts() == (10, 0)
 
     # The API is unavailable while decisions keep being queued locally.

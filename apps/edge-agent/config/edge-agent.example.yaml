@@ -51,6 +51,16 @@ liveness:
   required: false
   min_live_score: null
 
+preview:
+  enabled: true
+  bind_host: 127.0.0.1
+  port: 8765
+  allowed_origins:
+    - http://127.0.0.1:5173
+    - http://localhost:5173
+  max_width: 640
+  jpeg_quality: 70
+
 runtime:
   outbox_path: ../data/camera-queue/edge-events.sqlite3
   max_outbox_events: 50000

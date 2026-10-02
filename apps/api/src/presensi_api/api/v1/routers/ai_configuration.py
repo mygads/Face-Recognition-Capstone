@@ -189,17 +189,6 @@ def put_edge_settings(
         raise ApiProblem(
             409, "deployment_profile_mismatch", "Perangkat ini bukan AI_EDGE."
         )
-    if (
-        request.min_top1_similarity is None
-        or request.min_top1_top2_margin is None
-        or not (request.calibration_reference or "").strip()
-    ):
-        raise ApiProblem(
-            422,
-            "calibration_reference_required",
-            "Isi kedua threshold dari laporan kalibrasi sebelum menerapkannya "
-            "ke AI_EDGE.",
-        )
     device.config_apply_status = "pending"
     device.config_error_code = None
     save_configuration(

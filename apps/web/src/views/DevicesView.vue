@@ -731,6 +731,13 @@ onBeforeUnmount(() => {
       description="Pantau koneksi kamera dan versi agent. Status diperbarui otomatis setiap 15 detik."
     >
       <template #actions>
+        <RouterLink
+          v-if="activeProfile === 'AI_EDGE'"
+          class="button button--secondary"
+          to="/app/camera-preview"
+        >
+          Preview kamera
+        </RouterLink>
         <button
           v-if="canRegisterDevice"
           class="button button--primary"

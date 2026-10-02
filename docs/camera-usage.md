@@ -4,9 +4,10 @@ Untuk pembagian konfigurasi AI_EDGE/STB, pengaturan mana yang dapat diubah,
 dan batas dashboard saat ini, lihat [panduan konfigurasi device](architecture/device-configuration.md).
 
 Panduan ini membedakan tiga hal yang sering terlihat sama: kamera di halaman
-enrollment browser, kamera untuk pengenalan saat presensi, dan preview lokal
-untuk memasang kamera. Tidak ada live video kamera edge yang dikirim ke
-dashboard guru.
+enrollment browser, kamera untuk pengenalan saat presensi, utility kalibrasi,
+dan preview operasional lokal. Edge-agent menyediakan satu preview loopback yang
+bisa dibuka dashboard ADMIN/LABORANT pada host AI_EDGE. Live video tidak dikirim
+ke dashboard guru/komputer lain.
 
 ## Model YuNet dan SFace
 
@@ -142,11 +143,28 @@ python -m presensi_edge_agent --config apps/edge-agent/config/edge-agent.yaml ru
 ```
 
 `cameras` enumerasi index; `status` mengecek koneksi API, config, dan kamera;
-`run` mulai capture dan inference tanpa jendela preview. Ubuntu memakai perintah
+`run` mulai capture dan inference tanpa jendela kalibrasi GUI. Ubuntu memakai perintah
 `python3 -m ...` yang sama dan backend `v4l2`. Device harus terdaftar dan
 credential tersimpan di file yang ACL/permission-nya dibatasi. Jangan isi nilai
-threshold tebakan: agent memang menolak config AI_EDGE bila dua threshold belum
-diisi.
+threshold tebakan: agent dapat berjalan dalam status `waiting_for_calibration`
+tanpa threshold, tetapi inference/keputusan presensi tetap dijeda.
+
+Saat `AI_EDGE`, agent menyalakan preview dashboard lokal pada
+`http://127.0.0.1:8765` (juga menerima `localhost`) dengan bind loopback saja.
+Dashboard Vite pada host yang sama menggunakan satu stream/frame yang sudah
+dimiliki agent; ia tidak membuka device webcam kedua. Masuk sebagai
+ADMIN/LABORANT, lalu pilih **Perangkat → Preview kamera**. Gambar di-resize
+hingga lebar 640 px, dikirim sebagai JPEG sementara, dan tidak disimpan ke file.
+Jika dashboard development berjalan pada origin/port lain, tambahkan origin
+localhost yang persis pada `preview.allowed_origins`; jangan gunakan wildcard
+atau bind address `0.0.0.0`.
+
+Preview tetap menampilkan kamera ketika recognition belum siap. Dalam status
+`waiting_for_calibration`, belum ada nama yang ditampilkan atau recognition
+event yang dibuat. Setelah sesi aktif, template model/version cocok, dan admin
+menerbitkan threshold Top-1 serta margin dari laporan kalibrasi, preview dapat
+menampilkan nama hanya untuk keputusan `accepted`. API tetap memvalidasi dan
+menetapkan attendance final.
 
 Installer camera-device kini menawarkan wizard index kamera, resolusi, dan FPS
 requested sebelum pemeriksaan status. Jika dilewati, jalankan wizard lagi dari

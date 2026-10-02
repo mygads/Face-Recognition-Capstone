@@ -69,9 +69,23 @@ def apply_managed_configuration(
             min_brightness=_number(settings, "min_brightness", 0, 254),
             max_brightness=_number(settings, "max_brightness", 1, 255),
         )
+        thresholds_configured = (
+            recognition.min_top1_similarity is not None
+            and recognition.min_top1_top2_margin is not None
+        )
+        thresholds_partially_configured = (recognition.min_top1_similarity is None) != (
+            recognition.min_top1_top2_margin is None
+        )
+        calibration_reference = settings.get("calibration_reference")
         if (
-            recognition.min_top1_similarity is None
-            or recognition.min_top1_top2_margin is None
+            thresholds_partially_configured
+            or (
+                thresholds_configured
+                and (
+                    not isinstance(calibration_reference, str)
+                    or not calibration_reference.strip()
+                )
+            )
             or recognition.best_frame_count < recognition.minimum_agreeing_frames
             or recognition.max_history_frames < recognition.best_frame_count
             or quality.min_brightness >= quality.max_brightness

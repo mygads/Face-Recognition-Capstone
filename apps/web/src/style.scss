@@ -2506,6 +2506,153 @@ a:focus-visible {
   font-weight: 600;
 }
 
+.camera-preview-view {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.camera-preview-view__intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+}
+
+.camera-preview-view__intro h2,
+.camera-preview-view__identity h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 1.1rem;
+}
+
+.camera-preview-view__intro p:last-child,
+.camera-preview-view__identity > p {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.camera-preview-view__badge {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border-radius: 99px;
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.camera-preview-view__badge.is-online {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+}
+
+.camera-preview-view__badge.is-offline {
+  color: var(--text-secondary);
+  background: var(--bg-surface-secondary);
+}
+
+.camera-preview-view__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(260px, 0.8fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.camera-preview-view__frame,
+.camera-preview-view__identity {
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+}
+
+.camera-preview-view__frame img,
+.camera-preview-view__placeholder {
+  display: grid;
+  width: 100%;
+  min-height: 220px;
+  max-height: 65vh;
+  aspect-ratio: 16 / 9;
+  place-items: center;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  background: #131923;
+  object-fit: contain;
+}
+
+.camera-preview-view__placeholder {
+  align-content: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  text-align: center;
+}
+
+.camera-preview-view__placeholder span {
+  color: var(--primary);
+  font-size: 2rem;
+}
+
+.camera-preview-view__placeholder strong {
+  color: #fff;
+}
+
+.camera-preview-view__placeholder p {
+  max-width: 420px;
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.camera-preview-view__frame figcaption {
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+.camera-preview-view__identity h3 {
+  margin-top: var(--space-2);
+  font-size: 1.3rem;
+}
+
+.camera-preview-view__identity dl {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+
+.camera-preview-view__identity dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-color-light);
+}
+
+.camera-preview-view__identity dt {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.camera-preview-view__identity dd {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.camera-preview-view__identity .camera-preview-view__privacy {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface-secondary);
+  font-size: 0.74rem;
+  line-height: 1.55;
+}
+
 @media (max-width: 650px) {
   .session-view__schedule-card {
     align-items: stretch;
@@ -2530,5 +2677,24 @@ a:focus-visible {
 
   .enrollment-view__student {
     align-items: flex-start;
+  }
+}
+
+@media (max-width: 850px) {
+  .camera-preview-view__layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 520px) {
+  .camera-preview-view__intro {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: var(--space-4);
+  }
+
+  .camera-preview-view__frame,
+  .camera-preview-view__identity {
+    padding: var(--space-3);
   }
 }

@@ -78,6 +78,32 @@ Threshold tetap harus dikalibrasi. Lihat
 enrollment, edge-agent, dan alur pengujian. SFace belum cleared untuk deployment
 sekolah sampai provenance/license weight ditinjau.
 
+### Jalankan kamera AI_EDGE dan lihat preview lokal
+
+Untuk satu-PC Windows development, jalankan API/web seperti di atas, lalu
+jalankan satu edge-agent native agar ia menjadi satu-satunya pemilik webcam:
+
+```powershell
+.\.venv-edge-agent\Scripts\presensi-edge-agent.exe --config apps/edge-agent/config/edge-agent.yaml run
+```
+
+Jika installer membuat executable pada direktori virtual environment lain,
+gunakan path executable yang ditampilkan installer. Jangan jalankan utility
+calibration atau halaman enrollment bersamaan dengan agent pada kamera fisik
+yang sama. Dengan browser pada komputer AI_EDGE, buka **Perangkat → Preview
+kamera**. Halaman menampilkan satu preview dari frame yang sudah diambil agent;
+ia tidak meminta izin kamera atau membuka webcam kedua. Preview dibatasi ke
+loopback dan akun ADMIN/LABORANT. Gambar hanya berada di memori agent/browser,
+tidak ditulis ke disk. Hentikan agent dengan Ctrl+C untuk kembali memakai
+webcam melalui halaman enrollment.
+
+Untuk melihat nama siswa, harus ada sesi praktikum aktif dan template untuk
+model/version yang sedang dipakai. Sistem hanya menampilkan nama setelah
+recognition-core menerima identitas berdasarkan threshold Top-1 dan margin yang
+diambil dari laporan kalibrasi. Selama threshold belum dikalibrasi, preview
+tetap tersedia tetapi statusnya **menunggu kalibrasi**; sistem tidak menebak
+identitas dan tidak mengirim presensi.
+
 ## Tiga topologi penggunaan
 
 Project tetap memiliki dua profil pengenalan: **AI_EDGE** dan
@@ -208,7 +234,7 @@ tersedia. Halaman ini tidak mengunduh model atau memulai ulang service.
 | Item | Status repository | Persiapan untuk tes fisik |
 | --- | --- | --- |
 | YuNet + SFace | Adapter tersedia; downloader memprovision file lokal ke direktori ignored dengan SHA-256 terverifikasi. SFace weight masih perlu review provenance sebelum operasi. | Setup lokal dan installer AI_EDGE mengunduh otomatis; AI_CENTRAL production diprovision dari runbook. Catat versi/checksum dan selesaikan review institusi sebelum deployment. |
-| Threshold Top-1/margin | Tidak ada nilai final default; agent gagal terbuka jika kosong. | Kalibrasi pada data berizin yang mewakili kamera kelas. Prioritaskan false acceptance rendah; laporkan FMR/FNMR. |
+| Threshold Top-1/margin | Tidak ada nilai final default; agent dapat berjalan aman dalam status `waiting_for_calibration`, tetapi tidak mengenali atau mengirim presensi. | Kalibrasi pada data berizin yang mewakili kamera kelas. Prioritaskan false acceptance rendah; laporkan FMR/FNMR. |
 | Webcam/PC lab/STB | Utility kamera dan test mock tersedia; uji lapangan belum dilakukan. | Uji webcam UVC, posisi, pencahayaan, dan OS target; ukur CPU/RAM/suhu STB nyata. |
 | Liveness | Adapter/code path tersedia tetapi contoh nonaktif. Kandidat yang terdokumentasi belum cleared untuk operasi sekolah. | Tinjau lisensi/provenance, uji code path dan threshold sendiri, atau operasikan kontrol fisik/sesi yang disetujui. |
 | Template metadata lama | Migration mencabut template aktif tanpa ciphertext agar tidak dianggap enrolled. | Setelah migration diterapkan pada database lama, siswa terkait perlu enrollment baru. |

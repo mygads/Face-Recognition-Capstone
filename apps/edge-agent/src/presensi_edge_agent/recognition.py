@@ -112,7 +112,12 @@ class LocalRecognizer:
             )
 
     def apply_configuration(self, config: EdgeConfig) -> None:
-        next_pipeline = build_pipeline(config)
+        next_pipeline = (
+            build_pipeline(config)
+            if config.recognition.min_top1_similarity is not None
+            and config.recognition.min_top1_top2_margin is not None
+            else None
+        )
         with self._pipeline_lock:
             self.pipeline = next_pipeline
 

@@ -18,6 +18,7 @@ from presensi_edge_agent.cache import (
 from presensi_edge_agent.camera import CameraUnavailableError
 from presensi_edge_agent.config import EdgeConfig, resolve_api_token
 from presensi_edge_agent.events import event_payload
+from presensi_edge_agent.local_preview import LocalCameraPreview
 from presensi_edge_agent.logging import log_event
 from presensi_edge_agent.managed_config import (
     apply_managed_configuration,
@@ -84,6 +85,11 @@ class EdgeService:
         self._gallery: tuple[GalleryEntry, ...] = ()
         self._last_decision: tuple[str, str | None, str | None] | None = None
         self._camera_open = False
+        self.preview = (
+            LocalCameraPreview(config)
+            if config.mode == "AI_EDGE" and config.preview.enabled
+            else None
+        )
 
     def status(self) -> dict[str, object]:
         bundle = self.cache.current()
@@ -130,12 +136,37 @@ class EdgeService:
             daemon=True,
         )
         self._worker.start()
+        if self.preview is not None:
+            try:
+                self.preview.start()
+                self.preview.update_status(
+                    camera_open=False,
+                    session_active=False,
+                    recognition_state="starting",
+                )
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "local_camera_preview_started",
+                    bind_host=self.config.preview.bind_host,
+                    port=self.config.preview.port,
+                )
+            except OSError as exc:
+                self.preview = None
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "local_camera_preview_unavailable",
+                    exception_type=type(exc).__name__,
+                )
         try:
             while not self.stop_event.is_set():
                 try:
                     if not self._camera_open:
                         self.camera.open()
                         self._camera_open = True
+                        if self.preview is not None:
+                            self.preview.update_status(camera_open=True)
                         log_event(
                             logger,
                             logging.INFO,
@@ -148,9 +179,18 @@ class EdgeService:
                     ok, frame = self.camera.read()
                     if not ok or frame is None:
                         raise CameraUnavailableError("Camera frame read failed.")
+                    if self.preview is not None:
+                        self.preview.update_frame(frame)
                 except Exception as exc:
                     self.camera.close()
                     self._camera_open = False
+                    if self.preview is not None:
+                        self.preview.clear_frame()
+                        self.preview.update_status(
+                            camera_open=False,
+                            recognition_state="camera_unavailable",
+                            display_name=None,
+                        )
                     log_event(
                         logger,
                         logging.WARNING,
@@ -177,6 +217,13 @@ class EdgeService:
                 self._worker.join(timeout=self.config.api.timeout_seconds + 1)
             self.camera.close()
             self._camera_open = False
+            if self.preview is not None:
+                self.preview.update_status(
+                    camera_open=False,
+                    recognition_state="stopped",
+                    display_name=None,
+                )
+                self.preview.stop()
             self.api.close()
             self.outbox.close()
             log_event(logger, logging.INFO, "edge_agent_stopped")
@@ -187,6 +234,12 @@ class EdgeService:
     def _process_frame(self, frame: object) -> None:
         bundle = self.cache.current()
         if bundle is None:
+            if self.preview is not None:
+                self.preview.update_status(
+                    session_active=False,
+                    recognition_state="waiting_for_session",
+                    display_name=None,
+                )
             if self._active_session_id is not None:
                 expired_session_id = str(self._active_session_id)
                 self._active_session_id = None
@@ -194,6 +247,12 @@ class EdgeService:
                 self._gallery = ()
                 self._last_decision = None
                 self.recognizer.reset()
+                if self.preview is not None:
+                    self.preview.update_status(
+                        session_active=False,
+                        recognition_state="waiting_for_session",
+                        display_name=None,
+                    )
                 log_event(
                     logger,
                     logging.WARNING,
@@ -219,6 +278,15 @@ class EdgeService:
                     len(student.templates) for student in bundle.students
                 ),
             )
+            if self.preview is not None:
+                self.preview.update_status(
+                    session_active=True,
+                    recognition_state="waiting_for_calibration"
+                    if self.config.recognition.min_top1_similarity is None
+                    or self.config.recognition.min_top1_top2_margin is None
+                    else "checking",
+                    display_name=None,
+                )
         if cache_changed:
             self._gallery = bundle.gallery()
         self._active_bundle = bundle
@@ -226,9 +294,35 @@ class EdgeService:
             self.config.recognition.min_top1_similarity is None
             or self.config.recognition.min_top1_top2_margin is None
         ):
+            if self.preview is not None:
+                self.preview.update_status(
+                    session_active=True,
+                    recognition_state="waiting_for_calibration",
+                    display_name=None,
+                )
             return
         captured_at = datetime.now(UTC)
         decision = self.recognizer.process(frame, self._gallery, captured_at)
+        if self.preview is not None:
+            display_name = None
+            if (
+                decision.state == "accepted"
+                and decision.decision.student_id is not None
+            ):
+                matched_student = next(
+                    (
+                        student
+                        for student in bundle.students
+                        if student.student_id == decision.decision.student_id
+                    ),
+                    None,
+                )
+                display_name = matched_student.full_name if matched_student else None
+            self.preview.update_status(
+                session_active=True,
+                recognition_state=decision.state,
+                display_name=display_name,
+            )
         if decision.state == "collecting":
             return
         signature = (
