@@ -10,7 +10,6 @@ type PreviewStatus = {
   updated_at: number | null
   camera_observation?: CameraObservation
   attendance_result?: AttendanceResult | null
-  calibration?: CalibrationStatus
 }
 
 type CameraFaceObservation = {
@@ -42,40 +41,14 @@ type AttendanceResult = {
   updated_at: number
 }
 
-type CalibrationSummary = {
-  sample_count: number
-  top1_min?: number
-  top1_mean?: number
-  top1_max?: number
-  margin_min?: number
-  margin_mean?: number
-  margin_max?: number
-  identity_match_count?: number
-}
-
-type CalibrationStatus = {
-  students: { student_id: string; full_name: string }[]
-  sample_pending: boolean
-  gallery_identity_count: number
-  margin_interpretable: boolean
-  last_result: { phase: string; result: string; message: string } | null
-  genuine: CalibrationSummary
-  impostor: CalibrationSummary
-}
-
 const auth = useAuthStore()
 const previewToken = ref<string | null>(null)
 const frameUrl = ref<string | null>(null)
 const previewStatus = ref<PreviewStatus | null>(null)
-const calibration = computed(() => previewStatus.value?.calibration ?? null)
 const cameraObservation = computed(() => previewStatus.value?.camera_observation ?? null)
 const errorMessage = ref<string | null>(null)
 const isStarting = ref(true)
 const isFullscreen = ref(false)
-const selectedStudentId = ref('')
-const isRequestingCalibrationSample = ref(false)
-const identityConfirmed = ref(false)
-const volunteerConsented = ref(false)
 let frameTimer: ReturnType<typeof setTimeout> | undefined
 let statusTimer: ReturnType<typeof setTimeout> | undefined
 let stopped = false
@@ -105,6 +78,9 @@ const cameraObservationLabel = computed(() => {
 
 const identityTitle = computed(() => {
   if (!isFullscreen.value) {
+    if (previewStatus.value?.recognition_state === 'waiting_for_calibration') {
+      return 'AI belum dikalibrasi'
+    }
     return previewStatus.value?.recognition_state === 'accepted'
       ? (previewStatus.value.display_name ?? 'Identitas cocok')
       : 'Belum teridentifikasi'
@@ -113,6 +89,9 @@ const identityTitle = computed(() => {
     return recentAttendanceResult.value.display_name ?? 'Presensi tercatat'
   }
   if (recentAttendanceResult.value?.decision === 'not_recorded') return 'Presensi belum tercatat'
+  if (previewStatus.value?.recognition_state === 'waiting_for_calibration') {
+    return 'AI belum dikalibrasi'
+  }
   if (
     recentAttendanceResult.value?.decision === 'pending' ||
     previewStatus.value?.recognition_state === 'accepted'
@@ -145,6 +124,9 @@ const identityDisplayMessage = computed(() => {
   if (recentAttendanceResult.value?.decision === 'not_recorded') {
     return 'Presensi belum tercatat. Silakan minta bantuan petugas.'
   }
+  if (previewStatus.value?.recognition_state === 'waiting_for_calibration') {
+    return recognitionMessage.value
+  }
   if (
     recentAttendanceResult.value?.decision === 'pending' ||
     previewStatus.value?.recognition_state === 'accepted'
@@ -170,7 +152,7 @@ const recognitionMessage = computed(() => {
     return 'Kamera aktif. Buka sesi praktikum agar pengenalan dimulai.'
   switch (previewStatus.value.recognition_state) {
     case 'waiting_for_calibration':
-      return 'Preview aktif. Pengenalan identitas menunggu threshold hasil kalibrasi.'
+      return 'Pengenalan belum aktif karena admin belum menerapkan threshold Top-1 dan margin hasil benchmark. Presensi belum dibuat. Minta admin memeriksa konfigurasi AI & kamera.'
     case 'checking':
     case 'collecting':
       return 'Sedang memeriksa beberapa frame. Minta siswa menghadap kamera.'
@@ -244,42 +226,7 @@ async function refreshStatus(): Promise<void> {
   const response = await authorizedFetch('/v1/status')
   if (!response.ok) throw new Error('Status kamera belum tersedia.')
   previewStatus.value = (await response.json()) as PreviewStatus
-  const enrolledStudents = previewStatus.value.calibration?.students ?? []
-  if (!enrolledStudents.some((student) => student.student_id === selectedStudentId.value)) {
-    selectedStudentId.value = enrolledStudents[0]?.student_id ?? ''
-  }
   if (previewStatus.value.camera_open) errorMessage.value = null
-}
-
-async function requestCalibrationSample(phase: 'genuine' | 'impostor'): Promise<void> {
-  if (isRequestingCalibrationSample.value) return
-  isRequestingCalibrationSample.value = true
-  errorMessage.value = null
-  try {
-    const response = await authorizedFetch('/v1/calibration-sample', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        phase,
-        ...(phase === 'genuine' ? { student_id: selectedStudentId.value } : {}),
-      }),
-    })
-    if (!response.ok) {
-      const result = (await response.json().catch(() => ({}))) as { error?: string }
-      const messages: Record<string, string> = {
-        session_unavailable: 'Kamera dan sesi aktif diperlukan untuk mengambil sampel.',
-        student_not_in_session: 'Siswa tersebut tidak memiliki template pada sesi aktif.',
-        sample_in_progress: 'Satu sampel masih diproses. Tunggu hasilnya terlebih dahulu.',
-        sample_limit: 'Batas 100 sampel per kategori tercapai. Reset agent untuk mulai ulang.',
-      }
-      throw new Error(messages[result.error ?? ''] ?? 'Agent menolak permintaan sampel.')
-    }
-    await refreshStatus()
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Sampel belum dapat dimulai.'
-  } finally {
-    isRequestingCalibrationSample.value = false
-  }
 }
 
 async function toggleFullscreen(): Promise<void> {
@@ -300,10 +247,6 @@ async function toggleFullscreen(): Promise<void> {
 
 function syncFullscreenState(): void {
   isFullscreen.value = Boolean(document.fullscreenElement)
-}
-
-function formatScore(value: number | undefined): string {
-  return value === undefined ? '—' : value.toFixed(3)
 }
 
 async function pollFrame(): Promise<void> {
@@ -457,6 +400,17 @@ onBeforeUnmount(() => {
         <p class="master-data__eyebrow">Hasil pengenalan</p>
         <h3>{{ identityTitle }}</h3>
         <p>{{ identityDisplayMessage }}</p>
+        <RouterLink
+          v-if="
+            !isFullscreen &&
+            previewStatus?.recognition_state === 'waiting_for_calibration' &&
+            auth.account?.roles.includes('ADMIN')
+          "
+          class="button button--secondary camera-preview-view__settings-link"
+          to="/app/ai-setup"
+        >
+          Buka AI & kamera
+        </RouterLink>
         <dl>
           <div>
             <dt>Sesi praktikum</dt>
@@ -478,170 +432,5 @@ onBeforeUnmount(() => {
         </p>
       </aside>
     </div>
-
-    <section class="camera-preview-view__diagnostics" aria-labelledby="diagnostics-title">
-      <div class="camera-preview-view__diagnostics-heading">
-        <div>
-          <p class="master-data__eyebrow">Pemeriksaan lokal</p>
-          <h3 id="diagnostics-title">Uji kecocokan kamera</h3>
-          <p>
-            Mengambil satu rangkaian frame berkualitas per permintaan untuk membandingkan skor siswa
-            terdaftar dan relawan dewasa yang tidak terdaftar.
-          </p>
-        </div>
-        <span class="camera-preview-view__diagnostic-badge">Diagnostik saja</span>
-      </div>
-
-      <div class="camera-preview-view__diagnostic-warning" role="note">
-        Tidak membuat presensi dari sampel uji dan tidak mengubah threshold. Foto hanya diproses
-        sementara oleh agent yang sudah berjalan; foto dan embedding tidak disimpan. Ringkasan skor
-        berada di memori agent dan terhapus saat sesi berganti atau agent dimulai ulang.
-      </div>
-
-      <template v-if="calibration">
-        <div class="camera-preview-view__diagnostic-controls">
-          <label>
-            Siswa terdaftar
-            <select v-model="selectedStudentId" :disabled="calibration.sample_pending">
-              <option value="" disabled>Pilih siswa dengan template aktif</option>
-              <option
-                v-for="student in calibration.students"
-                :key="student.student_id"
-                :value="student.student_id"
-              >
-                {{ student.full_name }}
-              </option>
-            </select>
-          </label>
-          <label class="camera-preview-view__consent">
-            <input v-model="identityConfirmed" type="checkbox" />
-            Saya memastikan orang di kamera adalah siswa yang dipilih.
-          </label>
-          <button
-            class="button button--primary"
-            type="button"
-            :disabled="
-              !previewStatus?.camera_open ||
-              !previewStatus?.session_active ||
-              !selectedStudentId ||
-              !identityConfirmed ||
-              calibration.sample_pending ||
-              isRequestingCalibrationSample
-            "
-            @click="requestCalibrationSample('genuine')"
-          >
-            Ambil sampel siswa terdaftar
-          </button>
-        </div>
-
-        <div class="camera-preview-view__diagnostic-controls">
-          <label class="camera-preview-view__consent">
-            <input v-model="volunteerConsented" type="checkbox" />
-            Relawan dewasa setuju ikut uji lokal dan bukan siswa yang terdaftar.
-          </label>
-          <button
-            class="button button--secondary"
-            type="button"
-            :disabled="
-              !previewStatus?.camera_open ||
-              !previewStatus?.session_active ||
-              !volunteerConsented ||
-              calibration.sample_pending ||
-              isRequestingCalibrationSample
-            "
-            @click="requestCalibrationSample('impostor')"
-          >
-            Ambil sampel relawan non-terdaftar
-          </button>
-        </div>
-
-        <p
-          v-if="calibration.sample_pending"
-          class="camera-preview-view__sample-status"
-          role="status"
-        >
-          Memeriksa frame. Tahan posisi sampai hasil tampil…
-        </p>
-        <p
-          v-else-if="calibration.last_result"
-          class="camera-preview-view__sample-status"
-          :class="calibration.last_result.result === 'retry' ? 'is-retry' : 'is-complete'"
-          role="status"
-        >
-          {{ calibration.last_result.message }}
-        </p>
-
-        <div
-          v-if="calibration.gallery_identity_count < 2"
-          class="camera-preview-view__diagnostic-warning"
-          role="note"
-        >
-          Gallery saat ini hanya memiliki {{ calibration.gallery_identity_count }} identitas dengan
-          template. Margin Top‑1/Top‑2 disembunyikan karena belum ada identitas kedua untuk
-          dibandingkan. Enrollment beberapa siswa diperlukan sebelum menilai margin.
-        </div>
-
-        <div class="camera-preview-view__diagnostic-table-wrap">
-          <table class="camera-preview-view__diagnostic-table">
-            <thead>
-              <tr>
-                <th scope="col">Kelompok</th>
-                <th scope="col">Sampel</th>
-                <th scope="col">Top‑1 min / rata-rata / max</th>
-                <th v-if="calibration.margin_interpretable" scope="col">
-                  Margin min / rata-rata / max
-                </th>
-                <th v-if="calibration.genuine.identity_match_count !== undefined" scope="col">
-                  Identitas cocok
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <th scope="row">Siswa terdaftar</th>
-                <td>{{ calibration.genuine.sample_count }}</td>
-                <td>
-                  {{ formatScore(calibration.genuine.top1_min) }} /
-                  {{ formatScore(calibration.genuine.top1_mean) }} /
-                  {{ formatScore(calibration.genuine.top1_max) }}
-                </td>
-                <td v-if="calibration.margin_interpretable">
-                  {{ formatScore(calibration.genuine.margin_min) }} /
-                  {{ formatScore(calibration.genuine.margin_mean) }} /
-                  {{ formatScore(calibration.genuine.margin_max) }}
-                </td>
-                <td v-if="calibration.genuine.identity_match_count !== undefined">
-                  {{ calibration.genuine.identity_match_count }} /
-                  {{ calibration.genuine.sample_count }}
-                </td>
-              </tr>
-              <tr>
-                <th scope="row">Relawan non-terdaftar</th>
-                <td>{{ calibration.impostor.sample_count }}</td>
-                <td>
-                  {{ formatScore(calibration.impostor.top1_min) }} /
-                  {{ formatScore(calibration.impostor.top1_mean) }} /
-                  {{ formatScore(calibration.impostor.top1_max) }}
-                </td>
-                <td v-if="calibration.margin_interpretable">
-                  {{ formatScore(calibration.impostor.margin_min) }} /
-                  {{ formatScore(calibration.impostor.margin_mean) }} /
-                  {{ formatScore(calibration.impostor.margin_max) }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <p class="camera-preview-view__diagnostic-limit">
-          Hasil ini hanya eksplorasi pada kamera, ruangan, model, dan relawan ini. Sampel sedikit
-          tidak cukup untuk memperkirakan false-accept rate operasional atau menetapkan threshold
-          produksi. Catat threshold dari benchmark yang disetujui secara terpisah.
-        </p>
-      </template>
-      <p v-else class="camera-preview-view__sample-status" role="status">
-        Menunggu status sesi dan roster template dari agent.
-      </p>
-    </section>
   </section>
 </template>

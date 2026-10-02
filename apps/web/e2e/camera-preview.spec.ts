@@ -4,8 +4,8 @@ import { stubNoActiveBrowserSession } from './session-fixture'
 test('AI_EDGE dashboard shows its single preview and accepted student identity', async ({
   page,
 }) => {
-  let diagnosticSamples = 0
   let attendanceRecorded = false
+  let recognitionState = 'waiting_for_calibration'
   await page.route('**/api/v1/**', (route) =>
     route.fulfill({
       status: 200,
@@ -57,7 +57,10 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
   await page.route('**/api/v1/devices?**', (route) =>
     route.fulfill({
       status: 200,
-      json: { items: [], pagination: { total: 0, limit: 10, offset: 0 } },
+      json: {
+        items: [{ deployment_profile: 'AI_EDGE', is_active: true }],
+        pagination: { total: 1, limit: 10, offset: 0 },
+      },
     }),
   )
   await page.route('**/api/v1/laboratories?**', (route) =>
@@ -82,9 +85,6 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
         headers,
         json: { preview_token: 'synthetic-local-preview-token' },
       })
-    } else if (request.url().endsWith('/v1/calibration-sample') && request.method() === 'POST') {
-      diagnosticSamples += 1
-      await route.fulfill({ status: 202, headers, json: { queued: true } })
     } else if (request.url().endsWith('/v1/frame.jpg')) {
       await route.fulfill({
         status: 200,
@@ -98,7 +98,7 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
         json: {
           camera_open: true,
           session_active: true,
-          recognition_state: 'accepted',
+          recognition_state: recognitionState,
           display_name: 'Yoga',
           updated_at: Date.now() / 1000,
           camera_observation: {
@@ -131,37 +131,6 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
                 updated_at: Date.now() / 1000,
               }
             : null,
-          calibration: {
-            students: [
-              {
-                student_id: 'student-yoga',
-                full_name: 'Yoga',
-              },
-            ],
-            sample_pending: false,
-            gallery_identity_count: 1,
-            margin_interpretable: false,
-            last_result:
-              diagnosticSamples > 0
-                ? {
-                    phase: 'genuine',
-                    result: 'sampled',
-                    message: 'Sampel siswa cocok dengan identitas yang dipilih.',
-                  }
-                : null,
-            genuine: {
-              sample_count: diagnosticSamples,
-              ...(diagnosticSamples > 0
-                ? {
-                    top1_min: 0.81,
-                    top1_mean: 0.81,
-                    top1_max: 0.81,
-                    identity_match_count: diagnosticSamples,
-                  }
-                : { identity_match_count: 0 }),
-            },
-            impostor: { sample_count: 0 },
-          },
         },
       })
     } else {
@@ -174,28 +143,22 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
   await page.getByLabel('Kata sandi').fill('synthetic-password')
   await page.getByRole('button', { name: 'Masuk' }).click()
   await expect(page).toHaveURL(/\/app\/dashboard$/)
-  await expect(page.getByTestId('devices-link')).toBeVisible({ timeout: 5000 })
-  await page.getByTestId('devices-link').click()
-  await expect(page.getByRole('heading', { name: 'Registry perangkat' })).toBeVisible()
-  await page.getByRole('link', { name: 'Preview kamera' }).click()
+  await expect(page.getByTestId('camera-preview-link')).toBeVisible({ timeout: 5000 })
+  await page.getByTestId('camera-preview-link').click()
 
   await expect(page.getByRole('heading', { name: 'Preview kamera presensi' })).toBeVisible()
   await expect(page.getByRole('img', { name: 'Preview langsung kamera presensi' })).toBeVisible()
   await expect(page.locator('.camera-preview-view__face-ring.is-ready')).toBeVisible()
   await expect(page.getByText('Frame siap diperiksa', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'AI belum dikalibrasi' })).toBeVisible()
+  await expect(page.getByText(/Pengenalan belum aktif.*threshold Top-1 dan margin/)).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Buka AI & kamera' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Uji kecocokan kamera' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Ambil sampel/ })).toHaveCount(0)
+
+  recognitionState = 'accepted'
   await expect(page.getByRole('heading', { name: 'Yoga' })).toBeVisible()
   await expect(page.getByText(/Presensi menunggu validasi Core API/)).toBeVisible()
-  await expect(page.getByRole('img')).toHaveCount(1)
-  await expect(page.getByRole('heading', { name: 'Uji kecocokan kamera' })).toBeVisible()
-  await expect(
-    page.getByText(/Margin Top‑1\/Top‑2 disembunyikan karena belum ada identitas kedua/),
-  ).toBeVisible()
-  await expect(page.getByRole('columnheader', { name: /Margin min/ })).toHaveCount(0)
-  await page.getByLabel('Saya memastikan orang di kamera adalah siswa yang dipilih.').check()
-  await page.getByRole('button', { name: 'Ambil sampel siswa terdaftar' }).click()
-  await expect(page.getByText('Sampel siswa cocok dengan identitas yang dipilih.')).toBeVisible()
-  await expect(page.getByRole('cell', { name: '1', exact: true })).toBeVisible()
-  expect(diagnosticSamples).toBe(1)
   await expect(page.getByRole('img')).toHaveCount(1)
 
   await page.getByRole('button', { name: 'Tampilan depan kamera' }).click()

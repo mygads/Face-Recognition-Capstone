@@ -72,9 +72,10 @@ device yang sudah terpasang.
    beberapa capture sementara untuk diproses API. Capture tidak dijadikan video
    atau file wajah tersimpan secara default.
 2. **Presensi:** webcam terhubung ke PC edge atau STB; proses native edge-agent
-   yang membuka device kamera. Dashboard tidak bisa memilih kamera remote atau
-   menampilkan preview live kamera lab. Gunakan CLI/calibration utility langsung
-   di host kamera.
+   yang membuka device kamera. Pada AI_EDGE, buka **Preview kamera** dari sidebar
+   di browser pada PC yang sama dengan agent untuk melihat stream lokal. Preview
+   tidak bisa melalui jaringan ke kamera remote. Pada STB_GATEWAY tidak ada
+   preview web lokal; gunakan status CLI dan pemeriksaan kamera pada host STB.
 
 ## 3. Setup development dari fresh clone
 

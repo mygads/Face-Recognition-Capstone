@@ -153,29 +153,19 @@ Saat `AI_EDGE`, agent menyalakan preview dashboard lokal pada
 `http://127.0.0.1:8765` (juga menerima `localhost`) dengan bind loopback saja.
 Dashboard Vite pada host yang sama menggunakan satu stream/frame yang sudah
 dimiliki agent; ia tidak membuka device webcam kedua. Masuk sebagai
-ADMIN/LABORANT, lalu pilih **Perangkat → Preview kamera**. Gambar di-resize
+ADMIN/LABORANT, lalu pilih **Preview kamera** dari sidebar. Menu tersedia saat
+ada perangkat AI_EDGE aktif. Gambar di-resize
 hingga lebar 640 px, dikirim sebagai JPEG sementara, dan tidak disimpan ke file.
 Jika dashboard development berjalan pada origin/port lain, tambahkan origin
 localhost yang persis pada `preview.allowed_origins`; jangan gunakan wildcard
 atau bind address `0.0.0.0`.
 
-Pada halaman yang sama, **Uji kecocokan kamera** dapat mengambil satu rangkaian
-frame per klik untuk membandingkan siswa terdaftar dengan relawan dewasa yang
-setuju ikut uji. Gunakan sesi aktif, tandai konfirmasi identitas sebelum sampel
-siswa dan konfirmasi relawan sebelum sampel non-terdaftar. UI hanya menampilkan
-jumlah serta min/rata-rata/max skor; gambar dan embedding tidak ditulis, dan
-ringkasan sementara berada di memori agent sampai sesi berganti atau agent
-dimulai ulang. Sampel diagnostik tidak mengubah konfigurasi threshold dan jalur
-sampel itu sendiri tidak membuat recognition event. Saat threshold produksi
-sudah aktif, attendance normal untuk frame di luar sampel tetap mengikuti
-konfigurasi yang sudah diterapkan.
-
-> Margin Top‑1/Top‑2 tidak ditampilkan jika gallery aktif hanya berisi satu
-> identitas dengan template. Dalam kondisi itu tidak ada kandidat identitas
-> kedua untuk perbandingan yang bermakna. Kumpulkan uji lintas identitas dan
-> gunakan harness benchmark untuk evaluasi yang lebih luas; sedikit relawan pada
-> satu kamera tidak cukup untuk menyimpulkan false-accept rate atau menetapkan
-> nilai produksi.
+Preview menampilkan kamera, bounding oval kualitas frame, status sesi, dan
+status pengenalan. Bagian ini tidak menjalankan diagnostik skor. Saat konfigurasi
+threshold belum diterapkan, halaman menyatakan bahwa pengenalan dijeda dan
+presensi tidak dicatat. Setelah threshold dikalibrasi dan diterapkan, nama siswa
+hanya ditampilkan pada layar operator saat cocok dan pada layar depan setelah
+Core API mengonfirmasi presensi.
 
 Preview tetap menampilkan kamera ketika recognition belum siap. Dalam status
 `waiting_for_calibration`, belum ada nama yang ditampilkan atau recognition
@@ -199,8 +189,8 @@ venv agent:
 Wizard membuka kamera dan menunjukkan resolusi aktual dari frame serta FPS
 driver/pengukuran singkat. OpenCV menggunakan index, sebab label kamera tidak
 seragam lintas backend. FPS/resolusi adalah request ke driver dan dapat
-bernegosiasi; verifikasi kembali lewat `status` dan preview calibration pada
-host fisik. Untuk STB, capture aktual di atas 1280×720 ditolak.
+bernegosiasi; verifikasi kembali lewat `status` dan **Preview kamera** pada host
+AI_EDGE fisik. Untuk STB, capture aktual di atas 1280×720 ditolak.
 
 Pada STB_GATEWAY, kamera tetap dibuka native oleh edge-agent tetapi inference
 berjalan di AI service pusat. Letakkan YuNet/SFace di host AI server dan set
