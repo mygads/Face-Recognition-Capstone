@@ -105,7 +105,10 @@ def _diagnostics(config: EdgeConfig, *, include_cameras: bool) -> int:
     selected_camera_available = (
         None if cameras is None else config.camera.index in cameras
     )
-    cache_provider_ready = False
+    # Core API exposes this device-authenticated route and the client has a
+    # corresponding fetch method. Actual session/gallery readiness is checked
+    # by the running service when a session is active.
+    cache_provider_ready = callable(api.fetch_active_session_cache)
     ai_reachable: bool | None = None
     if config.mode == "STB_GATEWAY":
         ai = CentralAIClient(

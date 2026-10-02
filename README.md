@@ -35,9 +35,12 @@ Untuk menghentikan database dan API gunakan py -3 scripts/dev.py dev-down di
 Windows atau python3 scripts/dev.py dev-down di Ubuntu. Volume database tetap
 tersimpan.
 
-Mode development belum menjalankan pengenalan wajah sampai model disediakan dan
-threshold dikalibrasi. Lihat [panduan satu komputer](docs/deployment/single-pc.md)
-untuk webcam, model, edge-agent, dan alur pengujian.
+Unduh model evaluasi checksum-pinned dengan `python scripts/download_face_models.py`.
+Threshold tetap harus dikalibrasi. Lihat
+[panduan kamera dan model](docs/camera-usage.md) serta
+[panduan satu komputer](docs/deployment/single-pc.md) untuk preview webcam,
+enrollment, edge-agent, dan alur pengujian. SFace belum cleared untuk deployment
+sekolah sampai provenance/license weight ditinjau.
 
 ## Tiga topologi penggunaan
 
@@ -75,7 +78,7 @@ credential, izin webcam, threshold, domain, dan kebijakan data disiapkan terpisa
 
 | Item | Status repository | Persiapan untuk tes fisik |
 | --- | --- | --- |
-| YuNet + SFace | Adapter OpenCV/pipeline tersedia; model tidak masuk Git dan tidak diunduh otomatis. | Sediakan file model yang disetujui pada path konfigurasi; catat versi dan checksum. |
+| YuNet + SFace | Adapter tersedia; downloader memprovision file lokal ke direktori ignored dengan SHA-256 terverifikasi. SFace weight masih perlu review provenance sebelum operasi. | Jalankan downloader untuk local evaluation; catat versi/checksum dan selesaikan review institusi sebelum deployment. |
 | Threshold Top-1/margin | Tidak ada nilai final default; agent gagal terbuka jika kosong. | Kalibrasi pada data berizin yang mewakili kamera kelas. Prioritaskan false acceptance rendah; laporkan FMR/FNMR. |
 | Webcam/PC lab/STB | Utility kamera dan test mock tersedia; uji lapangan belum dilakukan. | Uji webcam UVC, posisi, pencahayaan, dan OS target; ukur CPU/RAM/suhu STB nyata. |
 | Liveness | Adapter/code path tersedia tetapi contoh nonaktif. Kandidat yang terdokumentasi belum cleared untuk operasi sekolah. | Tinjau lisensi/provenance, uji code path dan threshold sendiri, atau operasikan kontrol fisik/sesi yang disetujui. |

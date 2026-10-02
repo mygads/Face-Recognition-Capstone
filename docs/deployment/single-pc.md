@@ -89,7 +89,7 @@ OpenCV; the edge-agent uses headless OpenCV.
 py -3 -m venv .venv-camera-calibration
 ./.venv-camera-calibration/Scripts/Activate.ps1
 python -m pip install -e "apps/edge-agent[camera-preview]" -e "libs/recognition-core"
-presensi-camera-calibration --list-cameras
+presensi-camera-calibration --list-cameras --scan-max-index 1
 ~~~
 
 ~~~bash
@@ -100,11 +100,12 @@ python -m pip install -e 'apps/edge-agent[camera-preview]' -e 'libs/recognition-
 presensi-camera-calibration --list-cameras
 ~~~
 
-Face boxes require a locally provisioned YuNet model. Download/provision model
-weights only from an approved source; the application does not download them.
-See [model provenance and recommendation](../models.md). Put the approved
-files outside Git, for example in repository-local models/weights, which is
-ignored:
+Face boxes require a local YuNet model. From the repository root,
+`python scripts/download_face_models.py` fetches the OpenCV Zoo pair and checks
+their pinned SHA-256 values into the ignored `models/weights/` folder. SFace is
+for local evaluation only until its weight provenance/license is reviewed. See
+[model provenance](../models.md) and the [camera usage guide](../camera-usage.md).
+The model weights are not committed or downloaded at application runtime:
 
 - face_detection_yunet_2023mar.onnx
 - face_recognition_sface_2021dec.onnx

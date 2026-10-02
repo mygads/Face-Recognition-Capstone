@@ -2,14 +2,14 @@
 
 ## Practical recommendation
 
-For the current codebase, keep OpenCV Zoo YuNet 2023mar plus SFace 2021dec as
-the first pair to evaluate locally. These are already supported by the shared
-recognition-core adapter and their model directories identify MIT and
-Apache-2.0 licensing respectively. This makes their provenance easier to review
-than alternatives whose public pretrained weights carry research-only terms.
-It does not prove that the pair is the most accurate for this school, nor does
-it approve use with student biometrics. Review the exact model files and notices
-before redistribution or operational use.
+For the current codebase, YuNet 2023mar plus SFace 2021dec are the pair already
+supported by the shared recognition-core adapter. YuNet's directory states MIT;
+SFace's directory states Apache-2.0. However, a public OpenCV Zoo issue asks for
+clarification about the exact SFace ONNX weight's training-data provenance and
+whether the directory license fully covers it; the issue is still open. Treat
+SFace as **local development/evaluation only** until the school has reviewed
+that question and approved deployment. The model pair is not calibrated for
+this school and is not an approval to process student biometrics.
 
 The current adapter targets OpenCV 4. OpenCV Zoo now also lists a newer dynamic
 input YuNet artifact intended for OpenCV 5. Do not replace the current file as a
@@ -17,17 +17,19 @@ drop-in upgrade: first update and test the detector adapter, pin the OpenCV
 runtime, run legal/provenance review, and repeat threshold calibration. Keep the
 model version and checksum fixed across enrollment and inference.
 
-No actual model weights are included or downloaded by this repository. The
-recommended pair is a practical evaluation baseline, not a production selection.
-Provide the exact files locally, store their trusted SHA-256 values in the
-deployment record, and test on lawfully collected data representative of the
-camera height, distance, lighting, motion, glasses, and student population.
+Model weights are never fetched automatically at application runtime and are
+not committed to Git. Run `python scripts/download_face_models.py` to download
+the checksum-pinned OpenCV Zoo files into the ignored `models/weights/` folder.
+The recommended pair is a practical evaluation baseline, not a production
+selection. Test on lawfully collected data representative of camera height,
+distance, lighting, motion, glasses, and the people the school has permission
+to evaluate.
 
 ### Candidate choices
 
 | Option | Detection + recognition | Repository status | Licensing / decision |
 | --- | --- | --- | --- |
-| OpenCV Zoo baseline | YuNet 2023mar + SFace 2021dec | Implemented and covered by recognition-core adapters | Best starting point for this project because it is already integrated and the model directories declare MIT and Apache-2.0. Still requires review of the exact artifact and local school evaluation. |
+| OpenCV Zoo baseline | YuNet 2023mar + SFace 2021dec | Implemented and covered by recognition-core adapters | Best starting point for local evaluation because it is integrated. YuNet directory says MIT; SFace directory says Apache-2.0, but exact weight provenance/licensing remains an open question. Do not deploy SFace until reviewed. |
 | InsightFace family | SCRFD + ArcFace-derived recognition, for example a public model package | Not integrated; would need an adapter, dependency/runtime pinning, compatibility tests and new calibration | InsightFace library code is MIT, but its public pretrained weights are licensed for non-commercial research. Do not assume school attendance use is covered; require separate written licensing clearance before evaluation for operations. |
 | Licensed vendor or institution-approved model | Vendor-selected detector/recognizer and optional PAD | Not integrated; can be added behind existing detector/embedder/liveness protocols | Consider if the vendor provides clear deployment rights, provenance, support, security updates and acceptable processing terms. Require a technical benchmark and procurement/privacy review; a vendor claim alone is not proof of fit. |
 
@@ -63,7 +65,19 @@ arguments, and deployments must control which versioned files are provisioned.
 | Component | OpenCV Zoo model directory | Example asset name | Directory license |
 | --- | --- | --- | --- |
 | Face detection | [face_detection_yunet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) | `face_detection_yunet_2023mar.onnx` | MIT |
-| Face recognition | [face_recognition_sface](https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface) | `face_recognition_sface_2021dec.onnx` | Apache-2.0 |
+| Face recognition | [face_recognition_sface](https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface) | `face_recognition_sface_2021dec.onnx` | Directory says Apache-2.0; exact pretrained-weight provenance is under clarification. |
+
+Pinned artifact checksums used by the downloader:
+
+| File | Size | SHA-256 |
+| --- | ---: | --- |
+| `face_detection_yunet_2023mar.onnx` | 232,589 bytes | `8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4` |
+| `face_recognition_sface_2021dec.onnx` | 38,696,353 bytes | `0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79` |
+
+The downloader reads the official OpenCV Zoo Git LFS artifacts and rejects
+size/checksum mismatches. The SFace directory's Apache-2.0 notice is included
+upstream, but it does not answer every question raised about training data and
+the exact pretrained weights. See [OpenCV Zoo issue #313](https://github.com/opencv/opencv_zoo/issues/313).
 
 The model directory README/license is the provenance source for the corresponding
 asset. Keep those notices with any distributed model files. Do not commit model
@@ -190,6 +204,7 @@ process those images. Never use real student/minor images in cloud CI.
 - [YuNet directory MIT license](https://github.com/opencv/opencv_zoo/blob/main/models/face_detection_yunet/LICENSE)
 - [SFace model README](https://github.com/opencv/opencv_zoo/blob/main/models/face_recognition_sface/README.md)
 - [SFace directory license](https://github.com/opencv/opencv_zoo/blob/main/models/face_recognition_sface/LICENSE)
+- [Open question about SFace weight provenance and use](https://github.com/opencv/opencv_zoo/issues/313)
 - [InsightFace model zoo and pretrained-model license terms](https://github.com/deepinsight/insightface/blob/master/python-package/docs/model_zoo.md)
 - [NIST face-recognition demographic evaluation](https://pages.nist.gov/frvt/html/frvt_demographics.html)
 - [OpenCV DNN face detection and recognition tutorial](https://docs.opencv.org/4.x/d0/dd4/tutorial_dnn_face.html)
