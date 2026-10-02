@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/v1/admin/system/ai-readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Check AI model and inference readiness */
+        get: operations["get_ai_readiness_api_v1_admin_system_ai_readiness_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -1651,6 +1668,16 @@ export interface components {
              */
             status: "ok";
         };
+        /** AiReadinessResponse */
+        AiReadinessResponse: {
+            deployment_profile: "AI_EDGE" | "AI_CENTRAL";
+            enrollment_models_ready: boolean;
+            central_ai_status: "disabled" | "ready" | "degraded" | "unreachable";
+            central_ai_models_ready: boolean | null;
+            central_ai_model_version: string | null;
+            central_ai_thresholds_configured: boolean | null;
+            central_ai_recognition_ready: boolean | null;
+        };
         /** LaboratoryCreateRequest */
         LaboratoryCreateRequest: {
             /** Code */
@@ -2353,6 +2380,25 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_ai_readiness_api_v1_admin_system_ai_readiness_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiReadinessResponse"];
+                };
+            };
+        };
+    };
     health_api_v1_health_get: {
         parameters: {
             query?: never;

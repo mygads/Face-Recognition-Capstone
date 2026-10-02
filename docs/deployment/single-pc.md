@@ -69,13 +69,14 @@ service). Pilihan disimpan di `.env`. Untuk mengganti pilihan di kemudian hari,
 jalankan `scripts/start-local.py --profile edge` atau
 `scripts/start-local.py --profile central`.
 
-Jika file YuNet/SFace belum ada atau checksum berbeda, startup menawarkan
-download checksum-pinned (~39 MB) atau melewatinya. Pilihan lewati tersimpan di
-`.env`; download kemudian dengan `py -3 scripts/start-local.py --download-models`
-atau `python3 scripts/start-local.py --download-models`. File disimpan ke
-`models/weights/`. Untuk AI_CENTRAL, startup mengisi path model setelah file
-terverifikasi, tetapi service tetap menolak inference sampai threshold dikalibrasi.
-SFace masih untuk evaluasi lokal sampai sekolah meninjau izin penggunaannya.
+Pada setup lokal pertama, startup otomatis mengunduh dan memverifikasi file
+model (~39 MB). Untuk melewati gunakan `py -3 scripts/start-local.py
+--skip-model-download`; untuk mengunduhnya nanti jalankan
+`py -3 scripts/start-local.py --download-models` (Ubuntu: `python3
+scripts/start-local.py --download-models`). File disimpan ke `models/weights/`.
+Untuk AI_CENTRAL lokal, startup mengisi path model setelah file terverifikasi,
+tetapi inference belum siap sampai threshold dikalibrasi. SFace masih untuk
+evaluasi lokal sampai sekolah meninjau izin penggunaannya.
 
 Open `http://127.0.0.1:5173`. Press Ctrl+C to stop Vite. The API/database
 continue in Docker so that they can be reused; stop them when finished:
@@ -206,8 +207,9 @@ bash scripts/install-camera-device.sh "$HOME/Downloads/presensi-device-setup.jso
 
 It creates the local agent environment, selects `AI_EDGE` from the bundle,
 writes `apps/edge-agent/config/edge-agent.yaml` and a protected token file, and
-checks camera/config readiness. If the camera PC is a different computer, also
-download the checksum-pinned model files into that checkout before `run`:
+checks camera/config readiness. For an AI_EDGE camera host, the installer
+automatically downloads and checksum-verifies YuNet/SFace. If you need to
+recover a failed or incomplete download manually, run:
 
 ~~~powershell
 py -3 scripts/download_face_models.py

@@ -1694,6 +1694,134 @@ a:focus-visible {
   gap: var(--space-4);
 }
 
+.ai-setup-view {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.ai-setup-view__profile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.ai-setup-view__profile h2,
+.ai-setup-view__card h2 {
+  margin: 0.25rem 0 0.65rem;
+  color: var(--text);
+  font-size: 1.15rem;
+}
+
+.ai-setup-view__profile p,
+.ai-setup-view__card p {
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.ai-setup-view__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.ai-setup-view__card {
+  position: relative;
+  min-width: 0;
+  padding: 1.35rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  background: var(--body-bg);
+  box-shadow: 0 0.3rem 1.2rem rgb(25 42 70 / 5%);
+}
+
+.ai-setup-view__card--wide {
+  grid-column: span 2;
+}
+
+.ai-setup-view__icon {
+  display: inline-grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  margin-bottom: 0.75rem;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--primary) 10%, white);
+  color: var(--primary);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.ai-setup-view__badge {
+  display: inline-flex;
+  margin-top: 0.35rem;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.ai-setup-view__badge.is-ready {
+  background: #e8f5ed;
+  color: #26734d;
+}
+
+.ai-setup-view__badge.is-pending {
+  background: #fff3dc;
+  color: #8b5e12;
+}
+
+.ai-setup-view__checks {
+  display: grid;
+  gap: 0.45rem;
+  margin: 1rem 0 0;
+}
+
+.ai-setup-view__checks div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.ai-setup-view__checks dt {
+  color: var(--text-secondary);
+}
+
+.ai-setup-view__checks dd {
+  margin: 0;
+  color: var(--text);
+  font-weight: 600;
+  text-align: right;
+}
+
+.ai-setup-view__note {
+  padding: 0.75rem 0.9rem;
+  border-left: 3px solid #d9a441;
+  background: #fff8e9;
+  color: #65470f !important;
+}
+
+@media (max-width: 760px) {
+  .ai-setup-view__profile {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ai-setup-view__profile .button {
+    align-self: flex-start;
+  }
+
+  .ai-setup-view__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ai-setup-view__card--wide {
+    grid-column: auto;
+  }
+}
+
 .devices-view__toolbar {
   display: flex;
   flex-wrap: wrap;

@@ -14,10 +14,12 @@ from presensi_api.api.v1.routers import (
     sessions,
     student_imports,
     students_classes,
+    system_status,
 )
 
 api_v1_router = APIRouter(prefix="/api/v1")
 api_v1_router.include_router(health.router)
+api_v1_router.include_router(system_status.router)
 api_v1_router.include_router(auth.router)
 api_v1_router.include_router(accounts.router)
 api_v1_router.include_router(students_classes.router)

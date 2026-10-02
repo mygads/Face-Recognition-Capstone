@@ -70,16 +70,10 @@ if (Test-Path -LiteralPath $tokenPath) {
 }
 
 if ($bundle.deployment_profile -eq 'AI_EDGE') {
-    $modelDirectory = Join-Path $repoRoot 'models/weights'
-    $yunetModel = Join-Path $modelDirectory 'face_detection_yunet_2023mar.onnx'
-    $sfaceModel = Join-Path $modelDirectory 'face_recognition_sface_2021dec.onnx'
-    if (-not (Test-Path $yunetModel) -or -not (Test-Path $sfaceModel)) {
-        $downloadModels = Read-Host 'YuNet/SFace belum tersedia. Unduh file checksum-pinned untuk evaluasi lokal? SFace belum disetujui untuk deployment sekolah. [y/N]'
-        if ($downloadModels -in @('y', 'Y', 'yes', 'YES')) {
-            & $venvPython (Join-Path $repoRoot 'scripts/download_face_models.py')
-            if ($LASTEXITCODE -ne 0) { throw 'Model tidak berhasil diunduh/diverifikasi.' }
-        }
-    }
+    Write-Host 'Provisioning checksum-verified YuNet/SFace models for AI_EDGE...'
+    Write-Warning 'SFace is provisioned for evaluation; obtain school/institutional license clearance before operational use.'
+    & $venvPython (Join-Path $repoRoot 'scripts/download_face_models.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Model tidak berhasil diunduh/diverifikasi.' }
 }
 
 $agent = Join-Path $venv 'Scripts/presensi-edge-agent.exe'

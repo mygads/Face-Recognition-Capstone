@@ -466,8 +466,26 @@ def create_app(
         return _error(500, "internal_error", "The request could not be completed.")
 
     @app.get("/health", tags=["system"])
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
+    async def health() -> dict[str, object]:
+        active_settings: AISettings = app.state.settings
+        model_paths = (
+            active_settings.yunet_model_path,
+            active_settings.sface_model_path,
+        )
+        models_ready = all(path is not None and path.is_file() for path in model_paths)
+        thresholds_configured = (
+            active_settings.min_top1_similarity is not None
+            and active_settings.min_top1_top2_margin is not None
+        )
+        recognition_ready = app.state.runner is not None
+        return {
+            "status": "ok",
+            "deployment_profile": "AI_CENTRAL",
+            "models_ready": models_ready,
+            "model_version": active_settings.model_version,
+            "thresholds_configured": thresholds_configured,
+            "recognition_ready": recognition_ready,
+        }
 
     @app.get("/metrics", response_model=Metrics, tags=["system"])
     async def metrics() -> Metrics:

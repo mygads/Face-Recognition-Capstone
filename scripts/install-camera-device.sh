@@ -90,16 +90,9 @@ fi
 chmod 600 "$TOKEN_PATH"
 
 if [[ "$PROFILE" == "AI_EDGE" ]]; then
-  YUNET_MODEL="$ROOT/models/weights/face_detection_yunet_2023mar.onnx"
-  SFACE_MODEL="$ROOT/models/weights/face_recognition_sface_2021dec.onnx"
-  if [[ ! -f "$YUNET_MODEL" || ! -f "$SFACE_MODEL" ]]; then
-    read -r -p 'YuNet/SFace belum tersedia. Unduh file checksum-pinned untuk evaluasi lokal? SFace belum disetujui untuk deployment sekolah. [y/N] ' DOWNLOAD_MODELS
-    case "$DOWNLOAD_MODELS" in
-      y|Y|yes|YES)
-        "$VENV_PATH/bin/python" "$ROOT/scripts/download_face_models.py"
-        ;;
-    esac
-  fi
+  echo 'Provisioning checksum-verified YuNet/SFace models for AI_EDGE...'
+  echo 'SFace is for evaluation; obtain school/institutional license clearance before operational use.'
+  "$VENV_PATH/bin/python" "$ROOT/scripts/download_face_models.py"
 fi
 
 AGENT="$VENV_PATH/bin/presensi-edge-agent"

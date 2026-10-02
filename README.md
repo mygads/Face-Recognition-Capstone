@@ -35,16 +35,16 @@ Windows; di Ubuntu gunakan `python3 scripts/start-local.py --profile edge` atau
 `--profile central`. Flag lama `--central` tetap tersedia. Model dan threshold
 AI Central tetap harus diprovisikan/dikalibrasi sebelum inference dapat dipakai.
 
-Jika YuNet/SFace belum ada atau checksum-nya tidak cocok, startup juga
-menawarkan **1 — unduh sekarang** (~39 MB, checksum diverifikasi) atau
-**2 — lewati**. Pilihan lewati disimpan di `.env`; untuk mengubahnya nanti,
-jalankan `py -3 scripts/start-local.py --download-models` di Windows atau
-`python3 scripts/start-local.py --download-models` di Ubuntu. Model dipasang ke
-`models/weights/`. Download ini untuk evaluasi lokal; SFace belum disetujui untuk
-deployment operasional sekolah. Threshold recognition tetap harus dikalibrasi.
-Untuk AI_CENTRAL, model paths di `.env` diisi setelah verifikasi, tetapi
-inference tetap degraded sampai threshold dikonfigurasi. Model tidak diunduh
-otomatis saat clone.
+Pada setup lokal pertama, YuNet/SFace otomatis diunduh (~39 MB), diverifikasi
+dengan checksum, lalu dipasang ke `models/weights/`. Gunakan
+`py -3 scripts/start-local.py --skip-model-download` untuk melewati unduhan dan
+`py -3 scripts/start-local.py --download-models` untuk mengunduhnya kemudian
+(ganti `py -3` dengan `python3` di Ubuntu). Installer perangkat AI_EDGE juga
+otomatis mengunduh model. File model tidak ikut `git clone`. Untuk AI_CENTRAL
+production, ikuti provisioning pada runbook. SFace masih untuk evaluasi hingga
+izin sekolah ditinjau; threshold recognition harus dikalibrasi. Pada AI_CENTRAL
+lokal, model sudah dipasang tetapi inference belum siap sampai threshold
+dikonfigurasi.
 
 Satu command startup menyimpan pilihan profile, membuat `.env` lokal jika belum
 ada, menghasilkan secret development, menjalankan migration dan role seed,
@@ -113,27 +113,23 @@ serta [index runbook deployment](docs/deployment/README.md).
 2. Login admin. Buat laboratorium, kelas/tahun ajaran, data siswa, dan akun
    TEACHER/LABORANT melalui UI. Untuk uji kamera gunakan data sintetis atau
    relawan dewasa yang setuju.
-3. Jika enrollment/recognition akan diuji, unduh model evaluasi. `.env.example`
-   sudah memakai path/version standar; setelah mengubah nilai `.env`, restart
-   API. Weight perlu ditinjau untuk izin pemakaian. Untuk AI_EDGE, file model
-   yang sama harus ada pada server enrollment dan komputer edge. Threshold
-   recognition masih perlu kalibrasi.
+3. YuNet/SFace otomatis diunduh dan checksum-diverifikasi saat setup lokal
+   pertama dan saat installer memasang kamera AI_EDGE. `git clone` tidak
+   mengunduh model. Untuk AI_CENTRAL production, provision model di server
+   dengan langkah checksum-pinned pada [runbook AI Central](docs/deployment/ai-central-stb.md).
+   Jika setup lokal melewati unduhan atau unduhannya gagal, jalankan salah satu
+   command berikut dari root repository:
 
    ```powershell
-   # Windows
-   py -3 scripts/download_face_models.py
+   py -3 scripts/start-local.py --download-models
    ```
 
    ```bash
-   # Ubuntu
-   python3 scripts/download_face_models.py
+   python3 scripts/start-local.py --download-models
    ```
 
-   `git clone` tidak mengunduh file model: bobot berada di `models/weights/`,
-   diabaikan Git, dan dipasang terpisah setelah checksum diperiksa. Bootstrap
-   kamera hanya menawarkan download ini untuk `AI_EDGE`; gateway `STB_GATEWAY`
-   tidak membutuhkan model pengenalan lokal. Persetujuan lisensi SFace untuk
-   operasi sekolah tetap harus diselesaikan sebelum deployment.
+   STB_GATEWAY tidak memerlukan model lokal. SFace masih untuk evaluasi sampai
+   sekolah meninjau izin penggunaannya; threshold harus dikalibrasi terpisah.
 4. Buka **Perangkat**, daftarkan device dengan laboratorium dan profile yang
    benar, lalu buat kredensial. Token hanya tampil sekali. Pilih OS target dan
    cara koneksi di panel setup, isi URL yang dapat dijangkau kamera, lalu salin
@@ -144,10 +140,11 @@ serta [index runbook deployment](docs/deployment/README.md).
    Tombol **Unduh paket setup perangkat** tetap tersedia untuk pemindahan file
    yang lebih terkontrol.
 5. Jalankan command yang ditampilkan pada terminal di host kamera. Installer
-   membaca profile dari registry device, menyiapkan dependency/config, memeriksa
-   kamera dan status, lalu menawarkan menjalankan agent. Untuk
-   `STB_GATEWAY`, isi URL AI Central yang dapat dijangkau gateway. Pilih
-   **Armbian Linux** untuk STB dan **Windows** atau **Ubuntu** untuk AI_EDGE.
+   membaca profile dari registry device, menyiapkan dependency/config, otomatis
+   mengunduh model bila profile AI_EDGE, memeriksa kamera dan status, lalu
+   menawarkan menjalankan agent. Untuk `STB_GATEWAY`, isi URL AI Central yang
+   dapat dijangkau gateway. Pilih **Armbian Linux** untuk STB dan **Windows**
+   atau **Ubuntu** untuk AI_EDGE.
 
    Installer menulis token ke lokasi terlindungi, memeriksa kamera/status, lalu
    menawarkan menjalankan agent di terminal agar koneksi/heartbeat terlihat.
@@ -157,15 +154,17 @@ serta [index runbook deployment](docs/deployment/README.md).
    belum diaktifkan karena agent belum mendukung identitas Cloudflare Access dan
    jalur device mengakses template biometrik; gunakan LAN/VPN privat. Di Windows,
    Git dan Python dipasang melalui winget bila belum tersedia; launcher `py`
-   dapat memasang runtime Python 3.12. Di
-   Ubuntu/Armbian, bootstrap membutuhkan Bash, koneksi internet, dan akses
-   `sudo`; ia memasang `curl`, Python, atau Git dari apt bila belum tersedia.
+   dapat memasang runtime Python 3.12. Di Ubuntu/Armbian, bootstrap membutuhkan
+   Bash, koneksi internet, dan akses `sudo`; ia memasang `curl`, Python, atau Git
+   dari apt bila belum tersedia.
 
-6. Untuk `AI_EDGE`, download model evaluasi jika disetujui dan isi threshold
-   Top-1 serta margin dari kalibrasi lokal sebelum menjalankan presensi. Untuk
-   `STB_GATEWAY`, pastikan AI Central dan Core API sehat serta STB menjangkau
-   keduanya melalui LAN. Setelah heartbeat muncul **Online**, buat jadwal, buka
-   sesi sebagai guru, lalu uji event dan dashboard.
+6. Installer AI_EDGE memasang model checksum-verified otomatis. Untuk
+   AI_CENTRAL production, provision model saat setup server sesuai runbook.
+   Isi threshold Top-1 dan margin dari laporan kalibrasi pada konfigurasi
+   service yang sesuai sebelum presensi. Untuk `STB_GATEWAY`, pastikan AI
+   Central dan Core API sehat serta STB menjangkau keduanya melalui LAN.
+   Setelah heartbeat muncul **Online**, buat jadwal, buka sesi sebagai guru,
+   lalu uji event dan dashboard.
 
 Pada dev single-PC, URL kamera harus `http://127.0.0.1:8000` dan agent harus
 berjalan di komputer yang sama. API dev sengaja hanya bind ke loopback. Untuk
@@ -180,11 +179,17 @@ perintah yang otomatis memilih domain, TLS, secret store, firewall, backup,
 model, threshold, dan kebijakan sekolah; langkah server production tetap
 terkendali di [runbook deployment](docs/deployment/README.md).
 
+Halaman admin **AI & kamera** menampilkan profile aktif, kesiapan model yang
+dilaporkan, status AI Central, dan heartbeat/kamera perangkat. Halaman ini belum
+mengubah threshold atau me-restart service; threshold tetap diisi berdasarkan
+laporan kalibrasi pada `.env` AI Central atau YAML edge agent. Untuk perubahan
+runtime, restart service lewat supervisor deployment yang sesuai.
+
 ## Status kesiapan pengenalan wajah
 
 | Item | Status repository | Persiapan untuk tes fisik |
 | --- | --- | --- |
-| YuNet + SFace | Adapter tersedia; downloader memprovision file lokal ke direktori ignored dengan SHA-256 terverifikasi. SFace weight masih perlu review provenance sebelum operasi. | Jalankan downloader untuk local evaluation; catat versi/checksum dan selesaikan review institusi sebelum deployment. |
+| YuNet + SFace | Adapter tersedia; downloader memprovision file lokal ke direktori ignored dengan SHA-256 terverifikasi. SFace weight masih perlu review provenance sebelum operasi. | Setup lokal dan installer AI_EDGE mengunduh otomatis; AI_CENTRAL production diprovision dari runbook. Catat versi/checksum dan selesaikan review institusi sebelum deployment. |
 | Threshold Top-1/margin | Tidak ada nilai final default; agent gagal terbuka jika kosong. | Kalibrasi pada data berizin yang mewakili kamera kelas. Prioritaskan false acceptance rendah; laporkan FMR/FNMR. |
 | Webcam/PC lab/STB | Utility kamera dan test mock tersedia; uji lapangan belum dilakukan. | Uji webcam UVC, posisi, pencahayaan, dan OS target; ukur CPU/RAM/suhu STB nyata. |
 | Liveness | Adapter/code path tersedia tetapi contoh nonaktif. Kandidat yang terdokumentasi belum cleared untuk operasi sekolah. | Tinjau lisensi/provenance, uji code path dan threshold sendiri, atau operasikan kontrol fisik/sesi yang disetujui. |

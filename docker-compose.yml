@@ -32,6 +32,9 @@ services:
       - "${PRESENSI_AI_MODELS_DIR:-./models/weights}:/models:ro"
     environment:
       APP_ENV: development
+      PRESENSI_LOCAL_AI_PROFILE: ${PRESENSI_LOCAL_AI_PROFILE:-edge}
+      PRESENSI_AI_SERVICE_BASE_URL: ${PRESENSI_AI_SERVICE_BASE_URL:-http://ai-service:8001}
+      PRESENSI_AI_MODELS_DIR: /models
       DATABASE_HOST: db
       DATABASE_PORT: "5432"
       DATABASE_NAME: ${POSTGRES_DB:?Copy .env.example to .env first}

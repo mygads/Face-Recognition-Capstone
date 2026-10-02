@@ -125,17 +125,10 @@ def setup_local_models(profile: str, requested: str | None) -> bool:
         )
         return False
 
-    should_download = requested == "download"
-    if requested is None and previous_choice != "skipped" and sys.stdin.isatty():
-        print("Model YuNet + SFace belum tersedia atau checksum-nya tidak cocok.")
-        print(
-            "  1. Unduh sekarang (~39 MB, checksum diverifikasi; evaluasi lokal saja)"
-        )
-        print("  2. Lewati dan unduh nanti")
-        choice = input("Pilih 1 atau 2 [2]: ").strip()
-        if choice not in {"", "1", "2"}:
-            raise ValueError("Pilihan harus 1 (unduh model) atau 2 (lewati).")
-        should_download = choice == "1"
+    # Provision recognition models automatically on first local setup. A user
+    # who explicitly skipped on an earlier run can still opt in with
+    # --download-models, or keep skipping with --skip-model-download.
+    should_download = requested != "skip"
 
     if not should_download:
         save_local_env_setting(LOCAL_MODEL_SETUP_KEY, "skipped")
@@ -215,7 +208,7 @@ def main() -> int:
         dest="model_setup",
         action="store_const",
         const="skip",
-        help="skip the first-run model download prompt",
+        help="skip model provisioning for this run",
     )
     args = parser.parse_args()
 

@@ -54,13 +54,15 @@ cd /opt/presensi/server
 sudo git checkout --detach <reviewed-release-commit>
 ```
 
-Letakkan model di luar Git/image. Bandingkan checksum dengan manifest artefak
-yang disetujui sebelum mencatat hasil lokal:
+Provision model otomatis dari manifest checksum-pinned repository ke folder model
+di luar Git/image. SFace hanya untuk evaluasi sampai sekolah memberi clearance
+izin penggunaan:
 
 ```bash
 sudo install -d -o root -g root -m 0755 /srv/presensi/models
-cd /srv/presensi/models
-sha256sum face_detection_yunet_2023mar.onnx face_recognition_sface_2021dec.onnx
+cd /opt/presensi/server
+python3 scripts/download_face_models.py --directory /srv/presensi/models
+python3 scripts/download_face_models.py --directory /srv/presensi/models --check
 ```
 
 Catat nama, versi, sumber, checksum tepercaya, tanggal, dan server. API

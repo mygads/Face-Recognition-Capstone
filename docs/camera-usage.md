@@ -5,19 +5,25 @@ enrollment browser, kamera untuk pengenalan saat presensi, dan preview lokal
 untuk memasang kamera. Tidak ada live video kamera edge yang dikirim ke
 dashboard guru.
 
-## Unduh model YuNet dan SFace
+## Model YuNet dan SFace
 
-Dari root repository:
+Setup lokal dan installer AI_EDGE mengunduh model ini secara otomatis. Untuk
+pemulihan atau provisioning server production, jalankan downloader dari root
+repository:
 
-```powershell
-# Windows PowerShell atau terminal Ubuntu dengan Python project aktif
-python scripts/download_face_models.py
-```
+~~~powershell
+# Windows PowerShell
+py -3 scripts/download_face_models.py
+~~~
+
+~~~bash
+# Ubuntu
+python3 scripts/download_face_models.py
+~~~
 
 Model disimpan di `models/weights/`, folder yang diabaikan Git. Script mengambil
 file OpenCV Zoo yang versinya dan SHA-256-nya dipatok; ukuran/checksum yang tidak
-cocok akan ditolak. File ini tidak ikut build/deploy otomatis kecuali volume
-model dipasang dan path dikonfigurasi.
+cocok akan ditolak. File ini tidak masuk Git atau image container; installer menaruhnya pada host model yang sesuai dan Docker membacanya melalui volume read-only.
 
 YuNet dipakai untuk deteksi dan kotak wajah. SFace dipakai untuk embedding dan
 pencocokan. File YuNet sesuai adapter OpenCV 4 saat ini. SFace sudah terunduh
@@ -43,7 +49,7 @@ Windows PowerShell:
 py -3 -m venv .venv-camera-calibration
 .\.venv-camera-calibration\Scripts\Activate.ps1
 python -m pip install -e "apps/edge-agent[camera-preview]" -e "libs/recognition-core"
-python scripts/download_face_models.py
+py -3 scripts/download_face_models.py
 presensi-camera-calibration --list-cameras --scan-max-index 1
 presensi-camera-calibration --yunet-model models/weights/face_detection_yunet_2023mar.onnx --camera-index 0 --duration-seconds 60 --report camera-calibration.json
 ```
@@ -54,7 +60,7 @@ Ubuntu Desktop:
 python3 -m venv .venv-camera-calibration
 . .venv-camera-calibration/bin/activate
 python -m pip install -e 'apps/edge-agent[camera-preview]' -e 'libs/recognition-core'
-python scripts/download_face_models.py
+python3 scripts/download_face_models.py
 presensi-camera-calibration --list-cameras --scan-max-index 1
 presensi-camera-calibration --yunet-model models/weights/face_detection_yunet_2023mar.onnx --camera-index 0 --duration-seconds 60 --report camera-calibration.json
 ```

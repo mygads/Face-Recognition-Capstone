@@ -2,6 +2,7 @@ import createClient, { type Middleware } from 'openapi-fetch'
 import type { components, operations, paths } from './generated/schema'
 
 export type AuthenticatedAccount = components['schemas']['CurrentUserResponse']
+export type AiReadiness = components['schemas']['AiReadinessResponse']
 export type AccessToken = components['schemas']['TokenResponse']
 export type PasswordChangeRequest = components['schemas']['PasswordChangeRequest']
 export type PasswordChangeResult = components['schemas']['PasswordChangeResponse']
@@ -135,6 +136,11 @@ export async function loginWithPassword(email: string, password: string): Promis
 
 export async function getCurrentAccount(): Promise<AuthenticatedAccount> {
   const result = await apiClient.GET('/api/v1/auth/me')
+  return unwrap(result)
+}
+
+export async function getAiReadiness(): Promise<AiReadiness> {
+  const result = await apiClient.GET('/api/v1/admin/system/ai-readiness')
   return unwrap(result)
 }
 

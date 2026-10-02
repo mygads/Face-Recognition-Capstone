@@ -31,6 +31,7 @@ const canViewReports = computed(
 )
 const canManageMasterData = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
 const canManageAccounts = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
+const canManageSettings = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
 </script>
 
 <template>
@@ -99,6 +100,21 @@ const canManageAccounts = computed(() => auth.account?.roles.includes('ADMIN') ?
           <path d="M3.5 19c.5-3.2 2.3-5 5.5-5s5 1.8 5.5 5M17 8v6M14 11h6" />
         </svg>
         <span class="app-sidebar__link-label">Kelola akun staf</span>
+      </RouterLink>
+      <RouterLink
+        v-if="canManageSettings"
+        class="app-sidebar__link"
+        active-class="app-sidebar__link--active"
+        to="/app/ai-setup"
+        :aria-label="collapsed ? 'AI dan kamera' : undefined"
+        data-testid="ai-setup-link"
+        @click="emit('navigate')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M9 3.5h6M10 3.5v5l-5.5 9.3A2 2 0 0 0 6.2 21h11.6a2 2 0 0 0 1.7-3.2L14 8.5v-5" />
+          <path d="M7.5 15h9" />
+        </svg>
+        <span class="app-sidebar__link-label">AI & kamera</span>
       </RouterLink>
       <RouterLink
         v-if="canManageSchedules"

@@ -42,9 +42,7 @@ alternative from **Unduh paket setup perangkat**.
 This is commissioning setup, not a persistent service. If readiness checks
 pass, it offers to run the agent in the current terminal so the first
 heartbeat can be seen; Ctrl+C stops that run. `AI_EDGE` requires local
-YuNet/SFace files and calibrated Top-1/margin thresholds. The installer asks
-before downloading checksum-verified model files and never fills guessed
-thresholds. `STB_GATEWAY` does not install local face-recognition models. For
+YuNet/SFace files and calibrated Top-1/margin thresholds. The AI_EDGE installer automatically downloads and checksum-verifies the pinned YuNet/SFace files. It never fills guessed thresholds. `STB_GATEWAY` does not install local face-recognition models. For
 reboot survival, use the hardened systemd steps in the deployment runbook.
 
 The downloaded bundle's Core API URL must be reachable from the camera host.

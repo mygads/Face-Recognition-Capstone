@@ -21,6 +21,7 @@ import ProfileView from '../views/ProfileView.vue'
 import ReportsView from '../views/ReportsView.vue'
 import ScheduleView from '../views/ScheduleView.vue'
 import SessionsView from '../views/SessionsView.vue'
+import AiSetupView from '../views/AiSetupView.vue'
 
 export const routes: RouteRecordRaw[] = [
   {
@@ -86,6 +87,16 @@ export const routes: RouteRecordRaw[] = [
         meta: {
           title: 'Kelola akun staf',
           description: 'Buat akun guru dan laboran untuk menggunakan sistem.',
+          requiredRoles: ['ADMIN'],
+        },
+      },
+      {
+        path: 'ai-setup',
+        name: 'ai-setup',
+        component: AiSetupView,
+        meta: {
+          title: 'AI & kamera',
+          description: 'Periksa kesiapan model AI, threshold, dan kamera perangkat.',
           requiredRoles: ['ADMIN'],
         },
       },
