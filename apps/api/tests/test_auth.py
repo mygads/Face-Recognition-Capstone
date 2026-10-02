@@ -596,6 +596,8 @@ def test_expired_bearer_token_is_rejected(api_database: sessionmaker[Session]) -
         ("ADMIN", "GET", "/api/v1/devices", None, 200),
         ("TEACHER", "GET", "/api/v1/devices", None, 403),
         ("LABORANT", "GET", "/api/v1/devices", None, 200),
+        ("TEACHER", "DELETE", f"/api/v1/devices/{UUID(int=55)}", None, 403),
+        ("LABORANT", "DELETE", f"/api/v1/devices/{UUID(int=55)}", None, 403),
         ("ADMIN", "GET", "/api/v1/face-templates", None, 200),
         ("TEACHER", "GET", "/api/v1/face-templates", None, 403),
         ("LABORANT", "GET", "/api/v1/face-templates", None, 200),

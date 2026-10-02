@@ -39,8 +39,12 @@ The API computes health at read time:
 | Warning | Heartbeat is recent and device is active, but camera status is not `online`. |
 | Online | Device is active, heartbeat is recent, and camera status is `online`. |
 
-The registry page refreshes every 15 seconds and lets an administrator register a
-device, reassign its laboratory, and provision or rotate its agent credential.
+The registry page refreshes every 15 seconds and reads the active server profile
+from the AI-readiness endpoint. The device form only offers the profile supported
+by that server. In the single-PC AI_EDGE setup the page permits one active camera
+device; AI_CENTRAL permits registering the STB gateways used by the labs. An
+administrator can reassign a device, provision or rotate its credential, or
+remove it from active use after a confirmation dialog.
 The raw credential is shown only in the immediate one-time result panel, with
 copy and download actions; closing the panel clears it from the page, and there
 is no endpoint or UI to retrieve an existing raw token. The panel can also
@@ -61,3 +65,20 @@ Initial assignment and every actual reassignment write `device.laboratory_assign
 to `audit_logs`, with the actor and assigned laboratory UUIDs; reassignment records
 both previous and new IDs. Reassigning to the current lab does not add a duplicate
 audit row.
+
+Removing a device is a soft deactivation, not a database cascade. It immediately
+revokes current and previous device credentials, marks the camera offline, and
+writes `device.deactivated` to `audit_logs`. Recognition and attendance history
+remain linked to that device. The registry hides inactive devices by default;
+the **Tampilkan perangkat nonaktif** filter exposes them for review or reactivation.
+When reactivated, an administrator must provision a new device credential.
+
+Installer defaults are auto-filled for local development: Core API
+`http://127.0.0.1:8000`, and AI Central `http://127.0.0.1:8001` when the browser is
+on localhost. For a remote host, the Core API defaults to the current web origin;
+the administrator must provide the reachable AI Central HTTPS origin because it
+cannot be inferred reliably from the web domain. The connection-mode selector is
+shown for AI_CENTRAL/STB setup; AI_EDGE infers same-host versus private HTTPS from
+the Core API URL. The enrollment model version is read-only and comes from Core
+API configuration; a new model version is not selectable until it is provisioned
+and approved across enrollment and inference.

@@ -10,6 +10,8 @@ import {
 import {
   ApiError,
   createDevice,
+  deleteDevice,
+  getAiReadiness,
   listDevices,
   listLaboratories,
   provisionDeviceCredential,
@@ -18,6 +20,7 @@ import {
   type Device,
   type DeviceCredential,
   type Laboratory,
+  type AiReadiness,
 } from '../api/client'
 
 type DeviceForm = {
@@ -35,17 +38,22 @@ type DeviceSetupDefaults = {
 }
 
 const DEVICE_SETUP_DEFAULTS_KEY = 'presensi.device-setup-defaults.v1'
+const FALLBACK_MODEL_VERSION = 'opencv-zoo-sface-2021dec'
 
 const auth = useAuthStore()
 const canManage = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
 const devices = ref<Device[]>([])
 const laboratories = ref<Laboratory[]>([])
+const aiReadiness = ref<AiReadiness | null>(null)
+const isProfileLoading = ref(true)
+const edgeDeviceCount = ref(0)
 const total = ref(0)
 const page = ref(0)
 const pageSize = 10
 const searchText = ref('')
 const search = ref('')
 const statusFilter = ref<'all' | 'online' | 'offline' | 'warning'>('all')
+const includeInactive = ref(false)
 const isLoading = ref(false)
 const errorMessage = ref<string | null>(null)
 const formError = ref<string | null>(null)
@@ -69,23 +77,45 @@ const installCommandMessage = ref<string | null>(null)
 const bundleMessage = ref<string | null>(null)
 const isCredentialLoading = ref(false)
 const isRotationOpen = ref(false)
+const devicePendingDeletion = ref<Device | null>(null)
+const isDeletingDevice = ref(false)
+const deleteError = ref<string | null>(null)
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 
-function emptyForm(): DeviceForm {
+const activeProfile = computed(() => aiReadiness.value?.deployment_profile ?? null)
+const enrollmentModelVersion = computed(
+  () => aiReadiness.value?.enrollment_model_version?.trim() || '',
+)
+const canRegisterDevice = computed(() => {
+  if (!canManage.value || isProfileLoading.value || !activeProfile.value) return false
+  return (
+    activeProfile.value === 'AI_CENTRAL' ||
+    (edgeDeviceCount.value === 0 && enrollmentModelVersion.value.length > 0)
+  )
+})
+const deviceConnectionMode = computed<DeviceConnectionMode>(() => {
+  if (credentialDevice.value?.deployment_profile === 'AI_EDGE') {
+    return isLoopbackOrigin(coreApiUrl.value) ? 'same-host' : 'private-network'
+  }
+  return connectionMode.value
+})
+
+function emptyForm(profile: Device['deployment_profile'] = 'AI_EDGE'): DeviceForm {
   return {
     name: '',
     laboratory_id: '',
-    deployment_profile: 'AI_EDGE',
+    deployment_profile: profile,
     is_active: true,
   }
 }
 
 function loadSetupDefaults(): DeviceSetupDefaults {
+  const localBrowser = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
   const empty: DeviceSetupDefaults = {
-    coreApiUrl: '',
-    centralAiUrl: '',
-    connectionMode: 'private-network',
-    modelVersion: 'opencv-zoo-sface-2021dec',
+    coreApiUrl: defaultCoreApiUrl(),
+    centralAiUrl: localBrowser ? 'http://127.0.0.1:8001' : '',
+    connectionMode: localBrowser ? 'same-host' : 'private-network',
+    modelVersion: FALLBACK_MODEL_VERSION,
   }
   try {
     const raw = window.localStorage.getItem(DEVICE_SETUP_DEFAULTS_KEY)
@@ -93,13 +123,15 @@ function loadSetupDefaults(): DeviceSetupDefaults {
     const stored = JSON.parse(raw) as Partial<DeviceSetupDefaults>
     const mode = stored.connectionMode
     return {
-      coreApiUrl: typeof stored.coreApiUrl === 'string' ? stored.coreApiUrl : '',
-      centralAiUrl: typeof stored.centralAiUrl === 'string' ? stored.centralAiUrl : '',
-      connectionMode: mode === 'same-host' ? mode : 'private-network',
-      modelVersion:
-        typeof stored.modelVersion === 'string' && stored.modelVersion.trim()
-          ? stored.modelVersion
-          : empty.modelVersion,
+      coreApiUrl:
+        typeof stored.coreApiUrl === 'string' && stored.coreApiUrl.trim()
+          ? stored.coreApiUrl
+          : empty.coreApiUrl,
+      centralAiUrl:
+        typeof stored.centralAiUrl === 'string' ? stored.centralAiUrl : empty.centralAiUrl,
+      connectionMode:
+        mode === 'same-host' || mode === 'private-network' ? mode : empty.connectionMode,
+      modelVersion: empty.modelVersion,
     }
   } catch {
     return empty
@@ -110,18 +142,26 @@ function saveSetupDefaults(): void {
   setupDefaultsMessage.value = null
   try {
     const coreOrigin = normalizeServerOrigin(setupDefaults.value.coreApiUrl, 'URL Core API')
-    validateConnectionOrigin(setupDefaults.value.connectionMode, coreOrigin, 'URL Core API')
-    const centralOrigin = setupDefaults.value.centralAiUrl.trim()
-      ? normalizeServerOrigin(setupDefaults.value.centralAiUrl, 'URL AI Central')
-      : ''
+    const mode =
+      activeProfile.value === 'AI_EDGE'
+        ? isLoopbackOrigin(coreOrigin)
+          ? 'same-host'
+          : 'private-network'
+        : setupDefaults.value.connectionMode
+    validateConnectionOrigin(mode, coreOrigin, 'URL Core API')
+    const centralOrigin =
+      activeProfile.value === 'AI_CENTRAL' && setupDefaults.value.centralAiUrl.trim()
+        ? normalizeServerOrigin(setupDefaults.value.centralAiUrl, 'URL AI Central')
+        : ''
     if (centralOrigin) {
-      validateConnectionOrigin(setupDefaults.value.connectionMode, centralOrigin, 'URL AI Central')
+      validateConnectionOrigin(mode, centralOrigin, 'URL AI Central')
     }
     const next: DeviceSetupDefaults = {
       ...setupDefaults.value,
       coreApiUrl: coreOrigin,
       centralAiUrl: centralOrigin,
-      modelVersion: setupDefaults.value.modelVersion.trim() || 'opencv-zoo-sface-2021dec',
+      connectionMode: mode,
+      modelVersion: enrollmentModelVersion.value,
     }
     window.localStorage.setItem(DEVICE_SETUP_DEFAULTS_KEY, JSON.stringify(next))
     setupDefaults.value = next
@@ -140,24 +180,24 @@ const setupCommandState = computed(() => {
   if (!device || !issuedCredential.value) return { command: '', error: null }
   try {
     const coreOrigin = normalizeServerOrigin(coreApiUrl.value, 'URL Core API')
-    validateConnectionOrigin(connectionMode.value, coreOrigin, 'URL Core API')
+    validateConnectionOrigin(deviceConnectionMode.value, coreOrigin, 'URL Core API')
     const centralOrigin =
       device.deployment_profile === 'STB_GATEWAY'
         ? normalizeServerOrigin(centralAiUrl.value, 'URL AI Central')
         : undefined
     if (centralOrigin) {
-      validateConnectionOrigin(connectionMode.value, centralOrigin, 'URL AI Central')
+      validateConnectionOrigin(deviceConnectionMode.value, centralOrigin, 'URL AI Central')
     }
     return {
       command: buildDeviceSetupCommand({
         profile: device.deployment_profile,
         platform: installPlatform.value,
-        connectionMode: connectionMode.value,
+        connectionMode: deviceConnectionMode.value,
         coreApiUrl: coreOrigin,
         centralAiUrl: centralOrigin,
         deviceId: device.device_id,
         modelVersion: modelVersion.value.trim(),
-        useWorkingCopy: connectionMode.value === 'same-host',
+        useWorkingCopy: deviceConnectionMode.value === 'same-host',
       }),
       error: null,
     }
@@ -197,6 +237,13 @@ function defaultCoreApiUrl(): string {
   return window.location.origin
 }
 
+function defaultCentralAiUrl(): string {
+  if (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost') {
+    return 'http://127.0.0.1:8001'
+  }
+  return ''
+}
+
 function healthLabel(status: Device['health_status']): string {
   return { online: 'Online', offline: 'Offline', warning: 'Warning' }[status]
 }
@@ -222,14 +269,55 @@ async function loadDevices(): Promise<void> {
       limit: pageSize,
       offset: page.value * pageSize,
       search: search.value || undefined,
+      deployment_profile: activeProfile.value
+        ? activeProfile.value === 'AI_CENTRAL'
+          ? 'STB_GATEWAY'
+          : 'AI_EDGE'
+        : undefined,
+      is_active: includeInactive.value ? undefined : true,
       health_status: statusFilter.value === 'all' ? undefined : statusFilter.value,
     })
     devices.value = result.items
     total.value = result.pagination.total
+    if (activeProfile.value === 'AI_EDGE') {
+      const edgeDevices = await listDevices({
+        limit: 1,
+        offset: 0,
+        deployment_profile: 'AI_EDGE',
+        is_active: true,
+      })
+      edgeDeviceCount.value = edgeDevices.pagination.total
+    } else {
+      edgeDeviceCount.value = 0
+    }
   } catch (error) {
     errorMessage.value = formatError(error)
   } finally {
     isLoading.value = false
+  }
+}
+
+async function loadAiReadiness(): Promise<void> {
+  if (!canManage.value) {
+    isProfileLoading.value = false
+    return
+  }
+  isProfileLoading.value = true
+  try {
+    aiReadiness.value = await getAiReadiness()
+    setupDefaults.value.modelVersion = enrollmentModelVersion.value
+    if (activeProfile.value === 'AI_EDGE') {
+      setupDefaults.value.centralAiUrl = ''
+      setupDefaults.value.connectionMode = isLoopbackOrigin(setupDefaults.value.coreApiUrl)
+        ? 'same-host'
+        : 'private-network'
+    } else if (!setupDefaults.value.centralAiUrl) {
+      setupDefaults.value.centralAiUrl = defaultCentralAiUrl()
+    }
+  } catch (error) {
+    errorMessage.value = formatError(error)
+  } finally {
+    isProfileLoading.value = false
   }
 }
 
@@ -252,8 +340,9 @@ function submitSearch(): void {
 }
 
 function openCreate(): void {
+  if (!canRegisterDevice.value || !activeProfile.value) return
   editingDeviceId.value = null
-  form.value = emptyForm()
+  form.value = emptyForm(activeProfile.value === 'AI_CENTRAL' ? 'STB_GATEWAY' : 'AI_EDGE')
   formError.value = null
   isFormOpen.value = true
   void loadLaboratories()
@@ -274,6 +363,10 @@ function openEdit(device: Device): void {
 
 async function submitForm(): Promise<void> {
   formError.value = null
+  if (!activeProfile.value) {
+    formError.value = 'Profil server belum dapat dipastikan. Muat ulang halaman lalu coba lagi.'
+    return
+  }
   isSaving.value = true
   try {
     if (editingDeviceId.value) {
@@ -286,8 +379,8 @@ async function submitForm(): Promise<void> {
       await createDevice({
         name: form.value.name.trim(),
         laboratory_id: form.value.laboratory_id,
-        deployment_profile: form.value.deployment_profile,
-        device_type: form.value.deployment_profile === 'AI_EDGE' ? 'edge_pc' : 'camera_gateway',
+        deployment_profile: activeProfile.value === 'AI_CENTRAL' ? 'STB_GATEWAY' : 'AI_EDGE',
+        device_type: activeProfile.value === 'AI_CENTRAL' ? 'camera_gateway' : 'edge_pc',
       })
     }
     isFormOpen.value = false
@@ -306,24 +399,21 @@ function openCredential(device: Device): void {
   credentialCopyMessage.value = null
   rotationReason.value = ''
   const browserIsLocal = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
-  const defaultMode = setupDefaults.value.connectionMode
-  const defaultsToSameHost =
-    device.deployment_profile === 'AI_EDGE' &&
-    (defaultMode === 'same-host' || (browserIsLocal && !setupDefaults.value.coreApiUrl))
   const savedCore = setupDefaults.value.coreApiUrl
   const savedCentral = setupDefaults.value.centralAiUrl
-  coreApiUrl.value = defaultsToSameHost
-    ? savedCore || defaultCoreApiUrl()
-    : savedCore && !isLoopbackOrigin(savedCore)
-      ? savedCore
-      : ''
+  coreApiUrl.value = savedCore || defaultCoreApiUrl()
   centralAiUrl.value =
-    device.deployment_profile === 'STB_GATEWAY' && savedCentral && !isLoopbackOrigin(savedCentral)
-      ? savedCentral
+    device.deployment_profile === 'STB_GATEWAY'
+      ? savedCentral || (browserIsLocal ? defaultCentralAiUrl() : '')
       : ''
-  modelVersion.value = setupDefaults.value.modelVersion
+  modelVersion.value = enrollmentModelVersion.value
   installPlatform.value = device.deployment_profile === 'STB_GATEWAY' ? 'armbian' : 'windows'
-  connectionMode.value = defaultsToSameHost ? 'same-host' : 'private-network'
+  connectionMode.value =
+    device.deployment_profile === 'AI_EDGE'
+      ? isLoopbackOrigin(coreApiUrl.value)
+        ? 'same-host'
+        : 'private-network'
+      : setupDefaults.value.connectionMode
   installCommandMessage.value = null
   bundleMessage.value = null
   isRotationOpen.value = false
@@ -470,6 +560,21 @@ function selectConnectionMode(mode: DeviceConnectionMode): void {
   }
 }
 
+function onDefaultConnectionModeChange(event: Event): void {
+  const mode = (event.currentTarget as HTMLSelectElement).value
+  if (mode !== 'same-host' && mode !== 'private-network') return
+  setupDefaults.value.connectionMode = mode
+  if (mode === 'same-host') {
+    setupDefaults.value.coreApiUrl = 'http://127.0.0.1:8000'
+    if (activeProfile.value === 'AI_CENTRAL') {
+      setupDefaults.value.centralAiUrl = 'http://127.0.0.1:8001'
+    }
+    return
+  }
+  if (isLoopbackOrigin(setupDefaults.value.coreApiUrl)) setupDefaults.value.coreApiUrl = ''
+  if (isLoopbackOrigin(setupDefaults.value.centralAiUrl)) setupDefaults.value.centralAiUrl = ''
+}
+
 function onConnectionModeChange(event: Event): void {
   const mode = (event.currentTarget as HTMLSelectElement).value
   if (
@@ -479,6 +584,37 @@ function onConnectionModeChange(event: Event): void {
     mode === 'cloudflare-tunnel'
   ) {
     selectConnectionMode(mode)
+  }
+}
+
+function requestDeviceDeletion(device: Device): void {
+  devicePendingDeletion.value = device
+  deleteError.value = null
+}
+
+function closeDeviceDeletion(): void {
+  if (isDeletingDevice.value) return
+  devicePendingDeletion.value = null
+  deleteError.value = null
+}
+
+async function confirmDeviceDeletion(): Promise<void> {
+  const device = devicePendingDeletion.value
+  if (!device || isDeletingDevice.value) return
+  isDeletingDevice.value = true
+  deleteError.value = null
+  try {
+    await deleteDevice(device.device_id)
+    devicePendingDeletion.value = null
+    if (device.deployment_profile === 'AI_EDGE') {
+      edgeDeviceCount.value = Math.max(0, edgeDeviceCount.value - 1)
+    }
+    if (devices.value.length === 1 && page.value > 0) page.value -= 1
+    await loadDevices()
+  } catch (error) {
+    deleteError.value = formatError(error)
+  } finally {
+    isDeletingDevice.value = false
   }
 }
 
@@ -507,7 +643,10 @@ function downloadSetupBundle(): void {
   if (!device || !credential) return
   bundleMessage.value = null
   try {
-    if (connectionMode.value === 'public-domain' || connectionMode.value === 'cloudflare-tunnel') {
+    if (
+      deviceConnectionMode.value === 'public-domain' ||
+      deviceConnectionMode.value === 'cloudflare-tunnel'
+    ) {
       throw new Error(
         'Jalur publik belum diaktifkan karena perangkat mengambil gallery template biometrik dari Core API. Gunakan LAN/VPN privat.',
       )
@@ -529,9 +668,9 @@ function downloadSetupBundle(): void {
     if (device.deployment_profile === 'AI_EDGE' && !bundle.model_version) {
       throw new Error('Versi model diperlukan untuk profil AI_EDGE.')
     }
-    validateConnectionOrigin(connectionMode.value, bundle.core_api_url, 'URL Core API')
+    validateConnectionOrigin(deviceConnectionMode.value, bundle.core_api_url, 'URL Core API')
     if (bundle.central_ai_url) {
-      validateConnectionOrigin(connectionMode.value, bundle.central_ai_url, 'URL AI Central')
+      validateConnectionOrigin(deviceConnectionMode.value, bundle.central_ai_url, 'URL AI Central')
     }
     const file = new Blob([`${JSON.stringify(bundle, null, 2)}\n`], {
       type: 'application/json;charset=utf-8',
@@ -558,14 +697,16 @@ function goToPage(nextPage: number): void {
   page.value = nextPage
 }
 
-watch([page, statusFilter], () => void loadDevices())
-watch([coreApiUrl, centralAiUrl, modelVersion, connectionMode], () => {
+watch([page, statusFilter, includeInactive], () => void loadDevices())
+watch([coreApiUrl, centralAiUrl, connectionMode], () => {
   bundleMessage.value = null
   installCommandMessage.value = null
 })
 onMounted(() => {
-  void loadDevices()
-  void loadLaboratories()
+  void (async () => {
+    await loadAiReadiness()
+    await Promise.all([loadDevices(), loadLaboratories()])
+  })()
   refreshTimer = setInterval(() => void loadDevices(), 15_000)
 })
 onBeforeUnmount(() => {
@@ -582,13 +723,26 @@ onBeforeUnmount(() => {
       description="Pantau koneksi kamera dan versi agent. Status diperbarui otomatis setiap 15 detik."
     >
       <template #actions>
-        <button v-if="canManage" class="button button--primary" @click="openCreate">
+        <button
+          v-if="canRegisterDevice"
+          class="button button--primary"
+          type="button"
+          @click="openCreate"
+        >
           Daftarkan perangkat
         </button>
       </template>
     </PageHeader>
 
     <p v-if="errorMessage" class="master-data__alert" role="alert">{{ errorMessage }}</p>
+    <p
+      v-if="canManage && activeProfile === 'AI_EDGE' && edgeDeviceCount > 0"
+      class="devices-view__profile-note"
+      role="status"
+    >
+      Profil AI_EDGE pada setup ini memakai satu PC kamera. Nonaktifkan perangkat lama sebelum
+      mendaftarkan penggantinya.
+    </p>
 
     <section v-if="canManage" class="master-data__panel devices-view__form-panel">
       <div class="master-data__panel-heading">
@@ -601,14 +755,25 @@ onBeforeUnmount(() => {
           </p>
         </div>
       </div>
-      <div class="master-data__form">
-        <label>
+      <div v-if="isProfileLoading" class="master-data__form">
+        <p role="status">Memuat profil instalasi…</p>
+      </div>
+      <div v-else class="master-data__form">
+        <label v-if="activeProfile === 'AI_CENTRAL'">
           Jaringan dari host kamera ke server
-          <select v-model="setupDefaults.connectionMode" aria-label="Default jaringan device">
+          <select
+            :value="setupDefaults.connectionMode"
+            aria-label="Default jaringan device"
+            @change="onDefaultConnectionModeChange"
+          >
             <option value="same-host">Komputer yang sama — localhost</option>
             <option value="private-network">LAN/VPN sekolah — HTTPS</option>
           </select>
         </label>
+        <p v-else class="devices-view__profile-note">
+          AI_EDGE memakai alamat Core API di bawah. Koneksi otomatis diperlakukan sebagai localhost
+          untuk komputer yang sama atau HTTPS untuk host lain.
+        </p>
         <label>
           Default URL Core API
           <input
@@ -618,7 +783,7 @@ onBeforeUnmount(() => {
             placeholder="http://127.0.0.1:8000 atau https://presensi.sekolah.id"
           />
         </label>
-        <label>
+        <label v-if="activeProfile === 'AI_CENTRAL'">
           Default URL AI Central (STB_GATEWAY)
           <input
             v-model="setupDefaults.centralAiUrl"
@@ -627,10 +792,27 @@ onBeforeUnmount(() => {
             placeholder="https://ai.sekolah.id"
           />
         </label>
-        <label>
-          Versi model enrollment
-          <input v-model="setupDefaults.modelVersion" maxlength="128" autocomplete="off" />
+        <label v-if="activeProfile === 'AI_EDGE'">
+          Versi model enrollment (terkunci)
+          <input
+            id="device-default-model-version"
+            :value="enrollmentModelVersion"
+            readonly
+            aria-readonly="true"
+          />
         </label>
+        <p v-if="activeProfile === 'AI_EDGE'" class="devices-view__profile-note">
+          Hanya versi model yang dikonfigurasi pada server enrollment yang didukung. Model baru
+          perlu dipasang dan diverifikasi sebelum dapat dipilih.
+        </p>
+        <p
+          v-if="activeProfile === 'AI_EDGE' && !enrollmentModelVersion"
+          class="master-data__alert"
+          role="alert"
+        >
+          Versi model belum dilaporkan oleh Core API. Atur versi model saat provisioning server
+          sebelum mendaftarkan kamera AI_EDGE.
+        </p>
         <p v-if="setupDefaultsMessage" class="master-data__alert" role="status">
           {{ setupDefaultsMessage }}
         </p>
@@ -662,6 +844,9 @@ onBeforeUnmount(() => {
           <option value="warning">Warning</option>
         </select>
       </label>
+      <label v-if="canManage" class="master-data__checkbox">
+        <input v-model="includeInactive" type="checkbox" /> Tampilkan perangkat nonaktif
+      </label>
     </div>
 
     <section v-if="isFormOpen" class="master-data__panel devices-view__form-panel">
@@ -683,15 +868,8 @@ onBeforeUnmount(() => {
             </option>
           </select>
         </label>
-        <label v-if="!editingDeviceId">
-          Profil deployment
-          <select v-model="form.deployment_profile">
-            <option value="AI_EDGE">AI di Edge PC</option>
-            <option value="STB_GATEWAY">STB Gateway · AI central</option>
-          </select>
-        </label>
-        <p v-else class="devices-view__profile-note">
-          {{ profileLabel(form.deployment_profile) }}
+        <p class="devices-view__profile-note">
+          Profil instalasi: {{ profileLabel(form.deployment_profile) }}
         </p>
         <label v-if="editingDeviceId" class="master-data__checkbox">
           <input v-model="form.is_active" type="checkbox" /> Perangkat aktif
@@ -768,7 +946,9 @@ onBeforeUnmount(() => {
             </td>
             <td v-if="canManage" data-label="Aksi">
               <div class="devices-view__actions">
-                <button class="button button--text" @click="openEdit(device)">Ubah</button>
+                <button class="button button--text" type="button" @click="openEdit(device)">
+                  Ubah
+                </button>
                 <button
                   class="button button--secondary"
                   type="button"
@@ -781,6 +961,14 @@ onBeforeUnmount(() => {
                   @click="openCredential(device)"
                 >
                   Kredensial
+                </button>
+                <button
+                  class="button button--danger"
+                  type="button"
+                  :disabled="!device.is_active"
+                  @click="requestDeviceDeletion(device)"
+                >
+                  Hapus
                 </button>
               </div>
             </td>
@@ -891,27 +1079,31 @@ onBeforeUnmount(() => {
                 Armbian Linux (STB_GATEWAY)
               </option>
             </select>
-            <label for="device-connection-mode">Jaringan dari perangkat kamera ke server</label>
-            <select
-              id="device-connection-mode"
-              :value="connectionMode"
-              @change="onConnectionModeChange"
+            <label
+              v-if="credentialDevice.deployment_profile === 'STB_GATEWAY'"
+              for="device-connection-mode"
             >
-              <option
-                value="same-host"
-                :disabled="credentialDevice.deployment_profile === 'STB_GATEWAY'"
+              Jaringan dari STB ke server
+              <select
+                id="device-connection-mode"
+                :value="connectionMode"
+                @change="onConnectionModeChange"
               >
-                Satu komputer — localhost
-              </option>
-              <option value="private-network">LAN/VPN sekolah — HTTPS privat</option>
-              <option value="public-domain">Domain publik — belum diaktifkan</option>
-              <option value="cloudflare-tunnel">Cloudflare Tunnel — belum diaktifkan</option>
-            </select>
-            <p v-if="connectionMode === 'same-host'">
+                <option value="same-host">Komputer yang sama — localhost</option>
+                <option value="private-network">LAN/VPN sekolah — HTTPS privat</option>
+                <option value="public-domain">Domain publik — belum diaktifkan</option>
+                <option value="cloudflare-tunnel">Cloudflare Tunnel — belum diaktifkan</option>
+              </select>
+            </label>
+            <p v-else class="devices-view__profile-note">
+              AI_EDGE mendeteksi mode koneksi dari URL Core API: localhost untuk host yang sama atau
+              HTTPS untuk host lain.
+            </p>
+            <p v-if="deviceConnectionMode === 'same-host'">
               Pilih ini hanya jika kamera, API, dan checkout project berada di komputer yang sama.
               Command akan memakai repo lokal dan tidak mengunduh repo ulang.
             </p>
-            <p v-else-if="connectionMode === 'private-network'">
+            <p v-else-if="deviceConnectionMode === 'private-network'">
               Gunakan HTTPS internal yang hanya bisa dijangkau melalui LAN/VPN sekolah. STB baru
               mengunduh source bootstrap, tanpa perlu clone manual.
             </p>
@@ -954,13 +1146,12 @@ onBeforeUnmount(() => {
               placeholder="https://ai.sekolah.id"
             />
             <template v-if="credentialDevice.deployment_profile === 'AI_EDGE'">
-              <label for="device-model-version">Versi model</label>
+              <label for="device-model-version">Versi model (terkunci)</label>
               <input
                 id="device-model-version"
-                v-model="modelVersion"
-                required
-                maxlength="128"
-                autocomplete="off"
+                :value="enrollmentModelVersion"
+                readonly
+                aria-readonly="true"
               />
               <p>
                 Harus sama dengan versi YuNet/SFace yang digunakan saat enrollment template siswa.
@@ -1083,6 +1274,52 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </template>
+      </section>
+    </div>
+
+    <div
+      v-if="devicePendingDeletion"
+      class="devices-view__modal-backdrop"
+      role="presentation"
+      @click.self="closeDeviceDeletion"
+    >
+      <section
+        class="devices-view__credential-modal devices-view__delete-modal"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="device-delete-title"
+        aria-describedby="device-delete-description"
+        data-testid="device-delete-dialog"
+      >
+        <header class="devices-view__credential-heading">
+          <div>
+            <p class="master-data__eyebrow">Konfirmasi penghapusan</p>
+            <h2 id="device-delete-title">Hapus {{ devicePendingDeletion.name }}?</h2>
+          </div>
+        </header>
+        <p id="device-delete-description" class="devices-view__credential-warning">
+          Perangkat akan dinonaktifkan dan kredensialnya dicabut. Data presensi dan audit lama tetap
+          tersimpan. Anda dapat melihatnya kembali dengan filter perangkat nonaktif.
+        </p>
+        <p v-if="deleteError" class="master-data__alert" role="alert">{{ deleteError }}</p>
+        <div class="master-data__form-actions">
+          <button
+            class="button button--secondary"
+            type="button"
+            :disabled="isDeletingDevice"
+            @click="closeDeviceDeletion"
+          >
+            Batal
+          </button>
+          <button
+            class="button button--danger"
+            type="button"
+            :disabled="isDeletingDevice"
+            @click="confirmDeviceDeletion"
+          >
+            {{ isDeletingDevice ? 'Menonaktifkan…' : 'Ya, hapus perangkat' }}
+          </button>
+        </div>
       </section>
     </div>
   </section>

@@ -70,6 +70,12 @@ def test_openapi_lists_each_versioned_router_group() -> None:
         "/api/v1/attendance/corrections",
         "/api/v1/reports/attendance",
     } <= set(document["paths"])
+    assert "delete" in document["paths"]["/api/v1/devices/{device_id}"]
+    device_query_fields = {
+        parameter["name"]
+        for parameter in document["paths"]["/api/v1/devices"]["get"]["parameters"]
+    }
+    assert {"deployment_profile", "is_active"} <= device_query_fields
     assert "/health" not in document["paths"]
 
 
@@ -87,6 +93,7 @@ def test_openapi_uses_pydantic_contract_and_shared_error_schema() -> None:
     assert "RecognitionEventDecisionResponse" in schemas
     assert "SessionDashboardSnapshot" in schemas
     assert "SessionRecentActivity" in schemas
+    assert "enrollment_model_version" in schemas["AiReadinessResponse"]["properties"]
     dashboard_fields = set(schemas["SessionDashboardSnapshot"]["properties"])
     assert {"summary", "devices", "recent_activity"} <= dashboard_fields
     dashboard_properties = str(schemas["SessionDashboardSnapshot"]["properties"])

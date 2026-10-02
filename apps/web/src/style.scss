@@ -912,6 +912,17 @@ a:focus-visible {
   color: var(--primary-dk);
 }
 
+.button--danger {
+  border-color: color-mix(in srgb, var(--red) 48%, var(--border-color));
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 7%, var(--bg-surface));
+}
+
+.button--danger:hover:not(:disabled) {
+  border-color: var(--red);
+  background: color-mix(in srgb, var(--red) 13%, var(--bg-surface));
+}
+
 .button--text {
   min-height: 30px;
   padding: 5px 7px;

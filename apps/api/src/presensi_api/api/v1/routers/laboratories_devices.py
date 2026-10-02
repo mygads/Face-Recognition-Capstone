@@ -204,6 +204,8 @@ def list_devices(
     offset: Annotated[int, Query(ge=0)] = 0,
     search: Annotated[str | None, Query(max_length=200)] = None,
     laboratory_id: UUID | None = None,
+    deployment_profile: Literal["AI_EDGE", "STB_GATEWAY"] | None = None,
+    is_active: bool | None = None,
     health_status: Literal["online", "offline", "warning"] | None = None,
 ) -> PageResponse[DeviceResponse]:
     query = select(Device, Laboratory).join(
@@ -229,6 +231,10 @@ def list_devices(
         )
     if laboratory_id is not None:
         filters.append(Device.laboratory_id == laboratory_id)
+    if deployment_profile is not None:
+        filters.append(Device.deployment_profile == deployment_profile)
+    if is_active is not None:
+        filters.append(Device.is_active.is_(is_active))
     if health_status == "online":
         filters.extend(
             [
@@ -343,6 +349,7 @@ def update_device(
             "Profil deployment harus sesuai dengan tipe perangkat.",
         )
     previous_laboratory_id = device.laboratory_id
+    previous_is_active = device.is_active
     for key, value in values.items():
         setattr(device, key, value)
     if device.laboratory_id != previous_laboratory_id:
@@ -356,9 +363,75 @@ def update_device(
                 after_state={"laboratory_id": str(device.laboratory_id)},
             )
         )
+    if device.is_active != previous_is_active:
+        if not device.is_active:
+            device.credential_hash = None
+            device.credential_expires_at = None
+            device.previous_credential_hash = None
+            device.previous_credential_expires_at = None
+            device.camera_status = "offline"
+        session.add(
+            AuditLog(
+                actor_user_id=principal.id,
+                action="device.reactivated"
+                if device.is_active
+                else "device.deactivated",
+                entity_type="device",
+                entity_id=device.id,
+                before_state={"is_active": previous_is_active},
+                after_state={
+                    "is_active": device.is_active,
+                    "credential_revoked": True,
+                    "new_credential_required": device.is_active,
+                },
+            )
+        )
     _commit(session, "device_update_conflict", "Perangkat tidak dapat diperbarui.")
     session.refresh(device)
     return _device_response(device, new_laboratory)
+
+
+@router.delete(
+    "/devices/{device_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Deactivate a device and revoke its credentials",
+)
+def deactivate_device(
+    device_id: UUID,
+    session: DbSession,
+    principal: Annotated[
+        AuthenticatedUser, Depends(require_permissions(Permission.MANAGE_MASTER_DATA))
+    ],
+) -> None:
+    device = session.get(Device, device_id)
+    if device is None:
+        raise _not_found("Device")
+    if device.is_active:
+        session.add(
+            AuditLog(
+                actor_user_id=principal.id,
+                action="device.deactivated",
+                entity_type="device",
+                entity_id=device.id,
+                before_state={
+                    "is_active": True,
+                    "laboratory_id": str(device.laboratory_id),
+                    "deployment_profile": device.deployment_profile,
+                },
+                after_state={
+                    "is_active": False,
+                    "credential_revoked": True,
+                },
+            )
+        )
+    device.is_active = False
+    device.credential_hash = None
+    device.credential_expires_at = None
+    device.previous_credential_hash = None
+    device.previous_credential_expires_at = None
+    device.camera_status = "offline"
+    session.commit()
 
 
 @router.post(

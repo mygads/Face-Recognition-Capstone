@@ -6,14 +6,14 @@ from uuid import UUID
 
 import httpx
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from presensi_api.api.security.dependencies import get_current_user
 from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
 from presensi_api.db.base import Base
-from presensi_api.db.models import AuditLog, FaceTemplate, User
+from presensi_api.db.models import AuditLog, Device, FaceTemplate, Laboratory, User
 from presensi_api.db.session import get_db_session
 from presensi_api.main import app
 
@@ -261,3 +261,68 @@ def test_master_data_rejects_empty_patch_and_unknown_resources(
         detail["field"] == "body.student_number"
         for detail in invalid_student.json()["error"]["details"]
     )
+
+
+def test_device_delete_revokes_credentials_and_preserves_audited_history(
+    api_database: sessionmaker[Session],
+) -> None:
+    laboratory = request(
+        "POST", "/api/v1/laboratories", {"code": "LAB-DELETE", "name": "Delete Lab"}
+    ).json()
+    created = request(
+        "POST",
+        "/api/v1/devices",
+        {
+            "laboratory_id": laboratory["id"],
+            "name": "Synthetic Device",
+            "device_type": "edge_pc",
+            "deployment_profile": "AI_EDGE",
+        },
+    )
+    assert created.status_code == 201
+    device_id = created.json()["device_id"]
+    with api_database.begin() as session:
+        device = session.get(Device, UUID(device_id))
+        assert device is not None
+        device.credential_hash = "current-verifier"
+        device.credential_expires_at = None
+        device.previous_credential_hash = "previous-verifier"
+        device.previous_credential_expires_at = None
+
+    deleted = request("DELETE", f"/api/v1/devices/{device_id}")
+    assert deleted.status_code == 204
+    assert request("DELETE", f"/api/v1/devices/{device_id}").status_code == 204
+
+    with api_database() as session:
+        device = session.get(Device, UUID(device_id))
+        assert device is not None
+        assert device.is_active is False
+        assert device.credential_hash is None
+        assert device.previous_credential_hash is None
+        assert device.camera_status == "offline"
+        assert (
+            session.scalar(
+                select(AuditLog).where(
+                    AuditLog.action == "device.deactivated",
+                    AuditLog.entity_id == UUID(device_id),
+                )
+            )
+            is not None
+        )
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(AuditLog)
+                .where(
+                    AuditLog.action == "device.deactivated",
+                    AuditLog.entity_id == UUID(device_id),
+                )
+            )
+            == 1
+        )
+        assert session.get(Laboratory, UUID(laboratory["id"])) is not None
+
+    active_devices = request("GET", "/api/v1/devices?is_active=true")
+    archived_devices = request("GET", "/api/v1/devices?is_active=false")
+    assert active_devices.json()["pagination"]["total"] == 0
+    assert archived_devices.json()["pagination"]["total"] == 1

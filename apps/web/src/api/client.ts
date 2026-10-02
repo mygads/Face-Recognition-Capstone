@@ -336,6 +336,8 @@ export async function listDevices(query: {
   offset: number
   search?: string
   laboratory_id?: string
+  deployment_profile?: Device['deployment_profile']
+  is_active?: boolean
   health_status?: Device['health_status']
 }): Promise<Page<Device>> {
   const result = await apiClient.GET('/api/v1/devices', { params: { query } })
@@ -353,6 +355,13 @@ export async function updateDevice(deviceId: string, body: DeviceUpdate): Promis
     body,
   })
   return unwrap(result)
+}
+
+export async function deleteDevice(deviceId: string): Promise<void> {
+  const result = await apiClient.DELETE('/api/v1/devices/{device_id}', {
+    params: { path: { device_id: deviceId } },
+  })
+  if (!result.response.ok) throw toApiError(result.response.status, result.error)
 }
 
 export async function provisionDeviceCredential(deviceId: string): Promise<DeviceCredential> {

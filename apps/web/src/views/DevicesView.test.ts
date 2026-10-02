@@ -7,10 +7,12 @@ import DevicesView from './DevicesView.vue'
 const api = vi.hoisted(() => ({
   listDevices: vi.fn(),
   listLaboratories: vi.fn(),
+  getAiReadiness: vi.fn(),
   provisionDeviceCredential: vi.fn(),
   rotateDeviceCredential: vi.fn(),
   createDevice: vi.fn(),
   updateDevice: vi.fn(),
+  deleteDevice: vi.fn(),
 }))
 
 vi.mock('../api/client', () => ({
@@ -58,6 +60,20 @@ function adminPinia() {
 describe('device installation setup', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    api.getAiReadiness.mockResolvedValue({
+      deployment_profile: 'AI_EDGE',
+      enrollment_models_ready: true,
+      enrollment_model_version: 'opencv-zoo-sface-2021dec',
+      enrollment_quality_revision: 0,
+      central_ai_status: 'disabled',
+      central_ai_models_ready: null,
+      central_ai_model_version: null,
+      central_ai_thresholds_configured: null,
+      central_ai_recognition_ready: null,
+      central_ai_config_desired_revision: null,
+      central_ai_config_applied_revision: null,
+      central_ai_config_sync_status: null,
+    })
     api.listDevices.mockResolvedValue({
       items: [device],
       pagination: { total: 1, limit: 10, offset: 0 },
@@ -72,11 +88,24 @@ describe('device installation setup', () => {
       expires_at: '2026-11-01T00:00:00Z',
       previous_token_valid_until: null,
     })
+    api.deleteDevice.mockImplementation(async () => {
+      api.listDevices.mockResolvedValue({
+        items: [],
+        pagination: { total: 0, limit: 10, offset: 0 },
+      })
+    })
   })
 
-  it('shows a local working-copy command and disables public setup routes', async () => {
+  it('auto-fills local AI_EDGE setup and hides STB-only controls', async () => {
     const wrapper = mount(DevicesView, { global: { plugins: [adminPinia()] } })
     await flushPromises()
+    expect(wrapper.find('.devices-view__profile-note').text()).toContain('satu PC kamera')
+    expect(wrapper.find('#device-central-ai-url').exists()).toBe(false)
+    expect(wrapper.find('#device-connection-mode').exists()).toBe(false)
+    expect(wrapper.get('#device-default-model-version').attributes('readonly')).toBeDefined()
+    expect(
+      wrapper.findAll('button').some((button) => button.text().trim() === 'Daftarkan perangkat'),
+    ).toBe(false)
     const credentialButton = wrapper
       .findAll('button')
       .find((button) => button.text().trim() === 'Kredensial')
@@ -92,13 +121,34 @@ describe('device installation setup', () => {
     )
     expect(wrapper.get('[data-testid="device-install-command"]').text()).toContain(device.device_id)
 
-    await wrapper.get('#device-connection-mode').setValue('public-domain')
+    expect(wrapper.find('#device-connection-mode').exists()).toBe(false)
+    expect((wrapper.get('#device-core-api-url').element as HTMLInputElement).value).toBe(
+      'http://127.0.0.1:8000',
+    )
+    expect(wrapper.get('#device-model-version').attributes('readonly')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('requires confirmation, then deactivates the edge device from the registry', async () => {
+    const wrapper = mount(DevicesView, { global: { plugins: [adminPinia()] } })
     await flushPromises()
-    expect(wrapper.find('[data-testid="device-install-command"]').exists()).toBe(false)
-    const copyCommandButton = wrapper
+    await wrapper
       .findAll('button')
-      .find((button) => button.text().includes('Salin perintah instalasi perangkat'))
-    expect(copyCommandButton?.attributes('disabled')).toBeDefined()
+      .find((button) => button.text().trim() === 'Hapus')!
+      .trigger('click')
+
+    expect(wrapper.get('[data-testid="device-delete-dialog"]').text()).toContain(
+      'Data presensi dan audit lama tetap tersimpan',
+    )
+    expect(api.deleteDevice).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="device-delete-dialog"] .button--danger').trigger('click')
+    await flushPromises()
+
+    expect(api.deleteDevice).toHaveBeenCalledWith(device.device_id)
+    expect(wrapper.text()).toContain('Belum ada perangkat yang cocok.')
+    expect(
+      wrapper.findAll('button').some((button) => button.text().trim() === 'Daftarkan perangkat'),
+    ).toBe(true)
     wrapper.unmount()
   })
 
@@ -111,6 +161,20 @@ describe('device installation setup', () => {
     api.listDevices.mockResolvedValue({
       items: [gateway],
       pagination: { total: 1, limit: 10, offset: 0 },
+    })
+    api.getAiReadiness.mockResolvedValue({
+      deployment_profile: 'AI_CENTRAL',
+      enrollment_models_ready: true,
+      enrollment_model_version: 'opencv-zoo-sface-2021dec',
+      enrollment_quality_revision: 0,
+      central_ai_status: 'degraded',
+      central_ai_models_ready: true,
+      central_ai_model_version: 'opencv-zoo-sface-2021dec',
+      central_ai_thresholds_configured: false,
+      central_ai_recognition_ready: false,
+      central_ai_config_desired_revision: 0,
+      central_ai_config_applied_revision: 0,
+      central_ai_config_sync_status: 'pending',
     })
     const wrapper = mount(DevicesView, { global: { plugins: [adminPinia()] } })
     await flushPromises()
@@ -128,8 +192,12 @@ describe('device installation setup', () => {
       'armbian',
     )
     expect((wrapper.get('#device-connection-mode').element as HTMLSelectElement).value).toBe(
-      'private-network',
+      'same-host',
     )
+    expect((wrapper.get('#device-core-api-url').element as HTMLInputElement).value).toBe(
+      'http://127.0.0.1:8000',
+    )
+    await wrapper.get('#device-connection-mode').setValue('private-network')
     await wrapper.get('#device-core-api-url').setValue('https://core.school.test')
     await wrapper.get('#device-central-ai-url').setValue('https://ai.school.test')
 

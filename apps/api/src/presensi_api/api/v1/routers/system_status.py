@@ -34,6 +34,9 @@ def get_ai_readiness(session: DbSession) -> AiReadinessResponse:
 
     yunet_path = os.getenv("PRESENSI_ENROLLMENT_YUNET_MODEL_PATH", "").strip()
     sface_path = os.getenv("PRESENSI_ENROLLMENT_SFACE_MODEL_PATH", "").strip()
+    enrollment_model_version = (
+        os.getenv("PRESENSI_ENROLLMENT_MODEL_VERSION", "").strip() or None
+    )
     enrollment_ready = bool(
         yunet_path
         and sface_path
@@ -46,6 +49,7 @@ def get_ai_readiness(session: DbSession) -> AiReadinessResponse:
         return AiReadinessResponse(
             deployment_profile="AI_EDGE",
             enrollment_models_ready=enrollment_ready,
+            enrollment_model_version=enrollment_model_version,
             enrollment_quality_revision=enrollment_revision,
             central_ai_status="disabled",
             central_ai_models_ready=None,
@@ -98,6 +102,7 @@ def get_ai_readiness(session: DbSession) -> AiReadinessResponse:
         return AiReadinessResponse(
             deployment_profile="AI_CENTRAL",
             enrollment_models_ready=enrollment_ready,
+            enrollment_model_version=enrollment_model_version,
             enrollment_quality_revision=enrollment_revision,
             central_ai_status="ready" if recognition_ready else "degraded",
             central_ai_models_ready=model_ready,
@@ -115,6 +120,7 @@ def get_ai_readiness(session: DbSession) -> AiReadinessResponse:
         return AiReadinessResponse(
             deployment_profile="AI_CENTRAL",
             enrollment_models_ready=enrollment_ready,
+            enrollment_model_version=enrollment_model_version,
             enrollment_quality_revision=enrollment_revision,
             central_ai_status="unreachable",
             central_ai_models_ready=None,
