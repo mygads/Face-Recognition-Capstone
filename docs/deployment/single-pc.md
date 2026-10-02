@@ -52,7 +52,7 @@ python3 scripts/dev.py dev-up
 
 The task runner copies .env.example to .env if needed and fills blank local
 database/JWT/encrypted-template secrets, applies migrations, seeds roles, and
-creates a local administrator only if one does not already exist. It prints a
+creates a local administrator only when the user table is empty. It prints a
 random one-time password; change it at first sign-in. The .env file is ignored by Git. Keep
 the local generated keyring with the database volume; losing it makes encrypted
 templates in that volume unusable. These development secrets are not production

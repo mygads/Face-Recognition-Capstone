@@ -221,6 +221,32 @@ def test_bootstrap_refuses_non_development_environment(
             bootstrap_development_admin(session)
 
 
+def test_development_bootstrap_skips_database_with_existing_accounts(
+    api_database: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    with api_database.begin() as session:
+        seed_roles(session)
+        user = User(
+            email="existing-admin@example.edu",
+            full_name="Existing administrator",
+            password_hash="already-hashed",
+        )
+        session.add(user)
+        session.flush()
+        admin_role = session.scalar(select(Role).where(Role.code == "ADMIN"))
+        assert admin_role is not None
+        session.add(UserRole(user_id=user.id, role_id=admin_role.id))
+        session.flush()
+
+        assert bootstrap_development_admin(session) is None
+        assert (
+            session.scalar(select(User.id).where(User.email == BOOTSTRAP_EMAIL)) is None
+        )
+        assert len(session.scalars(select(User.id)).all()) == 1
+
+
 def test_failed_login_audits_successfully_without_credentials(
     api_database: sessionmaker[Session],
 ) -> None:

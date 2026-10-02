@@ -21,7 +21,8 @@ oleh OS. Webcam tidak dipasang ke Docker Compose default.
 
 Task runner membuat .env lokal jika belum ada, menghasilkan secret development,
 menjalankan migration dan role seed, lalu membuat akun admin lokal hanya jika
-belum ada. Simpan kata sandi sementara yang dicetak satu kali di terminal.
+belum ada akun pada database. Simpan kata sandi sementara yang dicetak satu
+kali di terminal.
 Emailnya admin@local.test; kata sandi wajib diganti sebelum aplikasi bisa
 digunakan. Bootstrap ini hanya berjalan dengan Compose development; deployment
 production tidak membuat akun bawaan.

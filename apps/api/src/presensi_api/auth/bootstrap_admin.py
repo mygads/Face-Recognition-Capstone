@@ -4,7 +4,7 @@ import os
 import secrets
 import sys
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from presensi_api.api.security.passwords import hash_password
@@ -21,7 +21,7 @@ def bootstrap_development_admin(session: Session) -> str | None:
         raise RuntimeError(
             "Development admin bootstrap is allowed only in development."
         )
-    if session.scalar(select(User.id).where(func.lower(User.email) == BOOTSTRAP_EMAIL)):
+    if session.scalar(select(User.id).limit(1)) is not None:
         return None
 
     role = session.scalar(select(Role).where(Role.code == "ADMIN"))
@@ -63,8 +63,8 @@ def main() -> int:
 
     if temporary_password is None:
         print(
-            f"Local bootstrap account {BOOTSTRAP_EMAIL} already exists; "
-            "no password was changed or revealed."
+            "The development database already contains an account; "
+            "no bootstrap account was created and no password was changed or revealed."
         )
         return 0
 
