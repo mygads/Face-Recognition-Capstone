@@ -64,17 +64,18 @@ Provision YuNet and SFace weights locally and set:
 PRESENSI_AI_YUNET_MODEL_PATH=/models/face_detection_yunet_2023mar.onnx
 PRESENSI_AI_SFACE_MODEL_PATH=/models/face_recognition_sface_2021dec.onnx
 PRESENSI_AI_MODEL_VERSION=school-provisioned-version
-PRESENSI_AI_MIN_TOP1_SIMILARITY=<locally calibrated value>
-PRESENSI_AI_MIN_TOP1_TOP2_MARGIN=<locally calibrated value>
+PRESENSI_AI_CORE_API_BASE_URL=https://core-api.example.edu
+PRESENSI_AI_CONFIG_SYNC_TOKEN=<same secret as Core API>
 ```
 
 The service does not download pretrained models at startup. The local setup
 script can download checksum-pinned files explicitly and fill the central model
-paths. If model files are present but calibrated thresholds are blank, the AI
-service remains available in degraded mode and does not build a recognizer.
-Both files, model version, and calibrated thresholds are required before it can
-infer. Thresholds have no preset acceptance values. Model provenance and
-deployment license notes are in [`docs/models.md`](../../docs/models.md).
+paths. Configure its Core API URL and `PRESENSI_AI_CONFIG_SYNC_TOKEN`; set the
+same high-entropy token in Core API. Admins publish quality and calibrated
+recognition thresholds from **AI & kamera**. If policy thresholds are blank or
+have not yet synchronized, the AI service stays degraded without a recognizer.
+Thresholds have no preset acceptance values. Model provenance and deployment
+license notes are in [`docs/models.md`](../../docs/models.md).
 Compose mounts the ignored local `models/weights` folder read-only at `/models`;
 for a native run, set model paths to files on the host instead.
 

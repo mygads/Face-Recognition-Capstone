@@ -79,8 +79,10 @@ The SFace version in the edge YAML must match
 version on all lab PCs. A model-version change requires planned template
 re-enrollment and gallery rollout; a config-only change makes existing
 templates unavailable to that version. The edge sample leaves recognition
-thresholds empty intentionally; do not start attendance until Top-1 and margin
-thresholds are calibrated locally.
+thresholds empty intentionally. The agent may start and report device health in
+a waiting state, but it performs no recognition until an administrator
+publishes Top-1 and margin values from a local calibration report in **AI &
+kamera**. No guessed threshold is accepted.
 
 ## 3. Server secrets and environment
 
@@ -346,8 +348,9 @@ Copy the approved model files to `/opt/presensi-edge-agent/models`; verify
 checksums and make them read-only to the service account. Copy
 `apps/edge-agent/config/edge-agent-ai-edge.example.yaml` to
 `/etc/presensi-edge-agent/edge-agent.yaml`. Set the HTTPS API name, camera
-index/backend/mode, absolute model paths, exact SFace version, and calibrated
-thresholds. Keep the config root-owned and readable by the agent:
+index/backend/mode, absolute model paths, and exact SFace version. Calibrated
+thresholds are published later from admin **AI & kamera**. Keep local
+configuration root-owned and readable by the agent:
 
 ```bash
 sudo install -o root -g presensi-edge -m 0640 \

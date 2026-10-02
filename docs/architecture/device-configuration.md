@@ -1,64 +1,50 @@
 # Konfigurasi server dan device kamera
 
-Dokumen ini membedakan pengaturan satu kali di server, pilihan saat instalasi
-kamera, dan tuning yang perlu dikalibrasi per lokasi. Profile `AI_EDGE` dan
-`STB_GATEWAY` memakai agent, API attendance, model domain, dan alur event yang
-sama; lokasi inference menentukan setting mana yang berlaku.
+Dokumen ini membedakan konfigurasi server, pilihan kamera saat instalasi, dan
+kebijakan pengenalan yang bisa dikelola admin dari web. `AI_EDGE` dan
+`STB_GATEWAY` tetap memakai API/domain attendance dan recognition-core yang sama;
+lokasi inference menentukan setting yang berlaku.
 
 ## Pembagian konfigurasi
 
-| Pengaturan | AI_EDGE pada PC lab | STB_GATEWAY pada Armbian | Lokasi saat ini |
+| Pengaturan | AI_EDGE pada PC lab | STB_GATEWAY pada Armbian | Lokasi pengaturan |
 | --- | --- | --- | --- |
-| URL Core API | Wajib; harus dapat dijangkau PC kamera | Wajib; harus dapat dijangkau STB | Di setup bundle/perangkat, lalu tersimpan di YAML lokal |
-| URL AI Central | Tidak dipakai | Wajib; harus dapat dijangkau STB | Di setup bundle/perangkat, lalu tersimpan di YAML lokal |
-| Device UUID dan credential | Satu credential per kamera/PC | Satu credential per STB, dipakai ke Core API dan AI Central | Dibuat pada halaman Perangkat; token ditampilkan sekali dan disimpan installer ke file berizin terbatas |
-| Kamera, resolusi, FPS | Wajib | Wajib, batas runtime 1280×720 dan 15 FPS | Installer kini menawarkan wizard kamera; dapat diulang dengan `configure-camera` |
-| Model wajah | YuNet dan SFace berada di host PC | Tidak ada model recognition di STB; model berada di AI Central | Installer AI_EDGE mengunduh model pin/checksum; server AI Central diprovision saat setup server |
-| Face quality | Minimum ukuran wajah, blur/Laplacian, rentang brightness | Gate ringan brightness dan sharpness sebelum burst | YAML device; belum diedit dari web |
-| Identitas dan threshold | Top-1, margin Top-1–Top-2, jumlah frame setuju, stride sampling | Dipilih/dievaluasi oleh AI Central; STB tidak menghitung identitas | YAML AI_EDGE atau environment AI Central; threshold harus berasal dari kalibrasi, bukan tebakan |
-| Liveness | Configurable pada proses local recognition | Dijalankan pada service recognition pusat jika model/policy aktif; bukan setting inference STB | Config service dan model yang disetujui; belum ada editor web |
-| Sampling/burst | Stride sampling dan pemilihan frame terbaik untuk recognition lokal | Motion/periodic gate, jumlah frame burst dan interval JPEG ke AI Central | YAML lokal; nilai berbeda karena tujuan dan kapasitas hardware berbeda |
-| Cache dan offline | Gallery sesi di memory; batas freshness dan event outbox SQLite | Informasi sesi/response sementara di memory; event final di outbox SQLite | TTL/cache/retry di YAML lokal; gallery hilang saat proses restart |
-| Auto-start setelah reboot | Perlu service manager OS | systemd pada Armbian | Bukan bagian installer commissioning saat ini; gunakan runbook production |
+| URL Core API | Wajib; harus dapat dijangkau PC kamera | Wajib; harus dapat dijangkau STB | Bundle saat instalasi, tersimpan lokal di YAML |
+| URL AI Central | Tidak dipakai | Wajib; harus dapat dijangkau STB | Bundle saat instalasi, tersimpan lokal di YAML |
+| UUID dan credential device | Satu credential per PC kamera | Satu credential per STB untuk Core API dan AI Central | Dibuat di Perangkat; token ditampilkan satu kali dan disimpan ke token file terlindungi |
+| Kamera, resolusi, FPS | Wajib | Wajib, batas runtime 1280×720 dan 15 FPS | Wizard installer di host kamera; dapat diulang dengan `configure-camera` |
+| YuNet/SFace dan versi model | Berada di PC kamera | Berada di server AI Central, bukan di STB | Dipasang saat provisioning; path/checksum bukan setting dashboard |
+| Kualitas enrollment | Min ukuran wajah, sharpness, dan brightness | Sama; enrollment tetap diproses Core API | AI & kamera di dashboard; revisi berlaku pada capture berikutnya |
+| Kualitas presensi | Min ukuran wajah, Laplacian sharpness, rentang brightness | Filter proxy brightness dan sharpness pada gateway | AI & kamera; tersinkron per device atau server |
+| Identitas dan threshold | Top-1, margin Top-1–Top-2, jumlah frame setuju, stride sampling | Dipilih AI Central; STB tidak menghitung identitas | AI & kamera; threshold butuh referensi laporan kalibrasi |
+| Burst gateway | Tidak dipakai | Motion/periodic gate, burst count/interval, JPEG quality | AI & kamera; konfigurasi per STB |
+| Liveness | Model dan policy lokal | Model dan policy di AI Central | Tetap pada konfigurasi service sampai model/izin disetujui; tidak diedit dashboard |
+| Cache/offline/retry | Gallery memory dan SQLite outbox | Session cache dan SQLite outbox | YAML lokal; ditujukan untuk operasi perangkat, bukan kalibrasi kualitas |
 
-## Kenapa beberapa opsi hanya ada di satu profile
+## Perbedaan setting antar-profile
 
-`AI_EDGE` menjalankan seluruh recognition-core di PC kamera. Karena itu ia
-memerlukan YuNet/SFace, threshold kecocokan, kualitas wajah untuk model, dan
-sampling temporal. Yang disebut “beberapa frame” pada profile ini adalah bukti
-multi-frame untuk satu track; tidak ada upload burst ke service AI.
+`AI_EDGE` menjalankan YuNet/SFace dan `recognition-core` pada PC kamera. Quality
+gate menilai face crop sebelum matching; threshold dan temporal agreement juga
+berada pada PC tersebut. Perubahan dari dashboard dikirim ke satu device, lalu
+pipeline dimuat ulang secara lokal oleh agent.
 
-`STB_GATEWAY` hanya menangkap gambar ringan dan mengirim burst kandidat ke AI
-Central. Config-nya memang memiliki camera index/resolusi/FPS, filter brightness
-dan sharpness, trigger gerakan/periodik, jumlah burst, kualitas JPEG, reconnect,
-cache session, batas offline, dan outbox/retry event. STB tidak memiliki
-threshold identitas, gallery embedding, atau model liveness lokal karena
-keputusan itu berada di AI Central. Nilai threshold dan versi model disetel
-seragam pada service pusat agar enrollment dan inference memakai versi sama.
-
-`quality` dan `gateway` memakai nama section terpisah sebab pengukuran serta
-ambang batasnya berbeda. AI_EDGE mengukur kualitas face crop untuk mencegah
-embedding dari wajah terlalu kecil/buram/gelap. STB menghitung proxy ringan
-pada frame downsampled untuk menghindari upload burst yang tidak perlu.
+`STB_GATEWAY` hanya menangkap gambar, menghitung proxy brightness/sharpness dan
+motion, lalu mengirim burst ke AI Central. Threshold identitas, face quality
+untuk recognition, model, dan liveness berada pada AI Central. Gateway hanya
+memakai setting capture/burst yang sesuai kemampuan hardware.
 
 ## Wizard kamera
 
-Installer Windows untuk AI_EDGE dan installer Linux untuk kedua profile kini
-menanyakan apakah operator ingin mengatur kamera. Wizard:
+Installer Windows untuk AI_EDGE dan installer Linux untuk kedua profile
+menawarkan wizard kamera. Wizard menampilkan index kamera yang terdeteksi, bukan
+meminta operator menebak dan mengetik index bebas. Nama/serial kamera tidak
+tersedia konsisten dari backend OpenCV pada semua OS, sehingga pilihan diberi
+label index. Wizard juga menawarkan resolusi dan FPS, mencoba mengirim beberapa
+frame, lalu menunjukkan resolusi hasil negosiasi driver serta FPS aktual.
 
-1. membuka kamera yang terdeteksi dan menawarkan index OpenCV yang tersedia;
-2. menawarkan resolusi dan FPS awal yang sesuai profile;
-3. meminta kamera mengirim beberapa frame, lalu menunjukkan resolusi hasil
-   negosiasi driver, FPS dari driver, dan FPS pengukuran singkat;
-4. menyimpan setting yang dipilih ke `edge-agent.yaml` atau `stb-gateway.yaml`.
-
-Nama/serial kamera tidak tersedia secara konsisten dari backend OpenCV untuk
-semua OS, sehingga pilihan memakai index. Nilai yang dipilih adalah request
-kepada driver; kamera dapat menegosiasikan mode berbeda. Untuk STB, wizard
-menolak mode aktual di atas batas 1280×720. Resolusi/FPS yang tersedia pada
-kamera tetap harus dipastikan pada perangkat nyata.
-
-Jika installer dilewati atau perlu mengubah kamera kemudian:
+Mode yang disimpan adalah permintaan kepada driver. Bila driver memilih resolusi
+lain, wizard meminta konfirmasi sebelum menyimpan. Batas STB 1280×720 dan 15 FPS
+tetap ditegakkan. Setelah mengganti kamera atau kabel, jalankan lagi wizard:
 
 ```powershell
 .\.venv-edge-agent\Scripts\presensi-edge-agent.exe --config apps/edge-agent/config/edge-agent.yaml configure-camera
@@ -68,60 +54,70 @@ Jika installer dilewati atau perlu mengubah kamera kemudian:
 .venv-edge-agent/bin/presensi-edge-agent --config apps/edge-agent/config/stb-gateway.yaml configure-camera
 ```
 
-Perintah `cameras` hanya menemukan index. Wizard di atas mencoba mode dan
-menyimpan pilihan. Preview kalibrasi (`presensi-camera-calibration`) adalah alat
-terpisah untuk menilai framing, blur, brightness, ukuran wajah, dan lampu; ia
-tidak mengganti setting attendance secara otomatis.
+Preview kalibrasi (`presensi-camera-calibration`) alat terpisah untuk memeriksa
+framing, blur, brightness, ukuran wajah, dan pencahayaan. Browser admin tidak
+dapat menemukan kamera yang tersambung ke host lain.
+
+## Pengaturan dari dashboard
+
+Halaman **AI & kamera** (`/app/ai-setup`) memiliki tiga kelompok pengaturan:
+
+1. **Kualitas enrollment** disimpan Core API dan digunakan pada request capture
+   berikutnya. Bila belum ada revisi dashboard, Core API memakai default
+   environment.
+2. **PC edge & STB** menerbitkan konfigurasi kualitas/temporal AI_EDGE atau
+   quality/burst STB untuk satu device terdaftar.
+3. **AI Central** menerbitkan quality/threshold/temporal policy di server
+   inference.
+
+Setiap perubahan menjadi revisi baru di `runtime_configuration_versions` dan
+menulis `runtime_configuration.published` ke `audit_logs`. API hanya menerima
+field allowlist; setting tidak bisa mengubah secret, URL, path model, kamera,
+embedding, atau liveness. Top-1 dan margin harus memiliki nilai berpasangan dan
+referensi laporan kalibrasi sebelum diterbitkan. Nilai kalibrasi tidak otomatis
+ditentukan dari kualitas gambar.
+
+AI_EDGE dan STB menarik konfigurasi per-device menggunakan device credential
+setidaknya setiap 15 detik. Agent melaporkan revisi yang diterapkan atau error
+code aman ke Core API. Konfigurasi terakhir yang valid disimpan sebagai file JSON
+non-biometrik di direktori state agent untuk digunakan setelah restart ketika
+koneksi API terputus. AI Central melakukan pull ke endpoint internal Core API
+menggunakan `PRESENSI_AI_CONFIG_SYNC_TOKEN`; rahasia yang sama harus tersedia pada
+Core API dan AI Central. `scripts/dev.py` membuat token lokal secara otomatis.
+Jika sinkronisasi AI Central belum berhasil, recognition runner tetap nonaktif
+dan readiness melaporkan pending/degraded.
+
+Status readiness/perangkat membandingkan revisi yang diminta dengan yang
+diterapkan. Perubahan quality/temporal/burst berlaku tanpa restart service.
+URL, credential, file model, versi model, dan kamera tetap dikelola saat
+provisioning/instalasi host. Perubahan model tetap perlu provisioning dan
+verifikasi checksum agar enrollment dan inference menggunakan versi sama.
 
 ## Setup deployment dan alamat jaringan
 
-Core API adalah control plane bersama untuk kedua profile. Pilihan deployment
-server (lokal/dev atau production) dilakukan saat menyiapkan server. Device
-harus diberi origin yang benar-benar dapat dijangkau dari jaringan kamera:
+Core API adalah control plane kedua profile. Device harus diberi origin yang bisa
+dijangkau dari jaringan kamera:
 
-- `127.0.0.1` hanya tepat jika kamera dan API berada pada komputer yang sama;
-- PC/STB lain harus memakai alamat LAN/VPN atau hostname HTTPS yang dapat
-  dirutekan dari VLAN kamera;
-- `localhost` pada konfigurasi kamera selalu menunjuk ke kamera itu sendiri;
-- Cloudflare Access/service identity belum didukung oleh agent. Jangan gunakan
-  tunnel publik sebagai pengganti jalur privat yang belum diuji.
+- `127.0.0.1` hanya tepat bila kamera dan API ada pada komputer yang sama;
+- PC/STB lain perlu alamat LAN/VPN atau hostname HTTPS yang bisa dirutekan dari
+  VLAN kamera;
+- `localhost` pada konfigurasi kamera selalu menunjuk ke host kamera itu sendiri;
+- Cloudflare Access/service identity belum didukung agent; gunakan reverse proxy
+  HTTPS atau jalur privat yang sudah diuji.
 
-Halaman Perangkat menyediakan default Core API/AI Central origin sebelum device
-dibuat dan dapat menggunakannya kembali pada setup selanjutnya. Default itu
-disimpan di browser admin (`localStorage`) agar tidak menyimpan secret ke API;
-ia tidak dibagi ke browser admin lain dan bukan system-wide server setting.
-Setiap bundle tetap dapat mengubah URL untuk device/lab yang berbeda. Halaman
-`/app/ai-setup` adalah readiness status, bukan editor config atau tombol restart
-service. Runtime setting per device masih ditulis ke YAML di host kamera.
-Production service configuration tetap dikelola pada host AI server dengan
-runbook.
+Halaman Perangkat dapat menyimpan default Core API/AI Central origin di browser
+admin (`localStorage`); nilai itu bukan system-wide server setting. Bundle tetap
+memuat URL, profile, UUID dan credential khusus satu device. Hapus setup bundle
+setelah transfer/pemasangan. Command installer tidak menaruh token pada shell
+history/process arguments.
 
-Untuk menghindari mengetik ulang URL dan credential di host kamera, gunakan
-tombol **Unduh paket setup perangkat**. Bundle satu device memuat origin,
-profile, UUID, model version, dan token, lalu command hasil dashboard membacanya
-dari `Downloads/presensi-device-<device-uuid>-setup.json`. Jika operator
-membuat bundle di komputer lain, pindahkan melalui USB/SCP ke folder Downloads
-host kamera sebelum menjalankan command. Hapus bundle setelah dipakai. Command
-tidak menaruh token ke shell history/process arguments. Bootstrap manual yang
-dijalankan tanpa bundle tetap meminta URL/credential melalui prompt tersembunyi.
+Model AI Central dipasang saat provisioning host:
 
-## Perubahan setting lewat dashboard
+```bash
+python3 scripts/download_face_models.py --directory /srv/presensi/models
+python3 scripts/download_face_models.py --directory /srv/presensi/models --check
+```
 
-Dashboard belum mendorong setting runtime ke agent. Satu host kamera memiliki
-config lokal dan mungkin sedang offline; perubahan jarak jauh butuh protokol
-versi/config, validasi, audit, persetujuan restart, dan rollback agar nilai
-threshold/model tidak berubah diam-diam. Sampai mekanisme itu tersedia:
-
-- pengaturan server AI Central diubah lewat secret/environment yang dilindungi
-  dan service direstart sesuai runbook;
-- setting device diedit pada YAML lokal lalu agent direstart;
-- threshold hanya diisi dari laporan benchmark/kalibrasi berversi;
-- jangan menyalin threshold antar kamera/lab tanpa validasi.
-
-Provision model AI Central dilakukan sebagai bagian provisioning host server
-dengan `python3 scripts/download_face_models.py --directory
-/srv/presensi/models`, diikuti `--check`. Downloader memverifikasi ukuran dan
-checksum. Service production tidak mengunduh file ketika start/restart; hal ini
-membuat startup tidak bergantung pada internet dan perubahan model tetap menjadi
-langkah deployment yang bisa ditinjau. Runbook production menyediakan perintah
-tersebut sebelum Compose dijalankan.
+Downloader memverifikasi ukuran dan checksum. File model tidak diunduh ulang
+ketika service production start. Path file dan versi model tetap menjadi bagian
+runbook deployment, bukan editor kebijakan di dashboard.

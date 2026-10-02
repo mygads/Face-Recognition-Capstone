@@ -209,7 +209,7 @@ before planning an integration around one.
    and [edge-agent setup](../../apps/edge-agent/README.md). Use only non-sensitive
    legal fixtures/adult volunteers with consent.
 
-Host OS prerequisites are installed once. Local startup downloads and checksum-verifies YuNet/SFace on first setup unless model download is explicitly skipped; the AI_EDGE camera installer also provisions them. Startup does not choose recognition thresholds or publish ports/domains. Device
+Host OS prerequisites are installed once. Local startup downloads and checksum-verifies YuNet/SFace on first setup unless model download is explicitly skipped; the AI_EDGE camera installer also provisions them. Startup does not choose recognition thresholds or publish ports/domains. Admins configure enrollment/recognition quality, temporal policy, and calibrated thresholds through the versioned **AI & kamera** dashboard; the camera wizard chooses physical camera and capture mode locally on that host. Device
 credentials are issued in the admin UI and transferred in a secret setup
 bundle; production service setup and public networking stay in the deployment
 runbooks.

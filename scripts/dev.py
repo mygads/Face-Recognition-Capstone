@@ -24,6 +24,7 @@ def ensure_env_file() -> None:
     secret_factories: dict[str, Callable[[], str]] = {
         "POSTGRES_PASSWORD": lambda: secrets.token_urlsafe(32),
         "JWT_SECRET": lambda: secrets.token_hex(32),
+        "PRESENSI_AI_CONFIG_SYNC_TOKEN": lambda: secrets.token_urlsafe(48),
         "PRESENSI_FACE_TEMPLATE_KEYS": lambda: (
             '{"local-v1":"' + base64.b64encode(secrets.token_bytes(32)).decode() + '"}'
         ),

@@ -33,6 +33,13 @@ fixtures.
   bearer credential. Credential verifiers are stored as SHA-256 hashes; a secret
   is returned once on provisioning/rotation, has an expiry, and renewal is
   audited. A human JWT cannot act as a device credential.
+- Remote settings are typed and allowlisted. Only ADMIN can publish revisions;
+  publication is recorded in `audit_logs`. Edge/STB sync uses each device's
+  credential and returns only that device's policy. AI Central sync uses
+  `PRESENSI_AI_CONFIG_SYNC_TOKEN`, which must be a high-entropy secret shared
+  only between Core API and AI Central through the deployment secret store. It
+  is not stored in the database, browser, or logs. Apply reports contain a
+  revision and safe error code only.
 - Gallery retrieval is scoped to active sessions in that device's assigned
   laboratory and to the requested model/version. Recognition event submission
   reuses the Core API attendance validation and idempotency rules.

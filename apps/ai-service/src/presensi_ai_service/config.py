@@ -17,6 +17,7 @@ class AIServiceConfigError(ValueError):
 class AISettings:
     device_tokens: Mapping[UUID, str] = field(default_factory=dict, repr=False)
     core_api_base_url: str | None = None
+    config_sync_token: str | None = field(default=None, repr=False)
     max_request_bytes: int = 20 * 1024 * 1024
     max_frame_bytes: int = 3 * 1024 * 1024
     max_frames_per_burst: int = 5
@@ -184,6 +185,9 @@ class AISettings:
             core_api_base_url=(
                 values.get("PRESENSI_AI_CORE_API_BASE_URL", "").strip().rstrip("/")
                 or None
+            ),
+            config_sync_token=(
+                values.get("PRESENSI_AI_CONFIG_SYNC_TOKEN", "").strip() or None
             ),
             max_request_bytes=int_setting(
                 "PRESENSI_AI_MAX_REQUEST_BYTES", 20 * 1024 * 1024

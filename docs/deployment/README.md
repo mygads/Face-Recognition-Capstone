@@ -74,7 +74,7 @@ replace the hardened systemd service setup in the AI_EDGE/STB runbooks.
 | Database/API settings | Root .env is created/populated by scripts/dev.py. | Copy the profile-specific example to a protected .env.ai-edge or .env.ai-central file; use distinct DB-owner and API-role passwords. |
 | JWT and encryption keys | Random local keys are generated for development. | Generate/recover keys through the institution's approved secret manager; store backups securely. |
 | YuNet/SFace | Optional until webcam recognition/enrollment; place approved files in ignored models/weights. | Provision outside Git/images, verify provenance and trusted SHA-256, and keep the same model version for enrollment and inference. |
-| Attendance thresholds | Empty intentionally. Do not start recognition with uncalibrated settings. | Record approved local calibration report and configure Top-1 plus Top-1/Top-2 margin. |
+| Attendance thresholds | Empty intentionally. Recognition stays disabled until configured. | Record approved local calibration report, then publish Top-1 plus Top-1/Top-2 margin from admin **AI & kamera**. |
 | Web/domain | localhost Vite is enough; no public hostname required. | Vue build behind Nginx or another reviewed proxy with exact public/internal DNS and valid TLS. |
 | Edge credentials | Register one development device and store its token in a local protected file. | Unique credential per physical device, OS ACL, renewal/revocation and audit. |
 | Hardware | Camera may be mocked or local UVC. | Verify exact PC/STB camera, OS/kernel driver, resolution, sustained CPU/RAM/temp and reconnect. |

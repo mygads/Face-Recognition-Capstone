@@ -175,8 +175,6 @@ PRESENSI_AI_MODELS_DIR=./models/weights
 PRESENSI_AI_YUNET_MODEL_PATH=/models/face_detection_yunet_2023mar.onnx
 PRESENSI_AI_SFACE_MODEL_PATH=/models/face_recognition_sface_2021dec.onnx
 PRESENSI_AI_MODEL_VERSION=opencv-zoo-sface-2021dec
-PRESENSI_AI_MIN_TOP1_SIMILARITY=
-PRESENSI_AI_MIN_TOP1_TOP2_MARGIN=
 ```
 
 Jalankan development central stack dengan:
@@ -197,12 +195,14 @@ gateway, gunakan capture hemat CPU dari contoh `STB_GATEWAY`; STB tidak memuat
 SFace/YuNet untuk inference. Preview diagnostik tetap alat lokal terpisah, bukan
 stream jaringan.
 
-Menu **AI readiness** di dashboard menampilkan status model/service yang
-dilaporkan API; menu itu belum mengubah threshold, brightness/sharpness,
-camera mode, credential, atau YAML agent. Ubah setting device di YAML host lalu
-restart agent. Aturan inference server AI Central diubah melalui protected
-environment/config dan runbook; jangan mengubah threshold sebelum ada laporan
-kalibrasi berversi.
+Menu **AI & kamera** di dashboard mengelola kualitas enrollment, kualitas frame,
+sampling, jumlah frame yang perlu sepakat, threshold terkalibrasi untuk AI_EDGE
+atau AI Central, dan burst/filter STB. Perubahan disimpan sebagai revision dan
+agent/service menariknya otomatis, tanpa restart. Threshold hanya boleh diisi
+dari laporan kalibrasi lokal; halaman readiness juga memperlihatkan revision
+yang diterapkan. Kamera fisik, index, resolusi/FPS, model file/version, liveness,
+URL, dan credential tetap dikelola pada host; jalankan ulang wizard kamera
+langsung di host saat perangkat perlu diubah.
 
 ## Batas fungsi saat ini
 

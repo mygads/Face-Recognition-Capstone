@@ -60,13 +60,24 @@ API connectivity again. There is no public gallery upload route.
 
 Model files are local provisioned YuNet/SFace assets; service startup never
 downloads weights. The local setup command can explicitly download the pinned
-files. If paths are configured but thresholds are blank, the service starts in
-degraded mode without a recognition runner. Recognition thresholds must be
-explicitly set from local evaluation before inference is enabled. The AI Compose
-profile installs the inference dependencies and the shared recognition-core
-package. For LAN access, bind the service to the central
+files. Quality and recognition policy (including calibrated thresholds) are
+published by an administrator in **AI & kamera** in the Core API dashboard. AI
+Central polls the Core API using `PRESENSI_AI_CONFIG_SYNC_TOKEN`, validates the
+allowlisted policy, rebuilds its runner, and reports the applied revision in
+`/health`. It starts without an inference runner until it receives a valid
+configuration. After a successful sync, a temporary Core API outage leaves the
+last valid policy active and reports sync as unavailable; the service never
+switches to an uncalibrated threshold. If thresholds are blank, it remains
+degraded without recognition. The Core API and AI Central need the same secret
+from the deployment secret store. The AI Compose profile installs the inference
+dependencies and the shared recognition-core package. For LAN access, bind the service to the central
 server's lab-network interface and place it behind TLS or an equivalent trusted
 transport boundary. Development Compose binds to loopback by default.
+
+Camera identity, model files/checksums/version, liveness model, and secrets are
+provisioned on the inference host. The dashboard does not change these host
+resources; quality, threshold, sampling, and frame-agreement policy are the
+remotely managed settings.
 
 Liveness stays disabled by default. Enabling it requires an explicitly configured
 local model and cutoff. Refer to [`models.md`](../models.md) for the current

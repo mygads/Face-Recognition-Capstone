@@ -42,6 +42,7 @@ from presensi_api.enrollment_processing import (
     EnrollmentProcessor,
     get_enrollment_processor,
 )
+from presensi_api.runtime_configuration import configuration_values
 from presensi_api.session_lifecycle import as_utc
 
 router = APIRouter(tags=["enrollment", "templates"])
@@ -56,6 +57,11 @@ ALLOWED_IMAGE_TYPES = {
     ".png": "image/png",
     ".webp": "image/webp",
 }
+
+
+def configured_enrollment_processor(session: DbSession) -> EnrollmentProcessor:
+    _, quality_settings, _ = configuration_values(session, "enrollment")
+    return get_enrollment_processor(quality_settings or None)
 
 
 @router.get(
@@ -146,7 +152,7 @@ async def submit_enrollment_captures(
     captures: Annotated[list[UploadFile], File(min_length=3, max_length=MAX_CAPTURES)],
     principal: EnrollmentOperator,
     session: DbSession,
-    processor: EnrollmentProcessor = Depends(get_enrollment_processor),
+    processor: EnrollmentProcessor = Depends(configured_enrollment_processor),
 ) -> EnrollmentCaptureResultResponse:
     student = session.scalar(
         select(Student).where(Student.id == student_id).with_for_update()

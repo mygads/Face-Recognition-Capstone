@@ -32,8 +32,9 @@ AI_CENTRAL (API/web plus AI service). Pilihan disimpan di `.env`; berikutnya
 script menjalankan pilihan yang sama. Untuk menggantinya, jalankan
 `py -3 scripts/start-local.py --profile edge` atau `--profile central` di
 Windows; di Ubuntu gunakan `python3 scripts/start-local.py --profile edge` atau
-`--profile central`. Flag lama `--central` tetap tersedia. Model dan threshold
-AI Central tetap harus diprovisikan/dikalibrasi sebelum inference dapat dipakai.
+`--profile central`. Flag lama `--central` tetap tersedia. Model harus
+diprovisikan pada host inference dan threshold harus diisi dari laporan
+kalibrasi melalui halaman admin **AI & kamera** sebelum inference dipakai.
 
 Pada setup lokal pertama, YuNet/SFace otomatis diunduh (~39 MB), diverifikasi
 dengan checksum, lalu dipasang ke `models/weights/`. Gunakan
@@ -43,8 +44,8 @@ dengan checksum, lalu dipasang ke `models/weights/`. Gunakan
 otomatis mengunduh model. File model tidak ikut `git clone`. Untuk AI_CENTRAL
 production, ikuti provisioning pada runbook. SFace masih untuk evaluasi hingga
 izin sekolah ditinjau; threshold recognition harus dikalibrasi. Pada AI_CENTRAL
-lokal, model sudah dipasang tetapi inference belum siap sampai threshold
-dikonfigurasi.
+lokal, model sudah dipasang tetapi inference belum siap sampai konfigurasi
+berkalibrasi diterbitkan dari dashboard **AI & kamera**.
 
 Satu command startup menyimpan pilihan profile, membuat `.env` lokal jika belum
 ada, menghasilkan secret development, menjalankan migration dan role seed,
@@ -167,8 +168,8 @@ serta [index runbook deployment](docs/deployment/README.md).
 
 6. Installer AI_EDGE memasang model checksum-verified otomatis. Untuk
    AI_CENTRAL production, provision model saat setup server sesuai runbook.
-   Isi threshold Top-1 dan margin dari laporan kalibrasi pada konfigurasi
-   service yang sesuai sebelum presensi. Untuk `STB_GATEWAY`, pastikan AI
+   Isi threshold Top-1 dan margin dari laporan kalibrasi pada halaman admin
+   **AI & kamera** sebelum presensi. Untuk `STB_GATEWAY`, pastikan AI
    Central dan Core API sehat serta STB menjangkau keduanya melalui LAN.
    Setelah heartbeat muncul **Online**, buat jadwal, buka sesi sebagai guru,
    lalu uji event dan dashboard.
@@ -187,11 +188,14 @@ perintah yang otomatis memilih domain, TLS, secret store, firewall, backup,
 model, threshold, dan kebijakan sekolah; langkah server production tetap
 terkendali di [runbook deployment](docs/deployment/README.md).
 
-Halaman admin **AI & kamera** menampilkan profile aktif, kesiapan model yang
-dilaporkan, status AI Central, dan heartbeat/kamera perangkat. Halaman ini belum
-mengubah threshold atau me-restart service; threshold tetap diisi berdasarkan
-laporan kalibrasi pada `.env` AI Central atau YAML edge agent. Untuk perubahan
-runtime, restart service lewat supervisor deployment yang sesuai.
+Halaman admin **AI & kamera** menampilkan readiness dan mengelola kualitas
+enrollment, kualitas frame, sampling, jumlah frame yang perlu sepakat, threshold
+terkalibrasi AI_EDGE/AI_CENTRAL, serta filter/burst STB. Pengaturan dibuat
+sebagai revisi, dicatat di audit log, lalu ditarik otomatis oleh service tanpa
+restart. Dashboard menampilkan revisi yang diminta dan diterapkan. Kamera,
+resolusi/FPS, model/checksum/version, token, URL service, dan liveness model
+tetap dikonfigurasi pada host; wizard installer mendeteksi pilihan kamera yang
+tersedia. Halaman ini tidak mengunduh model atau memulai ulang service.
 
 ## Status kesiapan pengenalan wajah
 

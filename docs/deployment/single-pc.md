@@ -227,9 +227,11 @@ configured private LAN server/reverse proxy from the deployment runbook. Never
 expose the raw development API port directly to the Internet.
 
 Recognition thresholds `min_top1_similarity` and `min_top1_top2_margin`
-intentionally have no final defaults. The installer reports this as a
-readiness blocker and does not invent values. Calibrate locally under approved
-conditions before running attendance. For the first webcam test, use the
+intentionally have no final defaults. The edge agent may start in a waiting
+state so it can receive settings from the admin dashboard, but it does not
+recognize or create events until thresholds are published from a local
+calibration report. Calibrate under approved conditions before running
+attendance. For the first webcam test, use the
 camera calibration preview, then close it before running the edge-agent because
 many webcams allow only one process at a time. See [edge-agent setup](../../apps/edge-agent/README.md).
 
@@ -249,9 +251,10 @@ python3 scripts/start-local.py --central
 
 Before starting it, place the model files and set the central YuNet/SFace paths
 and model version in `.env` (fresh `.env.example` already contains local paths
-and the baseline version).
-Both Top-1 and Top-1/Top-2 margin values must come from approved local
-calibration; there are no production defaults. The camera-side process must use
+and the baseline version). Local Compose generates the Core API/AI Central
+configuration sync secret. Set calibrated Top-1 and Top-1/Top-2 margin values
+from the admin dashboard using an approved local calibration report; there are
+no production defaults. The camera-side process must use
 STB_GATEWAY mode and send bursts to the service. A webcam on the same laptop is
 only a developer simulation of the networked STB arrangement; it does not test
 ARM64 performance, Armbian drivers, LAN latency, or STB thermals.

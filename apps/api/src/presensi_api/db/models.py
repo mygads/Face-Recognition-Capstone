@@ -188,6 +188,13 @@ class Device(UUIDPrimaryKey, TimestampMixin, Base):
             "camera_status IN ('unknown', 'online', 'offline', 'error')",
             name="camera_status",
         ),
+        CheckConstraint(
+            "config_apply_status IN ('not_configured', 'pending', 'applied', 'error')",
+            name="config_apply_status",
+        ),
+        CheckConstraint(
+            "config_applied_revision >= 0", name="config_revision_nonnegative"
+        ),
         Index("ix_devices_laboratory_id", "laboratory_id"),
         Index("ix_devices_last_seen_at", "last_seen_at"),
     )
@@ -222,6 +229,39 @@ class Device(UUIDPrimaryKey, TimestampMixin, Base):
     previous_credential_hash: Mapped[str | None] = mapped_column(String(64))
     previous_credential_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
+    )
+    config_applied_revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    config_apply_status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="not_configured",
+        server_default=text("'not_configured'"),
+    )
+    config_error_code: Mapped[str | None] = mapped_column(String(64))
+    config_applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RuntimeConfigurationVersion(UUIDPrimaryKey, Base):
+    """Auditable versions of safe, remotely managed runtime settings."""
+
+    __tablename__ = "runtime_configuration_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "scope_key", "revision", name="uq_runtime_config_scope_revision"
+        ),
+        CheckConstraint("revision >= 1", name="revision_positive"),
+    )
+
+    scope_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    settings: Mapped[dict[str, object]] = mapped_column(JSON_OBJECT, nullable=False)
+    actor_user_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
 

@@ -1803,6 +1803,93 @@ a:focus-visible {
   color: #65470f !important;
 }
 
+.ai-setup-view__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.ai-setup-view__settings {
+  display: grid;
+  gap: 1rem;
+}
+
+.ai-setup-view__settings h3 {
+  margin: 0.5rem 0 0;
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.ai-setup-view__form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ai-setup-view__form-wide {
+  grid-column: 1 / -1;
+}
+
+.ai-setup-view__device-picker {
+  display: grid;
+  width: min(100%, 460px);
+  gap: 0.4rem;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.ai-setup-view__device-picker select {
+  min-height: 40px;
+  padding: 0 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.45rem;
+  background: var(--body-bg);
+  color: var(--text);
+}
+
+.ai-setup-view__apply-state,
+.ai-setup-view__device-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.ai-setup-view__apply-state strong {
+  color: var(--text);
+}
+
+.ai-setup-view__device-status {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+
+.ai-setup-view__device-row span:first-child strong,
+.ai-setup-view__device-row span:first-child small {
+  display: block;
+}
+
+.ai-setup-view__device-row small {
+  margin-top: 0.2rem;
+  color: var(--text-muted);
+}
+
+.ai-setup-view__success {
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
+  border-radius: 0.45rem;
+  background: color-mix(in srgb, var(--green) 9%, var(--bg-surface));
+  color: var(--green);
+}
+
 @media (max-width: 760px) {
   .ai-setup-view__profile {
     align-items: stretch;
@@ -1815,6 +1902,14 @@ a:focus-visible {
 
   .ai-setup-view__grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ai-setup-view__form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ai-setup-view__form-wide {
+    grid-column: auto;
   }
 
   .ai-setup-view__card--wide {

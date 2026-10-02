@@ -5,6 +5,7 @@ import io
 import math
 import os
 import warnings
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -144,7 +145,9 @@ class OpenCVEnrollmentProcessor:
         )
 
 
-def get_enrollment_processor() -> EnrollmentProcessor:
+def get_enrollment_processor(
+    quality_settings: Mapping[str, object] | None = None,
+) -> EnrollmentProcessor:
     yunet_path = os.getenv("PRESENSI_ENROLLMENT_YUNET_MODEL_PATH", "").strip()
     sface_path = os.getenv("PRESENSI_ENROLLMENT_SFACE_MODEL_PATH", "").strip()
     model_version = os.getenv("PRESENSI_ENROLLMENT_MODEL_VERSION", "").strip()
@@ -155,17 +158,34 @@ def get_enrollment_processor() -> EnrollmentProcessor:
             "Enrollment image processing is not configured on this server.",
         )
     try:
+        values = quality_settings or {}
         return OpenCVEnrollmentProcessor(
             yunet_path=yunet_path,
             sface_path=sface_path,
             model_version=model_version,
-            min_face_pixels=int(os.getenv("PRESENSI_ENROLLMENT_MIN_FACE_PIXELS", "80")),
-            min_laplacian_variance=float(
-                os.getenv("PRESENSI_ENROLLMENT_MIN_SHARPNESS", "45")
+            min_face_pixels=_quality_int(
+                values,
+                "min_face_pixels",
+                "PRESENSI_ENROLLMENT_MIN_FACE_PIXELS",
+                80,
             ),
-            min_brightness=float(os.getenv("PRESENSI_ENROLLMENT_MIN_BRIGHTNESS", "25")),
-            max_brightness=float(
-                os.getenv("PRESENSI_ENROLLMENT_MAX_BRIGHTNESS", "235")
+            min_laplacian_variance=_quality_float(
+                values,
+                "min_sharpness",
+                "PRESENSI_ENROLLMENT_MIN_SHARPNESS",
+                45.0,
+            ),
+            min_brightness=_quality_float(
+                values,
+                "min_brightness",
+                "PRESENSI_ENROLLMENT_MIN_BRIGHTNESS",
+                25.0,
+            ),
+            max_brightness=_quality_float(
+                values,
+                "max_brightness",
+                "PRESENSI_ENROLLMENT_MAX_BRIGHTNESS",
+                235.0,
             ),
         )
     except (OSError, RuntimeError, ValueError) as exc:
@@ -174,6 +194,48 @@ def get_enrollment_processor() -> EnrollmentProcessor:
             "enrollment_models_unavailable",
             "Enrollment image processing is not configured on this server.",
         ) from exc
+
+
+def _setting_value(
+    settings: Mapping[str, object],
+    name: str,
+    environment_name: str,
+    default: int | float,
+) -> object:
+    value = settings.get(name)
+    return os.getenv(environment_name, str(default)) if value is None else value
+
+
+def _quality_int(
+    settings: Mapping[str, object], name: str, environment_name: str, default: int
+) -> int:
+    value = _setting_value(settings, name, environment_name, default)
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer.")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        parsed = float(value)
+        if math.isfinite(parsed) and parsed.is_integer():
+            return int(parsed)
+    raise ValueError(f"{name} must be an integer.")
+
+
+def _quality_float(
+    settings: Mapping[str, object],
+    name: str,
+    environment_name: str,
+    default: float,
+) -> float:
+    value = _setting_value(settings, name, environment_name, default)
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        raise ValueError(f"{name} must be a number.")
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError(f"{name} must be finite.")
+    return parsed
 
 
 def _rejected(model_version: str, reason: str) -> EnrollmentFrameResult:

@@ -184,6 +184,30 @@ class CoreApiClient:
             payload=payload,
         )
 
+    def fetch_runtime_configuration(self) -> dict[str, object]:
+        response = self._request(
+            "GET", f"/api/v1/devices/{self.device_id}/runtime-configuration"
+        )
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ApiCallError(response.status_code, retryable=False) from exc
+        if not isinstance(payload, dict):
+            raise ApiCallError(response.status_code, retryable=False)
+        return cast(dict[str, object], payload)
+
+    def report_runtime_configuration(
+        self, *, revision: int, status: str, error_code: str | None = None
+    ) -> None:
+        payload: dict[str, object] = {"revision": revision, "status": status}
+        if error_code is not None:
+            payload["error_code"] = error_code
+        self._request(
+            "POST",
+            f"/api/v1/devices/{self.device_id}/runtime-configuration/status",
+            payload=payload,
+        )
+
     def _persist_rotated_credential(self, payload: object) -> None:
         if not isinstance(payload, dict):
             return

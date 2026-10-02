@@ -3,6 +3,12 @@ import type { components, operations, paths } from './generated/schema'
 
 export type AuthenticatedAccount = components['schemas']['CurrentUserResponse']
 export type AiReadiness = components['schemas']['AiReadinessResponse']
+export type ConfigurationVersion = components['schemas']['ConfigurationVersionResponse']
+export type EnrollmentQualityConfiguration =
+  components['schemas']['EnrollmentQualityConfiguration']
+export type RecognitionConfiguration = components['schemas']['RecognitionConfiguration']
+export type StbGatewayConfiguration = components['schemas']['StbGatewayConfiguration']
+export type DeviceRuntimeConfiguration = components['schemas']['DeviceConfigurationResponse']
 export type AccessToken = components['schemas']['TokenResponse']
 export type PasswordChangeRequest = components['schemas']['PasswordChangeRequest']
 export type PasswordChangeResult = components['schemas']['PasswordChangeResponse']
@@ -142,6 +148,60 @@ export async function getCurrentAccount(): Promise<AuthenticatedAccount> {
 export async function getAiReadiness(): Promise<AiReadiness> {
   const result = await apiClient.GET('/api/v1/admin/system/ai-readiness')
   return unwrap(result)
+}
+
+export async function getEnrollmentQualityConfiguration(): Promise<ConfigurationVersion> {
+  return unwrap(await apiClient.GET('/api/v1/admin/settings/enrollment-quality'))
+}
+
+export async function saveEnrollmentQualityConfiguration(
+  body: EnrollmentQualityConfiguration,
+): Promise<ConfigurationVersion> {
+  return unwrap(await apiClient.PUT('/api/v1/admin/settings/enrollment-quality', { body }))
+}
+
+export async function getCentralRecognitionConfiguration(): Promise<ConfigurationVersion> {
+  return unwrap(await apiClient.GET('/api/v1/admin/settings/ai-central'))
+}
+
+export async function saveCentralRecognitionConfiguration(
+  body: RecognitionConfiguration,
+): Promise<ConfigurationVersion> {
+  return unwrap(await apiClient.PUT('/api/v1/admin/settings/ai-central', { body }))
+}
+
+export async function getDeviceRuntimeConfiguration(
+  deviceId: string,
+): Promise<DeviceRuntimeConfiguration> {
+  return unwrap(
+    await apiClient.GET('/api/v1/admin/settings/devices/{device_id}', {
+      params: { path: { device_id: deviceId } },
+    }),
+  )
+}
+
+export async function saveEdgeDeviceConfiguration(
+  deviceId: string,
+  body: RecognitionConfiguration,
+): Promise<DeviceRuntimeConfiguration> {
+  return unwrap(
+    await apiClient.PUT('/api/v1/admin/settings/devices/{device_id}/ai-edge', {
+      params: { path: { device_id: deviceId } },
+      body,
+    }),
+  )
+}
+
+export async function saveGatewayDeviceConfiguration(
+  deviceId: string,
+  body: StbGatewayConfiguration,
+): Promise<DeviceRuntimeConfiguration> {
+  return unwrap(
+    await apiClient.PUT('/api/v1/admin/settings/devices/{device_id}/stb-gateway', {
+      params: { path: { device_id: deviceId } },
+      body,
+    }),
+  )
 }
 
 export async function changePassword(body: PasswordChangeRequest): Promise<PasswordChangeResult> {

@@ -19,6 +19,10 @@ from presensi_edge_agent.camera import CameraUnavailableError
 from presensi_edge_agent.config import EdgeConfig, resolve_api_token
 from presensi_edge_agent.events import event_payload
 from presensi_edge_agent.logging import log_event
+from presensi_edge_agent.managed_config import (
+    apply_managed_configuration,
+    persist_managed_configuration,
+)
 from presensi_edge_agent.outbox import EventOutbox, OutboxFullError
 from recognition_core.domain import GalleryEntry, TrackDecision
 
@@ -99,11 +103,16 @@ class EdgeService:
             ),
             "pending_events": pending,
             "dead_letter_events": dead_letter,
+            "runtime_config_revision": self.config.runtime_config_revision,
+            "recognition_ready": (
+                self.config.recognition.min_top1_similarity is not None
+                and self.config.recognition.min_top1_top2_margin is not None
+            ),
         }
 
     def run(self) -> None:
         token = resolve_api_token(self.config)
-        self.config.require_runtime(api_token=token)
+        self.config.require_runtime(api_token=token, allow_unconfigured_thresholds=True)
         log_event(
             logger,
             logging.INFO,
@@ -213,6 +222,11 @@ class EdgeService:
         if cache_changed:
             self._gallery = bundle.gallery()
         self._active_bundle = bundle
+        if (
+            self.config.recognition.min_top1_similarity is None
+            or self.config.recognition.min_top1_top2_margin is None
+        ):
+            return
         captured_at = datetime.now(UTC)
         decision = self.recognizer.process(frame, self._gallery, captured_at)
         if decision.state == "collecting":
@@ -263,6 +277,7 @@ class EdgeService:
     def _sync_worker(self) -> None:
         next_heartbeat = 0.0
         next_cache_refresh = 0.0
+        next_configuration_refresh = 0.0
         while not self.stop_event.is_set():
             now = time.monotonic()
             try:
@@ -275,6 +290,11 @@ class EdgeService:
                     if not refreshed:
                         retry_delay = max(retry_delay, 30.0)
                     next_cache_refresh = now + retry_delay
+                if now >= next_configuration_refresh:
+                    self._sync_managed_configuration()
+                    next_configuration_refresh = now + max(
+                        15.0, self.config.api.heartbeat_interval_seconds
+                    )
                 self._flush_outbox()
             except Exception as exc:
                 log_event(
@@ -284,6 +304,78 @@ class EdgeService:
                     exception_type=type(exc).__name__,
                 )
             self.stop_event.wait(1.0)
+
+    def _sync_managed_configuration(self) -> None:
+        fetch = getattr(self.api, "fetch_runtime_configuration", None)
+        report = getattr(self.api, "report_runtime_configuration", None)
+        if not callable(fetch) or not callable(report):
+            return
+        attempted_revision = self.config.runtime_config_revision
+        try:
+            payload = fetch()
+            revision = payload.get("revision")
+            settings = payload.get("settings")
+            if type(revision) is not int or revision < 0:
+                raise ValueError("invalid_revision")
+            attempted_revision = revision
+            if revision == 0:
+                return
+            if revision < self.config.runtime_config_revision:
+                raise ValueError("revision_rollback")
+            if revision != self.config.runtime_config_revision:
+                updated_config = apply_managed_configuration(
+                    self.config, revision=revision, settings=settings
+                )
+                apply_recognition = getattr(
+                    self.recognizer, "apply_configuration", None
+                )
+                if updated_config.mode == "AI_EDGE":
+                    if not callable(apply_recognition):
+                        raise ValueError("recognition_reconfigure_unavailable")
+                    apply_recognition(updated_config)
+                    self.recognizer.reset()
+                if not isinstance(settings, dict):
+                    raise ValueError("invalid_settings")
+                persist_managed_configuration(
+                    self.config, revision=revision, settings=settings
+                )
+                self.config = updated_config
+            report(revision=revision, status="applied")
+            log_event(
+                logger,
+                logging.INFO,
+                "runtime_configuration_applied",
+                config_revision=revision,
+            )
+        except ApiCallError as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                "runtime_configuration_fetch_failed",
+                status_code=exc.status_code,
+                retryable=exc.retryable,
+            )
+        except Exception as exc:
+            error_code = (
+                str(exc)
+                if isinstance(exc, ValueError) and str(exc).replace("_", "").isalnum()
+                else "configuration_apply_failed"
+            )[:64]
+            try:
+                if callable(report) and attempted_revision > 0:
+                    report(
+                        revision=attempted_revision,
+                        status="error",
+                        error_code=error_code,
+                    )
+            except ApiCallError:
+                pass
+            log_event(
+                logger,
+                logging.ERROR,
+                "runtime_configuration_apply_failed",
+                error_code=error_code,
+            )
 
     def _send_heartbeat(self) -> None:
         try:

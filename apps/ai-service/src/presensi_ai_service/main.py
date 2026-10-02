@@ -3,11 +3,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import math
 import secrets
 import time
 from collections import defaultdict, deque
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager, suppress
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Literal, cast
 from uuid import UUID
@@ -21,6 +24,10 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validato
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from presensi_ai_service.config import AISettings
+from presensi_ai_service.configuration_sync import (
+    ConfigurationSyncError,
+    CoreApiConfigurationClient,
+)
 from presensi_ai_service.gallery_cache import (
     SessionGallery,
     SessionGalleryCache,
@@ -38,6 +45,8 @@ from presensi_ai_service.inference import (
     build_model_runner,
 )
 from recognition_core.opencv_models import SFaceModel
+
+logger = logging.getLogger("presensi_ai_service")
 
 
 class ErrorPayload(BaseModel):
@@ -347,15 +356,116 @@ def create_app(
     runner: RecognitionRunner | None = None,
     gallery_cache: SessionGalleryCache | None = None,
     gallery_provider: SessionGalleryProvider | None = None,
+    configuration_client: CoreApiConfigurationClient | None = None,
 ) -> FastAPI:
     configured = settings or AISettings.from_env()
     psutil.cpu_percent(interval=None)
+
+    sync_client = configuration_client
+    if (
+        sync_client is None
+        and configured.core_api_base_url is not None
+        and configured.config_sync_token is not None
+        and len(configured.config_sync_token) >= 32
+    ):
+        sync_client = CoreApiConfigurationClient(
+            configured.core_api_base_url,
+            configured.config_sync_token,
+            timeout_seconds=configured.inference_timeout_seconds,
+        )
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        async def sync_managed_settings() -> None:
+            while True:
+                try:
+                    if sync_client is not None:
+                        revision, values = await sync_client.fetch()
+                        current_revision = app.state.central_config_revision
+                        if revision < current_revision:
+                            raise ConfigurationSyncError(
+                                "Configuration revision rollback was rejected."
+                            )
+                        should_apply = (
+                            revision > current_revision
+                            or app.state.central_config_sync_status
+                            in {
+                                "pending",
+                                "unavailable",
+                            }
+                        )
+                        if should_apply:
+                            allowed_fields = {
+                                "min_top1_similarity",
+                                "min_top1_top2_margin",
+                                "minimum_agreeing_frames",
+                                "sample_every_n_frames",
+                                "best_frame_count",
+                                "max_history_frames",
+                                "min_face_pixels",
+                                "min_laplacian_variance",
+                                "min_brightness",
+                                "max_brightness",
+                                "calibration_reference",
+                            }
+                            if set(values) != allowed_fields:
+                                raise ConfigurationSyncError(
+                                    "Managed settings are incomplete."
+                                )
+                            settings_patch = {
+                                key: value
+                                for key, value in values.items()
+                                if key != "calibration_reference"
+                            }
+                            next_settings = replace(
+                                app.state.settings, **settings_patch
+                            )
+                            next_runner = await asyncio.to_thread(
+                                build_model_runner, next_settings
+                            )
+                            app.state.settings = next_settings
+                            app.state.runner = next_runner
+                            app.state.central_config_revision = revision
+                        app.state.central_config_sync_status = "applied"
+                        app.state.central_config_error_code = None
+                    else:
+                        app.state.central_config_sync_status = "disabled"
+                except ConfigurationSyncError:
+                    app.state.central_config_sync_status = "unavailable"
+                    app.state.central_config_error_code = (
+                        "configuration_sync_unavailable"
+                    )
+                    logger.warning("AI Central managed configuration sync unavailable")
+                except (TypeError, ValueError):
+                    app.state.central_config_sync_status = "error"
+                    app.state.central_config_error_code = "configuration_rejected"
+                    logger.error("AI Central rejected managed configuration")
+                except Exception:
+                    app.state.central_config_sync_status = "unavailable"
+                    app.state.central_config_error_code = "configuration_sync_failed"
+                    logger.warning("AI Central managed configuration sync failed")
+                await asyncio.sleep(15)
+
+        worker = asyncio.create_task(sync_managed_settings())
+        try:
+            yield
+        finally:
+            worker.cancel()
+            with suppress(asyncio.CancelledError):
+                await worker
+
     app = FastAPI(
         title="Presensi Central AI Service",
         version="0.2.0",
         description="Transient central inference for trusted edge devices.",
+        lifespan=lifespan,
     )
     app.state.settings = configured
+    app.state.central_config_revision = 0
+    app.state.central_config_sync_status = (
+        "pending" if sync_client is not None else "disabled"
+    )
+    app.state.central_config_error_code = None
     app.state.authenticator = DeviceAuthenticator(configured.device_tokens)
     app.state.rate_limiter = DeviceRateLimiter(
         rate=configured.rate_limit_per_second,
@@ -377,7 +487,13 @@ def create_app(
             timeout_seconds=configured.inference_timeout_seconds,
         )
     app.state.gallery_provider = configured_provider
-    app.state.runner = runner if runner is not None else build_model_runner(configured)
+    app.state.runner = (
+        None
+        if sync_client is not None
+        else runner
+        if runner is not None
+        else build_model_runner(configured)
+    )
     app.state.metrics = BasicMetrics()
     device_session_grants: dict[tuple[UUID, UUID], tuple[bytes, datetime]] = {}
 
@@ -485,6 +601,9 @@ def create_app(
             "model_version": active_settings.model_version,
             "thresholds_configured": thresholds_configured,
             "recognition_ready": recognition_ready,
+            "configuration_revision": app.state.central_config_revision,
+            "configuration_sync_status": app.state.central_config_sync_status,
+            "configuration_sync_error_code": app.state.central_config_error_code,
         }
 
     @app.get("/metrics", response_model=Metrics, tags=["system"])

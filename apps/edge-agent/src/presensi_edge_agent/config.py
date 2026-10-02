@@ -115,6 +115,7 @@ class EdgeConfig:
     liveness: LivenessSettings
     runtime: RuntimeSettings
     mode: str = "AI_EDGE"
+    runtime_config_revision: int = 0
     central_ai: CentralAISettings = field(
         default_factory=lambda: CentralAISettings("http://127.0.0.1:8001", None, 8.0)
     )
@@ -125,7 +126,11 @@ class EdgeConfig:
     )
 
     def require_runtime(
-        self, *, api_token: str | None, ai_token: str | None = None
+        self,
+        *,
+        api_token: str | None,
+        ai_token: str | None = None,
+        allow_unconfigured_thresholds: bool = False,
     ) -> None:
         if self.device_id is None:
             raise EdgeConfigError("PRESENSI_EDGE_DEVICE_ID is required.")
@@ -167,7 +172,7 @@ class EdgeConfig:
             raise EdgeConfigError("models.sface_path must point to a local model file.")
         if not self.models.version.strip():
             raise EdgeConfigError("models.version is required.")
-        if (
+        if not allow_unconfigured_thresholds and (
             self.recognition.min_top1_similarity is None
             or self.recognition.min_top1_top2_margin is None
         ):

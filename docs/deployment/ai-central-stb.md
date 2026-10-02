@@ -95,9 +95,13 @@ rahasia/keyring di secret manager sekolah.
 
 `PRESENSI_AI_CORE_API_BASE_URL` harus mengarah ke origin HTTPS Core API valid dan
 dapat dicapai dari container (DNS LAN boleh menunjuk ke IP server privat).
+Atur `PRESENSI_AI_CONFIG_SYNC_TOKEN` sebagai secret acak minimal 32 karakter di
+Core API dan AI Central. Token ini hanya untuk penarikan konfigurasi internal;
+jangan taruh pada bundle device.
 Biarkan `PRESENSI_AI_DEVICE_TOKENS` kosong: AI memvalidasi credential/session
-melalui Core API; jangan salin token STB ke env server. Isi threshold Top-1 dan
-margin hanya dari evaluasi lokal legal. Liveness tetap nonaktif di contoh;
+melalui Core API; jangan salin token STB ke env server. Setelah server siap,
+admin mengisi threshold Top-1 dan margin pada halaman **AI & kamera** dengan
+referensi laporan evaluasi lokal legal. Liveness tetap nonaktif di contoh;
 gunakan kontrol fisik/pengawasan yang disetujui sekolah hingga model liveness
 mendapat clearance lisensi dan validasi tersendiri.
 

@@ -61,7 +61,12 @@ the camera index is used instead. Re-run the wizard with:
 This is commissioning setup, not a persistent service. If readiness checks
 pass, it offers to run the agent in the current terminal so the first
 heartbeat can be seen; Ctrl+C stops that run. `AI_EDGE` requires local
-YuNet/SFace files and calibrated Top-1/margin thresholds. The AI_EDGE installer automatically downloads and checksum-verifies the pinned YuNet/SFace files. It never fills guessed thresholds. `STB_GATEWAY` does not install local face-recognition models. For
+YuNet/SFace files and a calibrated policy from the admin dashboard. The AI_EDGE
+installer automatically downloads and checksum-verifies the pinned YuNet/SFace
+files. It never fills guessed thresholds. The agent can start in waiting mode
+without calibrated thresholds, but will not recognize or submit attendance
+until it receives a valid policy. `STB_GATEWAY` does not install local face-
+recognition models. For
 reboot survival, use the hardened systemd steps in the deployment runbook.
 
 The downloaded bundle's Core API URL must be reachable from the camera host.
@@ -208,8 +213,10 @@ an SQLite outbox so temporary API outages do not stop camera operation.
 - A supported UVC camera and its Windows/Linux device permissions.
 - YuNet and SFace model files provisioned locally. Do not fetch weights at
   runtime or add model weights to Git. See [model provenance](../../docs/models.md).
-- Locally calibrated recognition thresholds. The example config intentionally
-  leaves them empty; there is no default production threshold.
+- A reachable Core API and device credential. Recognition thresholds are
+  published by an administrator in the dashboard from an approved local
+  calibration report; the agent may start in waiting mode until that policy is
+  received. The example config intentionally has no guessed threshold.
 
 Install from the repository root in the project virtual environment:
 
@@ -229,8 +236,9 @@ for deployment until that use is cleared.
 ## Configure a lab PC
 
 Copy `config/edge-agent.example.yaml` to `config/edge-agent.yaml`, then set the
-device UUID, model paths, API URL, camera settings, and locally calibrated
-thresholds. The local file should not be committed. A deployment can point to a
+device UUID, model paths, API URL, and camera settings. Use the installer wizard
+to choose a detected camera, capture resolution, and FPS. The local file should
+not be committed. A deployment can point to a
 config elsewhere with `--config` or `PRESENSI_EDGE_CONFIG`.
 
 Windows PowerShell:

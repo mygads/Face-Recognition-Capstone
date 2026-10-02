@@ -7,13 +7,14 @@ services:
     restart: unless-stopped
     environment:
       PRESENSI_AI_CORE_API_BASE_URL: ${PRESENSI_AI_CORE_API_BASE_URL:?Set the HTTPS Core API origin}
+      PRESENSI_AI_CONFIG_SYNC_TOKEN: ${PRESENSI_AI_CONFIG_SYNC_TOKEN:?Set the shared service configuration token}
       # Empty in production: validate device credentials and sessions against Core API.
       PRESENSI_AI_DEVICE_TOKENS: ${PRESENSI_AI_DEVICE_TOKENS:-}
       PRESENSI_AI_YUNET_MODEL_PATH: /models/face_detection_yunet_2023mar.onnx
       PRESENSI_AI_SFACE_MODEL_PATH: /models/face_recognition_sface_2021dec.onnx
       PRESENSI_AI_MODEL_VERSION: ${PRESENSI_ENROLLMENT_MODEL_VERSION:?Set the approved SFace model version}
-      PRESENSI_AI_MIN_TOP1_SIMILARITY: ${PRESENSI_AI_MIN_TOP1_SIMILARITY:?Set the locally calibrated Top-1 threshold}
-      PRESENSI_AI_MIN_TOP1_TOP2_MARGIN: ${PRESENSI_AI_MIN_TOP1_TOP2_MARGIN:?Set the locally calibrated Top-1/Top-2 margin}
+      PRESENSI_AI_MIN_TOP1_SIMILARITY: ${PRESENSI_AI_MIN_TOP1_SIMILARITY:-}
+      PRESENSI_AI_MIN_TOP1_TOP2_MARGIN: ${PRESENSI_AI_MIN_TOP1_TOP2_MARGIN:-}
       PRESENSI_AI_INFERENCE_TIMEOUT_SECONDS: ${PRESENSI_AI_INFERENCE_TIMEOUT_SECONDS:-5}
       PRESENSI_AI_RATE_LIMIT_PER_SECOND: ${PRESENSI_AI_RATE_LIMIT_PER_SECOND:-10}
       PRESENSI_AI_RATE_LIMIT_BURST: ${PRESENSI_AI_RATE_LIMIT_BURST:-20}

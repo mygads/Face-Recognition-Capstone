@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
@@ -86,9 +87,10 @@ def build_pipeline(config: EdgeConfig) -> RecognitionPipeline:
 class LocalRecognizer:
     """Run the shared recognition-core pipeline for one UVC camera stream."""
 
-    def __init__(self, pipeline: RecognitionPipeline, device_id: UUID) -> None:
+    def __init__(self, pipeline: RecognitionPipeline | None, device_id: UUID) -> None:
         self.pipeline = pipeline
         self.track_id = f"camera-{device_id}"
+        self._pipeline_lock = threading.RLock()
 
     def process(
         self,
@@ -96,16 +98,27 @@ class LocalRecognizer:
         gallery: tuple[GalleryEntry, ...],
         captured_at: datetime,
     ) -> TrackDecision:
-        # The temporal engine needs candidates from distinct students to apply
-        # Top-1 vs Top-2 correctly when the gallery has multiple templates per
-        # student. Return all template matches; the engine collapses by student.
-        self.pipeline.max_candidates = max(2, len(gallery))
-        return self.pipeline.process(
-            frame,
-            gallery,
-            FrameObservation(track_id=self.track_id, captured_at=captured_at),
-        )
+        with self._pipeline_lock:
+            if self.pipeline is None:
+                raise RuntimeError("Recognition is waiting for calibrated settings.")
+            # The temporal engine needs candidates from distinct students to apply
+            # Top-1 vs Top-2 correctly when the gallery has multiple templates per
+            # student. Return all template matches; the engine collapses by student.
+            self.pipeline.max_candidates = max(2, len(gallery))
+            return self.pipeline.process(
+                frame,
+                gallery,
+                FrameObservation(track_id=self.track_id, captured_at=captured_at),
+            )
+
+    def apply_configuration(self, config: EdgeConfig) -> None:
+        next_pipeline = build_pipeline(config)
+        with self._pipeline_lock:
+            self.pipeline = next_pipeline
 
     def reset(self) -> None:
-        temporal_engine = cast(Any, self.pipeline.temporal_decision)
-        temporal_engine.reset_track(self.track_id)
+        with self._pipeline_lock:
+            if self.pipeline is None:
+                return
+            temporal_engine = cast(Any, self.pipeline.temporal_decision)
+            temporal_engine.reset_track(self.track_id)

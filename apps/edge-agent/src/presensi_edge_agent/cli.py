@@ -27,6 +27,7 @@ from presensi_edge_agent.config import (
 )
 from presensi_edge_agent.gateway import OpenCVFrameProcessor, StbGatewayService
 from presensi_edge_agent.logging import configure_logging, log_event
+from presensi_edge_agent.managed_config import load_cached_configuration
 from presensi_edge_agent.outbox import EventOutbox
 
 DEFAULT_CONFIG = Path("apps/edge-agent/config/edge-agent.yaml")
@@ -84,6 +85,7 @@ def _camera_indices(config: EdgeConfig) -> list[int]:
 
 
 def _diagnostics(config: EdgeConfig, *, include_cameras: bool) -> int:
+    config = load_cached_configuration(config)
     api = _api_client(config)
     try:
         health = api.health()
@@ -164,9 +166,14 @@ def _diagnostics(config: EdgeConfig, *, include_cameras: bool) -> int:
 
 
 def _run_service(config: EdgeConfig) -> int:
+    config = load_cached_configuration(config)
     token = resolve_api_token(config)
     ai_token = resolve_ai_token(config)
-    config.require_runtime(api_token=token, ai_token=ai_token)
+    config.require_runtime(
+        api_token=token,
+        ai_token=ai_token,
+        allow_unconfigured_thresholds=config.mode == "AI_EDGE",
+    )
     assert config.device_id is not None
     configure_logging(config.runtime.log_level)
     if config.mode == "STB_GATEWAY":
@@ -223,7 +230,12 @@ def _run_service(config: EdgeConfig) -> int:
     from presensi_edge_agent.recognition import LocalRecognizer, build_pipeline
     from presensi_edge_agent.service import EdgeService
 
-    pipeline = build_pipeline(config)
+    pipeline = (
+        build_pipeline(config)
+        if config.recognition.min_top1_similarity is not None
+        and config.recognition.min_top1_top2_margin is not None
+        else None
+    )
     edge_service = EdgeService(
         config=config,
         camera=OpenCVCamera(config.camera),

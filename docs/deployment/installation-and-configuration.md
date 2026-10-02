@@ -29,10 +29,13 @@ menjalankan beberapa proses lokal, tetapi tidak menambah profile recognition.
 | Device UUID/profile/lab dan credential | Ya; credential ditampilkan sekali | Installer memvalidasi credential dan mengambil profile dari API | Token disimpan pada file terlindungi di host kamera. |
 | URL Core API | Setup perangkat/admin | Ya, installer kamera menanyakan origin Core API | Tetap harus dapat dijangkau dari host kamera. `127.0.0.1` hanya untuk mesin yang sama. |
 | URL AI Central untuk STB | Tidak mengatur service lokal STB | Ya, installer Linux menanyakannya untuk `STB_GATEWAY` | Ditulis ke `stb-gateway.yaml`. |
-| Kamera index, ukuran capture, FPS, backend | Web tidak dapat enumerasi kamera pada komputer lain | **Belum ada pilihan kamera di wizard.** Installer menampilkan daftar yang ditemukan dan memakai default YAML. | Pilih/edit index, resolusi, FPS, backend di YAML pada host kamera; preview/calibration utility berjalan di host itu. |
+| Kamera index, ukuran capture, FPS, backend | Browser admin tidak dapat enumerasi kamera pada komputer lain | Wizard installer menampilkan index kamera yang terdeteksi, lalu pilihan resolusi/FPS dan hasil negosiasi | Bisa dijalankan ulang pada host kamera; simpan ke YAML lokal. |
 | Unduh model YuNet/SFace | Tidak ada tombol download | Otomatis pada startup development dan installer `AI_EDGE`; bukan pada `STB_GATEWAY` | AI Central production diprovision dengan downloader checksum-pinned saat setup server; model tidak diunduh saat service production boot. |
-| Threshold Top-1 dan Top-1/Top-2 margin | **Belum bisa diubah di dashboard.** Halaman AI & kamera hanya menampilkan status. | Installer belum meminta threshold | Harus diisi dari hasil kalibrasi untuk profile/model yang tepat di environment AI Central atau YAML AI_EDGE. Nilai kosong berarti inference belum siap. |
-| Camera quality, sampling, burst, retry, cache | Tidak | Wizard belum menawarkan semua pilihan ini | Nilai awal berada di profile YAML; tune/ukur pada kamera dan ruangan sebenarnya. |
+| Kualitas enrollment | Ya, Core API; berlaku saat capture berikutnya | Tidak | Mulai dari default; sesuaikan berdasarkan capture kamera nyata. |
+| Threshold Top-1 dan Top-1/Top-2 margin | Ya, AI & kamera; wajib menyertakan referensi laporan kalibrasi | Tidak | Threshold kosong membuat recognition degraded/nonaktif. Jangan gunakan nilai tebakan. |
+| Kualitas face, sampling, temporal agreement | Ya, per device AI_EDGE atau untuk AI Central | Tidak | Service menarik revision setiap 15 detik dan melaporkan applied/pending/error. |
+| STB burst, interval, brightness/sharpness gate | Ya, per STB_GATEWAY | Tidak | Gateway menarik setting jarak jauh; camera capture mode tetap lokal. |
+| Retry, cache umur, model file/version, liveness, URL, credential | Tidak | Sebagian provisioning | Setting operasional/runtime/security tetap berada di host atau deployment secret store. |
 | Liveness | Tidak | Tidak | Tetap nonaktif pada contoh. Kandidat model perlu persetujuan lisensi dan kalibrasi terpisah. |
 | Start/restart service production | Tidak; tidak ada tombol restart service | Installer saat ini hanya menawarkan menjalankan agent di terminal | Restart AI/API lewat Docker Compose supervisor; restart kamera production lewat systemd sesuai runbook. |
 | Domain, TLS, firewall, backup, secret store | Tidak | Tidak ada wizard production satu-perintah | Dikonfigurasi operator server mengikuti runbook sekolah. |
@@ -123,11 +126,12 @@ agent di terminal.
 Gunakan command PowerShell/Bash yang ditampilkan halaman Perangkat. Command itu
 menunjuk ke nama file bundle khusus device di folder Downloads.
 
-Wizard belum mengimport threshold dari laporan kalibrasi, mengubah quality/liveness
-di dashboard, atau memasang service auto-start. Pengaturan advanced berada di
-YAML device atau environment AI Central dan harus direstart sesuai runbook.
-Service produksi setelah reboot dipasang terpisah melalui systemd runbook. Hapus
-bundle rahasia setelah provisioning.
+Dashboard **AI & kamera** mengatur quality enrollment, quality/temporal policy
+AI_EDGE dan AI Central, serta capture/burst gate STB. Perangkat menerapkan revisi
+secara otomatis; nilai threshold harus diambil dari laporan kalibrasi lokal.
+Wizard kamera mengatur pilihan fisik kamera, resolusi, dan FPS di host. Instalasi
+service auto-start setelah reboot tetap mengikuti systemd runbook. Hapus bundle
+rahasia setelah provisioning.
 
 ## 5. Isi konfigurasi per profile
 
@@ -145,8 +149,9 @@ File awal: `apps/edge-agent/config/edge-agent.example.yaml`; installer menulis
 - optional liveness, disabled by default.
 
 AI_EDGE installer memasang model otomatis ke checkout host, tapi **tidak mengisi
-threshold**. Calibrated threshold dan model version harus cocok dengan enrolled
-template dan approved evaluation report. Deployment AI_EDGE API juga memerlukan
+threshold**. Admin menerbitkan threshold dari halaman **AI & kamera** dengan
+referensi laporan kalibrasi. Threshold dan model version harus cocok dengan
+enrolled template dan approved evaluation report. Deployment AI_EDGE API juga memerlukan
 YuNet/SFace yang sama untuk enrollment; mount model read-only sesuai API env.
 
 ### STB_GATEWAY — kamera ringan + AI_CENTRAL
@@ -160,18 +165,21 @@ File awal: `apps/edge-agent/config/stb-gateway.example.yaml`. Isinya:
 - model paths kosong dan tidak dipakai; STB tidak perlu SFace/YuNet identity model.
 
 Nilai motion/camera adalah starting point hardware-specific, bukan jaminan
-kualitas. AI Central server memegang model path/version dan threshold di
-`.env.ai-central`; STB mengirim burst lewat trusted LAN/TLS.
+kualitas. AI Central server memegang model path/version dan menarik
+threshold/policy dari Core API dashboard; STB mengirim burst lewat trusted
+LAN/TLS.
 
 ### AI_CENTRAL — server inference
 
 Environment production template: `infra/deployment/ai-central.env.example`.
-Atur origin Core API, YuNet/SFace model path/version, timeout/rate limit, dan
-Top-1/margin threshold. Threshold kosong membuat `/health` degraded dan service
-tidak membuat recognizer. Pada production model files diprovision saat install
-server dengan checksum downloader; proses AI tidak mengunduh model saat startup.
-Restrict AI route ke network perangkat; PostgreSQL dan service ports tidak
-publik. Restart lewat supervisor setelah mengubah `.env`.
+Atur origin Core API, token sinkronisasi setting, YuNet/SFace model path/version,
+timeout/rate limit, dan model-service controls. Admin mengatur Top-1/margin
+threshold di halaman **AI & kamera** dengan laporan kalibrasi. Threshold kosong
+membuat `/health` degraded dan service tidak membuat recognizer. Pada production
+model files diprovision saat install server dengan checksum downloader; proses AI
+tidak mengunduh model saat startup. Restrict AI route ke network perangkat;
+PostgreSQL dan service ports tidak publik. Restart lewat supervisor setelah
+mengubah `.env`.
 
 ### Core API/server web
 
@@ -184,16 +192,13 @@ langsung ke server production.
 
 ## 6. Dashboard yang ada dan yang belum
 
-Admin dashboard saat ini dapat mengelola akun, data master, jadwal, device/lab
-assignment dan device credential. Menu **AI & kamera** adalah halaman status:
-profile service lokal, file model enrollment, status AI Central, versi model yang
-dilaporkan device, camera status dan heartbeat. Status edge model berasal dari
-heartbeat/version report; halaman itu tidak dapat memeriksa filesystem PC remote.
-
-Dashboard belum dapat mengunduh model, memilih kamera remote, mengubah threshold,
-memuat laporan kalibrasi, mengganti YAML device, atau restart AI/API/edge services.
-Untuk operasi yang tersedia, UI menggunakan API dengan RBAC; layanan tidak
-memberi akses shell dari browser.
+Admin dashboard dapat mengelola akun, data master, jadwal, device/lab, credential,
+serta kebijakan AI/runtime berversi. **AI & kamera** menampilkan model/service
+readiness, revision konfigurasi, dan status penerapan device. Dashboard tidak dapat
+memeriksa filesystem PC remote, mengunduh/mengganti model, memilih kamera remote,
+mengubah URL/token, atau me-restart service. Pilihan kamera dilakukan pada host
+melalui wizard installer. Untuk operasi yang tersedia, UI menggunakan API dengan
+RBAC; layanan tidak memberi akses shell dari browser.
 
 ## 7. Urutan dari development ke production
 

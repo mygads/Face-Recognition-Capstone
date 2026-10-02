@@ -94,6 +94,9 @@ class DeviceResponse(ApiSchema):
     model_version: str | None
     camera_status: Literal["unknown", "online", "offline", "error"]
     latency_summary: DeviceLatencySummary | None
+    config_applied_revision: int = Field(ge=0)
+    config_apply_status: Literal["not_configured", "pending", "applied", "error"]
+    config_error_code: str | None
     health_status: Literal["online", "offline", "warning"]
     heartbeat_timeout_seconds: int = Field(ge=5, le=3600)
     is_active: bool

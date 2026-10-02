@@ -13,6 +13,10 @@ from presensi_edge_agent.camera import CameraUnavailableError
 from presensi_edge_agent.central_ai import BurstFrame, CentralDecision
 from presensi_edge_agent.config import EdgeConfig, resolve_ai_token, resolve_api_token
 from presensi_edge_agent.logging import log_event
+from presensi_edge_agent.managed_config import (
+    apply_managed_configuration,
+    persist_managed_configuration,
+)
 from presensi_edge_agent.outbox import EventOutbox, OutboxFullError
 
 logger = logging.getLogger("presensi_edge_agent")
@@ -148,11 +152,11 @@ class StbGatewayService:
         }
 
     def run(self) -> None:
+        settings = self.config.gateway
         self.config.require_runtime(
             api_token=resolve_api_token(self.config),
             ai_token=resolve_ai_token(self.config),
         )
-        settings = self.config.gateway
         log_event(
             logger,
             logging.INFO,
@@ -172,6 +176,7 @@ class StbGatewayService:
         self._worker.start()
         try:
             while not self.stop_event.is_set():
+                settings = self.config.gateway
                 if not self._session_active():
                     self.stop_event.wait(1.0)
                     continue
@@ -361,6 +366,7 @@ class StbGatewayService:
     def _sync_worker(self) -> None:
         next_heartbeat = 0.0
         next_discovery = 0.0
+        next_configuration_refresh = 0.0
         while not self.stop_event.is_set():
             now = time.monotonic()
             if self._session_discovery_supported and now >= next_discovery:
@@ -397,6 +403,11 @@ class StbGatewayService:
                         retryable=exc.retryable,
                     )
                 next_heartbeat = now + self.config.api.heartbeat_interval_seconds
+            if now >= next_configuration_refresh:
+                self._sync_managed_configuration()
+                next_configuration_refresh = now + max(
+                    15.0, self.config.api.heartbeat_interval_seconds
+                )
             for queued_event in self.outbox.due(limit=50):
                 try:
                     self.api.submit_recognition_event(queued_event.payload)
@@ -428,6 +439,70 @@ class StbGatewayService:
                     self.outbox.acknowledge(queued_event.event_id)
                     log_event(logger, logging.INFO, "recognition_event_delivered")
             self.stop_event.wait(1.0)
+
+    def _sync_managed_configuration(self) -> None:
+        fetch = getattr(self.api, "fetch_runtime_configuration", None)
+        report = getattr(self.api, "report_runtime_configuration", None)
+        if not callable(fetch) or not callable(report):
+            return
+        attempted_revision = self.config.runtime_config_revision
+        try:
+            payload = fetch()
+            revision = payload.get("revision")
+            settings = payload.get("settings")
+            if type(revision) is not int or revision < 0:
+                raise ValueError("invalid_revision")
+            attempted_revision = revision
+            if revision == 0:
+                return
+            if revision < self.config.runtime_config_revision:
+                raise ValueError("revision_rollback")
+            if revision != self.config.runtime_config_revision:
+                updated_config = apply_managed_configuration(
+                    self.config, revision=revision, settings=settings
+                )
+                if not isinstance(settings, dict):
+                    raise ValueError("invalid_settings")
+                persist_managed_configuration(
+                    self.config, revision=revision, settings=settings
+                )
+                self.config = updated_config
+            report(revision=revision, status="applied")
+            log_event(
+                logger,
+                logging.INFO,
+                "runtime_configuration_applied",
+                config_revision=revision,
+            )
+        except ApiCallError as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                "runtime_configuration_fetch_failed",
+                status_code=exc.status_code,
+                retryable=exc.retryable,
+            )
+        except Exception as exc:
+            error_code = (
+                str(exc)
+                if isinstance(exc, ValueError) and str(exc).replace("_", "").isalnum()
+                else "configuration_apply_failed"
+            )[:64]
+            try:
+                if attempted_revision > 0:
+                    report(
+                        revision=attempted_revision,
+                        status="error",
+                        error_code=error_code,
+                    )
+            except ApiCallError:
+                pass
+            log_event(
+                logger,
+                logging.ERROR,
+                "runtime_configuration_apply_failed",
+                error_code=error_code,
+            )
 
 
 def _event_payload(

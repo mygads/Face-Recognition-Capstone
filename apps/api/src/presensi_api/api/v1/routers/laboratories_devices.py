@@ -71,6 +71,12 @@ def _device_response(
             if device.latency_summary is not None
             else None
         ),
+        config_applied_revision=device.config_applied_revision,
+        config_apply_status=cast(
+            Literal["not_configured", "pending", "applied", "error"],
+            device.config_apply_status,
+        ),
+        config_error_code=device.config_error_code,
         health_status=cast(
             Literal["online", "offline", "warning"],
             device_health_status(device, now=now),

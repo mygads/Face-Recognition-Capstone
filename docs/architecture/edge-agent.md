@@ -68,9 +68,14 @@ in process memory and are not written to disk.
 
 The agent loads YuNet/SFace model files from configured local paths. The
 commissioning installer downloads the pinned files and checks their checksums;
-the running agent never downloads weights. Top-1 and Top-1-vs-Top-2 margin
-thresholds are required runtime settings and must come from local calibration.
-The stream currently uses a single camera track and rejects frames containing
+the running agent never downloads weights. An administrator publishes quality,
+sampling, temporal-agreement, and calibrated Top-1/Top-1-vs-Top-2 margin values
+from **AI & kamera**. The agent polls Core API with its device credential,
+applies a validated revision, reports its state, and caches the non-biometric
+configuration for restart during a temporary outage. Model files/version,
+liveness model, network endpoint, token file, and camera remain host-level
+configuration. Thresholds must come from local calibration. The stream currently
+uses a single camera track and rejects frames containing
 zero or multiple faces; lab framing should keep one participant in view until
 multi-person tracking is designed.
 
@@ -125,9 +130,10 @@ machine-specific copy and credentials out of Git. See
 [`apps/edge-agent/README.md`](../../apps/edge-agent/README.md) for PowerShell and
 Linux commands, camera enumeration, status diagnostics, model paths, and
 calibration requirements. The installer offers camera index, resolution, and
-requested FPS choices and persists them to device YAML; advanced quality and
-threshold changes remain local YAML configuration. Camera access is native and
-intentionally excluded from default Docker Compose.
+requested FPS choices and persists them to device YAML. Quality and threshold
+policy is managed from the admin dashboard; camera selection, capture mode,
+model files, endpoint, and credentials stay local to the host. Camera access is
+native and intentionally excluded from default Docker Compose.
 
 Liveness is disabled in the sample config. That mode requires documented
 physical/session controls at the lab station. The available anti-spoof model
