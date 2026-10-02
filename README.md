@@ -114,18 +114,42 @@ serta [index runbook deployment](docs/deployment/README.md).
    # Ubuntu
    python3 scripts/download_face_models.py
    ```
+
+   `git clone` tidak mengunduh file model: bobot berada di `models/weights/`,
+   diabaikan Git, dan dipasang terpisah setelah checksum diperiksa. Bootstrap
+   kamera hanya menawarkan download ini untuk `AI_EDGE`; gateway `STB_GATEWAY`
+   tidak membutuhkan model pengenalan lokal. Persetujuan lisensi SFace untuk
+   operasi sekolah tetap harus diselesaikan sebelum deployment.
 4. Buka **Perangkat**, daftarkan device dengan laboratorium dan profile yang
-   benar, lalu buat kredensial. Pilih **Unduh paket setup perangkat** dan isi
-   URL Core API yang dapat dijangkau kamera. Untuk `STB_GATEWAY`, isi juga URL
-   AI Central. File JSON hasil unduhan memuat token device sekali tampil;
-   pindahkan lewat media/kanal tepercaya dan hapus setelah setup.
-5. Clone repository pada host kamera dan jalankan installer yang sesuai dengan
-   OS menggunakan paket JSON. Installer memasang runtime agent, memilih
-   konfigurasi `AI_EDGE` atau `STB_GATEWAY` dari bundle, menulis token ke lokasi
-   lokal terlindungi, memeriksa kamera/status, lalu menawarkan menjalankan
-   agent pada terminal untuk melihat koneksi/heartbeat. Installer tidak
-   mengarang threshold atau menyalakan pengenalan yang belum siap.
-6. Untuk `AI_EDGE`, provision YuNet/SFace di komputer edge dan isi threshold
+   benar, lalu buat kredensial. Klik **Salin kredensial untuk installer** untuk
+   menyalin `UUID:token` yang hanya ditampilkan saat dibuat. Clipboard berisi
+   rahasia sampai diganti.
+5. Di host kamera, jalankan bootstrap satu perintah di bawah. Ia meminta URL
+   Core API dan kredensial secara tersembunyi, mengambil profile dari registry,
+   mengunduh source tanpa clone manual, lalu memasang agent. Untuk
+   `STB_GATEWAY`, ia juga meminta URL AI Central. Ada pilihan **Unduh paket
+   setup perangkat** bila Anda lebih suka memindahkan file JSON secara aman.
+
+   ```powershell
+   # Windows AI_EDGE
+   irm https://raw.githubusercontent.com/mygads/Face-Recognition-Capstone/main/scripts/bootstrap-camera-device.ps1 | iex
+   ```
+
+   ```bash
+   # Ubuntu/Armbian; profile dibaca dari Core API
+   curl -fsSL https://raw.githubusercontent.com/mygads/Face-Recognition-Capstone/main/scripts/bootstrap-camera-device.sh | bash
+   ```
+
+   Installer menulis token ke lokasi terlindungi, memeriksa kamera/status, lalu
+   menawarkan menjalankan agent di terminal agar koneksi/heartbeat terlihat.
+   Jangan tempel token ke command line. Bootstrap mengambil source dari branch
+   `main`; untuk production gunakan versi yang sudah ditinjau dan langkah
+   systemd pada runbook. Di Windows, Git dan Python dipasang melalui winget bila
+   belum tersedia; launcher `py` dapat memasang runtime Python 3.12. Di
+   Ubuntu/Armbian, sediakan `curl` dan akses `sudo`; bootstrap memasang Python
+   atau Git dari apt jika belum tersedia.
+
+6. Untuk `AI_EDGE`, download model evaluasi jika disetujui dan isi threshold
    Top-1 serta margin dari kalibrasi lokal sebelum menjalankan presensi. Untuk
    `STB_GATEWAY`, pastikan AI Central dan Core API sehat serta STB menjangkau
    keduanya melalui LAN. Setelah heartbeat muncul **Online**, buat jadwal, buka

@@ -227,18 +227,24 @@ Untuk tiap STB, ADMIN membuat device di `/app/devices` bertipe `camera_gateway`,
 profile `STB_GATEWAY`, dan laboratorium yang tepat. Catat UUID, hostname, MAC,
 IP reservation, posisi kamera, dan rilis.
 
-Di baris device pilih **Kredensial**, buat token pertama, isi origin Core API
-yang dapat dijangkau STB dari LAN (misalnya `https://presensi.lan.sekolah.id`)
-dan origin AI Central (misalnya `https://ai.lan.sekolah.id`), lalu unduh paket
-setup. Paket JSON memuat secret raw satu kali. Transfer ke STB melalui kanal
-tepercaya, jalankan installer commissioning:
+Di baris device pilih **Kredensial**, buat token pertama, lalu klik **Salin
+kredensial untuk installer satu-perintah**. Di Armbian, jalankan bootstrap ini;
+masukkan origin Core API, UUID:token pada prompt tersembunyi, lalu origin AI
+Central saat diminta:
 
 ```bash
-bash scripts/install-camera-device.sh /path/to/presensi-device-setup.json
+curl -fsSL https://raw.githubusercontent.com/mygads/Face-Recognition-Capstone/main/scripts/bootstrap-camera-device.sh | bash
 ```
 
-Hapus paket setelah konfigurasi berhasil. Installer memilih `STB_GATEWAY`
-berdasarkan bundle dan menulis URL, UUID, serta token ke konfigurasi lokal.
+Bootstrap mengambil `STB_GATEWAY` dari registry, mengunduh repository, memasang
+agent dan menulis URL, UUID, serta token ke konfigurasi lokal. Perintah ini
+untuk Ubuntu/Armbian/Debian dengan `curl`; ia memasang Python/Git melalui `apt`
+jika belum ada. Sistem berbasis CasaOS belum divalidasi terpisah; gunakan hanya
+jika host dasarnya menyediakan Debian/Ubuntu, `apt`, systemd, dan akses UVC.
+Sebagai alternatif, **Unduh paket setup perangkat** membuat JSON berisi secret
+satu kali; pindahkan melalui kanal tepercaya, lalu jalankan
+`scripts/install-camera-device.sh` dari checkout lokal dan hapus bundle.
+
 Untuk API dan AI, agent memakai credential device yang sama; API dapat
 memperbaruinya saat heartbeat jika token berada dalam file yang writable oleh
 service.

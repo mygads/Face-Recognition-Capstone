@@ -266,6 +266,20 @@ async function copyCredential(): Promise<void> {
   }
 }
 
+async function copyBootstrapCredential(): Promise<void> {
+  const device = credentialDevice.value
+  const credential = issuedCredential.value
+  if (!device || !credential) return
+  try {
+    await navigator.clipboard.writeText(`${device.device_id}:${credential.token}`)
+    credentialCopyMessage.value =
+      'ID dan token disalin untuk installer. Tempelkan hanya pada prompt tersembunyi installer; isi clipboard ini tetap rahasia.'
+  } catch {
+    credentialCopyMessage.value =
+      'Clipboard tidak tersedia. Gunakan ID perangkat dan token secara terpisah pada prompt installer.'
+  }
+}
+
 function downloadCredential(): void {
   if (!issuedCredential.value) return
   const file = new Blob([`${issuedCredential.value.token}\n`], {
@@ -603,7 +617,15 @@ onBeforeUnmount(() => {
             {{ credentialCopyMessage }}
           </p>
           <section class="devices-view__bundle-form" aria-label="Paket instalasi perangkat">
-            <h3>Siapkan paket instalasi</h3>
+            <h3>Siapkan instalasi perangkat</h3>
+            <button class="button button--secondary" type="button" @click="copyBootstrapCredential">
+              Salin kredensial untuk installer satu-perintah
+            </button>
+            <p>
+              Installer meminta URL Core API dan kredensial ID:token ini secara tersembunyi,
+              mendeteksi profile dari registry, lalu mengunduh source dan memasang agent. Jangan
+              tempelkan kredensial ke perintah terminal.
+            </p>
             <label for="device-core-api-url">URL Core API yang bisa dijangkau kamera</label>
             <input
               id="device-core-api-url"
@@ -675,15 +697,17 @@ onBeforeUnmount(() => {
             class="devices-view__credential-commands"
             aria-label="Variabel konfigurasi perangkat"
           >
-            <p>Setelah clone repository di komputer kamera, jalankan installer sesuai OS:</p>
+            <p>Untuk bootstrap tanpa clone manual, jalankan command sesuai OS pada host kamera:</p>
             <pre
               v-if="credentialDevice.deployment_profile === 'AI_EDGE'"
-            ><code>Windows: .\scripts\install-camera-device.ps1
-Ubuntu:  bash scripts/install-camera-device.sh</code></pre>
-            <pre v-else><code>Armbian/Linux: bash scripts/install-camera-device.sh</code></pre>
+            ><code>Windows: irm https://raw.githubusercontent.com/mygads/Face-Recognition-Capstone/main/scripts/bootstrap-camera-device.ps1 | iex
+Linux:   curl -fsSL https://raw.githubusercontent.com/mygads/Face-Recognition-Capstone/main/scripts/bootstrap-camera-device.sh | bash</code></pre>
+            <pre
+              v-else
+            ><code>Armbian: curl -fsSL https://raw.githubusercontent.com/mygads/Face-Recognition-Capstone/main/scripts/bootstrap-camera-device.sh | bash</code></pre>
             <p>
-              Installer meminta lokasi file paket ini, memasang dependency yang tersedia, memilih
-              profil {{ credentialDevice.deployment_profile }}, lalu membuat config dan token file.
+              Profile dideteksi dari Core API. Untuk STB, installer juga meminta URL AI Central.
+              Instalasi produksi tetap memerlukan langkah systemd pada runbook.
             </p>
           </div>
           <div class="master-data__form-actions">

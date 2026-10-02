@@ -39,11 +39,15 @@ For development, `py -3 scripts/start-local.py` (Windows) or
 `python3 scripts/start-local.py` (Ubuntu) creates local secrets, starts the
 database/API, applies migrations and seeds, bootstraps the development admin,
 installs web dependencies when needed, and starts Vite. Host prerequisites
-still need to be installed first. The Devices page can issue a one-time setup
-bundle with the selected profile, reachable service URL(s), device UUID, and
-credential; `scripts/install-camera-device.ps1` or
-`scripts/install-camera-device.sh` prepares the matching native agent config.
-The profile in the registry selects local AI_EDGE versus STB_GATEWAY forwarding.
+still need to be installed first. The Devices page issues a one-time
+`UUID:token` for the camera bootstrap. Windows can run
+`irm https://raw.githubusercontent.com/mygads/Face-Recognition-Capstone/main/scripts/bootstrap-camera-device.ps1 | iex`;
+Ubuntu/Armbian can run
+`curl -fsSL https://raw.githubusercontent.com/mygads/Face-Recognition-Capstone/main/scripts/bootstrap-camera-device.sh | bash`.
+The bootstrap reads profile from the device registry and downloads the agent
+source; it is a commissioning helper, not a persistent service. Use the
+deployment-specific systemd runbook for reboot survival. The profile in the
+registry selects local AI_EDGE versus STB_GATEWAY forwarding.
 
 Production server provisioning remains in the runbooks. Domain, TLS, firewall,
 secret-store, backup, model approval, calibration, and school policy are

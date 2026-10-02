@@ -10,42 +10,42 @@ for a clean Armbian install, central server, recovery, and acceptance checklists
 
 ## Quick setup from the device registry
 
-For a development/commissioning install, register one device per physical
-camera under **Perangkat**, set its lab and deployment profile, then open its
-credential panel. Create a credential and download **Paket setup perangkat**.
-The downloaded JSON includes a one-time secret. Transfer it only through a
-trusted channel, run the installer below from the cloned repository on the
-camera host, and delete the bundle after the device is configured. Never put
-the bundle in Git, chat, a ticket, or a screenshot.
+For a commissioning install, register one device per physical camera under
+**Perangkat**, set its lab and deployment profile, then create a credential.
+Use **Salin kredensial untuk installer satu-perintah**. On the camera host, run
+the bootstrap below. It asks for the Core API origin and credential in a
+hidden prompt, reads the profile from the registry, downloads the source,
+installs the matching native agent, and writes a protected local token file.
+For STB_GATEWAY it also asks for the Central AI origin.
 
-Windows supports `AI_EDGE` only:
+Windows supports `AI_EDGE` only. PowerShell bootstrap uses winget for Git or
+Python if missing; the Python launcher can install Python 3.12 if no runtime
+is installed:
 
 ```powershell
-git clone https://github.com/mygads/Face-Recognition-Capstone.git
-cd Face-Recognition-Capstone
-.\scripts\install-camera-device.ps1 -BundlePath "$HOME\Downloads\presensi-device-setup.json"
+irm https://raw.githubusercontent.com/mygads/Face-Recognition-Capstone/main/scripts/bootstrap-camera-device.ps1 | iex
 ```
 
-Ubuntu x86-64 can install either `AI_EDGE` or `STB_GATEWAY`; Armbian ARM64 uses
-the lightweight `STB_GATEWAY` profile:
+Ubuntu x86-64 can install either profile; Debian/Armbian ARM64 uses the
+lightweight `STB_GATEWAY` profile. Shell bootstrap needs curl and Python 3; it
+installs Python packages and Git from apt when missing:
 
 ```bash
-git clone https://github.com/mygads/Face-Recognition-Capstone.git
-cd Face-Recognition-Capstone
-bash scripts/install-camera-device.sh "$HOME/Downloads/presensi-device-setup.json"
+curl -fsSL https://raw.githubusercontent.com/mygads/Face-Recognition-Capstone/main/scripts/bootstrap-camera-device.sh | bash
 ```
 
-The installer reads the profile from the bundle, installs the Python runtime,
-sets the Core API URL and (for STB) Central AI URL, writes a protected token
-file, creates a local config, and checks camera/API readiness. It does not
-install a background service. If checks pass, it offers to run the agent in the
-current terminal so the first heartbeat and connection can be observed; press
-Ctrl+C to stop that commissioning run. `AI_EDGE` requires local YuNet/SFace
-model files and calibrated Top-1/margin thresholds before `run` can start; the
-installer will not choose threshold values. A successful install can still
-report a missing model, threshold, network path, or camera as `degraded`. For
-reboot survival in production, follow the hardened systemd steps in the
-deployment runbook after commissioning.
+The bootstrap clones the public `main` branch to the user data directory; no
+manual repository clone is needed. Keep the one-time credential out of shell
+commands, chat, tickets, and screenshots. The downloaded setup JSON remains an
+alternative from **Unduh paket setup perangkat**.
+
+This is commissioning setup, not a persistent service. If readiness checks
+pass, it offers to run the agent in the current terminal so the first
+heartbeat can be seen; Ctrl+C stops that run. `AI_EDGE` requires local
+YuNet/SFace files and calibrated Top-1/margin thresholds. The installer asks
+before downloading checksum-verified model files and never fills guessed
+thresholds. `STB_GATEWAY` does not install local face-recognition models. For
+reboot survival, use the hardened systemd steps in the deployment runbook.
 
 The downloaded bundle's Core API URL must be reachable from the camera host.
 Use a LAN IP/DNS or HTTPS origin for another computer; `localhost` and
