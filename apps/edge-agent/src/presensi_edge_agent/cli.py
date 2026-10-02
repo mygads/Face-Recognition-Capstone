@@ -42,6 +42,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("cameras", help="Enumerate accessible UVC camera indices")
+    commands.add_parser(
+        "configure-camera",
+        help="Interactively select and save camera index, resolution and FPS",
+    )
     commands.add_parser("health", help="Check Core API process health")
     commands.add_parser("status", help="Report config, camera and API status")
     commands.add_parser("run", help="Run the AI_EDGE camera service")
@@ -197,19 +201,20 @@ def _run_service(config: EdgeConfig) -> int:
         gateway_service.run()
         return 0
 
-    if not config.liveness.enabled:
-        log_event(
-            logging.getLogger("presensi_edge_agent"),
-            logging.WARNING,
-            "liveness_disabled_physical_control_required",
-        )
-    elif config.liveness.enabled:
-        log_event(
-            logging.getLogger("presensi_edge_agent"),
-            logging.WARNING,
-            "liveness_model_candidate_requires_license_clearance",
-            model="anti-spoof-mn3",
-        )
+    if config.mode == "AI_EDGE":
+        if not config.liveness.enabled:
+            log_event(
+                logging.getLogger("presensi_edge_agent"),
+                logging.WARNING,
+                "liveness_disabled_physical_control_required",
+            )
+        else:
+            log_event(
+                logging.getLogger("presensi_edge_agent"),
+                logging.WARNING,
+                "liveness_model_candidate_requires_license_clearance",
+                model="anti-spoof-mn3",
+            )
     client = _api_client(config)
     outbox = EventOutbox(
         config.runtime.outbox_path,
@@ -244,6 +249,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = load_config(args.config)
         if args.command == "cameras":
             _write_json({"camera_indices": _camera_indices(config)})
+            return 0
+        if args.command == "configure-camera":
+            from presensi_edge_agent.camera_setup import configure_camera_interactively
+
+            configure_camera_interactively(config)
             return 0
         if args.command == "health":
             return _diagnostics(config, include_cameras=False)

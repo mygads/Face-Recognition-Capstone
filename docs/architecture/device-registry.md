@@ -49,8 +49,14 @@ Core API origin, optional Central AI origin, model version, and raw credential.
 That file is a secret: transfer it through a trusted channel, install it on only
 that device, and delete it after setup. The installer uses the registry profile
 to configure `AI_EDGE` local inference or `STB_GATEWAY` forwarding; it does not
-decide or invent recognition thresholds. Rotations require an audit reason and
-retain the previous verifier for the documented overlap window.
+decide or invent recognition thresholds. The dashboard command expects the
+bundle in that host user's Downloads folder with the device-specific filename
+shown in the UI. A remote host can be bootstrapped without a manual repository
+clone after securely transferring the file. Installer prompts for camera index,
+requested resolution, and FPS, checks the driver-returned mode, and writes the
+selection to local YAML. It does not change advanced recognition or quality
+policy. Rotations require an audit reason and retain the previous verifier for
+the documented overlap window.
 Initial assignment and every actual reassignment write `device.laboratory_assigned`
 to `audit_logs`, with the actor and assigned laboratory UUIDs; reassignment records
 both previous and new IDs. Reassigning to the current lab does not add a duplicate

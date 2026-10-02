@@ -133,24 +133,29 @@ serta [index runbook deployment](docs/deployment/README.md).
    STB_GATEWAY tidak memerlukan model lokal. SFace masih untuk evaluasi sampai
    sekolah meninjau izin penggunaannya; threshold harus dikalibrasi terpisah.
 4. Buka **Perangkat**, daftarkan device dengan laboratorium dan profile yang
-   benar, lalu buat kredensial. Token hanya tampil sekali. Pilih OS target dan
-   cara koneksi di panel setup, isi URL yang dapat dijangkau kamera, lalu salin
-   command yang dibuat untuk device itu. Token tidak ditanam di command;
-   installer meminta `UUID:token` melalui prompt tersembunyi. Untuk satu PC
-   `AI_EDGE`, pilih localhost agar memakai checkout yang sudah ada. Untuk STB
-   atau host kamera lain, pilih LAN/VPN agar bootstrap mengunduh source sendiri.
-   Tombol **Unduh paket setup perangkat** tetap tersedia untuk pemindahan file
-   yang lebih terkontrol.
-5. Jalankan command yang ditampilkan pada terminal di host kamera. Installer
-   membaca profile dari registry device, menyiapkan dependency/config, otomatis
-   mengunduh model bila profile AI_EDGE, memeriksa kamera dan status, lalu
-   menawarkan menjalankan agent. Untuk `STB_GATEWAY`, isi URL AI Central yang
-   dapat dijangkau gateway. Pilih **Armbian Linux** untuk STB dan **Windows**
-   atau **Ubuntu** untuk AI_EDGE.
+   benar, lalu buat kredensial. Token hanya tampil sekali. Pilih OS dan koneksi
+   pada panel setup. Simpan default URL Core API dan AI Central sekali di panel
+   atas halaman Perangkat; default berada hanya pada browser admin ini, bukan
+   konfigurasi server. Bundle dapat memakai default atau override per device.
+   Download paket setup. Paket ini adalah file rahasia berisi
+   alamat, UUID, profile, dan token device. Untuk komputer kamera yang sama,
+   file sudah berada di Downloads. Untuk host lain, pindahkan file ke folder
+   Downloads di kamera lewat USB/SCP. Lalu salin command dari halaman itu.
+   Command tidak mengandung token dan installer tidak meminta UUID/token/URL
+   lagi. Untuk satu PC `AI_EDGE`, pilih localhost
+   agar memakai checkout yang sudah ada. Untuk STB atau host kamera lain,
+   bootstrap mengambil source sendiri.
+5. Jalankan command hasil halaman Perangkat pada host kamera. Installer membaca
+   bundle lokal, memvalidasi profile ke Core API, menyiapkan dependency/config,
+   otomatis mengunduh model bila profile AI_EDGE, lalu menawarkan wizard untuk
+   memilih kamera, resolusi, dan FPS. Pilihan ditulis ke YAML device. Setelah
+   itu installer memeriksa status dan menawarkan menjalankan agent. Pilih
+   **Armbian Linux** untuk STB dan **Windows** atau **Ubuntu** untuk AI_EDGE.
 
    Installer menulis token ke lokasi terlindungi, memeriksa kamera/status, lalu
    menawarkan menjalankan agent di terminal agar koneksi/heartbeat terlihat.
-   Jangan tempel token ke command line. Bootstrap mengambil source dari branch
+   Hapus bundle setup setelah pemasangan. Jangan tempel token ke command line.
+   Bootstrap mengambil source dari branch
    `main`; untuk production gunakan versi yang sudah ditinjau dan langkah
    systemd pada runbook. Jalur domain publik dan Cloudflare untuk koneksi agent
    belum diaktifkan karena agent belum mendukung identitas Cloudflare Access dan
@@ -174,7 +179,8 @@ kamera di host lain, deploy server dengan LAN/DNS dan reverse proxy HTTPS
 terlebih dahulu; jangan membuka port API development ke jaringan publik.
 
 Lihat [panduan instalasi kamera](apps/edge-agent/README.md) untuk perintah
-Windows/Ubuntu/Armbian. Ini adalah installer commissioning yang menyiapkan
+Windows/Ubuntu/Armbian dan [matriks konfigurasi profile](docs/architecture/device-configuration.md)
+untuk batas opsi dashboard/installer. Ini adalah installer commissioning yang menyiapkan
 agent dan konfigurasi lokal. Untuk layanan produksi yang berjalan setelah reboot,
 ikuti runbook systemd AI_EDGE atau STB. Tidak ada installer produksi satu
 perintah yang otomatis memilih domain, TLS, secret store, firewall, backup,

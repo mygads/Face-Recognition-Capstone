@@ -34,26 +34,6 @@ models:
   liveness_path: null
   liveness_version: null
 
-quality:
-  min_face_pixels: 80
-  min_laplacian_variance: 45
-  min_brightness: 25
-  max_brightness: 235
-
-recognition:
-  min_top1_similarity: null
-  min_top1_top2_margin: null
-  minimum_agreeing_frames: 3
-  sample_every_n_frames: 6
-  best_frame_count: 5
-  max_history_frames: 10
-  track_ttl_seconds: 3
-
-liveness:
-  enabled: false
-  required: false
-  min_live_score: null
-
 gateway:
   session_id: null # Optional filter; API discovery is authoritative.
   session_starts_at: null # Deprecated; API supplies the active session window.

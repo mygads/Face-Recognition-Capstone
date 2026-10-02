@@ -27,6 +27,15 @@ type DeviceForm = {
   is_active: boolean
 }
 
+type DeviceSetupDefaults = {
+  coreApiUrl: string
+  centralAiUrl: string
+  connectionMode: DeviceConnectionMode
+  modelVersion: string
+}
+
+const DEVICE_SETUP_DEFAULTS_KEY = 'presensi.device-setup-defaults.v1'
+
 const auth = useAuthStore()
 const canManage = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
 const devices = ref<Device[]>([])
@@ -54,6 +63,8 @@ const centralAiUrl = ref('')
 const modelVersion = ref('opencv-zoo-sface-2021dec')
 const installPlatform = ref<DeviceSetupPlatform>('windows')
 const connectionMode = ref<DeviceConnectionMode>('same-host')
+const setupDefaults = ref<DeviceSetupDefaults>(loadSetupDefaults())
+const setupDefaultsMessage = ref<string | null>(null)
 const installCommandMessage = ref<string | null>(null)
 const bundleMessage = ref<string | null>(null)
 const isCredentialLoading = ref(false)
@@ -66,6 +77,59 @@ function emptyForm(): DeviceForm {
     laboratory_id: '',
     deployment_profile: 'AI_EDGE',
     is_active: true,
+  }
+}
+
+function loadSetupDefaults(): DeviceSetupDefaults {
+  const empty: DeviceSetupDefaults = {
+    coreApiUrl: '',
+    centralAiUrl: '',
+    connectionMode: 'private-network',
+    modelVersion: 'opencv-zoo-sface-2021dec',
+  }
+  try {
+    const raw = window.localStorage.getItem(DEVICE_SETUP_DEFAULTS_KEY)
+    if (!raw) return empty
+    const stored = JSON.parse(raw) as Partial<DeviceSetupDefaults>
+    const mode = stored.connectionMode
+    return {
+      coreApiUrl: typeof stored.coreApiUrl === 'string' ? stored.coreApiUrl : '',
+      centralAiUrl: typeof stored.centralAiUrl === 'string' ? stored.centralAiUrl : '',
+      connectionMode: mode === 'same-host' ? mode : 'private-network',
+      modelVersion:
+        typeof stored.modelVersion === 'string' && stored.modelVersion.trim()
+          ? stored.modelVersion
+          : empty.modelVersion,
+    }
+  } catch {
+    return empty
+  }
+}
+
+function saveSetupDefaults(): void {
+  setupDefaultsMessage.value = null
+  try {
+    const coreOrigin = normalizeServerOrigin(setupDefaults.value.coreApiUrl, 'URL Core API')
+    validateConnectionOrigin(setupDefaults.value.connectionMode, coreOrigin, 'URL Core API')
+    const centralOrigin = setupDefaults.value.centralAiUrl.trim()
+      ? normalizeServerOrigin(setupDefaults.value.centralAiUrl, 'URL AI Central')
+      : ''
+    if (centralOrigin) {
+      validateConnectionOrigin(setupDefaults.value.connectionMode, centralOrigin, 'URL AI Central')
+    }
+    const next: DeviceSetupDefaults = {
+      ...setupDefaults.value,
+      coreApiUrl: coreOrigin,
+      centralAiUrl: centralOrigin,
+      modelVersion: setupDefaults.value.modelVersion.trim() || 'opencv-zoo-sface-2021dec',
+    }
+    window.localStorage.setItem(DEVICE_SETUP_DEFAULTS_KEY, JSON.stringify(next))
+    setupDefaults.value = next
+    setupDefaultsMessage.value =
+      'Default disimpan di browser ini. URL akan terisi untuk setup device berikutnya; token tidak disimpan.'
+  } catch (error) {
+    setupDefaultsMessage.value =
+      error instanceof Error ? error.message : 'Default setup tidak dapat disimpan.'
   }
 }
 
@@ -242,10 +306,22 @@ function openCredential(device: Device): void {
   credentialCopyMessage.value = null
   rotationReason.value = ''
   const browserIsLocal = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
-  const defaultsToSameHost = browserIsLocal && device.deployment_profile === 'AI_EDGE'
-  coreApiUrl.value = defaultsToSameHost ? defaultCoreApiUrl() : ''
-  centralAiUrl.value = ''
-  modelVersion.value = 'opencv-zoo-sface-2021dec'
+  const defaultMode = setupDefaults.value.connectionMode
+  const defaultsToSameHost =
+    device.deployment_profile === 'AI_EDGE' &&
+    (defaultMode === 'same-host' || (browserIsLocal && !setupDefaults.value.coreApiUrl))
+  const savedCore = setupDefaults.value.coreApiUrl
+  const savedCentral = setupDefaults.value.centralAiUrl
+  coreApiUrl.value = defaultsToSameHost
+    ? savedCore || defaultCoreApiUrl()
+    : savedCore && !isLoopbackOrigin(savedCore)
+      ? savedCore
+      : ''
+  centralAiUrl.value =
+    device.deployment_profile === 'STB_GATEWAY' && savedCentral && !isLoopbackOrigin(savedCentral)
+      ? savedCentral
+      : ''
+  modelVersion.value = setupDefaults.value.modelVersion
   installPlatform.value = device.deployment_profile === 'STB_GATEWAY' ? 'armbian' : 'windows'
   connectionMode.value = defaultsToSameHost ? 'same-host' : 'private-network'
   installCommandMessage.value = null
@@ -311,20 +387,6 @@ async function copyCredential(): Promise<void> {
     credentialCopyMessage.value = 'Token disalin. Simpan segera ke file token perangkat.'
   } catch {
     credentialCopyMessage.value = 'Salin token dari kotak secara manual sebelum menutup panel.'
-  }
-}
-
-async function copyBootstrapCredential(): Promise<void> {
-  const device = credentialDevice.value
-  const credential = issuedCredential.value
-  if (!device || !credential) return
-  try {
-    await navigator.clipboard.writeText(`${device.device_id}:${credential.token}`)
-    credentialCopyMessage.value =
-      'ID dan token disalin untuk installer. Tempelkan hanya pada prompt tersembunyi installer; isi clipboard ini tetap rahasia.'
-  } catch {
-    credentialCopyMessage.value =
-      'Clipboard tidak tersedia. Gunakan ID perangkat dan token secara terpisah pada prompt installer.'
   }
 }
 
@@ -422,6 +484,10 @@ function onConnectionModeChange(event: Event): void {
 
 async function copyInstallCommand(): Promise<void> {
   installCommandMessage.value = null
+  if (!bundleMessage.value?.startsWith('Paket setup diunduh')) {
+    installCommandMessage.value = 'Unduh paket setup perangkat dulu sebelum menyalin command.'
+    return
+  }
   if (!setupCommandState.value.command) {
     installCommandMessage.value = setupCommandState.value.error ?? 'Perintah setup belum siap.'
     return
@@ -429,7 +495,7 @@ async function copyInstallCommand(): Promise<void> {
   try {
     await navigator.clipboard.writeText(setupCommandState.value.command)
     installCommandMessage.value =
-      'Perintah disalin. Token tidak ada di command; masukkan UUID:token pada prompt tersembunyi.'
+      'Perintah disalin. Pastikan file bundle berada di folder Downloads pada host yang menjalankan command.'
   } catch {
     installCommandMessage.value = 'Clipboard tidak tersedia. Salin perintah yang ditampilkan.'
   }
@@ -473,11 +539,11 @@ function downloadSetupBundle(): void {
     const url = URL.createObjectURL(file)
     const link = document.createElement('a')
     link.href = url
-    link.download = 'presensi-device-setup.json'
+    link.download = `presensi-device-${device.device_id}-setup.json`
     link.click()
     window.setTimeout(() => URL.revokeObjectURL(url), 0)
     bundleMessage.value =
-      'Paket setup diunduh. Paket ini memuat secret; pindahkan secara aman dan hapus setelah agent berhasil dipasang.'
+      'Paket setup diunduh. Paket ini memuat secret; pindahkan secara aman ke host kamera dan hapus setelah agent berhasil dipasang.'
   } catch (error) {
     bundleMessage.value = error instanceof Error ? error.message : 'Paket setup tidak dapat dibuat.'
   }
@@ -493,6 +559,10 @@ function goToPage(nextPage: number): void {
 }
 
 watch([page, statusFilter], () => void loadDevices())
+watch([coreApiUrl, centralAiUrl, modelVersion, connectionMode], () => {
+  bundleMessage.value = null
+  installCommandMessage.value = null
+})
 onMounted(() => {
   void loadDevices()
   void loadLaboratories()
@@ -519,6 +589,58 @@ onBeforeUnmount(() => {
     </PageHeader>
 
     <p v-if="errorMessage" class="master-data__alert" role="alert">{{ errorMessage }}</p>
+
+    <section v-if="canManage" class="master-data__panel devices-view__form-panel">
+      <div class="master-data__panel-heading">
+        <div>
+          <h2>Default koneksi untuk installer kamera</h2>
+          <p>
+            Isi sekali untuk mempercepat paket device berikutnya. Nilai ini disimpan hanya di
+            browser admin ini, bukan di server; tidak ada token di sini. Ubah default per device
+            bila lab memakai jaringan berbeda.
+          </p>
+        </div>
+      </div>
+      <div class="master-data__form">
+        <label>
+          Jaringan dari host kamera ke server
+          <select v-model="setupDefaults.connectionMode" aria-label="Default jaringan device">
+            <option value="same-host">Komputer yang sama — localhost</option>
+            <option value="private-network">LAN/VPN sekolah — HTTPS</option>
+          </select>
+        </label>
+        <label>
+          Default URL Core API
+          <input
+            v-model="setupDefaults.coreApiUrl"
+            type="url"
+            autocomplete="url"
+            placeholder="http://127.0.0.1:8000 atau https://presensi.sekolah.id"
+          />
+        </label>
+        <label>
+          Default URL AI Central (STB_GATEWAY)
+          <input
+            v-model="setupDefaults.centralAiUrl"
+            type="url"
+            autocomplete="url"
+            placeholder="https://ai.sekolah.id"
+          />
+        </label>
+        <label>
+          Versi model enrollment
+          <input v-model="setupDefaults.modelVersion" maxlength="128" autocomplete="off" />
+        </label>
+        <p v-if="setupDefaultsMessage" class="master-data__alert" role="status">
+          {{ setupDefaultsMessage }}
+        </p>
+        <div class="master-data__form-actions">
+          <button class="button button--primary" type="button" @click="saveSetupDefaults">
+            Simpan default di browser ini
+          </button>
+        </div>
+      </div>
+    </section>
 
     <div class="devices-view__toolbar">
       <form class="master-data__search" role="search" @submit.prevent="submitSearch">
@@ -746,13 +868,10 @@ onBeforeUnmount(() => {
           </p>
           <section class="devices-view__bundle-form" aria-label="Paket instalasi perangkat">
             <h3>Siapkan instalasi perangkat</h3>
-            <button class="button button--secondary" type="button" @click="copyBootstrapCredential">
-              Salin kredensial untuk installer satu-perintah
-            </button>
             <p>
-              Installer meminta URL Core API dan kredensial ID:token ini secara tersembunyi,
-              mendeteksi profile dari registry, lalu mengunduh source dan memasang agent. Jangan
-              tempelkan kredensial ke perintah terminal.
+              Isi alamat server yang dapat dijangkau kamera untuk paket ini, lalu unduh paket setup.
+              Bootstrap membaca URL, profile, UUID, dan token dari file; token tidak diketik atau
+              ditaruh pada command.
             </p>
             <label for="device-install-platform">Sistem operasi perangkat</label>
             <select id="device-install-platform" v-model="installPlatform">
@@ -859,10 +978,19 @@ onBeforeUnmount(() => {
             <p v-if="installCommandMessage" class="devices-view__credential-status" role="status">
               {{ installCommandMessage }}
             </p>
+            <p>
+              File bundle bernama
+              <code>presensi-device-{{ credentialDevice.device_id }}-setup.json</code>. Jika kamera
+              ada di host lain, pindahkan file itu lewat USB atau SCP ke folder Downloads pada host
+              kamera. Jika browser menambahkan akhiran karena file lama sudah ada, pulihkan nama
+              persis seperti di atas. File bundle adalah rahasia dan berlaku untuk satu device.
+            </p>
             <button
               class="button button--secondary"
               type="button"
-              :disabled="!setupCommandState.command"
+              :disabled="
+                !setupCommandState.command || !bundleMessage?.startsWith('Paket setup diunduh')
+              "
               @click="copyInstallCommand"
             >
               Salin perintah instalasi perangkat
@@ -890,9 +1018,10 @@ onBeforeUnmount(() => {
             </span>
           </div>
           <p class="devices-view__credential-instructions">
-            Command membawa URL dan UUID device, tetapi token sengaja tidak dimasukkan ke riwayat
-            terminal. Tempel UUID:token pada prompt tersembunyi. Profile dibaca otomatis dari
-            registry; pemasangan systemd production mengikuti runbook.
+            Command mengunduh source untuk host baru atau memakai checkout ini untuk kamera pada
+            komputer yang sama. Ia membaca bundle lokal dan memvalidasi profile ke Core API;
+            kredensial tidak muncul di riwayat terminal. Installer lalu menawarkan pilihan kamera,
+            resolusi, dan FPS. Pemasangan service setelah reboot mengikuti runbook production.
           </p>
           <div class="master-data__form-actions">
             <button class="button button--primary" type="button" @click="closeCredential">

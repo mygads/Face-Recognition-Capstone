@@ -12,11 +12,13 @@ for a clean Armbian install, central server, recovery, and acceptance checklists
 
 For a commissioning install, register one device per physical camera under
 **Perangkat**, set its lab and deployment profile, then create a credential.
-Use **Salin kredensial untuk installer satu-perintah**. On the camera host, run
-the bootstrap below. It asks for the Core API origin and credential in a
-hidden prompt, reads the profile from the registry, downloads the source,
+Download the setup bundle from the credential panel and place it in the
+`Downloads` folder on the camera host. The generated command reads the server
+origin(s), profile, device UUID, and credential from this one-device bundle; it
+does not require typing them in the terminal. The bootstrap validates the
+credential/profile with Core API, downloads the source for a separate host,
 installs the matching native agent, and writes a protected local token file.
-For STB_GATEWAY it also asks for the Central AI origin.
+For a manual bootstrap without the setup bundle, it prompts for the values.
 
 Windows supports `AI_EDGE` only. PowerShell bootstrap uses winget for Git or
 Python if missing; the Python launcher can install Python 3.12 if no runtime
@@ -35,9 +37,26 @@ curl -fsSL https://raw.githubusercontent.com/mygads/Face-Recognition-Capstone/ma
 ```
 
 The bootstrap clones the public `main` branch to the user data directory; no
-manual repository clone is needed. Keep the one-time credential out of shell
-commands, chat, tickets, and screenshots. The downloaded setup JSON remains an
-alternative from **Unduh paket setup perangkat**.
+manual repository clone is needed. The generated command expects a file named
+`presensi-device-<device-uuid>-setup.json` under the current user's Downloads
+folder. If the dashboard was opened on another computer, copy the file securely
+to that folder on the camera host first. It is a device secret; remove it after
+setup. Do not paste it into chat, tickets, or screenshots.
+
+After dependencies and (for AI_EDGE) models install, the installer offers an
+interactive camera wizard. Choose an available OpenCV camera index, a profile-
+appropriate resolution and requested FPS. It reads a short sample, displays the
+driver-negotiated resolution and FPS information, and saves the selection to
+the generated device YAML. It cannot provide stable camera names for every OS;
+the camera index is used instead. Re-run the wizard with:
+
+```powershell
+.\.venv-edge-agent\Scripts\presensi-edge-agent.exe --config apps/edge-agent/config/edge-agent.yaml configure-camera
+```
+
+```bash
+.venv-edge-agent/bin/presensi-edge-agent --config apps/edge-agent/config/stb-gateway.yaml configure-camera
+```
 
 This is commissioning setup, not a persistent service. If readiness checks
 pass, it offers to run the agent in the current terminal so the first
@@ -67,6 +86,12 @@ resolution request is not silently passed through to central AI.
 The example motion, brightness, and sharpness values are starting values, not
 calibrated operating limits. Tune them against the actual camera position and
 room lighting, then record the measurements for the selected board.
+
+The gateway also uses `camera.index`, `camera.width`, `camera.height`, and
+`camera.fps`; those are asked in the installer wizard. Unlike AI_EDGE, STB has
+no local face-identity threshold or liveness model because recognition runs on
+AI Central. Its low-cost `gateway.min_brightness`, `max_brightness`, and
+`min_sharpness` are only upload gates, not recognition quality/identity scores.
 
 ### Install and register the systemd service
 

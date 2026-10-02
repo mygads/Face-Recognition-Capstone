@@ -101,35 +101,33 @@ python3 scripts/dev.py dev-down
 2. Buka **Perangkat**, buat device pada lab yang tepat, pilih profile:
    `AI_EDGE` untuk PC yang menjalankan model lokal atau `STB_GATEWAY` untuk STB
    yang mengirim burst ke central server.
-3. Buat credential device. Simpan credential sekali tampil dengan aman.
-4. Pada komputer kamera, jalankan bootstrap resmi dari PowerShell (Windows,
-   AI_EDGE saja) atau Bash (Ubuntu/Armbian). Script mengambil source; STB tidak
-   perlu clone manual.
+3. Buat credential device; token hanya ditampilkan sekali. Pada halaman
+   Perangkat, simpan default URL Core API/AI Central di browser admin jika
+   cocok untuk banyak kamera. Default ini lokal-browser saja; origin tetap dapat
+   dioverride per device. Unduh bundle dari panel setup. Bundle memuat
+   URL, UUID, profile, versi model, dan token. Pindahkan file ke folder
+   Downloads pada host kamera jika dashboard dibuka di komputer lain.
+4. Salin command yang dihasilkan Perangkat ke host kamera. Command mengunduh
+   source bila host baru atau memakai checkout yang ada pada host sama. Bootstrap
+   memvalidasi bundle/profile melalui Core API, memasang dependency, lalu
+   installer menulis token file lokal dengan permission terbatas. Tidak perlu
+   mengetik URL atau `UUID:token` lagi.
 
-Bootstrap bertanya origin Core API dan credential `UUID:token`, memvalidasi
-profile dari registry, menyiapkan Python dependencies, membuat token file lokal
-berpermission terbatas, lalu menjalankan installer yang cocok. Jika profile
-STB_GATEWAY, bootstrap Linux juga meminta origin AI Central. Jika AI_EDGE, ia
-meminta versi model (baseline default bila tidak diisi), otomatis mengunduh dan
-memeriksa YuNet/SFace, menampilkan hasil discovery kamera, menjalankan status
-check, lalu menawarkan mulai agent pada terminal sekarang.
+AI_EDGE otomatis mengunduh dan memeriksa YuNet/SFace. Profile STB_GATEWAY tidak
+memasang model wajah lokal. Kedua installer menawarkan wizard untuk memilih
+camera index, resolusi, dan FPS; kamera mengembalikan beberapa frame percobaan
+agar operator melihat mode aktual yang dinegosiasikan driver. Nilai pilihan
+tersimpan di YAML lokal. Wizard kemudian menjalankan status check dan menawarkan
+agent di terminal.
 
-~~~powershell
-irm https://raw.githubusercontent.com/mygads/Face-Recognition-Capstone/main/scripts/bootstrap-camera-device.ps1 | iex
-~~~
+Gunakan command PowerShell/Bash yang ditampilkan halaman Perangkat. Command itu
+menunjuk ke nama file bundle khusus device di folder Downloads.
 
-~~~bash
-curl -fsSL https://raw.githubusercontent.com/mygads/Face-Recognition-Capstone/main/scripts/bootstrap-camera-device.sh | bash
-~~~
-
-**Yang belum ditangani wizard:** pemilihan index webcam secara interaktif,
-negosiasi/pemilihan resolusi-FPS, threshold calibration import, dan install
-systemd. Kamera saat ini didiscover/didaftarkan untuk diagnosis; profile YAML
-memakai default. Setelah install, jalankan `presensi-edge-agent ... cameras`
-atau camera calibration utility di host kamera, pilih/edit index dan mode pada
-YAML, lalu validasi status. Untuk service setelah reboot ikuti systemd runbook.
-Jangan menempel token ke command, chat, atau screenshot; hapus setup bundle
-sementara setelah provisioning.
+Wizard belum mengimport threshold dari laporan kalibrasi, mengubah quality/liveness
+di dashboard, atau memasang service auto-start. Pengaturan advanced berada di
+YAML device atau environment AI Central dan harus direstart sesuai runbook.
+Service produksi setelah reboot dipasang terpisah melalui systemd runbook. Hapus
+bundle rahasia setelah provisioning.
 
 ## 5. Isi konfigurasi per profile
 

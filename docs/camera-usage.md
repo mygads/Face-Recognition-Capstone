@@ -1,5 +1,8 @@
 # Kamera dan model lokal
 
+Untuk pembagian konfigurasi AI_EDGE/STB, pengaturan mana yang dapat diubah,
+dan batas dashboard saat ini, lihat [panduan konfigurasi device](architecture/device-configuration.md).
+
 Panduan ini membedakan tiga hal yang sering terlihat sama: kamera di halaman
 enrollment browser, kamera untuk pengenalan saat presensi, dan preview lokal
 untuk memasang kamera. Tidak ada live video kamera edge yang dikirim ke
@@ -145,6 +148,24 @@ credential tersimpan di file yang ACL/permission-nya dibatasi. Jangan isi nilai
 threshold tebakan: agent memang menolak config AI_EDGE bila dua threshold belum
 diisi.
 
+Installer camera-device kini menawarkan wizard index kamera, resolusi, dan FPS
+requested sebelum pemeriksaan status. Jika dilewati, jalankan wizard lagi dari
+venv agent:
+
+```powershell
+.\.venv-edge-agent\Scripts\presensi-edge-agent.exe --config apps/edge-agent/config/edge-agent.yaml configure-camera
+```
+
+```bash
+.venv-edge-agent/bin/presensi-edge-agent --config apps/edge-agent/config/stb-gateway.yaml configure-camera
+```
+
+Wizard membuka kamera dan menunjukkan resolusi aktual dari frame serta FPS
+driver/pengukuran singkat. OpenCV menggunakan index, sebab label kamera tidak
+seragam lintas backend. FPS/resolusi adalah request ke driver dan dapat
+bernegosiasi; verifikasi kembali lewat `status` dan preview calibration pada
+host fisik. Untuk STB, capture aktual di atas 1280×720 ditolak.
+
 Pada STB_GATEWAY, kamera tetap dibuka native oleh edge-agent tetapi inference
 berjalan di AI service pusat. Letakkan YuNet/SFace di host AI server dan set
 path Compose berikut; jangan salin model ke STB untuk attendance:
@@ -175,6 +196,13 @@ hentikan service terlebih dahulu bila ia sedang memegang webcam. Pada STB
 gateway, gunakan capture hemat CPU dari contoh `STB_GATEWAY`; STB tidak memuat
 SFace/YuNet untuk inference. Preview diagnostik tetap alat lokal terpisah, bukan
 stream jaringan.
+
+Menu **AI readiness** di dashboard menampilkan status model/service yang
+dilaporkan API; menu itu belum mengubah threshold, brightness/sharpness,
+camera mode, credential, atau YAML agent. Ubah setting device di YAML host lalu
+restart agent. Aturan inference server AI Central diubah melalui protected
+environment/config dan runbook; jangan mengubah threshold sebelum ada laporan
+kalibrasi berversi.
 
 ## Batas fungsi saat ini
 

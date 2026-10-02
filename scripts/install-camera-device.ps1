@@ -78,6 +78,19 @@ if ($bundle.deployment_profile -eq 'AI_EDGE') {
 
 $agent = Join-Path $venv 'Scripts/presensi-edge-agent.exe'
 Write-Host ''
+Write-Host 'Camera setup: select a detected index, capture resolution, and requested FPS.'
+$configureCamera = Read-Host 'Run the interactive camera setup now? [Y/n]'
+if ($configureCamera -notin @('n', 'N', 'no', 'NO')) {
+    & $agent --config $configPath configure-camera
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning 'Camera setup did not complete. Check OS camera permission and close other apps using the camera.'
+        Write-Host "Run later: `"$agent`" --config `"$configPath`" configure-camera"
+    }
+} else {
+    Write-Host "Camera setup skipped. Run later: `"$agent`" --config `"$configPath`" configure-camera"
+}
+
+Write-Host ''
 Write-Host 'Checking camera indexes. Close browser enrollment and camera calibration first.'
 & $agent --config $configPath cameras
 if ($LASTEXITCODE -ne 0) {

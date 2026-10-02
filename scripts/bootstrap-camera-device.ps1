@@ -1,5 +1,6 @@
 param(
-    [switch]$UseWorkingCopy
+    [switch]$UseWorkingCopy,
+    [string]$BundlePath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -64,36 +65,68 @@ if ($LASTEXITCODE -ne 0) {
     if ($LASTEXITCODE -ne 0) { throw 'Python 3.11+ belum tersedia setelah instalasi.' }
 }
 
-$apiInput = $env:PRESENSI_CORE_API_URL
-if (-not $apiInput) {
-    $apiInput = Read-Host 'URL origin Core API (misalnya https://presensi.sekolah.id)'
-}
-$apiUrl = ConvertTo-Origin $apiInput $true
-$secureCredential = Read-Host 'Kredensial bootstrap (UUID:token) dari halaman Perangkat' -AsSecureString
-$pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureCredential)
-$plainCredential = $null
+$inputBundlePath = if ($BundlePath) { $BundlePath } else { $env:PRESENSI_DEVICE_SETUP_BUNDLE }
+$setupBundle = $null
 $token = $null
+if ($inputBundlePath) {
+    $resolvedInputBundle = (Resolve-Path -LiteralPath $inputBundlePath).Path
+    $setupBundle = Get-Content -LiteralPath $resolvedInputBundle -Raw | ConvertFrom-Json
+    if ($setupBundle.schema_version -ne 1 -or $setupBundle.deployment_profile -ne 'AI_EDGE') {
+        throw 'Setup bundle tidak valid untuk Windows AI_EDGE.'
+    }
+    $apiUrl = ConvertTo-Origin ([string]$setupBundle.core_api_url) $true
+    $deviceId = ([Guid]$setupBundle.device_id).ToString()
+    $token = [string]$setupBundle.token
+    if ($env:PRESENSI_CORE_API_URL -and (ConvertTo-Origin $env:PRESENSI_CORE_API_URL $true) -ne $apiUrl) {
+        throw 'Core API pada command tidak cocok dengan setup bundle.'
+    }
+    if ($env:PRESENSI_DEVICE_ID -and ([Guid]$env:PRESENSI_DEVICE_ID).ToString() -ne $deviceId) {
+        throw 'Device ID pada command tidak cocok dengan setup bundle.'
+    }
+    if ($env:PRESENSI_MODEL_VERSION -and $env:PRESENSI_MODEL_VERSION -ne [string]$setupBundle.model_version) {
+        throw 'Versi model pada command tidak cocok dengan setup bundle.'
+    }
+    if ($token.Length -lt 40 -or $token -notmatch '^[A-Za-z0-9_-]+$') {
+        throw 'Credential pada setup bundle tidak valid.'
+    }
+    if (-not $setupBundle.model_version -or ([string]$setupBundle.model_version).Length -gt 128) {
+        throw 'Bundle harus berisi versi model AI_EDGE yang valid.'
+    }
+} else {
+    $apiInput = $env:PRESENSI_CORE_API_URL
+    if (-not $apiInput) {
+        $apiInput = Read-Host 'URL origin Core API (misalnya https://presensi.sekolah.id)'
+    }
+    $apiUrl = ConvertTo-Origin $apiInput $true
+}
+$secureCredential = $null
+$pointer = [IntPtr]::Zero
+$plainCredential = $null
 $bundlePath = $null
 try {
-    $plainCredential = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
-    $separator = $plainCredential.IndexOf(':')
-    if ($separator -lt 1) {
-        throw 'Kredensial harus berformat UUID:token.'
+    if (-not $setupBundle) {
+        $secureCredential = Read-Host 'Kredensial bootstrap (UUID:token) dari halaman Perangkat' -AsSecureString
+        $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureCredential)
+        $plainCredential = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
+        $separator = $plainCredential.IndexOf(':')
+        if ($separator -lt 1) {
+            throw 'Kredensial harus berformat UUID:token.'
+        }
+        $deviceId = ([Guid]$plainCredential.Substring(0, $separator)).ToString()
+        $token = $plainCredential.Substring($separator + 1)
+        $plainCredential = $null
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
+        $pointer = [IntPtr]::Zero
     }
-    $deviceId = ([Guid]$plainCredential.Substring(0, $separator)).ToString()
     if ($env:PRESENSI_DEVICE_ID) {
         $expectedDeviceId = ([Guid]$env:PRESENSI_DEVICE_ID).ToString()
         if ($deviceId -ne $expectedDeviceId) {
-            throw 'Token tidak cocok dengan UUID perangkat pada command.'
+            throw 'Device ID dari setup tidak cocok dengan PRESENSI_DEVICE_ID.'
         }
     }
-    $token = $plainCredential.Substring($separator + 1)
     if ($token.Length -lt 40 -or $token -notmatch '^[A-Za-z0-9_-]+$') {
         throw 'Token perangkat tidak valid.'
     }
-    $plainCredential = $null
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
-    $pointer = [IntPtr]::Zero
 
     Write-Host 'Memvalidasi kredensial dan membaca profile perangkat dari Core API...'
     $headers = @{
@@ -112,7 +145,7 @@ try {
         throw 'Windows bootstrap mendukung profile AI_EDGE. Untuk STB_GATEWAY, gunakan bootstrap Linux di Armbian.'
     }
 
-    $modelVersion = $env:PRESENSI_MODEL_VERSION
+    $modelVersion = if ($setupBundle) { [string]$setupBundle.model_version } else { $env:PRESENSI_MODEL_VERSION }
     if (-not $modelVersion) {
         $modelVersion = Read-Host 'Versi model template (default opencv-zoo-sface-2021dec)'
     }
@@ -170,6 +203,7 @@ try {
     $token = $null
     $headers = $null
     $bundle = $null
+    $setupBundle = $null
 
     & (Join-Path $sourceDir 'scripts/install-camera-device.ps1') -BundlePath $bundlePath
 }

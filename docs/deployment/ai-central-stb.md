@@ -229,23 +229,34 @@ Untuk tiap STB, ADMIN membuat device di `/app/devices` bertipe `camera_gateway`,
 profile `STB_GATEWAY`, dan laboratorium yang tepat. Catat UUID, hostname, MAC,
 IP reservation, posisi kamera, dan rilis.
 
-Di baris device pilih **Kredensial**, buat token pertama, lalu klik **Salin
-kredensial untuk installer satu-perintah**. Di Armbian, jalankan bootstrap ini;
-masukkan origin Core API, UUID:token pada prompt tersembunyi, lalu origin AI
-Central saat diminta:
+Di baris device pilih **Kredensial**, buat token pertama, lalu isi URL Core API
+dan AI Central pada panel setup dan unduh bundle. Pindahkan
+`presensi-device-<device-uuid>-setup.json` dengan USB/SCP ke folder Downloads
+pada STB. Salin command Linux yang dibuat dashboard ke terminal STB; bootstrap
+membaca origin dan credential dari bundle tanpa meminta URL atau UUID:token
+lagi. Manual bootstrap masih bisa dijalankan dengan prompt tersembunyi jika
+tidak memakai bundle:
 
 ```bash
+DEVICE_UUID='<device-uuid-from-dashboard>'
+export PRESENSI_DEVICE_SETUP_BUNDLE="$HOME/Downloads/presensi-device-${DEVICE_UUID}-setup.json"
+set -o pipefail
+if ! command -v curl >/dev/null 2>&1; then sudo apt-get update && sudo apt-get install -y curl || exit 1; fi
 curl -fsSL https://raw.githubusercontent.com/mygads/Face-Recognition-Capstone/main/scripts/bootstrap-camera-device.sh | bash
 ```
 
-Bootstrap mengambil `STB_GATEWAY` dari registry, mengunduh repository, memasang
-agent dan menulis URL, UUID, serta token ke konfigurasi lokal. Perintah ini
-untuk Ubuntu/Armbian/Debian dengan `curl`; ia memasang Python/Git melalui `apt`
-jika belum ada. Sistem berbasis CasaOS belum divalidasi terpisah; gunakan hanya
+Bootstrap memvalidasi `STB_GATEWAY` terhadap registry, mengunduh repository,
+memasang agent, meminta pilihan kamera/resolusi/FPS, lalu menulis URL, UUID,
+dan token ke config/token file terlindungi. Perintah ini untuk Ubuntu/Armbian/
+Debian dengan `curl`; ia memasang Python/Git melalui `apt` jika belum ada.
+Hapus bundle setelah instalasi. Sistem berbasis CasaOS belum divalidasi terpisah; gunakan hanya
 jika host dasarnya menyediakan Debian/Ubuntu, `apt`, systemd, dan akses UVC.
-Sebagai alternatif, **Unduh paket setup perangkat** membuat JSON berisi secret
-satu kali; pindahkan melalui kanal tepercaya, lalu jalankan
-`scripts/install-camera-device.sh` dari checkout lokal dan hapus bundle.
+Jika source sudah tersedia di STB, lewati bootstrap/download dan jalankan
+installer langsung:
+
+```bash
+bash scripts/install-camera-device.sh "$HOME/Downloads/presensi-device-${DEVICE_UUID}-setup.json"
+```
 
 Untuk API dan AI, agent memakai credential device yang sama; API dapat
 memperbaruinya saat heartbeat jika token berada dalam file yang writable oleh

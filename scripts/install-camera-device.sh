@@ -97,6 +97,22 @@ fi
 
 AGENT="$VENV_PATH/bin/presensi-edge-agent"
 echo
+read -r -p 'Run interactive camera setup now (camera, resolution, FPS)? [Y/n] ' CONFIGURE_CAMERA
+case "$CONFIGURE_CAMERA" in
+  n|N|no|NO) echo "Camera setup skipped. Run later: $AGENT --config $CONFIG_PATH configure-camera" ;;
+  *)
+    set +e
+    "$AGENT" --config "$CONFIG_PATH" configure-camera
+    CAMERA_SETUP_STATUS=$?
+    set -e
+    if [[ "$CAMERA_SETUP_STATUS" -ne 0 ]]; then
+      echo 'Camera setup did not complete. Check UVC permission and close other camera apps.' >&2
+      echo "Run later: $AGENT --config $CONFIG_PATH configure-camera"
+    fi
+    ;;
+esac
+
+echo
 echo 'Checking camera indexes. Close enrollment and camera preview apps first.'
 set +e
 "$AGENT" --config "$CONFIG_PATH" cameras

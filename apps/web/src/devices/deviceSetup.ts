@@ -51,6 +51,7 @@ export function buildDeviceSetupCommand(input: DeviceSetupCommandInput): string 
     PRESENSI_CORE_API_URL: input.coreApiUrl,
     PRESENSI_DEVICE_ID: input.deviceId,
   }
+  const bundleFile = `presensi-device-${input.deviceId}-setup.json`
   if (input.profile === 'AI_EDGE' && input.modelVersion) {
     values.PRESENSI_MODEL_VERSION = input.modelVersion
   }
@@ -62,17 +63,21 @@ export function buildDeviceSetupCommand(input: DeviceSetupCommandInput): string 
     const environment = Object.entries(values)
       .map(([name, value]) => `$env:${name}=${quotePowerShell(value)}`)
       .join('; ')
+    const bundlePath = `$env:PRESENSI_DEVICE_SETUP_BUNDLE="$HOME\\Downloads\\${bundleFile}"`
     const script = input.useWorkingCopy
       ? '.\\scripts\\bootstrap-camera-device.ps1 -UseWorkingCopy'
       : `irm ${WINDOWS_BOOTSTRAP} | iex`
-    return `${environment}; ${script}`
+    return `${environment}; ${bundlePath}; ${script}`
   }
 
   const environment = Object.entries(values)
     .map(([name, value]) => `${name}=${quotePosix(value)}`)
     .join(' ')
+  const bundlePath = `PRESENSI_DEVICE_SETUP_BUNDLE="$HOME/Downloads/${bundleFile}"`
   const script = input.useWorkingCopy
     ? 'bash scripts/bootstrap-camera-device.sh --use-working-copy'
     : `set -o pipefail; if ! command -v curl >/dev/null 2>&1; then sudo apt-get update && sudo apt-get install -y curl || exit 1; fi; curl -fsSL ${quotePosix(LINUX_BOOTSTRAP)}`
-  return input.useWorkingCopy ? `${environment} ${script}` : `${script} | ${environment} bash`
+  return input.useWorkingCopy
+    ? `${environment} ${bundlePath} ${script}`.trim()
+    : `${script} | ${environment} ${bundlePath} bash`.trim()
 }
