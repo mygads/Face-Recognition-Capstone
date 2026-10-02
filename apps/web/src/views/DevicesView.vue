@@ -46,6 +46,7 @@ const devices = ref<Device[]>([])
 const laboratories = ref<Laboratory[]>([])
 const aiReadiness = ref<AiReadiness | null>(null)
 const isProfileLoading = ref(true)
+const hasResolvedInitialProfile = ref(false)
 const edgeDeviceCount = ref(0)
 const total = ref(0)
 const page = ref(0)
@@ -300,9 +301,10 @@ async function loadDevices(): Promise<void> {
 async function loadAiReadiness(): Promise<void> {
   if (!canManage.value) {
     isProfileLoading.value = false
+    hasResolvedInitialProfile.value = true
     return
   }
-  isProfileLoading.value = true
+  isProfileLoading.value = !hasResolvedInitialProfile.value
   try {
     aiReadiness.value = await getAiReadiness()
     setupDefaults.value.modelVersion = enrollmentModelVersion.value
@@ -318,6 +320,7 @@ async function loadAiReadiness(): Promise<void> {
     errorMessage.value = formatError(error)
   } finally {
     isProfileLoading.value = false
+    hasResolvedInitialProfile.value = true
   }
 }
 
@@ -707,7 +710,12 @@ onMounted(() => {
     await loadAiReadiness()
     await Promise.all([loadDevices(), loadLaboratories()])
   })()
-  refreshTimer = setInterval(() => void loadDevices(), 15_000)
+  refreshTimer = setInterval(() => {
+    void (async () => {
+      await loadAiReadiness()
+      await loadDevices()
+    })()
+  }, 15_000)
 })
 onBeforeUnmount(() => {
   if (refreshTimer) clearInterval(refreshTimer)
@@ -770,7 +778,7 @@ onBeforeUnmount(() => {
             <option value="private-network">LAN/VPN sekolah — HTTPS</option>
           </select>
         </label>
-        <p v-else class="devices-view__profile-note">
+        <p v-else-if="activeProfile === 'AI_EDGE'" class="devices-view__profile-note">
           AI_EDGE memakai alamat Core API di bawah. Koneksi otomatis diperlakukan sebagai localhost
           untuk komputer yang sama atau HTTPS untuk host lain.
         </p>
