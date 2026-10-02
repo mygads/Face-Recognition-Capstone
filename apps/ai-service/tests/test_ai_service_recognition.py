@@ -408,7 +408,9 @@ def test_health_and_cache_invalidation_are_available() -> None:
     health, invalidated, request = asyncio.run(exercise())
 
     assert health.status_code == 200
-    assert health.json() == {"status": "ok"}
+    assert health.json()["status"] == "ok"
+    assert "models_ready" in health.json()
+    assert "thresholds_configured" in health.json()
     assert invalidated.status_code == 204
     assert request.status_code == 503
     assert request.json()["error"]["code"] == "session_gallery_unavailable"

@@ -40,6 +40,7 @@ from presensi_api.enrollment_processing import (
     MAX_TOTAL_CAPTURE_BYTES,
     EnrollmentFrameResult,
     EnrollmentProcessor,
+    build_enrollment_processor,
     get_enrollment_processor,
 )
 from presensi_api.runtime_configuration import configuration_values
@@ -59,9 +60,14 @@ ALLOWED_IMAGE_TYPES = {
 }
 
 
-def configured_enrollment_processor(session: DbSession) -> EnrollmentProcessor:
+def configured_enrollment_processor(
+    session: DbSession,
+    default_processor: EnrollmentProcessor = Depends(get_enrollment_processor),
+) -> EnrollmentProcessor:
     _, quality_settings, _ = configuration_values(session, "enrollment")
-    return get_enrollment_processor(quality_settings or None)
+    if not quality_settings:
+        return default_processor
+    return build_enrollment_processor(quality_settings)
 
 
 @router.get(

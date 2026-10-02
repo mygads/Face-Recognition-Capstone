@@ -778,7 +778,9 @@ def test_ten_offline_events_survive_restart_and_reconnect_in_fifo_idempotently(
         camera=CameraSettings(0, 1920, 1080, 30, "auto", 4, 1),
         models=ModelSettings(None, None, MODEL_VERSION, None, None),
         quality=QualitySettings(80, 45, 25, 235),
-        recognition=RecognitionSettings(None, None, 3, 5, 5, 10, 3),
+        # Synthetic calibrated values let this offline-queue test exercise the
+        # mocked decision path. Production values still come from calibration.
+        recognition=RecognitionSettings(0.5, 0.1, 3, 5, 5, 10, 3),
         liveness=LivenessSettings(False, False, None),
         runtime=RuntimeSettings(tmp_path / "queue.sqlite3", 20, 0.5, "INFO"),
     )

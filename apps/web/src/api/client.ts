@@ -4,8 +4,7 @@ import type { components, operations, paths } from './generated/schema'
 export type AuthenticatedAccount = components['schemas']['CurrentUserResponse']
 export type AiReadiness = components['schemas']['AiReadinessResponse']
 export type ConfigurationVersion = components['schemas']['ConfigurationVersionResponse']
-export type EnrollmentQualityConfiguration =
-  components['schemas']['EnrollmentQualityConfiguration']
+export type EnrollmentQualityConfiguration = components['schemas']['EnrollmentQualityConfiguration']
 export type RecognitionConfiguration = components['schemas']['RecognitionConfiguration']
 export type StbGatewayConfiguration = components['schemas']['StbGatewayConfiguration']
 export type DeviceRuntimeConfiguration = components['schemas']['DeviceConfigurationResponse']

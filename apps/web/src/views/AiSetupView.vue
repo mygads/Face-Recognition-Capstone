@@ -402,7 +402,9 @@ onBeforeUnmount(() => {
       <section v-if="activeTab === 'enrollment'" class="master-data__panel ai-setup-view__settings">
         <div class="master-data__panel-heading">
           <div>
-            <p class="master-data__eyebrow">Core API · revisi {{ readiness.enrollment_quality_revision }}</p>
+            <p class="master-data__eyebrow">
+              Core API · revisi {{ readiness.enrollment_quality_revision }}
+            </p>
             <h2>Kualitas capture pendaftaran</h2>
           </div>
         </div>
@@ -414,19 +416,46 @@ onBeforeUnmount(() => {
         <form class="master-data__form ai-setup-view__form" @submit.prevent="saveEnrollment">
           <label>
             Ukuran wajah minimum (piksel)
-            <input v-model.number="enrollmentForm.min_face_pixels" type="number" min="16" max="2048" required />
+            <input
+              v-model.number="enrollmentForm.min_face_pixels"
+              type="number"
+              min="16"
+              max="2048"
+              required
+            />
           </label>
           <label>
             Ketajaman minimum
-            <input v-model.number="enrollmentForm.min_sharpness" type="number" min="0" max="100000" step="any" required />
+            <input
+              v-model.number="enrollmentForm.min_sharpness"
+              type="number"
+              min="0"
+              max="100000"
+              step="any"
+              required
+            />
           </label>
           <label>
             Kecerahan minimum
-            <input v-model.number="enrollmentForm.min_brightness" type="number" min="0" max="254" step="any" required />
+            <input
+              v-model.number="enrollmentForm.min_brightness"
+              type="number"
+              min="0"
+              max="254"
+              step="any"
+              required
+            />
           </label>
           <label>
             Kecerahan maksimum
-            <input v-model.number="enrollmentForm.max_brightness" type="number" min="1" max="255" step="any" required />
+            <input
+              v-model.number="enrollmentForm.max_brightness"
+              type="number"
+              min="1"
+              max="255"
+              step="any"
+              required
+            />
           </label>
           <div class="master-data__form-actions">
             <button class="button button--primary" type="submit" :disabled="isSaving">
@@ -436,7 +465,10 @@ onBeforeUnmount(() => {
         </form>
       </section>
 
-      <section v-else-if="activeTab === 'devices'" class="master-data__panel ai-setup-view__settings">
+      <section
+        v-else-if="activeTab === 'devices'"
+        class="master-data__panel ai-setup-view__settings"
+      >
         <div class="master-data__panel-heading">
           <div>
             <p class="master-data__eyebrow">Konfigurasi jarak jauh</p>
@@ -452,7 +484,11 @@ onBeforeUnmount(() => {
           Perangkat
           <select v-model="selectedDeviceId" @change="loadDeviceConfiguration(selectedDeviceId)">
             <option value="">Pilih perangkat aktif</option>
-            <option v-for="device in devices.filter((item) => item.is_active)" :key="device.device_id" :value="device.device_id">
+            <option
+              v-for="device in devices.filter((item) => item.is_active)"
+              :key="device.device_id"
+              :value="device.device_id"
+            >
               {{ device.name }} · {{ device.deployment_profile }}
             </option>
           </select>
@@ -461,19 +497,105 @@ onBeforeUnmount(() => {
         <template v-if="selectedDevice?.deployment_profile === 'AI_EDGE'">
           <h3>AI_EDGE · kebijakan pengenalan</h3>
           <form class="master-data__form ai-setup-view__form" @submit.prevent="saveDevice">
-            <label>Ukuran wajah minimum<input v-model.number="edgeForm.min_face_pixels" type="number" min="16" max="2048" required /></label>
-            <label>Ketajaman minimum<input v-model.number="edgeForm.min_laplacian_variance" type="number" min="0" max="100000" step="any" required /></label>
-            <label>Kecerahan minimum<input v-model.number="edgeForm.min_brightness" type="number" min="0" max="254" step="any" required /></label>
-            <label>Kecerahan maksimum<input v-model.number="edgeForm.max_brightness" type="number" min="1" max="255" step="any" required /></label>
-            <label>Top-1 similarity<input :value="edgeForm.min_top1_similarity ?? ''" type="number" min="-1" max="1" step="any" required @input="setEdgeTop1" /></label>
-            <label>Margin Top-1 − Top-2<input :value="edgeForm.min_top1_top2_margin ?? ''" type="number" min="0" max="2" step="any" required @input="setEdgeMargin" /></label>
-            <label>Frame yang harus sepakat<input v-model.number="edgeForm.minimum_agreeing_frames" type="number" min="1" max="10" required /></label>
-            <label>Sampling setiap N frame<input v-model.number="edgeForm.sample_every_n_frames" type="number" min="1" max="60" required /></label>
-            <label>Frame terbaik<input v-model.number="edgeForm.best_frame_count" type="number" min="1" max="20" required /></label>
-            <label>Riwayat maksimum<input v-model.number="edgeForm.max_history_frames" type="number" min="1" max="60" required /></label>
-            <label class="ai-setup-view__form-wide">Referensi laporan kalibrasi<input v-model="edgeForm.calibration_reference" type="text" maxlength="200" required placeholder="ID/nama laporan kalibrasi yang disetujui" /></label>
+            <label
+              >Ukuran wajah minimum<input
+                v-model.number="edgeForm.min_face_pixels"
+                type="number"
+                min="16"
+                max="2048"
+                required
+            /></label>
+            <label
+              >Ketajaman minimum<input
+                v-model.number="edgeForm.min_laplacian_variance"
+                type="number"
+                min="0"
+                max="100000"
+                step="any"
+                required
+            /></label>
+            <label
+              >Kecerahan minimum<input
+                v-model.number="edgeForm.min_brightness"
+                type="number"
+                min="0"
+                max="254"
+                step="any"
+                required
+            /></label>
+            <label
+              >Kecerahan maksimum<input
+                v-model.number="edgeForm.max_brightness"
+                type="number"
+                min="1"
+                max="255"
+                step="any"
+                required
+            /></label>
+            <label
+              >Top-1 similarity<input
+                :value="edgeForm.min_top1_similarity ?? ''"
+                type="number"
+                min="-1"
+                max="1"
+                step="any"
+                required
+                @input="setEdgeTop1"
+            /></label>
+            <label
+              >Margin Top-1 − Top-2<input
+                :value="edgeForm.min_top1_top2_margin ?? ''"
+                type="number"
+                min="0"
+                max="2"
+                step="any"
+                required
+                @input="setEdgeMargin"
+            /></label>
+            <label
+              >Frame yang harus sepakat<input
+                v-model.number="edgeForm.minimum_agreeing_frames"
+                type="number"
+                min="1"
+                max="10"
+                required
+            /></label>
+            <label
+              >Sampling setiap N frame<input
+                v-model.number="edgeForm.sample_every_n_frames"
+                type="number"
+                min="1"
+                max="60"
+                required
+            /></label>
+            <label
+              >Frame terbaik<input
+                v-model.number="edgeForm.best_frame_count"
+                type="number"
+                min="1"
+                max="20"
+                required
+            /></label>
+            <label
+              >Riwayat maksimum<input
+                v-model.number="edgeForm.max_history_frames"
+                type="number"
+                min="1"
+                max="60"
+                required
+            /></label>
+            <label class="ai-setup-view__form-wide"
+              >Referensi laporan kalibrasi<input
+                v-model="edgeForm.calibration_reference"
+                type="text"
+                maxlength="200"
+                required
+                placeholder="ID/nama laporan kalibrasi yang disetujui"
+            /></label>
             <div class="master-data__form-actions ai-setup-view__form-wide">
-              <button class="button button--primary" type="submit" :disabled="isSaving">{{ isSaving ? 'Menyimpan…' : 'Terapkan ke perangkat' }}</button>
+              <button class="button button--primary" type="submit" :disabled="isSaving">
+                {{ isSaving ? 'Menyimpan…' : 'Terapkan ke perangkat' }}
+              </button>
             </div>
           </form>
         </template>
@@ -481,32 +603,112 @@ onBeforeUnmount(() => {
         <template v-else-if="selectedDevice?.deployment_profile === 'STB_GATEWAY'">
           <h3>STB_GATEWAY · capture dan burst</h3>
           <form class="master-data__form ai-setup-view__form" @submit.prevent="saveDevice">
-            <label>Ambang gerakan<input v-model.number="gatewayForm.motion_threshold" type="number" min="0" max="255" step="any" required /></label>
-            <label>Sampling periodik (detik)<input v-model.number="gatewayForm.periodic_burst_seconds" type="number" min="0.01" max="3600" step="any" required /></label>
-            <label>Jeda minimum burst (detik)<input v-model.number="gatewayForm.minimum_burst_interval_seconds" type="number" min="0.01" max="3600" step="any" required /></label>
-            <label>Jumlah frame per burst<input v-model.number="gatewayForm.burst_frame_count" type="number" min="1" max="5" required /></label>
-            <label>Jeda antar-frame (detik)<input v-model.number="gatewayForm.burst_frame_interval_seconds" type="number" min="0" max="10" step="any" required /></label>
-            <label>Kualitas JPEG<input v-model.number="gatewayForm.jpeg_quality" type="number" min="20" max="100" required /></label>
-            <label>Kecerahan minimum<input v-model.number="gatewayForm.min_brightness" type="number" min="0" max="254" step="any" required /></label>
-            <label>Kecerahan maksimum<input v-model.number="gatewayForm.max_brightness" type="number" min="1" max="255" step="any" required /></label>
-            <label>Ketajaman minimum<input v-model.number="gatewayForm.min_sharpness" type="number" min="0" max="100000" step="any" required /></label>
+            <label
+              >Ambang gerakan<input
+                v-model.number="gatewayForm.motion_threshold"
+                type="number"
+                min="0"
+                max="255"
+                step="any"
+                required
+            /></label>
+            <label
+              >Sampling periodik (detik)<input
+                v-model.number="gatewayForm.periodic_burst_seconds"
+                type="number"
+                min="0.01"
+                max="3600"
+                step="any"
+                required
+            /></label>
+            <label
+              >Jeda minimum burst (detik)<input
+                v-model.number="gatewayForm.minimum_burst_interval_seconds"
+                type="number"
+                min="0.01"
+                max="3600"
+                step="any"
+                required
+            /></label>
+            <label
+              >Jumlah frame per burst<input
+                v-model.number="gatewayForm.burst_frame_count"
+                type="number"
+                min="1"
+                max="5"
+                required
+            /></label>
+            <label
+              >Jeda antar-frame (detik)<input
+                v-model.number="gatewayForm.burst_frame_interval_seconds"
+                type="number"
+                min="0"
+                max="10"
+                step="any"
+                required
+            /></label>
+            <label
+              >Kualitas JPEG<input
+                v-model.number="gatewayForm.jpeg_quality"
+                type="number"
+                min="20"
+                max="100"
+                required
+            /></label>
+            <label
+              >Kecerahan minimum<input
+                v-model.number="gatewayForm.min_brightness"
+                type="number"
+                min="0"
+                max="254"
+                step="any"
+                required
+            /></label>
+            <label
+              >Kecerahan maksimum<input
+                v-model.number="gatewayForm.max_brightness"
+                type="number"
+                min="1"
+                max="255"
+                step="any"
+                required
+            /></label>
+            <label
+              >Ketajaman minimum<input
+                v-model.number="gatewayForm.min_sharpness"
+                type="number"
+                min="0"
+                max="100000"
+                step="any"
+                required
+            /></label>
             <div class="master-data__form-actions ai-setup-view__form-wide">
-              <button class="button button--primary" type="submit" :disabled="isSaving">{{ isSaving ? 'Menyimpan…' : 'Terapkan ke gateway' }}</button>
+              <button class="button button--primary" type="submit" :disabled="isSaving">
+                {{ isSaving ? 'Menyimpan…' : 'Terapkan ke gateway' }}
+              </button>
             </div>
           </form>
         </template>
-        <p v-else class="master-data__empty">Pilih perangkat AI_EDGE atau STB_GATEWAY untuk mengatur nilainya.</p>
+        <p v-else class="master-data__empty">
+          Pilih perangkat AI_EDGE atau STB_GATEWAY untuk mengatur nilainya.
+        </p>
 
         <div v-if="deviceConfiguration" class="ai-setup-view__apply-state" role="status">
           <strong>{{ configStatusLabel(deviceConfiguration.apply_status) }}</strong>
-          <span>Diminta: revisi {{ deviceConfiguration.revision }} · diterapkan: revisi {{ deviceConfiguration.applied_revision }}</span>
+          <span
+            >Diminta: revisi {{ deviceConfiguration.revision }} · diterapkan: revisi
+            {{ deviceConfiguration.applied_revision }}</span
+          >
           <code v-if="deviceConfiguration.error_code">{{ deviceConfiguration.error_code }}</code>
         </div>
 
         <div class="ai-setup-view__device-status">
           <h3>Status sinkronisasi</h3>
           <div v-for="device in devices" :key="device.device_id" class="ai-setup-view__device-row">
-            <span><strong>{{ device.name }}</strong><small>{{ device.deployment_profile }}</small></span>
+            <span
+              ><strong>{{ device.name }}</strong
+              ><small>{{ device.deployment_profile }}</small></span
+            >
             <span>{{ configStatusLabel(device.config_apply_status) }}</span>
             <code v-if="device.config_error_code">{{ device.config_error_code }}</code>
           </div>
@@ -516,7 +718,9 @@ onBeforeUnmount(() => {
       <section v-else class="master-data__panel ai-setup-view__settings">
         <div class="master-data__panel-heading">
           <div>
-            <p class="master-data__eyebrow">AI Central · revisi {{ readiness.central_ai_config_desired_revision ?? 0 }}</p>
+            <p class="master-data__eyebrow">
+              AI Central · revisi {{ readiness.central_ai_config_desired_revision ?? 0 }}
+            </p>
             <h2>Kualitas frame dan threshold identitas</h2>
           </div>
         </div>
@@ -526,19 +730,102 @@ onBeforeUnmount(() => {
           konfigurasi terbaru tanpa mengubah file model.
         </p>
         <form class="master-data__form ai-setup-view__form" @submit.prevent="saveCentral">
-          <label>Ukuran wajah minimum<input v-model.number="centralForm.min_face_pixels" type="number" min="16" max="2048" required /></label>
-          <label>Ketajaman minimum<input v-model.number="centralForm.min_laplacian_variance" type="number" min="0" max="100000" step="any" required /></label>
-          <label>Kecerahan minimum<input v-model.number="centralForm.min_brightness" type="number" min="0" max="254" step="any" required /></label>
-          <label>Kecerahan maksimum<input v-model.number="centralForm.max_brightness" type="number" min="1" max="255" step="any" required /></label>
-          <label>Top-1 similarity<input :value="centralForm.min_top1_similarity ?? ''" type="number" min="-1" max="1" step="any" @input="setCentralTop1" /></label>
-          <label>Margin Top-1 − Top-2<input :value="centralForm.min_top1_top2_margin ?? ''" type="number" min="0" max="2" step="any" @input="setCentralMargin" /></label>
-          <label>Frame yang harus sepakat<input v-model.number="centralForm.minimum_agreeing_frames" type="number" min="1" max="10" required /></label>
-          <label>Sampling setiap N frame<input v-model.number="centralForm.sample_every_n_frames" type="number" min="1" max="60" required /></label>
-          <label>Frame terbaik<input v-model.number="centralForm.best_frame_count" type="number" min="1" max="20" required /></label>
-          <label>Riwayat maksimum<input v-model.number="centralForm.max_history_frames" type="number" min="1" max="60" required /></label>
-          <label class="ai-setup-view__form-wide">Referensi laporan kalibrasi<input v-model="centralForm.calibration_reference" type="text" maxlength="200" placeholder="Wajib diisi bila threshold diatur" /></label>
+          <label
+            >Ukuran wajah minimum<input
+              v-model.number="centralForm.min_face_pixels"
+              type="number"
+              min="16"
+              max="2048"
+              required
+          /></label>
+          <label
+            >Ketajaman minimum<input
+              v-model.number="centralForm.min_laplacian_variance"
+              type="number"
+              min="0"
+              max="100000"
+              step="any"
+              required
+          /></label>
+          <label
+            >Kecerahan minimum<input
+              v-model.number="centralForm.min_brightness"
+              type="number"
+              min="0"
+              max="254"
+              step="any"
+              required
+          /></label>
+          <label
+            >Kecerahan maksimum<input
+              v-model.number="centralForm.max_brightness"
+              type="number"
+              min="1"
+              max="255"
+              step="any"
+              required
+          /></label>
+          <label
+            >Top-1 similarity<input
+              :value="centralForm.min_top1_similarity ?? ''"
+              type="number"
+              min="-1"
+              max="1"
+              step="any"
+              @input="setCentralTop1"
+          /></label>
+          <label
+            >Margin Top-1 − Top-2<input
+              :value="centralForm.min_top1_top2_margin ?? ''"
+              type="number"
+              min="0"
+              max="2"
+              step="any"
+              @input="setCentralMargin"
+          /></label>
+          <label
+            >Frame yang harus sepakat<input
+              v-model.number="centralForm.minimum_agreeing_frames"
+              type="number"
+              min="1"
+              max="10"
+              required
+          /></label>
+          <label
+            >Sampling setiap N frame<input
+              v-model.number="centralForm.sample_every_n_frames"
+              type="number"
+              min="1"
+              max="60"
+              required
+          /></label>
+          <label
+            >Frame terbaik<input
+              v-model.number="centralForm.best_frame_count"
+              type="number"
+              min="1"
+              max="20"
+              required
+          /></label>
+          <label
+            >Riwayat maksimum<input
+              v-model.number="centralForm.max_history_frames"
+              type="number"
+              min="1"
+              max="60"
+              required
+          /></label>
+          <label class="ai-setup-view__form-wide"
+            >Referensi laporan kalibrasi<input
+              v-model="centralForm.calibration_reference"
+              type="text"
+              maxlength="200"
+              placeholder="Wajib diisi bila threshold diatur"
+          /></label>
           <div class="master-data__form-actions ai-setup-view__form-wide">
-            <button class="button button--primary" type="submit" :disabled="isSaving">{{ isSaving ? 'Menyimpan…' : 'Simpan dan terapkan' }}</button>
+            <button class="button button--primary" type="submit" :disabled="isSaving">
+              {{ isSaving ? 'Menyimpan…' : 'Simpan dan terapkan' }}
+            </button>
           </div>
         </form>
         <p class="ai-setup-view__note">
@@ -558,17 +845,38 @@ onBeforeUnmount(() => {
         <div class="master-data__table-wrap">
           <table class="master-data__table">
             <thead>
-              <tr><th>Perangkat / lab</th><th>Profile</th><th>Model dilaporkan</th><th>Kamera</th><th>Koneksi</th><th>Konfigurasi</th></tr>
+              <tr>
+                <th>Perangkat / lab</th>
+                <th>Profile</th>
+                <th>Model dilaporkan</th>
+                <th>Kamera</th>
+                <th>Koneksi</th>
+                <th>Konfigurasi</th>
+              </tr>
             </thead>
             <tbody>
-              <tr v-if="devices.length === 0"><td colspan="6" class="master-data__empty">Belum ada perangkat.</td></tr>
+              <tr v-if="devices.length === 0">
+                <td colspan="6" class="master-data__empty">Belum ada perangkat.</td>
+              </tr>
               <tr v-for="device in devices" :key="device.device_id">
-                <td data-label="Perangkat / lab"><strong>{{ device.name }}</strong><small>{{ device.laboratory_code }} · {{ device.laboratory_name }}</small></td>
+                <td data-label="Perangkat / lab">
+                  <strong>{{ device.name }}</strong
+                  ><small>{{ device.laboratory_code }} · {{ device.laboratory_name }}</small>
+                </td>
                 <td data-label="Profile">{{ device.deployment_profile }}</td>
-                <td data-label="Model dilaporkan">{{ device.deployment_profile === 'AI_EDGE' ? (device.model_version ?? 'Belum dilaporkan') : 'Dijalankan di server' }}</td>
+                <td data-label="Model dilaporkan">
+                  {{
+                    device.deployment_profile === 'AI_EDGE'
+                      ? (device.model_version ?? 'Belum dilaporkan')
+                      : 'Dijalankan di server'
+                  }}
+                </td>
                 <td data-label="Kamera">{{ device.camera_status }}</td>
                 <td data-label="Koneksi">{{ device.health_status }}</td>
-                <td data-label="Konfigurasi">{{ configStatusLabel(device.config_apply_status) }} · {{ device.config_applied_revision }}</td>
+                <td data-label="Konfigurasi">
+                  {{ configStatusLabel(device.config_apply_status) }} ·
+                  {{ device.config_applied_revision }}
+                </td>
               </tr>
             </tbody>
           </table>

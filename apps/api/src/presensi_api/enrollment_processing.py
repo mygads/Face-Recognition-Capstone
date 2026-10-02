@@ -145,9 +145,15 @@ class OpenCVEnrollmentProcessor:
         )
 
 
-def get_enrollment_processor(
+def get_enrollment_processor() -> EnrollmentProcessor:
+    """Provide the environment-configured enrollment processor to FastAPI."""
+    return build_enrollment_processor()
+
+
+def build_enrollment_processor(
     quality_settings: Mapping[str, object] | None = None,
 ) -> EnrollmentProcessor:
+    """Build a processor using environment defaults and optional runtime policy."""
     yunet_path = os.getenv("PRESENSI_ENROLLMENT_YUNET_MODEL_PATH", "").strip()
     sface_path = os.getenv("PRESENSI_ENROLLMENT_SFACE_MODEL_PATH", "").strip()
     model_version = os.getenv("PRESENSI_ENROLLMENT_MODEL_VERSION", "").strip()

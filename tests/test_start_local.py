@@ -93,8 +93,5 @@ def test_skipping_model_download_is_persisted(
     monkeypatch.setattr(start_local, "ENV_FILE", env_file)
     monkeypatch.setattr(start_local, "ENV_EXAMPLE", env_example)
     monkeypatch.setattr(start_local, "local_models_are_verified", lambda: False)
-    monkeypatch.setattr(start_local.sys, "stdin", InteractiveInput())
-    monkeypatch.setattr("builtins.input", lambda _prompt: "2")
-
-    assert start_local.setup_local_models("edge", None) is False
+    assert start_local.setup_local_models("edge", "skip") is False
     assert start_local.read_local_env_setting("PRESENSI_LOCAL_MODEL_SETUP") == "skipped"
