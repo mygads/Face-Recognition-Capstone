@@ -4,6 +4,7 @@ import os
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal, cast
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -29,6 +30,7 @@ from presensi_api.api.v1.schemas.device_runtime import (
     DeviceCredentialRotationRequest,
     DeviceHeartbeatDeviceResponse,
     DeviceRuntimeStatusResponse,
+    PreviewGalleryResponse,
     SessionRosterStudentResponse,
     SessionTemplateResponse,
 )
@@ -41,10 +43,13 @@ from presensi_api.biometric_crypto import (
 from presensi_api.db.models import (
     AttendanceSession,
     AuditLog,
+    ClassStudent,
     Device,
     FaceTemplate,
     PracticumSchedule,
+    SchoolClass,
     SessionStudent,
+    Student,
 )
 from presensi_api.db.session import get_db_session
 from presensi_api.session_lifecycle import (
@@ -95,6 +100,79 @@ def _active_device_sessions(
 
 def _device_for_path(actor: AuthenticatedDevice, device_id: UUID) -> Device:
     return require_path_device(actor, device_id)
+
+
+def _template_roster(
+    rows: list[tuple[UUID, str, str, str, FaceTemplate | None]],
+    *,
+    model_name: str,
+    model_version: str,
+) -> tuple[list[SessionRosterStudentResponse], int]:
+    keyring = require_face_template_keyring()
+    grouped: dict[UUID, dict[str, object]] = {}
+    template_count = 0
+    for student_id, student_number, full_name, class_name, template in rows:
+        student = grouped.setdefault(
+            student_id,
+            {
+                "student_id": student_id,
+                "student_number": student_number,
+                "full_name": full_name,
+                "class_names": set(),
+                "templates": [],
+            },
+        )
+        class_names = student["class_names"]
+        assert isinstance(class_names, set)
+        class_names.add(class_name)
+        if template is None:
+            continue
+        if (
+            template.embedding_ciphertext is None
+            or template.encryption_key_id is None
+            or template.embedding_dimension is None
+        ):
+            continue
+        try:
+            values = keyring.decrypt(
+                template.embedding_ciphertext,
+                dimension=template.embedding_dimension,
+                key_id=template.encryption_key_id,
+                template_id=template.id,
+                student_id=template.student_id,
+                model_name=template.model_name,
+                model_version=template.model_version,
+            )
+        except BiometricCryptographyError as exc:
+            raise ApiProblem(
+                503,
+                "face_template_unavailable",
+                "A stored template could not be loaded safely.",
+            ) from exc
+        templates = student["templates"]
+        assert isinstance(templates, list)
+        templates.append(
+            SessionTemplateResponse(
+                model_name=template.model_name,
+                model_version=template.model_version,
+                values=list(values),
+                normalized=True,
+            )
+        )
+        template_count += 1
+    return (
+        [
+            SessionRosterStudentResponse(
+                student_id=cast(UUID, item["student_id"]),
+                student_number=cast(str, item["student_number"]),
+                full_name=cast(str, item["full_name"]),
+                class_names=sorted(cast(set[str], item["class_names"])),
+                templates=cast(list[SessionTemplateResponse], item["templates"]),
+            )
+            for item in grouped.values()
+        ],
+        template_count,
+    )
 
 
 @router.post(
@@ -281,6 +359,10 @@ def get_active_session_cache(
     session_id: UUID | None = None,
 ) -> ActiveSessionCacheResponse:
     device = _device_for_path(principal, device_id)
+    if not device.camera_enabled:
+        raise ApiProblem(
+            409, "device_camera_disabled", "Kamera perangkat sedang dijeda admin."
+        )
     now = datetime.now(UTC)
     active = _active_device_sessions(session, device, now=now)
     if session_id is None:
@@ -310,8 +392,15 @@ def get_active_session_cache(
             SessionStudent.student_id,
             SessionStudent.student_number_snapshot,
             SessionStudent.full_name_snapshot,
+            SchoolClass.name,
             FaceTemplate,
         )
+        .join(AttendanceSession, AttendanceSession.id == SessionStudent.session_id)
+        .join(
+            PracticumSchedule,
+            PracticumSchedule.id == AttendanceSession.practicum_schedule_id,
+        )
+        .join(SchoolClass, SchoolClass.id == PracticumSchedule.class_id)
         .outerjoin(
             FaceTemplate,
             (FaceTemplate.student_id == SessionStudent.student_id)
@@ -322,54 +411,9 @@ def get_active_session_cache(
         .where(SessionStudent.session_id == selected.id)
         .order_by(SessionStudent.student_number_snapshot, SessionStudent.student_id)
     ).all()
-    keyring = require_face_template_keyring()
-    grouped: dict[UUID, dict[str, object]] = {}
-    template_count = 0
-    for student_id, student_number, full_name, template in roster_rows:
-        student = grouped.setdefault(
-            student_id,
-            {
-                "student_id": student_id,
-                "student_number": student_number,
-                "full_name": full_name,
-                "templates": [],
-            },
-        )
-        if template is None:
-            continue
-        if (
-            template.embedding_ciphertext is None
-            or template.encryption_key_id is None
-            or template.embedding_dimension is None
-        ):
-            continue
-        try:
-            values = keyring.decrypt(
-                template.embedding_ciphertext,
-                dimension=template.embedding_dimension,
-                key_id=template.encryption_key_id,
-                template_id=template.id,
-                student_id=template.student_id,
-                model_name=template.model_name,
-                model_version=template.model_version,
-            )
-        except BiometricCryptographyError as exc:
-            raise ApiProblem(
-                503,
-                "face_template_unavailable",
-                "A stored template could not be loaded safely.",
-            ) from exc
-        templates = student["templates"]
-        assert isinstance(templates, list)
-        templates.append(
-            SessionTemplateResponse(
-                model_name=template.model_name,
-                model_version=template.model_version,
-                values=list(values),
-                normalized=True,
-            )
-        )
-        template_count += 1
+    roster, template_count = _template_roster(
+        list(roster_rows), model_name=model_name, model_version=model_version
+    )
     if template_count == 0:
         raise ApiProblem(
             409,
@@ -392,10 +436,119 @@ def get_active_session_cache(
         expires_at=expires_at,
         model_name=model_name,
         model_version=model_version,
-        roster=[
-            SessionRosterStudentResponse.model_validate(item)
-            for item in grouped.values()
-        ],
+        roster=roster,
+    )
+
+
+@router.get(
+    "/devices/{device_id}/preview-gallery",
+    response_model=PreviewGalleryResponse,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Fetch the time- and laboratory-scoped preview gallery",
+)
+def get_preview_gallery(
+    device_id: UUID,
+    principal: DeviceActor,
+    session: DbSession,
+    model_name: Annotated[str, Query(min_length=1, max_length=120)],
+    model_version: Annotated[str, Query(min_length=1, max_length=80)],
+) -> PreviewGalleryResponse:
+    device = _device_for_path(principal, device_id)
+    if device.deployment_profile != "AI_EDGE":
+        raise ApiProblem(
+            409,
+            "preview_gallery_profile_unsupported",
+            "Preview gallery hanya tersedia untuk AI_EDGE.",
+        )
+    if not device.camera_enabled:
+        raise ApiProblem(
+            409, "device_camera_disabled", "Kamera perangkat sedang dijeda admin."
+        )
+    now = datetime.now(UTC)
+    if _active_device_sessions(session, device, now=now):
+        raise ApiProblem(
+            409,
+            "preview_gallery_session_active",
+            "Gunakan roster snapshot sesi aktif untuk pengenalan presensi.",
+        )
+    schedules = session.scalars(
+        select(PracticumSchedule)
+        .join(SchoolClass, SchoolClass.id == PracticumSchedule.class_id)
+        .where(
+            PracticumSchedule.laboratory_id == device.laboratory_id,
+            PracticumSchedule.is_active.is_(True),
+            SchoolClass.is_active.is_(True),
+        )
+    ).all()
+    eligible_class_ids: set[UUID] = set()
+    for schedule in schedules:
+        try:
+            local_now = now.astimezone(ZoneInfo(schedule.timezone_name))
+        except (ZoneInfoNotFoundError, ValueError, TypeError):
+            continue
+        if (
+            local_now.weekday() != schedule.weekday
+            or local_now.date() < schedule.effective_from
+            or (
+                schedule.effective_through is not None
+                and local_now.date() > schedule.effective_through
+            )
+        ):
+            continue
+        # A preview may begin shortly before class, but ends with the scheduled
+        # class. Keep the off-session gallery limited to today's lab schedule.
+        local_minutes = local_now.hour * 60 + local_now.minute
+        start_minutes = schedule.start_time.hour * 60 + schedule.start_time.minute
+        end_minutes = schedule.end_time.hour * 60 + schedule.end_time.minute
+        if start_minutes - 15 <= local_minutes < end_minutes:
+            eligible_class_ids.add(schedule.class_id)
+    if not eligible_class_ids:
+        raise ApiProblem(
+            404,
+            "preview_gallery_unavailable",
+            "Tidak ada kelas terjadwal untuk perangkat ini saat ini.",
+        )
+
+    rows = session.execute(
+        select(
+            Student.id,
+            Student.student_number,
+            Student.full_name,
+            SchoolClass.name,
+            FaceTemplate,
+        )
+        .join(ClassStudent, ClassStudent.student_id == Student.id)
+        .join(SchoolClass, SchoolClass.id == ClassStudent.class_id)
+        .outerjoin(
+            FaceTemplate,
+            (FaceTemplate.student_id == Student.id)
+            & (FaceTemplate.revoked_at.is_(None))
+            & (FaceTemplate.model_name == model_name)
+            & (FaceTemplate.model_version == model_version),
+        )
+        .where(
+            ClassStudent.class_id.in_(eligible_class_ids),
+            Student.is_active.is_(True),
+        )
+        .order_by(Student.student_number, Student.id, SchoolClass.name)
+    ).all()
+    roster, template_count = _template_roster(
+        list(rows), model_name=model_name, model_version=model_version
+    )
+    if template_count == 0:
+        raise ApiProblem(
+            409,
+            "preview_gallery_empty",
+            "Belum ada template aktif untuk kelas terjadwal di laboratorium ini.",
+        )
+    generated_at = datetime.now(UTC)
+    return PreviewGalleryResponse(
+        device_id=device.id,
+        generated_at=generated_at,
+        expires_at=generated_at + timedelta(seconds=_gallery_max_age_seconds()),
+        model_name=model_name,
+        model_version=model_version,
+        roster=roster,
     )
 
 

@@ -39,11 +39,13 @@ type AttendanceResult = {
   decision: 'pending' | 'recorded' | 'not_recorded'
   attendance_status: 'present' | 'late' | null
   display_name?: string | null
+  class_name?: string | null
   updated_at: number
 }
 
 type DiagnosticCandidate = {
   display_name: string
+  class_name: string
   similarity: number
   updated_at: number
 }
@@ -93,6 +95,11 @@ const cameraObservationLabel = computed(() => {
 })
 
 const identityTitle = computed(() => {
+  if (recentAttendanceResult.value?.decision === 'recorded') {
+    return recentAttendanceResult.value.display_name ?? 'Presensi tercatat'
+  }
+  if (recentAttendanceResult.value?.decision === 'not_recorded') return 'Presensi belum tercatat'
+  if (diagnosticCandidate.value) return diagnosticCandidate.value.display_name
   if (!isFullscreen.value) {
     if (previewStatus.value?.recognition_state === 'waiting_for_calibration') {
       return 'AI belum dikalibrasi'
@@ -101,10 +108,6 @@ const identityTitle = computed(() => {
       ? (previewStatus.value.display_name ?? 'Identitas cocok')
       : 'Belum teridentifikasi'
   }
-  if (recentAttendanceResult.value?.decision === 'recorded') {
-    return recentAttendanceResult.value.display_name ?? 'Presensi tercatat'
-  }
-  if (recentAttendanceResult.value?.decision === 'not_recorded') return 'Presensi belum tercatat'
   if (previewStatus.value?.recognition_state === 'waiting_for_calibration') {
     return 'AI belum dikalibrasi'
   }
@@ -118,28 +121,28 @@ const identityTitle = computed(() => {
 })
 
 const identityDisplayMessage = computed(() => {
-  if (!isFullscreen.value) {
-    if (recentAttendanceResult.value?.decision === 'recorded') {
-      return recentAttendanceResult.value.attendance_status === 'late'
-        ? 'Presensi sudah tercatat sebagai terlambat.'
-        : 'Presensi sudah tercatat sebagai hadir.'
-    }
-    if (recentAttendanceResult.value?.decision === 'not_recorded') {
-      return 'Kandidat belum menghasilkan presensi. Periksa alasan pada status sesi atau minta bantuan petugas.'
-    }
-    return recognitionMessage.value
-  }
-  if (!previewStatus.value?.session_active) return 'Sesi praktikum belum dibuka.'
   if (recentAttendanceResult.value?.decision === 'recorded') {
-    const name = recentAttendanceResult.value.display_name
-    const thanks = name ? `Terima kasih, ${name}.` : 'Terima kasih.'
+    const className = recentAttendanceResult.value.class_name
+    const prefix = className ? `${className} · ` : ''
     return recentAttendanceResult.value.attendance_status === 'late'
-      ? `${thanks} Presensi tercatat sebagai terlambat.`
-      : `${thanks} Presensi tercatat sebagai hadir.`
+      ? `${prefix}Presensi sudah tercatat sebagai terlambat.`
+      : `${prefix}Presensi sudah tercatat sebagai hadir.`
   }
   if (recentAttendanceResult.value?.decision === 'not_recorded') {
     return 'Presensi belum tercatat. Silakan minta bantuan petugas.'
   }
+  if (diagnosticCandidate.value) {
+    const candidate = diagnosticCandidate.value
+    const className = candidate.class_name ? `${candidate.class_name}. ` : ''
+    const score = `Kemiripan model ${(candidate.similarity * 100).toFixed(1)}% (bukan akurasi).`
+    return previewStatus.value?.session_active
+      ? `${className}${score} Identitas masih kandidat; presensi menunggu kebijakan pengenalan dan validasi API.`
+      : `${className}${score} Preview saja; presensi belum dimulai.`
+  }
+  if (!isFullscreen.value) {
+    return recognitionMessage.value
+  }
+  if (!previewStatus.value?.session_active) return recognitionMessage.value
   if (previewStatus.value?.recognition_state === 'waiting_for_calibration') {
     return recognitionMessage.value
   }
@@ -165,10 +168,12 @@ const recognitionMessage = computed(() => {
   if (!previewStatus.value.camera_open)
     return 'Kamera belum terbuka. Periksa agent dan koneksi kamera.'
   if (!previewStatus.value.session_active)
-    return 'Kamera aktif. Buka sesi praktikum agar pengenalan dimulai.'
+    return 'Kamera aktif untuk preview siswa di kelas yang dijadwalkan. Presensi tidak dicatat sebelum sesi dibuka.'
   switch (previewStatus.value.recognition_state) {
     case 'waiting_for_calibration':
       return 'Pengenalan belum aktif karena admin belum menerapkan threshold Top-1 dan margin hasil benchmark. Presensi belum dibuat. Minta admin memeriksa konfigurasi AI & kamera.'
+    case 'preview_only':
+      return 'Pencocokan preview berjalan untuk kelas terjadwal di laboratorium ini. Hasilnya belum menjadi presensi.'
     case 'checking':
     case 'collecting':
       return 'Sedang memeriksa beberapa frame. Minta siswa menghadap kamera.'
@@ -414,29 +419,29 @@ onBeforeUnmount(() => {
         <h3>{{ identityTitle }}</h3>
         <p>{{ identityDisplayMessage }}</p>
         <div
-          v-if="!isFullscreen && diagnosticCandidate"
+          v-if="diagnosticCandidate"
           class="camera-preview-view__candidate"
           role="status"
           aria-live="polite"
         >
-          <span>Uji kamera · kandidat terdekat di roster sesi</span>
+          <span>Kandidat sementara · belum diverifikasi presensi</span>
           <strong>{{ diagnosticCandidate.display_name }}</strong>
-          <b>{{ diagnosticSimilarityPercent }} kemiripan</b>
+          <b>{{ diagnosticCandidate.class_name || 'Kelas tidak tersedia' }}</b>
+          <b>{{ diagnosticSimilarityPercent }} kemiripan · bukan tingkat akurasi</b>
           <small>
-            Skor cosine ini bukan probabilitas atau tingkat akurasi. Threshold belum dikalibrasi;
-            hasil ini tidak membuat presensi.
+            Nama adalah kandidat terdekat dari kelas yang terjadwal di laboratorium hari ini. Hasil
+            preview tidak membuat presensi. Presensi hanya dicatat oleh Core API saat sesi aktif dan
+            kebijakan pengenalan lolos.
           </small>
         </div>
         <div
-          v-else-if="
-            !isFullscreen && previewStatus?.recognition_state === 'waiting_for_calibration'
-          "
+          v-else-if="previewStatus?.recognition_state === 'preview_only'"
           class="camera-preview-view__candidate-empty"
           role="status"
         >
-          <strong>Mencari kandidat di roster sesi</strong>
+          <strong>Mencari siswa dari jadwal lab hari ini</strong>
           <small v-if="!previewStatus?.session_active">
-            Guru perlu membuka sesi praktikum terlebih dahulu.
+            Kamera dapat menampilkan kandidat sebelum sesi dibuka. Presensi belum dicatat.
           </small>
           <small v-else-if="cameraObservation?.state !== 'ready'">
             {{ cameraObservation?.message ?? 'Menunggu satu wajah dengan kualitas yang cukup.' }}
@@ -467,8 +472,12 @@ onBeforeUnmount(() => {
           </div>
         </dl>
         <p class="camera-preview-view__privacy">
-          <template v-if="isFullscreen">
-            Nama dan status hanya tampil setelah Core API mengonfirmasi presensi.
+          <template v-if="isFullscreen && !previewStatus?.session_active">
+            Kandidat preview belum terverifikasi dan tidak membuat presensi. Buka sesi sesuai jadwal
+            untuk mulai mencatat kehadiran.
+          </template>
+          <template v-else-if="isFullscreen">
+            Presensi hanya dinyatakan berhasil setelah Core API mengonfirmasi hasil.
           </template>
           <template v-else>
             Kandidat pada uji kamera hanya untuk petugas. Presensi baru tercatat setelah threshold

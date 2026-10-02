@@ -1,19 +1,34 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useAuthStore } from '../stores/auth'
 import {
   ApiError,
   closeAttendanceSession,
   getAttendanceSessionStatus,
+  getSessionOpeningPolicy,
   listAttendanceSessions,
   listOpenableSchedules,
   openAttendanceSession,
+  saveSessionOpeningPolicy,
   type AttendanceSession,
   type OpenableSchedule,
+  type SessionOpeningPolicy,
+  type SessionOpeningPolicyResponse,
 } from '../api/client'
 
 const weekdays = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu']
+const auth = useAuthStore()
+const canManagePolicy = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
 const schedules = ref<OpenableSchedule[]>([])
 const sessions = ref<AttendanceSession[]>([])
+const policy = ref<SessionOpeningPolicyResponse | null>(null)
+const policyForm = ref<SessionOpeningPolicy>({
+  mode: 'manual',
+  auto_open_minutes_before: 0,
+  auto_open_minutes_after: 15,
+  default_grace_period_minutes: 15,
+})
+const isSavingPolicy = ref(false)
 const gracePeriodMinutes = ref(15)
 const openingScheduleId = ref<string | null>(null)
 const closingSessionId = ref<string | null>(null)
@@ -50,12 +65,21 @@ async function reload(): Promise<void> {
   isLoading.value = true
   pageError.value = null
   try {
-    const [available, page] = await Promise.all([
+    const [available, page, latestPolicy] = await Promise.all([
       listOpenableSchedules(),
       listAttendanceSessions({ limit: 50, offset: 0 }),
+      getSessionOpeningPolicy(),
     ])
     schedules.value = available
     sessions.value = page.items
+    policy.value = latestPolicy
+    policyForm.value = {
+      mode: latestPolicy.mode,
+      auto_open_minutes_before: latestPolicy.auto_open_minutes_before,
+      auto_open_minutes_after: latestPolicy.auto_open_minutes_after,
+      default_grace_period_minutes: latestPolicy.default_grace_period_minutes,
+    }
+    gracePeriodMinutes.value = latestPolicy.default_grace_period_minutes
   } catch (error) {
     pageError.value = formatError(error)
   } finally {
@@ -64,6 +88,25 @@ async function reload(): Promise<void> {
 }
 
 onMounted(() => void reload())
+
+async function savePolicy(): Promise<void> {
+  isSavingPolicy.value = true
+  pageError.value = null
+  successMessage.value = null
+  try {
+    policy.value = await saveSessionOpeningPolicy(policyForm.value)
+    gracePeriodMinutes.value = policyForm.value.default_grace_period_minutes
+    successMessage.value =
+      policyForm.value.mode === 'automatic'
+        ? 'Pembukaan otomatis tersimpan. Sesi akan dibuka dalam jendela jadwal yang dipilih.'
+        : 'Mode manual tersimpan. Guru membuka sesi dari halaman ini.'
+    await reload()
+  } catch (error) {
+    pageError.value = formatError(error)
+  } finally {
+    isSavingPolicy.value = false
+  }
+}
 
 async function openSession(schedule: OpenableSchedule): Promise<void> {
   openingScheduleId.value = schedule.id
@@ -114,7 +157,93 @@ async function showStatus(item: AttendanceSession): Promise<void> {
     <p v-if="pageError" class="master-data__alert" role="alert">{{ pageError }}</p>
     <p v-if="successMessage" class="master-data__success" role="status">{{ successMessage }}</p>
 
-    <section class="master-data__panel" aria-labelledby="open-session-title">
+    <section
+      v-if="policy"
+      class="master-data__panel"
+      aria-labelledby="session-policy-title"
+      data-testid="session-opening-policy"
+    >
+      <div class="master-data__panel-heading">
+        <div>
+          <p class="master-data__eyebrow">Kebijakan sesi</p>
+          <h2 id="session-policy-title">Cara membuka presensi</h2>
+        </div>
+        <span class="status-badge status-badge--active">
+          {{ policy.mode === 'automatic' ? 'Otomatis' : 'Manual oleh guru' }}
+        </span>
+      </div>
+      <form class="master-data__form session-view__policy-form" @submit.prevent="savePolicy">
+        <label>
+          Mode pembukaan
+          <select v-model="policyForm.mode" :disabled="!canManagePolicy || isSavingPolicy">
+            <option value="manual">Manual — guru membuka sesi</option>
+            <option value="automatic">Otomatis — mengikuti jadwal</option>
+          </select>
+        </label>
+        <label>
+          Grace period kehadiran
+          <span>
+            <input
+              v-model.number="policyForm.default_grace_period_minutes"
+              type="number"
+              min="0"
+              max="1440"
+              :disabled="!canManagePolicy || isSavingPolicy"
+            />
+            menit
+          </span>
+        </label>
+        <template v-if="policyForm.mode === 'automatic'">
+          <label>
+            Buka sebelum jadwal
+            <span>
+              <input
+                v-model.number="policyForm.auto_open_minutes_before"
+                type="number"
+                min="0"
+                max="15"
+                :disabled="!canManagePolicy || isSavingPolicy"
+              />
+              menit
+            </span>
+          </label>
+          <label>
+            Buka setelah jadwal mulai
+            <span>
+              <input
+                v-model.number="policyForm.auto_open_minutes_after"
+                type="number"
+                min="0"
+                max="15"
+                :disabled="!canManagePolicy || isSavingPolicy"
+              />
+              menit
+            </span>
+          </label>
+        </template>
+        <p class="session-view__hint session-view__policy-hint">
+          <template v-if="policyForm.mode === 'automatic'">
+            Backend membuka sesi sekali dalam jendela waktu tersebut, mengambil snapshot roster, dan
+            menutup sesi pada akhir jadwal. Grace period dihitung dari jam mulai jadwal.
+          </template>
+          <template v-else>
+            Guru tetap membuka sesi secara manual. Grace period setiap sesi dapat disesuaikan saat
+            sesi dibuka.
+          </template>
+        </p>
+        <div v-if="canManagePolicy" class="master-data__form-actions session-view__policy-actions">
+          <button class="button button--primary" type="submit" :disabled="isSavingPolicy">
+            {{ isSavingPolicy ? 'Menyimpan…' : 'Simpan kebijakan' }}
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <section
+      v-if="policy?.mode !== 'automatic'"
+      class="master-data__panel"
+      aria-labelledby="open-session-title"
+    >
       <div class="master-data__panel-heading">
         <div>
           <p class="master-data__eyebrow">Operasional guru</p>
@@ -164,6 +293,14 @@ async function showStatus(item: AttendanceSession): Promise<void> {
         Tidak ada jadwal aktif yang dapat dibuka hari ini.
       </p>
     </section>
+    <section v-else class="master-data__panel session-view__automatic-note" role="status">
+      <p class="master-data__eyebrow">Pembukaan otomatis aktif</p>
+      <h2>Sesi akan mengikuti jadwal laboratorium</h2>
+      <p>
+        Sesi dibuka di dalam jendela jadwal yang ditentukan admin. Roster diambil saat sesi otomatis
+        terbentuk. Tidak perlu menekan tombol buka sesi.
+      </p>
+    </section>
 
     <section class="master-data__panel" aria-labelledby="session-list-title">
       <div class="master-data__panel-heading">
@@ -201,7 +338,10 @@ async function showStatus(item: AttendanceSession): Promise<void> {
                 {{ item.class_name }}
                 <small>{{ item.laboratory_name }}</small>
               </td>
-              <td data-label="Dibuka">{{ displayDateTime(item.opened_at, item.timezone_name) }}</td>
+              <td data-label="Dibuka">
+                {{ displayDateTime(item.opened_at, item.timezone_name) }}
+                <small>{{ item.opened_automatically ? 'Otomatis' : 'Manual' }}</small>
+              </td>
               <td data-label="Roster">
                 {{ item.student_count }} siswa · grace {{ item.grace_period_minutes }} menit
               </td>

@@ -90,6 +90,7 @@ class ConfigurationVersionResponse(ApiSchema):
 class DeviceConfigurationResponse(ApiSchema):
     device_id: UUID
     deployment_profile: Literal["AI_EDGE", "STB_GATEWAY"]
+    camera_enabled: bool
     revision: int = Field(ge=0)
     settings: dict[str, object]
     applied_revision: int = Field(ge=0)

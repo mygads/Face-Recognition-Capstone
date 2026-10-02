@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { listDevices } from '../api/client'
+import { computed } from 'vue'
 import { useAuthStore } from '../stores/auth'
 
 defineOptions({ name: 'AppSidebar' })
@@ -14,7 +13,6 @@ const emit = defineEmits<{
   navigate: []
 }>()
 const auth = useAuthStore()
-const hasActiveEdgeCamera = ref(false)
 const canManageSchedules = computed(
   () => auth.account?.roles.some((role) => role === 'ADMIN' || role === 'TEACHER') ?? false,
 )
@@ -34,18 +32,6 @@ const canViewReports = computed(
 const canManageMasterData = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
 const canManageAccounts = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
 const canManageSettings = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
-
-onMounted(async () => {
-  if (!canViewDevices.value) return
-  try {
-    const devices = await listDevices({ limit: 100, offset: 0, is_active: true })
-    hasActiveEdgeCamera.value = devices.items.some(
-      (device) => device.deployment_profile === 'AI_EDGE',
-    )
-  } catch {
-    hasActiveEdgeCamera.value = false
-  }
-})
 </script>
 
 <template>
@@ -193,7 +179,7 @@ onMounted(async () => {
         <span class="app-sidebar__link-label">Perangkat</span>
       </RouterLink>
       <RouterLink
-        v-if="canViewDevices && hasActiveEdgeCamera"
+        v-if="canViewDevices"
         class="app-sidebar__link"
         active-class="app-sidebar__link--active"
         to="/app/camera-preview"

@@ -89,6 +89,7 @@ export const routes: RouteRecordRaw[] = [
           title: 'Kelola akun staf',
           description: 'Buat akun guru dan laboran untuk menggunakan sistem.',
           requiredRoles: ['ADMIN'],
+          pageHeaderInView: true,
         },
       },
       {
@@ -99,6 +100,7 @@ export const routes: RouteRecordRaw[] = [
           title: 'AI & kamera',
           description: 'Periksa kesiapan model AI, threshold, dan kamera perangkat.',
           requiredRoles: ['ADMIN'],
+          pageHeaderInView: true,
         },
       },
       {
@@ -107,8 +109,9 @@ export const routes: RouteRecordRaw[] = [
         component: CameraPreviewView,
         meta: {
           title: 'Preview kamera',
-          description: 'Lihat kamera AI_EDGE dan identitas yang telah cocok pada sesi aktif.',
+          description: 'Lihat kamera AI_EDGE dan kandidat identitas secara langsung.',
           requiredRoles: ['ADMIN', 'LABORANT'],
+          pageHeaderInView: true,
         },
       },
       {
@@ -119,6 +122,7 @@ export const routes: RouteRecordRaw[] = [
           title: 'Perangkat',
           description: 'Kelola penempatan dan pantau kondisi perangkat presensi.',
           requiredRoles: ['ADMIN', 'LABORANT'],
+          pageHeaderInView: true,
         },
       },
       {
@@ -224,6 +228,7 @@ declare module 'vue-router' {
     requiredRoles?: string[]
     title?: string
     description?: string
+    pageHeaderInView?: boolean
   }
 }
 

@@ -492,6 +492,23 @@ export interface paths {
         patch: operations["update_device_api_v1_devices__device_id__patch"];
         trace?: never;
     };
+    "/api/v1/devices/{device_id}/camera-control": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Enable or pause a device camera without deactivating the device */
+        put: operations["set_device_camera_enabled_api_v1_devices__device_id__camera_control_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/devices/{device_id}/heartbeat": {
         parameters: {
             query?: never;
@@ -603,6 +620,23 @@ export interface paths {
         };
         /** Fetch the active session roster and encrypted templates for local inference */
         get: operations["get_active_session_cache_api_v1_devices__device_id__active_session_cache_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/{device_id}/preview-gallery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch the time- and laboratory-scoped preview gallery */
+        get: operations["get_preview_gallery_api_v1_devices__device_id__preview_gallery_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -727,6 +761,24 @@ export interface paths {
         put?: never;
         /** Open an attendance session and snapshot its roster */
         post: operations["open_session_api_v1_sessions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the attendance session opening policy */
+        get: operations["get_session_policy_api_v1_sessions_policy_get"];
+        /** Publish attendance session opening policy */
+        put: operations["put_session_policy_api_v1_sessions_policy_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1336,6 +1388,8 @@ export interface components {
              * @enum {string}
              */
             status: "active" | "closed" | "cancelled";
+            /** Opened Automatically */
+            opened_automatically: boolean;
             /**
              * Opened At
              * Format: date-time
@@ -1578,6 +1632,11 @@ export interface components {
             /** Must Change Password */
             must_change_password: boolean;
         };
+        /** DeviceCameraControlRequest */
+        DeviceCameraControlRequest: {
+            /** Enabled */
+            enabled: boolean;
+        };
         /** DeviceConfigurationResponse */
         DeviceConfigurationResponse: {
             /**
@@ -1590,6 +1649,8 @@ export interface components {
              * @enum {string}
              */
             deployment_profile: "AI_EDGE" | "STB_GATEWAY";
+            /** Camera Enabled */
+            camera_enabled: boolean;
             /** Revision */
             revision: number;
             /** Settings */
@@ -1689,7 +1750,7 @@ export interface components {
             /** Model Version */
             model_version?: string | null;
             /** Camera Status */
-            camera_status?: ("unknown" | "online" | "offline" | "error") | null;
+            camera_status?: ("unknown" | "online" | "offline" | "error" | "disabled") | null;
             latency_summary?: components["schemas"]["DeviceLatencySummary"] | null;
         };
         /** DeviceHeartbeatResponse */
@@ -1748,7 +1809,9 @@ export interface components {
              * Camera Status
              * @enum {string}
              */
-            camera_status: "unknown" | "online" | "offline" | "error";
+            camera_status: "unknown" | "online" | "offline" | "error" | "disabled";
+            /** Camera Enabled */
+            camera_enabled: boolean;
             latency_summary: components["schemas"]["DeviceLatencySummary"] | null;
             /** Config Applied Revision */
             config_applied_revision: number;
@@ -2085,6 +2148,30 @@ export interface components {
             /** Sign In Again */
             sign_in_again: boolean;
         };
+        /** PreviewGalleryResponse */
+        PreviewGalleryResponse: {
+            /**
+             * Device Id
+             * Format: uuid
+             */
+            device_id: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Model Name */
+            model_name: string;
+            /** Model Version */
+            model_version: string;
+            /** Roster */
+            roster: components["schemas"]["SessionRosterStudentResponse"][];
+        };
         /** RecognitionConfiguration */
         RecognitionConfiguration: {
             /** Min Face Pixels */
@@ -2133,7 +2220,7 @@ export interface components {
              */
             decision: "attendance_recorded" | "no_attendance";
             /** Reason */
-            reason: ("device_inactive" | "device_laboratory_mismatch" | "session_inactive" | "student_not_found" | "student_not_in_session_roster" | "session_not_accessible" | "recognition_not_matched" | "liveness_failed" | "attendance_already_recorded") | null;
+            reason: ("device_inactive" | "device_camera_disabled" | "device_laboratory_mismatch" | "session_inactive" | "student_not_found" | "student_not_in_session_roster" | "session_not_accessible" | "recognition_not_matched" | "liveness_failed" | "attendance_already_recorded") | null;
             attendance: components["schemas"]["AttendanceRecordResponse"] | null;
             /** Replayed */
             replayed: boolean;
@@ -2364,7 +2451,7 @@ export interface components {
              * Camera Status
              * @enum {string}
              */
-            camera_status: "unknown" | "online" | "offline" | "error";
+            camera_status: "unknown" | "online" | "offline" | "error" | "disabled";
             /** Last Seen At */
             last_seen_at: string | null;
         };
@@ -2391,6 +2478,58 @@ export interface components {
             /** Recent Activity */
             recent_activity: components["schemas"]["SessionRecentActivity"][];
         };
+        /** SessionOpeningPolicy */
+        SessionOpeningPolicy: {
+            /**
+             * Mode
+             * @default manual
+             * @enum {string}
+             */
+            mode: "manual" | "automatic";
+            /**
+             * Auto Open Minutes Before
+             * @default 0
+             */
+            auto_open_minutes_before: number;
+            /**
+             * Auto Open Minutes After
+             * @default 15
+             */
+            auto_open_minutes_after: number;
+            /**
+             * Default Grace Period Minutes
+             * @default 15
+             */
+            default_grace_period_minutes: number;
+        };
+        /** SessionOpeningPolicyResponse */
+        SessionOpeningPolicyResponse: {
+            /**
+             * Mode
+             * @default manual
+             * @enum {string}
+             */
+            mode: "manual" | "automatic";
+            /**
+             * Auto Open Minutes Before
+             * @default 0
+             */
+            auto_open_minutes_before: number;
+            /**
+             * Auto Open Minutes After
+             * @default 15
+             */
+            auto_open_minutes_after: number;
+            /**
+             * Default Grace Period Minutes
+             * @default 15
+             */
+            default_grace_period_minutes: number;
+            /** Revision */
+            revision: number;
+            /** Updated At */
+            updated_at?: string | null;
+        };
         /** SessionRecentActivity */
         SessionRecentActivity: {
             /**
@@ -2415,7 +2554,7 @@ export interface components {
             /** Attendance Status */
             attendance_status: ("present" | "late" | "absent" | "excused") | null;
             /** Decision Reason */
-            decision_reason: ("device_inactive" | "device_laboratory_mismatch" | "session_inactive" | "student_not_found" | "student_not_in_session_roster" | "session_not_accessible" | "recognition_not_matched" | "liveness_failed" | "attendance_already_recorded") | null;
+            decision_reason: ("device_inactive" | "device_camera_disabled" | "device_laboratory_mismatch" | "session_inactive" | "student_not_found" | "student_not_in_session_roster" | "session_not_accessible" | "recognition_not_matched" | "liveness_failed" | "attendance_already_recorded") | null;
         };
         /** SessionRosterStudentResponse */
         SessionRosterStudentResponse: {
@@ -2428,6 +2567,8 @@ export interface components {
             student_number: string;
             /** Full Name */
             full_name: string;
+            /** Class Names */
+            class_names?: string[];
             /** Templates */
             templates: components["schemas"]["SessionTemplateResponse"][];
         };
@@ -7904,6 +8045,149 @@ export interface operations {
             };
         };
     };
+    set_device_camera_enabled_api_v1_devices__device_id__camera_control_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceCameraControlRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceResponse"];
+                };
+            };
+            /** @description The request could not be processed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Authentication is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description You are not allowed to perform this action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The requested resource was not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This method is not allowed for the resource. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The uploaded file exceeds the allowed size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The file extension or media type is not supported. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Request validation failed. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many requests. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description An unexpected server error occurred. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This API operation is not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The service is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     device_heartbeat_api_v1_devices__device_id__heartbeat_post: {
         parameters: {
             query?: never;
@@ -8776,6 +9060,150 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActiveSessionCacheResponse"];
+                };
+            };
+            /** @description The request could not be processed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Authentication is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description You are not allowed to perform this action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The requested resource was not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This method is not allowed for the resource. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The uploaded file exceeds the allowed size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The file extension or media type is not supported. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Request validation failed. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many requests. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description An unexpected server error occurred. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This API operation is not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The service is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_preview_gallery_api_v1_devices__device_id__preview_gallery_get: {
+        parameters: {
+            query: {
+                model_name: string;
+                model_version: string;
+            };
+            header?: {
+                "X-Device-ID"?: string | null;
+            };
+            path: {
+                device_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewGalleryResponse"];
                 };
             };
             /** @description The request could not be processed. */
@@ -10190,6 +10618,284 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AttendanceSessionResponse"];
+                };
+            };
+            /** @description The request could not be processed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Authentication is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description You are not allowed to perform this action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The requested resource was not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This method is not allowed for the resource. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The uploaded file exceeds the allowed size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The file extension or media type is not supported. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Request validation failed. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many requests. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description An unexpected server error occurred. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This API operation is not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The service is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_session_policy_api_v1_sessions_policy_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionOpeningPolicyResponse"];
+                };
+            };
+            /** @description The request could not be processed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Authentication is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description You are not allowed to perform this action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The requested resource was not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This method is not allowed for the resource. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The uploaded file exceeds the allowed size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The file extension or media type is not supported. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Request validation failed. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many requests. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description An unexpected server error occurred. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This API operation is not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The service is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    put_session_policy_api_v1_sessions_policy_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionOpeningPolicy"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionOpeningPolicyResponse"];
                 };
             };
             /** @description The request could not be processed. */

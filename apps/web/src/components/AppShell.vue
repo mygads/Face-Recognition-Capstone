@@ -108,6 +108,7 @@ function toggleTheme() {
 
       <main id="main-content" class="app-shell__main" tabindex="-1">
         <PageHeader
+          v-if="!route.meta.pageHeaderInView"
           eyebrow="Presensi praktikum"
           :title="pageTitle"
           :description="pageDescription"

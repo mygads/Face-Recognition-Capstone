@@ -20,6 +20,7 @@ from presensi_edge_agent.cache import (
     CachedStudent,
     CacheSchemaError,
     SessionCacheBundle,
+    parse_preview_gallery,
     parse_session_cache,
 )
 from presensi_edge_agent.config import (
@@ -412,6 +413,87 @@ def test_live_operator_preview_shows_diagnostic_candidate_without_attendance(
         assert candidate["display_name"] == "Synthetic Student"
         assert candidate["similarity"] == pytest.approx(0.902)
         assert probe.reset_calls == 1
+        assert outbox.counts() == (0, 0)
+    finally:
+        outbox.close()
+
+
+def test_off_session_preview_identifies_candidate_without_queuing_attendance(
+    tmp_path: Path,
+) -> None:
+    config = load_config(
+        EXAMPLE_CONFIG, environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)}
+    )
+    payload = sample_bundle_payload()
+    raw_roster = payload["roster"]
+    assert isinstance(raw_roster, list)
+    for raw_student in raw_roster:
+        assert isinstance(raw_student, dict)
+        raw_student["class_names"] = ["Kelas Sintetis"]
+    bundle = parse_preview_gallery(
+        payload,
+        device_id=DEVICE_ID,
+        model_name=MODEL_NAME,
+        model_version=MODEL_VERSION,
+    )
+
+    class FakeCamera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            return False, None
+
+        def close(self) -> None: ...
+
+    class FakeApi:
+        def close(self) -> None: ...
+
+    class AttendanceRecognizer:
+        def process(self, _frame, _gallery, _captured_at) -> TrackDecision:
+            raise AssertionError("Off-session preview must never run attendance logic.")
+
+        def reset(self) -> None: ...
+
+    class DiagnosticRecognizer:
+        def process(self, _frame, _gallery, _captured_at) -> TrackDecision:
+            return TrackDecision(
+                track_id="local-preview",
+                state="accepted",
+                decision=RecognitionDecision(
+                    outcome="matched",
+                    student_id=STUDENT_ID,
+                    confidence=0.951,
+                    margin=0.1,
+                ),
+                observation_count=1,
+            )
+
+        def reset(self) -> None: ...
+
+    outbox = EventOutbox(tmp_path / "off-session-preview.sqlite3", max_pending=10)
+    service = EdgeService(
+        config,
+        FakeCamera(),
+        FakeApi(),  # type: ignore[arg-type]
+        outbox,
+        AttendanceRecognizer(),  # type: ignore[arg-type]
+        lambda: {},
+    )
+    service._create_preview_recognizer = lambda: DiagnosticRecognizer()  # type: ignore[method-assign]
+    service.preview_cache.replace(bundle)
+    assert service.preview is not None
+    service.preview._sessions["synthetic-operator-viewer"] = time.monotonic() + 30
+
+    try:
+        service._process_frame(object())
+
+        status = service.preview.status()
+        candidate = status["diagnostic_candidate"]
+        assert status["session_active"] is False
+        assert status["recognition_state"] == "preview_only"
+        assert isinstance(candidate, dict)
+        assert candidate["display_name"] == "Synthetic Student"
+        assert candidate["class_name"] == "Kelas Sintetis"
         assert outbox.counts() == (0, 0)
     finally:
         outbox.close()

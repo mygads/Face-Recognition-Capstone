@@ -14,6 +14,7 @@ from presensi_api.api.security.dependencies import require_permissions
 from presensi_api.api.security.roles import AuthenticatedUser, Permission
 from presensi_api.api.v1.schemas.common import PageResponse, Pagination
 from presensi_api.api.v1.schemas.laboratories import (
+    DeviceCameraControlRequest,
     DeviceCreateRequest,
     DeviceHeartbeatRequest,
     DeviceHeartbeatResponse,
@@ -64,8 +65,10 @@ def _device_response(
         app_version=device.app_version,
         model_version=device.model_version,
         camera_status=cast(
-            Literal["unknown", "online", "offline", "error"], device.camera_status
+            Literal["unknown", "online", "offline", "error", "disabled"],
+            device.camera_status,
         ),
+        camera_enabled=device.camera_enabled,
         latency_summary=(
             DeviceLatencySummary.model_validate(device.latency_summary)
             if device.latency_summary is not None
@@ -389,6 +392,48 @@ def update_device(
     _commit(session, "device_update_conflict", "Perangkat tidak dapat diperbarui.")
     session.refresh(device)
     return _device_response(device, new_laboratory)
+
+
+@router.put(
+    "/devices/{device_id}/camera-control",
+    response_model=DeviceResponse,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Enable or pause a device camera without deactivating the device",
+)
+def set_device_camera_enabled(
+    device_id: UUID,
+    request: DeviceCameraControlRequest,
+    session: DbSession,
+    principal: Annotated[
+        AuthenticatedUser, Depends(require_permissions(Permission.MANAGE_SETTINGS))
+    ],
+) -> DeviceResponse:
+    device = session.get(Device, device_id)
+    if device is None or not device.is_active:
+        raise _not_found("Active device")
+    before = device.camera_enabled
+    if before != request.enabled:
+        device.camera_enabled = request.enabled
+        session.add(
+            AuditLog(
+                actor_user_id=principal.id,
+                action=(
+                    "device.camera_enabled"
+                    if request.enabled
+                    else "device.camera_disabled"
+                ),
+                entity_type="device",
+                entity_id=device.id,
+                before_state={"camera_enabled": before},
+                after_state={"camera_enabled": request.enabled},
+            )
+        )
+        session.commit()
+        session.refresh(device)
+    laboratory = session.get(Laboratory, device.laboratory_id)
+    if laboratory is None:
+        raise _not_found("Laboratory")
+    return _device_response(device, laboratory)
 
 
 @router.delete(

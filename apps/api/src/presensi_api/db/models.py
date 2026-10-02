@@ -207,7 +207,7 @@ class Device(UUIDPrimaryKey, TimestampMixin, Base):
             name="deployment_profile_matches_type",
         ),
         CheckConstraint(
-            "camera_status IN ('unknown', 'online', 'offline', 'error')",
+            "camera_status IN ('unknown', 'online', 'offline', 'error', 'disabled')",
             name="camera_status",
         ),
         CheckConstraint(
@@ -241,6 +241,9 @@ class Device(UUIDPrimaryKey, TimestampMixin, Base):
     model_version: Mapped[str | None] = mapped_column(String(128))
     camera_status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="unknown", server_default=text("'unknown'")
+    )
+    camera_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
     )
     latency_summary: Mapped[dict[str, object] | None] = mapped_column(JSON_OBJECT)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -353,8 +356,8 @@ class AttendanceSession(UUIDPrimaryKey, TimestampMixin, Base):
         ForeignKey("practicum_schedules.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    opened_by_user_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    opened_by_user_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
     )
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="active", server_default=text("'active'")

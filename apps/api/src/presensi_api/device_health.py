@@ -31,4 +31,6 @@ def has_recent_heartbeat(device: Device, *, now: datetime | None = None) -> bool
 def device_health_status(device: Device, *, now: datetime | None = None) -> str:
     if not has_recent_heartbeat(device, now=now):
         return "offline"
+    if not device.camera_enabled:
+        return "warning"
     return "online" if device.camera_status == "online" else "warning"

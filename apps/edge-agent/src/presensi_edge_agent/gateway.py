@@ -122,9 +122,16 @@ class StbGatewayService:
         self._active_session_expires_at = config.gateway.session_ends_at
         self.camera = camera
         self.api = api
+        self._camera_enabled = True
         if isinstance(api, CoreApiClient):
             api.set_camera_status_provider(
-                lambda: "online" if self._camera_open else "offline"
+                lambda: (
+                    "disabled"
+                    if not self._camera_enabled
+                    else "online"
+                    if self._camera_open
+                    else "offline"
+                )
             )
         self.ai = ai
         self.outbox = outbox
@@ -141,6 +148,7 @@ class StbGatewayService:
             "service": "presensi-edge-agent",
             "profile": "STB_GATEWAY",
             "camera_open": self._camera_open,
+            "camera_enabled": self._camera_enabled,
             "device_id_configured": self.config.device_id is not None,
             "active_session_id": str(self.session_id) if self.session_id else None,
             "session_ends_at": self._active_session_end.isoformat()
@@ -177,6 +185,12 @@ class StbGatewayService:
         try:
             while not self.stop_event.is_set():
                 settings = self.config.gateway
+                if not self._camera_enabled:
+                    if self._camera_open:
+                        self.camera.close()
+                        self._camera_open = False
+                    self.stop_event.wait(0.25)
+                    continue
                 if not self._session_active():
                     self.stop_event.wait(1.0)
                     continue
@@ -448,6 +462,10 @@ class StbGatewayService:
         attempted_revision = self.config.runtime_config_revision
         try:
             payload = fetch()
+            camera_enabled = payload.get("camera_enabled", self._camera_enabled)
+            if not isinstance(camera_enabled, bool):
+                raise ValueError("invalid_camera_enabled")
+            self._camera_enabled = camera_enabled
             revision = payload.get("revision")
             settings = payload.get("settings")
             if type(revision) is not int or revision < 0:

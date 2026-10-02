@@ -283,9 +283,14 @@ test('edge profile hides central settings and lists only active edge devices', a
   expect(settingsUpdates.some((url) => url.endsWith('/enrollment-quality'))).toBe(true)
   expect(settingsUpdates.some((url) => url.endsWith('/device-edge/ai-edge'))).toBe(true)
 
+  await page.getByRole('button', { name: 'Kualitas capture', exact: true }).click()
+  await expect(page.getByLabel('Ukuran wajah minimum (piksel)')).toBeVisible()
   await page.getByRole('button', { name: 'PC edge' }).click()
   await expect(page.getByRole('heading', { name: 'Perangkat AI_EDGE' })).toBeVisible()
-  await expect(page.getByLabel('Gunakan kualitas yang sama dengan pendaftaran')).toBeChecked()
+  await expect(page.locator('.ai-setup-view__shared-quality')).toContainText(
+    'memakai satu pengaturan yang sama',
+  )
+  await expect(page.getByLabel('Ukuran wajah minimum (piksel)')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Ubah kualitas bersama' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Pratinjau konfigurasi' })).toBeVisible()
   await expect(page.getByText('Belum aktif — menunggu kalibrasi')).toBeVisible()

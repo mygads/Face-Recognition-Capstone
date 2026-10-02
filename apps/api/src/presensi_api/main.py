@@ -28,7 +28,11 @@ from presensi_api.http_security import (
     configure_multipart_memory_only,
     parse_cors_allowed_origins,
 )
-from presensi_api.session_lifecycle import close_expired_sessions
+from presensi_api.runtime_configuration import session_opening_policy
+from presensi_api.session_lifecycle import (
+    auto_open_due_sessions,
+    close_expired_sessions,
+)
 
 logger = logging.getLogger(__name__)
 _MULTIPART_OVERHEAD_BYTES = 64 * 1024
@@ -56,6 +60,8 @@ def _positive_integer_setting(
 def _run_session_auto_close_sweep() -> None:
     with get_session_factory()() as session:
         close_expired_sessions(session)
+        _revision, policy, _updated_at = session_opening_policy(session)
+        auto_open_due_sessions(session, policy=policy)
 
 
 async def _session_auto_close_worker() -> None:
@@ -65,7 +71,7 @@ async def _session_auto_close_worker() -> None:
         except Exception:
             # Keep process health independent of migrations/database availability.
             logger.warning("Attendance session auto-close sweep failed; it will retry.")
-        await asyncio.sleep(30)
+        await asyncio.sleep(10)
 
 
 @asynccontextmanager

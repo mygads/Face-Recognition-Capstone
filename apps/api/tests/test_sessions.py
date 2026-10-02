@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -17,6 +17,7 @@ from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
 from presensi_api.db.base import Base
 from presensi_api.db.models import (
     AttendanceSession,
+    AuditLog,
     ClassStudent,
     Laboratory,
     PracticumSchedule,
@@ -27,7 +28,13 @@ from presensi_api.db.models import (
 )
 from presensi_api.db.session import get_db_session
 from presensi_api.main import app
-from presensi_api.session_lifecycle import close_expired_sessions, scheduled_end_at
+from presensi_api.session_lifecycle import (
+    auto_open_due_sessions,
+    close_expired_sessions,
+    scheduled_end_at,
+)
+
+ADMIN_ID = UUID(int=44)
 
 
 @pytest.fixture
@@ -67,6 +74,12 @@ def api_database() -> Generator[sessionmaker[Session], None, None]:
             full_name=principal.full_name,
             password_hash="unused-test-hash",
         )
+        admin = User(
+            id=ADMIN_ID,
+            email="admin@example.test",
+            full_name="Test Admin",
+            password_hash="unused-test-hash",
+        )
         school_class = SchoolClass(
             code="X-A",
             name="Kelas X A",
@@ -75,7 +88,7 @@ def api_database() -> Generator[sessionmaker[Session], None, None]:
         )
         first = Student(student_number="S-001", full_name="Siswa Satu")
         second = Student(student_number="S-002", full_name="Siswa Dua")
-        session.add_all([teacher, school_class, first, second])
+        session.add_all([teacher, admin, school_class, first, second])
         session.flush()
         schedule = PracticumSchedule(
             class_id=school_class.id,
@@ -203,6 +216,92 @@ def test_session_grace_period_defaults_to_fifteen_minutes(
     )
     assert opened.status_code == 201
     assert opened.json()["grace_period_minutes"] == 15
+
+
+def test_session_opening_policy_is_admin_managed_and_auto_opens_once(
+    api_database: sessionmaker[Session],
+) -> None:
+    current = request(
+        "GET",
+        "/api/v1/sessions/policy",
+    )
+    assert current.status_code == 200
+    assert current.json()["mode"] == "manual"
+    assert current.json()["auto_open_minutes_before"] == 0
+    assert current.json()["auto_open_minutes_after"] == 15
+
+    policy_payload = {
+        "mode": "automatic",
+        "auto_open_minutes_before": 0,
+        "auto_open_minutes_after": 15,
+        "default_grace_period_minutes": 12,
+    }
+    denied = request("PUT", "/api/v1/sessions/policy", policy_payload)
+    assert denied.status_code == 403
+
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        id=ADMIN_ID,
+        email="admin@example.test",
+        full_name="Test Admin",
+        roles=frozenset({RoleCode.ADMIN}),
+    )
+    published = request("PUT", "/api/v1/sessions/policy", policy_payload)
+    assert published.status_code == 200, published.text
+    assert published.json()["revision"] == 1
+
+    automatic = request("GET", "/api/v1/sessions/openable-schedules")
+    assert automatic.status_code == 200
+    assert automatic.json() == []
+
+    now = datetime(2026, 10, 5, 2, 5, tzinfo=UTC)  # Monday 09:05 in Jakarta.
+    with api_database.begin() as session:
+        schedule = session.scalars(select(PracticumSchedule)).one()
+        schedule.weekday = 0
+        schedule.start_time = time(9, 0)
+        schedule.end_time = time(11, 0)
+        schedule.timezone_name = "Asia/Jakarta"
+        schedule.effective_from = now.astimezone(ZoneInfo("Asia/Jakarta")).date()
+        schedule.effective_through = None
+
+    with api_database() as session:
+        assert (
+            auto_open_due_sessions(
+                session,
+                policy=policy_payload,
+                now=now,
+            )
+            == 1
+        )
+    with api_database() as session:
+        opened = session.scalars(
+            select(AttendanceSession).where(AttendanceSession.status == "active")
+        ).one()
+        assert opened.opened_by_user_id is None
+        assert opened.grace_period_minutes == 12
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(SessionStudent)
+                .where(SessionStudent.session_id == opened.id)
+            )
+            == 2
+        )
+        auto_audit = session.scalar(
+            select(AuditLog).where(
+                AuditLog.action == "attendance_session.opened_automatically"
+            )
+        )
+        assert auto_audit is not None
+
+    with api_database() as session:
+        assert (
+            auto_open_due_sessions(
+                session,
+                policy=policy_payload,
+                now=now + timedelta(minutes=1),
+            )
+            == 0
+        )
 
 
 def test_session_auto_closes_at_local_schedule_end(

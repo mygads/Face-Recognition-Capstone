@@ -23,15 +23,16 @@ class CachedStudent:
     student_number: str
     full_name: str
     templates: tuple[FaceEmbedding, ...] = field(repr=False)
+    class_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class SessionCacheBundle:
     device_id: UUID
-    session_id: UUID
+    session_id: UUID | None
     session_status: str
     generated_at: datetime
-    session_ends_at: datetime
+    session_ends_at: datetime | None
     expires_at: datetime
     model_name: str
     model_version: str
@@ -118,6 +119,37 @@ def _template(value: object, model_name: str, model_version: str) -> FaceEmbeddi
     )
 
 
+def _students(
+    raw_roster: object, *, model_name: str, model_version: str
+) -> tuple[CachedStudent, ...]:
+    if not isinstance(raw_roster, list):
+        raise CacheSchemaError("Invalid cache field: roster.")
+    students: list[CachedStudent] = []
+    for raw_student in raw_roster:
+        student = _object(raw_student, "roster[]")
+        raw_templates = student.get("templates")
+        if not isinstance(raw_templates, list):
+            raise CacheSchemaError("Invalid cache field: roster[].templates.")
+        raw_classes = student.get("class_names", [])
+        if not isinstance(raw_classes, list) or not all(
+            isinstance(item, str) for item in raw_classes
+        ):
+            raise CacheSchemaError("Invalid cache field: roster[].class_names.")
+        templates = tuple(
+            _template(item, model_name, model_version) for item in raw_templates
+        )
+        students.append(
+            CachedStudent(
+                student_id=_uuid(student, "student_id"),
+                student_number=_required_string(student, "student_number"),
+                full_name=_required_string(student, "full_name"),
+                class_names=tuple(raw_classes),
+                templates=templates,
+            )
+        )
+    return tuple(students)
+
+
 def parse_session_cache(
     payload: object,
     *,
@@ -160,27 +192,6 @@ def parse_session_cache(
     returned_model_version = _required_string(data, "model_version")
     if returned_model_name != model_name or returned_model_version != model_version:
         raise CacheSchemaError("Cache model version does not match the agent.")
-    raw_roster = data.get("roster")
-    if not isinstance(raw_roster, list):
-        raise CacheSchemaError("Invalid cache field: roster.")
-    students: list[CachedStudent] = []
-    for raw_student in raw_roster:
-        student = _object(raw_student, "roster[]")
-        raw_templates = student.get("templates")
-        if not isinstance(raw_templates, list):
-            raise CacheSchemaError("Invalid cache field: roster[].templates.")
-        templates = tuple(
-            _template(item, returned_model_name, returned_model_version)
-            for item in raw_templates
-        )
-        students.append(
-            CachedStudent(
-                student_id=_uuid(student, "student_id"),
-                student_number=_required_string(student, "student_number"),
-                full_name=_required_string(student, "full_name"),
-                templates=templates,
-            )
-        )
     return SessionCacheBundle(
         device_id=returned_device_id,
         session_id=_uuid(data, "session_id"),
@@ -190,7 +201,63 @@ def parse_session_cache(
         expires_at=expires_at,
         model_name=returned_model_name,
         model_version=returned_model_version,
-        students=tuple(students),
+        students=_students(
+            data.get("roster"),
+            model_name=returned_model_name,
+            model_version=returned_model_version,
+        ),
+    )
+
+
+def parse_preview_gallery(
+    payload: object,
+    *,
+    device_id: UUID,
+    model_name: str,
+    model_version: str,
+    max_offline_seconds: float = DEFAULT_MAX_OFFLINE_SECONDS,
+    now: datetime | None = None,
+) -> SessionCacheBundle:
+    data = _object(payload, "root")
+    if _uuid(data, "device_id") != device_id:
+        raise CacheSchemaError("Preview gallery belongs to a different device.")
+    generated_at = _timestamp(data, "generated_at")
+    expires_at = _timestamp(data, "expires_at")
+    current_time = (now or datetime.now(UTC)).astimezone(UTC)
+    if (
+        not math.isfinite(max_offline_seconds)
+        or max_offline_seconds <= 0
+        or max_offline_seconds > 86400
+    ):
+        raise ValueError("max_offline_seconds must be between 0 and 86400.")
+    expires_at = min(
+        expires_at,
+        generated_at + timedelta(seconds=max_offline_seconds),
+    )
+    if expires_at <= current_time or generated_at > current_time:
+        raise CacheSchemaError(
+            "Preview gallery is expired or has an invalid timestamp."
+        )
+    returned_model_name = _required_string(data, "model_name")
+    returned_model_version = _required_string(data, "model_version")
+    if returned_model_name != model_name or returned_model_version != model_version:
+        raise CacheSchemaError(
+            "Preview gallery model version does not match the agent."
+        )
+    return SessionCacheBundle(
+        device_id=device_id,
+        session_id=None,
+        session_status="preview",
+        generated_at=generated_at,
+        session_ends_at=None,
+        expires_at=expires_at,
+        model_name=returned_model_name,
+        model_version=returned_model_version,
+        students=_students(
+            data.get("roster"),
+            model_name=returned_model_name,
+            model_version=returned_model_version,
+        ),
     )
 
 

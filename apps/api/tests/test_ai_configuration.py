@@ -5,14 +5,14 @@ from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from presensi_api.api.security.dependencies import get_current_user
 from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
 from presensi_api.db.base import Base
-from presensi_api.db.models import Device, Laboratory, User
+from presensi_api.db.models import AuditLog, Device, Laboratory, User
 from presensi_api.db.session import get_db_session
 from presensi_api.main import app
 
@@ -60,6 +60,7 @@ def edge_settings_client() -> Generator[TestClient, None, None]:
         session.flush()
 
     app.dependency_overrides[get_db_session] = override_db
+    app.state.test_session_factory = factory
     app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
         id=ADMIN_ID,
         email="admin@example.test",
@@ -70,6 +71,7 @@ def edge_settings_client() -> Generator[TestClient, None, None]:
         yield TestClient(app)
     finally:
         app.dependency_overrides.clear()
+        del app.state.test_session_factory
         engine.dispose()
 
 
@@ -122,3 +124,23 @@ def test_edge_thresholds_must_be_a_calibrated_pair(
     )
 
     assert response.status_code == 422
+
+
+def test_admin_can_pause_camera_and_action_is_audited(
+    edge_settings_client: TestClient,
+) -> None:
+    response = edge_settings_client.put(
+        f"/api/v1/devices/{DEVICE_ID}/camera-control",
+        json={"enabled": False},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["camera_enabled"] is False
+    with app.state.test_session_factory() as session:
+        device = session.get(Device, DEVICE_ID)
+        assert device is not None and device.camera_enabled is False
+        audit = session.scalar(
+            select(AuditLog).where(AuditLog.action == "device.camera_disabled")
+        )
+        assert audit is not None
+        assert audit.after_state == {"camera_enabled": False}

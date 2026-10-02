@@ -16,6 +16,8 @@ from presensi_api.api.v1.schemas.sessions import (
     AttendanceSessionCreateRequest,
     AttendanceSessionResponse,
     OpenableScheduleResponse,
+    SessionOpeningPolicy,
+    SessionOpeningPolicyResponse,
 )
 from presensi_api.db.models import (
     AttendanceSession,
@@ -29,6 +31,11 @@ from presensi_api.db.models import (
     User,
 )
 from presensi_api.db.session import get_db_session
+from presensi_api.runtime_configuration import (
+    SESSION_OPENING_POLICY_SCOPE,
+    save_configuration,
+    session_opening_policy,
+)
 from presensi_api.session_lifecycle import (
     as_utc,
     close_expired_sessions,
@@ -40,6 +47,9 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 DbSession = Annotated[Session, Depends(get_db_session)]
 SessionOperator = Annotated[
     AuthenticatedUser, Depends(require_permissions(Permission.SESSION_OPERATE))
+]
+SessionPolicyManager = Annotated[
+    AuthenticatedUser, Depends(require_permissions(Permission.MANAGE_SETTINGS))
 ]
 SessionStatus = Literal["active", "closed", "cancelled"]
 
@@ -116,6 +126,7 @@ def _session_response(
         id=item.id,
         practicum_schedule_id=item.practicum_schedule_id,
         status=cast(SessionStatus, item.status),
+        opened_automatically=item.opened_by_user_id is None,
         opened_at=as_utc(item.opened_at),
         closed_at=as_utc(item.closed_at) if item.closed_at is not None else None,
         grace_period_minutes=item.grace_period_minutes,
@@ -163,6 +174,9 @@ def list_openable_schedules(
     session: DbSession,
 ) -> list[OpenableScheduleResponse]:
     now = datetime.now(UTC)
+    _revision, opening_policy, _updated_at = session_opening_policy(session)
+    if opening_policy["mode"] == "automatic":
+        return []
     query = (
         select(PracticumSchedule)
         .join(SchoolClass, SchoolClass.id == PracticumSchedule.class_id)
@@ -220,6 +234,48 @@ def list_sessions(
     )
 
 
+@router.get(
+    "/policy",
+    response_model=SessionOpeningPolicyResponse,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Read the attendance session opening policy",
+)
+def get_session_policy(
+    principal: SessionOperator,
+    session: DbSession,
+) -> SessionOpeningPolicyResponse:
+    revision, policy, updated_at = session_opening_policy(session)
+    return SessionOpeningPolicyResponse(
+        **SessionOpeningPolicy.model_validate(policy).model_dump(),
+        revision=revision,
+        updated_at=as_utc(updated_at) if updated_at is not None else None,
+    )
+
+
+@router.put(
+    "/policy",
+    response_model=SessionOpeningPolicyResponse,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Publish attendance session opening policy",
+)
+def put_session_policy(
+    request: SessionOpeningPolicy,
+    session: DbSession,
+    actor: SessionPolicyManager,
+) -> SessionOpeningPolicyResponse:
+    version = save_configuration(
+        session,
+        scope_key=SESSION_OPENING_POLICY_SCOPE,
+        settings=request.model_dump(mode="json"),
+        actor=actor,
+    )
+    return SessionOpeningPolicyResponse(
+        **request.model_dump(),
+        revision=version.revision,
+        updated_at=as_utc(version.created_at),
+    )
+
+
 @router.post(
     "",
     response_model=AttendanceSessionResponse,
@@ -234,6 +290,13 @@ def open_session(
 ) -> AttendanceSessionResponse:
     now = datetime.now(UTC)
     close_expired_sessions(session, now=now)
+    _revision, opening_policy, _updated_at = session_opening_policy(session)
+    if opening_policy["mode"] == "automatic":
+        raise ApiProblem(
+            409,
+            "session_opening_is_automatic",
+            "Pembukaan sesi sedang diatur otomatis oleh jadwal.",
+        )
     schedule = _schedule_for_open(session, request.practicum_schedule_id, principal)
     _can_open_today(schedule, now)
     active_session = session.scalar(

@@ -14,6 +14,14 @@ from presensi_api.api.errors import ApiProblem
 from presensi_api.api.security.roles import AuthenticatedUser
 from presensi_api.db.models import AuditLog, RuntimeConfigurationVersion
 
+SESSION_OPENING_POLICY_SCOPE = "attendance-session-policy"
+DEFAULT_SESSION_OPENING_POLICY: dict[str, object] = {
+    "mode": "manual",
+    "auto_open_minutes_before": 0,
+    "auto_open_minutes_after": 15,
+    "default_grace_period_minutes": 15,
+}
+
 
 def device_scope_key(device_id: UUID) -> str:
     return f"device:{device_id}"
@@ -37,6 +45,26 @@ def configuration_values(
     if version is None:
         return 0, {}, None
     return version.revision, dict(version.settings), version.created_at
+
+
+def session_opening_policy(
+    session: Session,
+) -> tuple[int, dict[str, object], datetime | None]:
+    revision, stored, updated_at = configuration_values(
+        session, SESSION_OPENING_POLICY_SCOPE
+    )
+    values = {**DEFAULT_SESSION_OPENING_POLICY, **stored}
+    if values.get("mode") not in {"manual", "automatic"}:
+        values["mode"] = "manual"
+    for key, default, maximum in (
+        ("auto_open_minutes_before", 0, 15),
+        ("auto_open_minutes_after", 15, 15),
+        ("default_grace_period_minutes", 15, 1440),
+    ):
+        value = values.get(key)
+        if type(value) is not int or not 0 <= value <= maximum:
+            values[key] = default
+    return revision, values, updated_at
 
 
 def save_configuration(

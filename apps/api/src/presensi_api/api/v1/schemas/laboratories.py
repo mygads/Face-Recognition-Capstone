@@ -78,7 +78,9 @@ class DeviceHeartbeatRequest(ApiSchema):
     deployment_profile: Literal["AI_EDGE", "STB_GATEWAY"] | None = None
     app_version: str | None = Field(default=None, min_length=1, max_length=80)
     model_version: str | None = Field(default=None, min_length=1, max_length=128)
-    camera_status: Literal["unknown", "online", "offline", "error"] | None = None
+    camera_status: (
+        Literal["unknown", "online", "offline", "error", "disabled"] | None
+    ) = None
     latency_summary: DeviceLatencySummary | None = None
 
 
@@ -92,7 +94,8 @@ class DeviceResponse(ApiSchema):
     deployment_profile: Literal["AI_EDGE", "STB_GATEWAY"]
     app_version: str | None
     model_version: str | None
-    camera_status: Literal["unknown", "online", "offline", "error"]
+    camera_status: Literal["unknown", "online", "offline", "error", "disabled"]
+    camera_enabled: bool
     latency_summary: DeviceLatencySummary | None
     config_applied_revision: int = Field(ge=0)
     config_apply_status: Literal["not_configured", "pending", "applied", "error"]
@@ -107,3 +110,7 @@ class DeviceResponse(ApiSchema):
 class DeviceHeartbeatResponse(ApiSchema):
     device_id: UUID
     last_seen_at: AwareDatetime
+
+
+class DeviceCameraControlRequest(ApiSchema):
+    enabled: bool

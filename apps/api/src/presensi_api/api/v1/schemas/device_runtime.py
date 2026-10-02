@@ -26,11 +26,21 @@ class SessionRosterStudentResponse(ApiSchema):
     student_id: UUID
     student_number: str
     full_name: str
+    class_names: list[str] = Field(default_factory=list)
     templates: list[SessionTemplateResponse]
 
 
 class ActiveSessionCacheResponse(ActiveDeviceSessionResponse):
     device_id: UUID
+    model_name: str
+    model_version: str
+    roster: list[SessionRosterStudentResponse]
+
+
+class PreviewGalleryResponse(ApiSchema):
+    device_id: UUID
+    generated_at: AwareDatetime
+    expires_at: AwareDatetime
     model_name: str
     model_version: str
     roster: list[SessionRosterStudentResponse]

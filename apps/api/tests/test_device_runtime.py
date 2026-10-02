@@ -7,7 +7,7 @@ import secrets
 from collections.abc import Generator
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
@@ -230,6 +230,113 @@ def test_device_discovery_and_gallery_are_scoped_and_decrypted_on_demand(
         f"/api/v1/devices/{OTHER_DEVICE_ID}/active-sessions",
     )
     assert wrong_device.status_code == 403
+
+
+def test_preview_gallery_is_lab_and_schedule_scoped_without_an_active_session(
+    runtime_database: tuple[sessionmaker[Session], dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from presensi_api.api.v1.routers import device_runtime
+
+    fixed_now = datetime(2026, 10, 5, 2, 5, tzinfo=UTC)  # Monday 09:05 Jakarta.
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz: Any = None) -> FrozenDateTime:
+            if tz is None:
+                return cast(FrozenDateTime, fixed_now.replace(tzinfo=None))
+            return cast(FrozenDateTime, fixed_now.astimezone(tz))
+
+    monkeypatch.setattr(device_runtime, "datetime", FrozenDateTime)
+    factory, _time_data = runtime_database
+    with factory.begin() as session:
+        schedule = session.scalars(select(PracticumSchedule)).one()
+        schedule.weekday = 0
+        schedule.start_time = time(9, 0)
+        schedule.end_time = time(11, 0)
+        schedule.effective_from = fixed_now.astimezone(ZoneInfo("Asia/Jakarta")).date()
+        attendance_session = session.get(AttendanceSession, SESSION_ID)
+        assert attendance_session is not None
+        attendance_session.opened_at = fixed_now
+
+    active = _request(
+        "GET",
+        f"/api/v1/devices/{DEVICE_ID}/preview-gallery"
+        f"?model_name={MODEL_NAME}&model_version={MODEL_VERSION}",
+    )
+    assert active.status_code == 409
+    assert active.json()["error"]["code"] == "preview_gallery_session_active"
+
+    with factory.begin() as session:
+        attendance_session = session.get(AttendanceSession, SESSION_ID)
+        assert attendance_session is not None
+        attendance_session.status = "closed"
+
+    preview = _request(
+        "GET",
+        f"/api/v1/devices/{DEVICE_ID}/preview-gallery"
+        f"?model_name={MODEL_NAME}&model_version={MODEL_VERSION}",
+    )
+    assert preview.status_code == 200, preview.text
+    payload = preview.json()
+    assert payload["roster"][0]["student_id"] == str(STUDENT_ID)
+    assert payload["roster"][0]["class_names"] == ["Runtime Class"]
+    assert len(payload["roster"][0]["templates"]) == 2
+    assert "embedding_ciphertext" not in preview.text
+    assert "ciphertext" not in preview.text
+
+
+def test_paused_camera_rejects_cache_and_attendance_submission(
+    runtime_database: tuple[sessionmaker[Session], dict[str, Any]],
+) -> None:
+    factory, _time_data = runtime_database
+    with factory.begin() as session:
+        device = session.get(Device, DEVICE_ID)
+        assert device is not None
+        device.camera_enabled = False
+
+    cache = _request(
+        "GET",
+        f"/api/v1/devices/{DEVICE_ID}/active-session-cache"
+        f"?session_id={SESSION_ID}&model_name={MODEL_NAME}&model_version={MODEL_VERSION}",
+    )
+    assert cache.status_code == 409
+    assert cache.json()["error"]["code"] == "device_camera_disabled"
+
+    event_id = uuid4()
+    event_response = _request(
+        "POST",
+        f"/api/v1/devices/{DEVICE_ID}/recognition-events",
+        json_body={
+            "event_id": str(event_id),
+            "device_id": str(DEVICE_ID),
+            "session_id": str(SESSION_ID),
+            "student_id": str(STUDENT_ID),
+            "outcome": "matched",
+            "similarity": 0.93,
+            "occurred_at": datetime.now(UTC).isoformat(),
+            "model_name": MODEL_NAME,
+            "model_version": MODEL_VERSION,
+        },
+    )
+    assert event_response.status_code == 200, event_response.text
+    assert event_response.json()["decision"] == "no_attendance"
+    assert event_response.json()["reason"] == "device_camera_disabled"
+    with factory() as session:
+        assert (
+            session.scalar(
+                select(RecognitionEvent).where(RecognitionEvent.event_uuid == event_id)
+            )
+            is not None
+        )
+        assert (
+            session.scalar(
+                select(AttendanceRecord).where(
+                    AttendanceRecord.session_id == SESSION_ID
+                )
+            )
+            is None
+        )
 
 
 def test_device_authentication_rejects_missing_or_unknown_credentials(

@@ -34,6 +34,8 @@ export type ScheduleCreate = components['schemas']['ScheduleCreateRequest']
 export type ScheduleUpdate = components['schemas']['ScheduleUpdateRequest']
 export type ScheduleTeacher = components['schemas']['ScheduleTeacherResponse']
 export type AttendanceSession = components['schemas']['AttendanceSessionResponse']
+export type SessionOpeningPolicy = components['schemas']['SessionOpeningPolicy']
+export type SessionOpeningPolicyResponse = components['schemas']['SessionOpeningPolicyResponse']
 export type StaffAccountCreate = components['schemas']['StaffAccountCreateRequest']
 export type StaffAccountCreated = components['schemas']['StaffAccountCreatedResponse']
 export type AttendanceReportQuery =
@@ -357,6 +359,15 @@ export async function updateDevice(deviceId: string, body: DeviceUpdate): Promis
   return unwrap(result)
 }
 
+export async function setDeviceCameraEnabled(deviceId: string, enabled: boolean): Promise<Device> {
+  return unwrap(
+    await apiClient.PUT('/api/v1/devices/{device_id}/camera-control', {
+      params: { path: { device_id: deviceId } },
+      body: { enabled },
+    }),
+  )
+}
+
 export async function deleteDevice(deviceId: string): Promise<void> {
   const result = await apiClient.DELETE('/api/v1/devices/{device_id}', {
     params: { path: { device_id: deviceId } },
@@ -421,6 +432,16 @@ export async function listScheduleTeachers(): Promise<ScheduleTeacher[]> {
 export async function listOpenableSchedules(): Promise<OpenableSchedule[]> {
   const result = await apiClient.GET('/api/v1/sessions/openable-schedules')
   return unwrap(result)
+}
+
+export async function getSessionOpeningPolicy(): Promise<SessionOpeningPolicyResponse> {
+  return unwrap(await apiClient.GET('/api/v1/sessions/policy'))
+}
+
+export async function saveSessionOpeningPolicy(
+  body: SessionOpeningPolicy,
+): Promise<SessionOpeningPolicyResponse> {
+  return unwrap(await apiClient.PUT('/api/v1/sessions/policy', { body }))
 }
 
 export async function listAttendanceSessions(query: {

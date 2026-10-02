@@ -16,6 +16,7 @@ import {
   listLaboratories,
   provisionDeviceCredential,
   rotateDeviceCredential,
+  setDeviceCameraEnabled,
   updateDevice,
   type Device,
   type DeviceCredential,
@@ -81,6 +82,8 @@ const isRotationOpen = ref(false)
 const devicePendingDeletion = ref<Device | null>(null)
 const isDeletingDevice = ref(false)
 const deleteError = ref<string | null>(null)
+const cameraControlTarget = ref<Device | null>(null)
+const isCameraControlSaving = ref(false)
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 
 const activeProfile = computed(() => aiReadiness.value?.deployment_profile ?? null)
@@ -253,13 +256,40 @@ function profileLabel(profile: Device['deployment_profile']): string {
   return profile === 'AI_EDGE' ? 'AI di Edge PC' : 'STB Gateway · AI central'
 }
 
-function cameraLabel(status: Device['camera_status']): string {
+function cameraLabel(device: Device): string {
+  if (!device.camera_enabled) {
+    return device.camera_status === 'disabled' ? 'Dijeda admin' : 'Menunggu agent dijeda'
+  }
+  if (device.camera_status === 'disabled') return 'Menunggu agent aktif'
   return {
     unknown: 'Belum dilaporkan',
     online: 'Aktif',
     offline: 'Tidak aktif',
     error: 'Gangguan',
-  }[status]
+    disabled: 'Dijeda admin',
+  }[device.camera_status]
+}
+
+function requestCameraToggle(device: Device): void {
+  cameraControlTarget.value = device
+}
+
+async function confirmCameraToggle(): Promise<void> {
+  const target = cameraControlTarget.value
+  if (!target) return
+  isCameraControlSaving.value = true
+  errorMessage.value = null
+  try {
+    const updated = await setDeviceCameraEnabled(target.device_id, !target.camera_enabled)
+    devices.value = devices.value.map((item) =>
+      item.device_id === updated.device_id ? updated : item,
+    )
+    cameraControlTarget.value = null
+  } catch (error) {
+    errorMessage.value = formatError(error)
+  } finally {
+    isCameraControlSaving.value = false
+  }
 }
 
 async function loadDevices(): Promise<void> {
@@ -941,7 +971,7 @@ onBeforeUnmount(() => {
               <strong>{{ device.app_version ?? 'Belum dilaporkan' }}</strong>
               <small>Model: {{ device.model_version ?? '—' }}</small>
             </td>
-            <td data-label="Kamera">{{ cameraLabel(device.camera_status) }}</td>
+            <td data-label="Kamera">{{ cameraLabel(device) }}</td>
             <td data-label="Heartbeat">
               {{ formatLastSeen(device.last_seen_at) }}
               <small>Timeout {{ device.heartbeat_timeout_seconds }} detik</small>
@@ -963,6 +993,15 @@ onBeforeUnmount(() => {
               <div class="devices-view__actions">
                 <button class="button button--text" type="button" @click="openEdit(device)">
                   Ubah
+                </button>
+                <button
+                  class="button button--secondary"
+                  type="button"
+                  :disabled="!device.is_active"
+                  :aria-label="device.camera_enabled ? 'Jeda kamera' : 'Aktifkan kamera'"
+                  @click="requestCameraToggle(device)"
+                >
+                  {{ device.camera_enabled ? 'Jeda kamera' : 'Aktifkan kamera' }}
                 </button>
                 <button
                   class="button button--secondary"
@@ -990,6 +1029,60 @@ onBeforeUnmount(() => {
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <div
+      v-if="cameraControlTarget"
+      class="devices-view__modal-backdrop"
+      role="presentation"
+      @click.self="cameraControlTarget = null"
+    >
+      <section
+        class="devices-view__confirm-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="camera-control-title"
+      >
+        <p class="master-data__eyebrow">Kontrol kamera</p>
+        <h2 id="camera-control-title">
+          {{ cameraControlTarget.camera_enabled ? 'Jeda kamera?' : 'Aktifkan kamera?' }}
+        </h2>
+        <p>
+          <strong>{{ cameraControlTarget.name }}</strong>
+          <template v-if="cameraControlTarget.camera_enabled">
+            akan berhenti mengambil frame dan mengirim presensi. Perangkat tetap terdaftar dan dapat
+            diaktifkan kembali dari halaman ini.
+          </template>
+          <template v-else>
+            akan mulai mengambil frame kembali saat agent menerima pengaturan ini.
+          </template>
+        </p>
+        <div class="master-data__form-actions">
+          <button
+            class="button button--secondary"
+            type="button"
+            :disabled="isCameraControlSaving"
+            @click="cameraControlTarget = null"
+          >
+            Batal
+          </button>
+          <button
+            class="button"
+            :class="cameraControlTarget.camera_enabled ? 'button--danger' : 'button--primary'"
+            type="button"
+            :disabled="isCameraControlSaving"
+            @click="confirmCameraToggle"
+          >
+            {{
+              isCameraControlSaving
+                ? 'Menerapkan…'
+                : cameraControlTarget.camera_enabled
+                  ? 'Jeda kamera'
+                  : 'Aktifkan kamera'
+            }}
+          </button>
+        </div>
+      </section>
     </div>
 
     <footer class="master-data__pagination">

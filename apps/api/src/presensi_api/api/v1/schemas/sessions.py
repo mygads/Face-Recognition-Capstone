@@ -21,6 +21,7 @@ class AttendanceSessionResponse(ApiSchema):
     id: UUID
     practicum_schedule_id: UUID
     status: Literal["active", "closed", "cancelled"]
+    opened_automatically: bool
     opened_at: AwareDatetime
     closed_at: AwareDatetime | None
     grace_period_minutes: int
@@ -48,6 +49,18 @@ class OpenableScheduleResponse(ApiSchema):
     timezone_name: str
 
 
+class SessionOpeningPolicy(ApiSchema):
+    mode: Literal["manual", "automatic"] = "manual"
+    auto_open_minutes_before: int = Field(default=0, ge=0, le=15)
+    auto_open_minutes_after: int = Field(default=15, ge=0, le=15)
+    default_grace_period_minutes: int = Field(default=15, ge=0, le=1440)
+
+
+class SessionOpeningPolicyResponse(SessionOpeningPolicy):
+    revision: int = Field(ge=0)
+    updated_at: AwareDatetime | None = None
+
+
 class SessionAttendanceSummary(ApiSchema):
     total_roster: int = Field(ge=0)
     present: int = Field(ge=0)
@@ -61,7 +74,7 @@ class SessionDashboardDevice(ApiSchema):
     device_type: Literal["edge_pc", "camera_gateway"]
     is_online: bool
     health_status: Literal["online", "offline", "warning"]
-    camera_status: Literal["unknown", "online", "offline", "error"]
+    camera_status: Literal["unknown", "online", "offline", "error", "disabled"]
     last_seen_at: AwareDatetime | None
 
 

@@ -163,6 +163,21 @@ class CoreApiClient:
             raise ApiCallError(response.status_code, retryable=False)
         return payload
 
+    def fetch_preview_gallery(self) -> dict[str, Any]:
+        version = str(self._heartbeat_metadata.get("model_version", ""))
+        response = self._request(
+            "GET",
+            f"/api/v1/devices/{self.device_id}/preview-gallery"
+            f"?model_name=opencv-zoo-sface&model_version={version}",
+        )
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ApiCallError(response.status_code, retryable=False) from exc
+        if not isinstance(payload, dict):
+            raise ApiCallError(response.status_code, retryable=False)
+        return cast(dict[str, Any], payload)
+
     def discover_active_sessions(self) -> list[dict[str, Any]]:
         response = self._request(
             "GET", f"/api/v1/devices/{self.device_id}/active-sessions"

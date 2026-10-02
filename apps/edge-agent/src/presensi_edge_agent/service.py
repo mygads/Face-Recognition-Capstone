@@ -14,6 +14,7 @@ from presensi_edge_agent.cache import (
     ActiveSessionCache,
     CacheSchemaError,
     SessionCacheBundle,
+    parse_preview_gallery,
     parse_session_cache,
 )
 from presensi_edge_agent.camera import CameraUnavailableError
@@ -77,7 +78,13 @@ class EdgeService:
         self.api = api
         if isinstance(api, CoreApiClient):
             api.set_camera_status_provider(
-                lambda: "online" if self._camera_open else "offline"
+                lambda: (
+                    "disabled"
+                    if not self._camera_enabled
+                    else "online"
+                    if self._camera_open
+                    else "offline"
+                )
             )
         self.outbox = outbox
         self.recognizer = recognizer
@@ -87,6 +94,7 @@ class EdgeService:
         self._worker: threading.Thread | None = None
         self._active_session_id: UUID | None = None
         self._active_bundle: SessionCacheBundle | None = None
+        self._preview_bundle: SessionCacheBundle | None = None
         self._gallery: tuple[GalleryEntry, ...] = ()
         self._last_decision: tuple[str, str | None, str | None] | None = None
         self._calibration_recognizer: FrameRecognizer | None = None
@@ -98,6 +106,8 @@ class EdgeService:
         self._last_camera_inspection = 0.0
         self._camera_inspector_error_reported = False
         self._camera_open = False
+        self._camera_enabled = True
+        self.preview_cache = ActiveSessionCache()
         self.preview = (
             LocalCameraPreview(config)
             if config.mode == "AI_EDGE" and config.preview.enabled
@@ -112,6 +122,7 @@ class EdgeService:
             "profile": "AI_EDGE",
             "device_id_configured": self.config.device_id is not None,
             "camera_open": self._camera_open,
+            "camera_enabled": self._camera_enabled,
             "session_cache_loaded": bundle is not None,
             "active_session_id": str(bundle.session_id) if bundle else None,
             "cached_student_count": len(bundle.students) if bundle else 0,
@@ -174,6 +185,20 @@ class EdgeService:
                 )
         try:
             while not self.stop_event.is_set():
+                if not self._camera_enabled:
+                    if self._camera_open:
+                        self.camera.close()
+                        self._camera_open = False
+                    if self.preview is not None:
+                        self.preview.clear_frame()
+                        self.preview.update_diagnostic_candidate(None, None)
+                        self.preview.update_status(
+                            camera_open=False,
+                            recognition_state="camera_disabled",
+                            display_name=None,
+                        )
+                    self.stop_event.wait(0.25)
+                    continue
                 try:
                     if not self._camera_open:
                         self.camera.open()
@@ -300,15 +325,6 @@ class EdgeService:
     def _process_frame(self, frame: object) -> None:
         bundle = self.cache.current()
         if bundle is None:
-            if self.preview is not None:
-                self.preview.clear_calibration_session()
-                self.preview.update_status(
-                    session_active=False,
-                    recognition_state="waiting_for_session",
-                    display_name=None,
-                )
-                self.preview.update_diagnostic_candidate(None, None)
-                self.preview.update_attendance_result(None)
             if self._active_session_id is not None:
                 expired_session_id = str(self._active_session_id)
                 self._active_session_id = None
@@ -328,6 +344,24 @@ class EdgeService:
                     "active_session_cache_expired_or_cleared",
                     session_id=expired_session_id,
                 )
+            preview_bundle = self.preview_cache.current()
+            if preview_bundle is not None:
+                self._process_preview_only_frame(frame, preview_bundle)
+                return
+            self._preview_bundle = None
+            if self.preview is not None:
+                self.preview.clear_calibration_session()
+                self.preview.update_status(
+                    session_active=False,
+                    recognition_state="waiting_for_session",
+                    display_name=None,
+                )
+                self.preview.update_diagnostic_candidate(None, None)
+                self.preview.update_attendance_result(None)
+            return
+        self.preview_cache.clear()
+        self._preview_bundle = None
+        if bundle.session_id is None:
             return
         session_changed = bundle.session_id != self._active_session_id
         cache_changed = (
@@ -477,6 +511,41 @@ class EdgeService:
             pending_events=pending,
         )
 
+    def _process_preview_only_frame(
+        self, frame: object, bundle: SessionCacheBundle
+    ) -> None:
+        """Identify a lab-scoped candidate for display only; never make attendance."""
+        preview = self.preview
+        if preview is None:
+            return
+        changed = (
+            self._preview_bundle is None
+            or bundle.generated_at != self._preview_bundle.generated_at
+        )
+        if changed:
+            self._preview_bundle = bundle
+            self._gallery = bundle.gallery()
+            if self._preview_recognizer is not None:
+                self._preview_recognizer.reset()
+                self._preview_recognizer = None
+            self._last_preview_probe_at = 0.0
+        preview.update_status(
+            session_active=False,
+            recognition_state="preview_only",
+            display_name=None,
+        )
+        preview.update_attendance_result(None)
+        if not preview.has_active_viewer() or not self._gallery:
+            preview.update_diagnostic_candidate(None, None)
+            if self._preview_recognizer is not None:
+                self._preview_recognizer.reset()
+                self._preview_recognizer = None
+            return
+        now = time.monotonic()
+        if now - self._last_preview_probe_at >= 0.8:
+            self._last_preview_probe_at = now
+            self._process_live_preview_candidate(frame, bundle)
+
     def _process_live_preview_candidate(
         self, frame: object, bundle: SessionCacheBundle
     ) -> None:
@@ -510,6 +579,7 @@ class EdgeService:
             preview.update_diagnostic_candidate(
                 student.full_name,
                 2 * confidence - 1,
+                " · ".join(student.class_names),
             )
         except Exception as exc:
             preview.update_diagnostic_candidate(None, None)
@@ -654,6 +724,10 @@ class EdgeService:
         attempted_revision = self.config.runtime_config_revision
         try:
             payload = fetch()
+            camera_enabled = payload.get("camera_enabled", self._camera_enabled)
+            if not isinstance(camera_enabled, bool):
+                raise ValueError("invalid_camera_enabled")
+            self._camera_enabled = camera_enabled
             revision = payload.get("revision")
             settings = payload.get("settings")
             if type(revision) is not int or revision < 0:
@@ -755,6 +829,12 @@ class EdgeService:
                 max_offline_seconds=self.config.api.cache_max_offline_seconds,
             )
         except ApiCallError as exc:
+            if exc.status_code in {404, 409}:
+                self.cache.clear()
+                if exc.status_code == 409:
+                    self.preview_cache.clear()
+                    return True
+                return self._refresh_preview_gallery()
             log_event(
                 logger,
                 logging.WARNING,
@@ -780,6 +860,7 @@ class EdgeService:
             )
             return False
         self.cache.replace(bundle)
+        self.preview_cache.clear()
         log_event(
             logger,
             logging.DEBUG,
@@ -789,6 +870,52 @@ class EdgeService:
                 len(student.templates) for student in bundle.students
             ),
         )
+        return True
+
+    def _refresh_preview_gallery(self) -> bool:
+        fetch = getattr(self.api, "fetch_preview_gallery", None)
+        if not callable(fetch):
+            self.preview_cache.clear()
+            return False
+        try:
+            payload = fetch()
+            bundle = parse_preview_gallery(
+                payload,
+                device_id=self.device_id,
+                model_name="opencv-zoo-sface",
+                model_version=self.config.models.version,
+                max_offline_seconds=self.config.api.cache_max_offline_seconds,
+            )
+        except ApiCallError as exc:
+            if exc.status_code in {404, 409}:
+                self.preview_cache.clear()
+                return True
+            log_event(
+                logger,
+                logging.WARNING,
+                "preview_gallery_refresh_failed",
+                status_code=exc.status_code,
+                retryable=exc.retryable,
+            )
+            return False
+        except CacheSchemaError as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                "preview_gallery_rejected",
+                reason=str(exc),
+            )
+            self.preview_cache.clear()
+            return False
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                "preview_gallery_refresh_failed",
+                exception_type=type(exc).__name__,
+            )
+            return False
+        self.preview_cache.replace(bundle)
         return True
 
     def _flush_outbox(self) -> None:
@@ -850,24 +977,29 @@ class EdgeService:
             )
             bundle = self._active_bundle
             display_name = None
+            class_name = None
             if (
                 status in {"present", "late"}
                 and isinstance(student_id, str)
                 and bundle is not None
                 and bundle.session_id == self._active_session_id
             ):
-                display_name = next(
+                matched_student = next(
                     (
-                        student.full_name
+                        student
                         for student in bundle.students
                         if str(student.student_id) == student_id
                     ),
                     None,
                 )
+                if matched_student is not None:
+                    display_name = matched_student.full_name
+                    class_name = " · ".join(matched_student.class_names)
             preview.update_attendance_result(
                 "recorded",
                 status if status in {"present", "late"} else None,
                 display_name,
+                class_name,
             )
         elif decision == "no_attendance":
             preview.update_attendance_result("not_recorded")

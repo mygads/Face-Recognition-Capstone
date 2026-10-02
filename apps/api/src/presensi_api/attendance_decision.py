@@ -29,7 +29,11 @@ from presensi_api.db.models import (
     SessionStudent,
     Student,
 )
-from presensi_api.session_lifecycle import as_utc, close_expired_sessions
+from presensi_api.session_lifecycle import (
+    as_utc,
+    close_expired_sessions,
+    scheduled_start_at,
+)
 
 
 def _request_fingerprint(request: RecognitionEventRequest) -> str:
@@ -188,6 +192,8 @@ def decide_recognition_event(
         reason = "session_not_accessible"
     elif not device.is_active:
         reason = "device_inactive"
+    elif not device.camera_enabled:
+        reason = "device_camera_disabled"
     elif device.laboratory_id != schedule.laboratory_id:
         reason = "device_laboratory_mismatch"
     elif attendance_session.status != "active":
@@ -219,7 +225,12 @@ def decide_recognition_event(
 
     if reason is None:
         assert request.student_id is not None
-        grace_cutoff = as_utc(attendance_session.opened_at) + timedelta(
+        grace_start = (
+            scheduled_start_at(schedule, attendance_session.opened_at)
+            if attendance_session.opened_by_user_id is None
+            else as_utc(attendance_session.opened_at)
+        )
+        grace_cutoff = grace_start + timedelta(
             minutes=attendance_session.grace_period_minutes
         )
         attendance_status = (

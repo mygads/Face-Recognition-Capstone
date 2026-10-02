@@ -19,6 +19,10 @@ Sistem mendukung dua deployment profile. Keduanya memakai satu Vue SPA, satu Cor
 
 `recognition_events` mencatat keluaran pengenalan. `attendance_records` hanya dibuat setelah Core API memvalidasi session aktif, roster snapshot, device, grace period, dan idempotency. Hasil AI yang ambigu harus menjadi retry/fallback, bukan otomatis menjadi presensi final.
 
+Pembukaan sesi dapat diatur sebagai `manual` (default, guru membuka sesi) atau `automatic` (Core API membuka sesi dari jadwal dalam jendela yang ditetapkan admin, maksimal 15 menit sebelum/sesudah jam mulai). Kedua cara membuat snapshot roster yang sama dan menutup sesi pada jam akhir jadwal. Grace period otomatis dihitung dari jam mulai jadwal; sesi manual mempertahankan grace period sejak guru membuka sesi.
+
+Admin dapat menjeda kamera perangkat dari registry tanpa menonaktifkan registry atau mencabut credential agent. Perangkat menerima desired state saat polling konfigurasi, melepas camera device ketika dijeda, dan Core API menolak recognition event baru ketika kamera sedang dijeda. Perubahan diaudit.
+
 ## Profile A — AI di Edge PC (`AI_EDGE`)
 
 Setiap laboratorium menghubungkan kamera UVC ke PC edge. Edge agent menjalankan pipeline dari `recognition-core` secara lokal, lalu mengirim recognition event ke Core API. Agent dapat memakai roster dan template untuk sesi aktif yang dicache. Saat API sementara tidak terjangkau, event disimpan dengan UUID idempotency key untuk dikirim ulang setelah koneksi pulih; final attendance tetap mengikuti validasi domain Core API.
@@ -53,17 +57,18 @@ Profil ini memusatkan pengelolaan model dan mengurangi kebutuhan PC kuat per lab
 
 ## Batas domain dan aliran data
 
-- Matching dibatasi pada roster sesi aktif bila memungkinkan; threshold harus dikalibrasi dari data uji lokal.
+- Saat sesi aktif, matching dibatasi pada snapshot roster sesi; threshold harus dikalibrasi dari data uji lokal.
+- Sebelum/sesudah sesi pada AI_EDGE, tampilan preview boleh memakai gallery sementara yang dibatasi ke siswa bertemplate di kelas dengan jadwal valid pada hari dan laboratorium tersebut. Gallery ini hanya hidup di memory, dibatasi masa cache, dan tidak pernah membuat recognition event atau attendance record. Selama sesi aktif, agent wajib kembali ke snapshot roster sesi.
 - Recognition memakai bukti beberapa frame dan margin Top-1/Top-2. Hasil ambigu meminta retry frontal.
 - AI/edge mengirim recognition event dengan `event_id` stabil agar retry jaringan idempotent.
 - Core API menolak event di luar sesi atau roster, mencegah presensi ganda, menentukan status hadir/terlambat, dan mencatat audit.
 - Frame mentah diproses sementara dan tidak disimpan secara default. Embedding template disimpan sebagai ciphertext AES-256-GCM. Log dan respons operator tidak berisi gambar, embedding, token, password, atau secret; gallery berisi embedding terdekripsi hanya untuk perangkat terautentikasi pada sesi/lab aktif.
 
-## Preview kamera operator
+## Preview kamera AI_EDGE
 
-Preview lokal operator yang terautentikasi menampilkan kotak wajah dari pemeriksa kualitas kamera. Saat threshold AI_EDGE belum diatur, agent boleh menjalankan pencocokan diagnostik satu frame secara berkala terhadap roster sesi aktif, hanya selama halaman preview operator yang berwenang terbuka. Halaman operator hanya menerima nama kandidat teratas dan skor cosine mentah; skor bukan probabilitas atau perkiraan akurasi. Frame dan skor hanya berada sementara di memori, kandidat tidak ditampilkan pada layar penuh untuk siswa, dan jalur diagnostik ini tidak pernah membuat recognition event atau attendance record. Pengenalan production tetap nonaktif sampai threshold hasil kalibrasi diterapkan.
+Preview lokal operator yang terautentikasi menampilkan kotak wajah dari pemeriksa kualitas kamera dan kandidat nama/kelas pada layar. Ketika tidak ada sesi aktif, gallery hanya mencakup kelas yang dijadwalkan pada lab tersebut hari itu, dalam jendela mulai 15 menit sebelum jadwal sampai akhir jadwal. Nama ditandai sebagai kandidat; skor cosine bukan probabilitas atau perkiraan akurasi. Frame, template terdekripsi, dan skor hanya sementara di memory. Jalur preview tidak pernah membuat recognition event atau attendance record. Ketika sesi aktif, hanya snapshot roster sesi yang dipakai; event presensi hanya dikirim jika kebijakan pengenalan terkalibrasi lolos dan Core API mengonfirmasi hasil.
 
-Untuk AI_EDGE, admin dapat memakai satu pengaturan kualitas capture bersama bagi enrollment Core API dan perangkat edge terpilih. Keduanya tetap merupakan cakupan konfigurasi berversi yang terpisah (enrollment global dan pengenalan per perangkat); dashboard menerbitkan keduanya dan melaporkan jika pembaruan perangkat gagal. Opsi ini dapat dimatikan untuk mempertahankan override kualitas per perangkat. Filter gambar ringan STB_GATEWAY tidak terpengaruh.
+Untuk AI_EDGE, admin memakai satu pengaturan kualitas capture bersama bagi enrollment Core API dan PC edge. Dashboard menerbitkan enrollment global dan kebijakan pengenalan per perangkat sebagai versi terpisah, dengan quality yang sama. Filter gambar ringan STB_GATEWAY tidak terpengaruh.
 - Data biometrik siswa nyata/minor tidak digunakan di cloud/CI dan tidak dimasukkan ke repository.
 - Template wajah menyimpan nama dan versi model. Pilihan model/pretrained weight memerlukan tinjauan lisensi dan validasi lokal sebelum dipakai.
 

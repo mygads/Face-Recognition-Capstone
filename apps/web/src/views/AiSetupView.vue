@@ -32,7 +32,6 @@ const isSaving = ref(false)
 const errorMessage = ref<string | null>(null)
 const successMessage = ref<string | null>(null)
 const activeTab = ref<SettingsTab>('enrollment')
-const useSharedQuality = ref(true)
 const settingsTabs = computed<{ id: SettingsTab; label: string }[]>(() => {
   const tabs: { id: SettingsTab; label: string }[] = [
     {
@@ -79,21 +78,12 @@ const gatewayForm = ref<StbGatewayConfiguration>({
 const selectedDevice = computed(
   () => devices.value.find((device) => device.device_id === selectedDeviceId.value) ?? null,
 )
-const displayedEdgeQuality = computed(() =>
-  useSharedQuality.value
-    ? {
-        min_face_pixels: enrollmentForm.value.min_face_pixels,
-        min_laplacian_variance: enrollmentForm.value.min_sharpness,
-        min_brightness: enrollmentForm.value.min_brightness,
-        max_brightness: enrollmentForm.value.max_brightness,
-      }
-    : {
-        min_face_pixels: edgeForm.value.min_face_pixels,
-        min_laplacian_variance: edgeForm.value.min_laplacian_variance,
-        min_brightness: edgeForm.value.min_brightness,
-        max_brightness: edgeForm.value.max_brightness,
-      },
-)
+const displayedEdgeQuality = computed(() => ({
+  min_face_pixels: enrollmentForm.value.min_face_pixels,
+  min_laplacian_variance: enrollmentForm.value.min_sharpness,
+  min_brightness: enrollmentForm.value.min_brightness,
+  max_brightness: enrollmentForm.value.max_brightness,
+}))
 const edgeThresholdsConfigured = computed(
   () => edgeForm.value.min_top1_similarity !== null && edgeForm.value.min_top1_top2_margin !== null,
 )
@@ -154,15 +144,6 @@ function recognitionFrom(settings: UnknownSettings): RecognitionConfiguration {
   }
 }
 
-function enrollmentQualityMatchesEdge(): boolean {
-  return (
-    edgeForm.value.min_face_pixels === enrollmentForm.value.min_face_pixels &&
-    edgeForm.value.min_laplacian_variance === enrollmentForm.value.min_sharpness &&
-    edgeForm.value.min_brightness === enrollmentForm.value.min_brightness &&
-    edgeForm.value.max_brightness === enrollmentForm.value.max_brightness
-  )
-}
-
 function copyEnrollmentQualityToEdge(): void {
   edgeForm.value = {
     ...edgeForm.value,
@@ -171,10 +152,6 @@ function copyEnrollmentQualityToEdge(): void {
     min_brightness: enrollmentForm.value.min_brightness,
     max_brightness: enrollmentForm.value.max_brightness,
   }
-}
-
-function onSharedQualityChange(): void {
-  if (useSharedQuality.value) copyEnrollmentQualityToEdge()
 }
 
 function updateSavedDevice(saved: DeviceRuntimeConfiguration): void {
@@ -278,7 +255,7 @@ async function loadDeviceConfiguration(deviceId: string): Promise<void> {
     deviceConfiguration.value = result
     if (result.deployment_profile === 'AI_EDGE') {
       edgeForm.value = recognitionFrom(result.settings as UnknownSettings)
-      useSharedQuality.value = enrollmentQualityMatchesEdge()
+      copyEnrollmentQualityToEdge()
     } else {
       gatewayForm.value = gatewayFrom(result.settings as UnknownSettings)
     }
@@ -294,8 +271,7 @@ async function saveEnrollment(): Promise<void> {
     if (readiness.value) readiness.value.enrollment_quality_revision = saved.revision
     if (
       readiness.value?.deployment_profile === 'AI_EDGE' &&
-      selectedDevice.value?.deployment_profile === 'AI_EDGE' &&
-      useSharedQuality.value
+      selectedDevice.value?.deployment_profile === 'AI_EDGE'
     ) {
       copyEnrollmentQualityToEdge()
       try {
@@ -327,7 +303,7 @@ async function saveDevice(): Promise<void> {
   await saveSettings(async () => {
     let saved: DeviceRuntimeConfiguration
     if (selectedDevice.value?.deployment_profile === 'AI_EDGE') {
-      if (useSharedQuality.value) copyEnrollmentQualityToEdge()
+      copyEnrollmentQualityToEdge()
       saved = await saveEdgeDeviceConfiguration(selectedDeviceId.value, edgeForm.value)
     } else {
       saved = await saveGatewayDeviceConfiguration(selectedDeviceId.value, gatewayForm.value)
@@ -510,8 +486,7 @@ onBeforeUnmount(() => {
             <h2>
               {{
                 readiness.deployment_profile === 'AI_EDGE' &&
-                selectedDevice?.deployment_profile === 'AI_EDGE' &&
-                useSharedQuality
+                selectedDevice?.deployment_profile === 'AI_EDGE'
                   ? 'Kualitas capture bersama'
                   : 'Kualitas capture pendaftaran'
               }}
@@ -522,8 +497,7 @@ onBeforeUnmount(() => {
           <template
             v-if="
               readiness.deployment_profile === 'AI_EDGE' &&
-              selectedDevice?.deployment_profile === 'AI_EDGE' &&
-              useSharedQuality
+              selectedDevice?.deployment_profile === 'AI_EDGE'
             "
           >
             Nilai ini memeriksa ukuran wajah, ketajaman, dan pencahayaan pada pendaftaran serta PC
@@ -627,17 +601,10 @@ onBeforeUnmount(() => {
         <template v-if="selectedDevice?.deployment_profile === 'AI_EDGE'">
           <h3>AI_EDGE · kebijakan pengenalan</h3>
           <form class="master-data__form ai-setup-view__form" @submit.prevent="saveDevice">
-            <label class="ai-setup-view__form-wide ai-setup-view__shared-toggle">
-              <input v-model="useSharedQuality" type="checkbox" @change="onSharedQualityChange" />
-              Gunakan kualitas yang sama dengan pendaftaran
-            </label>
-            <div
-              v-if="useSharedQuality"
-              class="ai-setup-view__shared-quality ai-setup-view__form-wide"
-            >
+            <div class="ai-setup-view__shared-quality ai-setup-view__form-wide">
               <p>
-                Ukuran wajah, ketajaman, dan pencahayaan mengikuti tab Kualitas capture. Perubahan
-                disimpan untuk enrollment dan perangkat AI_EDGE terpilih.
+                Kualitas wajah, ketajaman, dan pencahayaan memakai satu pengaturan yang sama untuk
+                pendaftaran serta presensi PC AI_EDGE. Ubah nilainya pada tab Kualitas capture.
               </p>
               <button
                 class="button button--secondary"
@@ -647,43 +614,6 @@ onBeforeUnmount(() => {
                 Ubah kualitas bersama
               </button>
             </div>
-            <template v-else>
-              <label
-                >Ukuran wajah minimum<input
-                  v-model.number="edgeForm.min_face_pixels"
-                  type="number"
-                  min="16"
-                  max="2048"
-                  required
-              /></label>
-              <label
-                >Ketajaman minimum<input
-                  v-model.number="edgeForm.min_laplacian_variance"
-                  type="number"
-                  min="0"
-                  max="100000"
-                  step="any"
-                  required
-              /></label>
-              <label
-                >Kecerahan minimum<input
-                  v-model.number="edgeForm.min_brightness"
-                  type="number"
-                  min="0"
-                  max="254"
-                  step="any"
-                  required
-              /></label>
-              <label
-                >Kecerahan maksimum<input
-                  v-model.number="edgeForm.max_brightness"
-                  type="number"
-                  min="1"
-                  max="255"
-                  step="any"
-                  required
-              /></label>
-            </template>
             <label
               >Top-1 similarity<input
                 :value="edgeForm.min_top1_similarity ?? ''"

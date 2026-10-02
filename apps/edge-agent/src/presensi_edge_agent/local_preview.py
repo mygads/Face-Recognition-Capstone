@@ -685,7 +685,10 @@ class LocalCameraPreview:
             self._status["updated_at"] = time.time()
 
     def update_diagnostic_candidate(
-        self, display_name: str | None, similarity: float | None
+        self,
+        display_name: str | None,
+        similarity: float | None,
+        class_name: str | None = None,
     ) -> None:
         """Publish a transient top candidate to the authenticated operator preview."""
         candidate: dict[str, object] | None = None
@@ -701,6 +704,11 @@ class LocalCameraPreview:
                 candidate = {
                     "display_name": safe_name,
                     "similarity": float(similarity),
+                    "class_name": (
+                        "".join(char for char in class_name if char.isprintable())[:160]
+                        if isinstance(class_name, str)
+                        else ""
+                    ),
                     "updated_at": time.time(),
                 }
         with self._lock:
@@ -772,6 +780,7 @@ class LocalCameraPreview:
         decision: str | None,
         attendance_status: str | None = None,
         display_name: str | None = None,
+        class_name: str | None = None,
     ) -> None:
         result: dict[str, str | float | None] | None
         if decision is None:
@@ -785,6 +794,12 @@ class LocalCameraPreview:
                 safe_name = safe_name.strip()[:120]
                 if safe_name:
                     result["display_name"] = safe_name
+            if isinstance(class_name, str):
+                safe_class_name = "".join(
+                    char for char in class_name if char.isprintable()
+                ).strip()[:160]
+                if safe_class_name:
+                    result["class_name"] = safe_class_name
         elif decision == "not_recorded":
             result = {"decision": decision, "attendance_status": None}
         else:

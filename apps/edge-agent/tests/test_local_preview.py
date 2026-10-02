@@ -163,11 +163,13 @@ def test_preview_exposes_name_only_for_confirmed_attendance(
             "recorded",
             attendance_status="present",
             display_name=" Synthetic Adult Volunteer\n",
+            class_name=" Synthetic Biology Class\n",
         )
         recorded = json.loads(_request(port, "/v1/status", token=token).read())
         assert (
             recorded["attendance_result"]["display_name"] == "Synthetic Adult Volunteer"
         )
+        assert recorded["attendance_result"]["class_name"] == "Synthetic Biology Class"
 
         preview.update_attendance_result(
             "recorded", attendance_status="present", display_name="X" * 150

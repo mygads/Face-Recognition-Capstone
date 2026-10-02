@@ -11,6 +11,7 @@ AttendanceSource = Literal["face_recognition", "manual", "system"]
 RecognitionOutcome = Literal["matched", "ambiguous", "no_match", "error", "redacted"]
 AttendanceDecisionReason = Literal[
     "device_inactive",
+    "device_camera_disabled",
     "device_laboratory_mismatch",
     "session_inactive",
     "student_not_found",

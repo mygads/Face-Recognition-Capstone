@@ -76,6 +76,7 @@ def _device_configuration(
         deployment_profile=cast(
             Literal["AI_EDGE", "STB_GATEWAY"], device.deployment_profile
         ),
+        camera_enabled=device.camera_enabled,
         revision=revision,
         settings=settings,
         applied_revision=device.config_applied_revision,
