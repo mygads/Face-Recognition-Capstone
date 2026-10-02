@@ -32,6 +32,7 @@ defineEmits<{
 
     <div class="app-topbar__right">
       <span class="app-topbar__environment">Internal</span>
+      <RouterLink class="app-topbar__profile-link" to="/app/profile">Profil</RouterLink>
       <button
         class="app-topbar__theme-button"
         type="button"

@@ -15,6 +15,8 @@ import EnrollmentView from '../views/EnrollmentView.vue'
 import ForbiddenView from '../views/ForbiddenView.vue'
 import LoginView from '../views/LoginView.vue'
 import MasterDataView from '../views/MasterDataView.vue'
+import ChangePasswordView from '../views/ChangePasswordView.vue'
+import ProfileView from '../views/ProfileView.vue'
 import ReportsView from '../views/ReportsView.vue'
 import ScheduleView from '../views/ScheduleView.vue'
 import SessionsView from '../views/SessionsView.vue'
@@ -35,6 +37,11 @@ export const routes: RouteRecordRaw[] = [
         name: 'login',
         component: LoginView,
       },
+      {
+        path: 'change-password',
+        name: 'change-password',
+        component: ChangePasswordView,
+      },
     ],
   },
   {
@@ -50,6 +57,15 @@ export const routes: RouteRecordRaw[] = [
         meta: {
           title: 'Ringkasan',
           description: 'Pantau kehadiran dan konektivitas perangkat secara live.',
+        },
+      },
+      {
+        path: 'profile',
+        name: 'profile',
+        component: ProfileView,
+        meta: {
+          title: 'Profil akun',
+          description: 'Lihat informasi akun dan perbarui kata sandi.',
         },
       },
       {
@@ -143,12 +159,22 @@ export function installAuthGuard(router: Router, pinia: Pinia): void {
       return { name: 'login', query: { redirect: to.fullPath } }
     }
 
+    if (auth.passwordChangeRequired && to.name !== 'change-password') {
+      return { name: 'change-password' }
+    }
+
+    if (to.name === 'change-password' && !hasSession) {
+      return { name: 'login' }
+    }
+
     if (requiresAuth && to.meta.requiredRoles?.length) {
       const hasRole = to.meta.requiredRoles.some((role) => auth.account?.roles.includes(role))
       if (!hasRole) return { name: 'forbidden' }
     }
 
-    if (to.name === 'login' && hasSession) return { name: 'dashboard' }
+    if (to.name === 'login' && hasSession) {
+      return { name: auth.passwordChangeRequired ? 'change-password' : 'dashboard' }
+    }
     return true
   })
 }

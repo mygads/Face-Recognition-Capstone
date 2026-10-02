@@ -15,19 +15,21 @@ oleh OS. Webcam tidak dipasang ke Docker Compose default.
 | --- | --- | --- |
 | Prasyarat | Docker Desktop + WSL2, Python 3.11+, Node sesuai engines di apps/web/package.json, npm 10+ | Docker Engine + Compose plugin, Python 3.11+, Node sesuai engines di apps/web/package.json, npm 10+ |
 | Server | py -3 scripts/dev.py dev-up | python3 scripts/dev.py dev-up |
-| Migration dan role | docker compose run --rm api alembic upgrade head lalu docker compose run --rm api python -m presensi_api.db.seed_roles | Perintah yang sama |
+| Setup database dan admin lokal | Otomatis oleh scripts/dev.py dev-up | Otomatis oleh scripts/dev.py dev-up |
 | Web | npm ci --prefix apps/web lalu npm --prefix apps/web run dev | Perintah yang sama |
 | URL | Web http://127.0.0.1:5173, API http://127.0.0.1:8000 | Sama |
 
-Task runner membuat .env lokal jika belum ada dan menghasilkan password
-database, signing key JWT, serta keyring template development yang acak. File
-.env diabaikan Git. Setelah role di-seed, buat akun admin development:
+Task runner membuat .env lokal jika belum ada, menghasilkan secret development,
+menjalankan migration dan role seed, lalu membuat akun admin lokal hanya jika
+belum ada. Simpan kata sandi sementara yang dicetak satu kali di terminal.
+Emailnya admin@local.test; kata sandi wajib diganti sebelum aplikasi bisa
+digunakan. Bootstrap ini hanya berjalan dengan Compose development; deployment
+production tidak membuat akun bawaan.
 
-~~~sh
-docker compose run --rm api python -m presensi_api.auth.create_user --email admin@example.edu --full-name "Local Admin" --role ADMIN
-~~~
-
-Password diminta secara interaktif. Login melalui web setelah akun dibuat.
+Kata sandi admin/admin yang tetap bukan pilihan aman walaupun ada menu ganti
+sandi: akun bisa terekspos sebelum operator sempat menggantinya. Karena itu
+bootstrap development membuat kata sandi acak sementara dan memaksa pergantian
+pada login pertama. Setelahnya, menu Profil menyediakan perubahan kata sandi.
 Untuk menghentikan database dan API gunakan py -3 scripts/dev.py dev-down di
 Windows atau python3 scripts/dev.py dev-down di Ubuntu. Volume database tetap
 tersimpan.

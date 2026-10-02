@@ -28,7 +28,19 @@ Several unrelated protected operations remain placeholders and return 501 after 
 
 Enrollment and operator template metadata routes require `ADMIN` or `LABORANT`. Raw captures are processed in memory; embeddings are encrypted at rest and only returned in an active session gallery to the matching device credential. Operator routes never expose vectors or ciphertext. See the [biometric data boundary](database-schema.md#recognition-and-privacy-boundary). Device runtime routes authenticate a registered device credential separately from human JWTs.
 
-## Creating the first account
+## Local development bootstrap
+
+Local development startup applies migrations, seeds roles, and creates
+admin@local.test on an empty database. It generates a random one-time password
+and forces password change before normal API access. The bootstrap command is
+guarded by APP_ENV=development and is not called by production deployment.
+
+The temporary access token is restricted to the password-change endpoint; the
+REST API and attendance websocket deny access until the user signs in again.
+This prevents the bootstrap credential from being used as an ordinary admin
+password.
+
+## Creating a first production account
 
 After migration and role seed, create an account with a hidden interactive password prompt:
 
@@ -37,7 +49,19 @@ docker compose run --rm api python -m presensi_api.auth.create_user \
   --email admin@example.edu --full-name "School Administrator" --role ADMIN
 ```
 
-The password is not a command-line argument and is never printed. The provisioner enforces a minimum of 12 characters and stores only the Argon2 hash. Creating an account also writes a minimal `account.created` audit event.
+The password is not a command-line argument and is never printed by this
+production provisioner. It enforces a minimum of 12 characters and stores only
+the Argon2 hash. Creating an account also writes a minimal account.created audit
+event.
+
+## Changing a password
+
+Authenticated users can change their password at POST
+/api/v1/auth/change-password or from the Profil page. The current password is
+verified, the new password must contain at least 12 characters, and successful
+changes invalidate all existing access tokens. The audit event excludes
+password values. A bootstrap-only token remains restricted after password
+change, so the user must sign in again to obtain a normal access token.
 
 ## Error behavior
 

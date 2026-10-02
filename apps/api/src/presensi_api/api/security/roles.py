@@ -66,6 +66,7 @@ class AuthenticatedUser:
     email: str
     full_name: str
     roles: frozenset[RoleCode]
+    must_change_password: bool = False
 
     @property
     def permissions(self) -> frozenset[Permission]:
@@ -96,4 +97,5 @@ def principal_for_user(session: Session, user: User) -> AuthenticatedUser:
         email=user.email,
         full_name=user.full_name,
         roles=get_user_roles(session, user.id),
+        must_change_password=user.must_change_password,
     )

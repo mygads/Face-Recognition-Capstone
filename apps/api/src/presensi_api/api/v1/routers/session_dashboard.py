@@ -253,6 +253,10 @@ def _principal_from_token(
         )
         if claims.get("token_use") != "access":
             return None
+        password_change_only = claims.get("password_change_only", False)
+        token_version = claims.get("token_version", 0)
+        if password_change_only or type(token_version) is not int or token_version < 0:
+            return None
         user_id = UUID(claims["sub"])
         expires_at = datetime.fromtimestamp(float(claims["exp"]), UTC)
     except (
@@ -265,7 +269,12 @@ def _principal_from_token(
     ):
         return None
     user = db.get(User, user_id)
-    if user is None or not user.is_active:
+    if (
+        user is None
+        or not user.is_active
+        or user.must_change_password
+        or user.auth_token_version != token_version
+    ):
         return None
     principal = principal_for_user(db, user)
     return (principal, expires_at) if principal.roles else None

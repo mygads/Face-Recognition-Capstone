@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import {
   ApiError,
+  changePassword,
   getCurrentAccount,
   loginWithPassword,
   type AuthenticatedAccount,
@@ -11,6 +12,7 @@ export const useAuthStore = defineStore('auth', () => {
   const accessToken = ref<string | null>(null)
   const expiresAt = ref<number | null>(null)
   const account = ref<AuthenticatedAccount | null>(null)
+  const passwordChangeRequired = ref(false)
   const isLoading = ref(false)
   const errorMessage = ref<string | null>(null)
   let expiryTimer: ReturnType<typeof setTimeout> | undefined
@@ -21,6 +23,7 @@ export const useAuthStore = defineStore('auth', () => {
     accessToken.value = null
     expiresAt.value = null
     account.value = null
+    passwordChangeRequired.value = false
   }
 
   function getValidAccessToken(): string | null {
@@ -32,7 +35,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function hasActiveSession(): boolean {
-    return account.value !== null && getValidAccessToken() !== null
+    return getValidAccessToken() !== null
   }
 
   function logout(): void {
@@ -50,6 +53,8 @@ export const useAuthStore = defineStore('auth', () => {
       accessToken.value = token.access_token
       expiresAt.value = Date.now() + token.expires_in_seconds * 1000
       expiryTimer = setTimeout(clearSession, token.expires_in_seconds * 1000)
+      passwordChangeRequired.value = Boolean(token.password_change_required)
+      if (passwordChangeRequired.value) return
       account.value = await getCurrentAccount()
     } catch (error) {
       clearSession()
@@ -63,15 +68,25 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function updatePassword(currentPassword: string, newPassword: string): Promise<void> {
+    await changePassword({
+      current_password: currentPassword,
+      new_password: newPassword,
+    })
+    logout()
+  }
+
   return {
     accessToken,
     expiresAt,
     account,
+    passwordChangeRequired,
     isLoading,
     errorMessage,
     getValidAccessToken,
     hasActiveSession,
     login,
     logout,
+    updatePassword,
   }
 })

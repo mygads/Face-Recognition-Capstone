@@ -47,6 +47,7 @@ function authenticatedPinia(role: 'ADMIN' | 'TEACHER') {
       email: 'staff@example.test',
       full_name: 'Test Staff',
       roles: [role],
+      must_change_password: false,
     },
   })
   return pinia

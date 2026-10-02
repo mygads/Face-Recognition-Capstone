@@ -76,7 +76,45 @@ def main() -> int:
         if args.web_container:
             command.extend(("--profile", "web-container"))
         command.extend(("up", "--build", "--detach"))
-        return run(command)
+        if run(command) != 0:
+            return 1
+
+        setup_commands = [
+            [
+                "docker",
+                "compose",
+                "run",
+                "--rm",
+                "api",
+                "alembic",
+                "upgrade",
+                "head",
+            ],
+            [
+                "docker",
+                "compose",
+                "run",
+                "--rm",
+                "api",
+                "python",
+                "-m",
+                "presensi_api.db.seed_roles",
+            ],
+            [
+                "docker",
+                "compose",
+                "run",
+                "--rm",
+                "api",
+                "python",
+                "-m",
+                "presensi_api.auth.bootstrap_admin",
+            ],
+        ]
+        for setup_command in setup_commands:
+            if run(setup_command) != 0:
+                return 1
+        return 0
 
     if args.task == "dev-down":
         return run(

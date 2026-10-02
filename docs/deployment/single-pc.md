@@ -43,19 +43,17 @@ From the repository root:
 ~~~powershell
 # Windows PowerShell
 py -3 scripts/dev.py dev-up
-docker compose run --rm api alembic upgrade head
-docker compose run --rm api python -m presensi_api.db.seed_roles
 ~~~
 
 ~~~bash
 # Ubuntu
 python3 scripts/dev.py dev-up
-docker compose run --rm api alembic upgrade head
-docker compose run --rm api python -m presensi_api.db.seed_roles
 ~~~
 
 The task runner copies .env.example to .env if needed and fills blank local
-database/JWT/encrypted-template secrets. The .env file is ignored by Git. Keep
+database/JWT/encrypted-template secrets, applies migrations, seeds roles, and
+creates a local administrator only if one does not already exist. It prints a
+random one-time password; change it at first sign-in. The .env file is ignored by Git. Keep
 the local generated keyring with the database volume; losing it makes encrypted
 templates in that volume unusable. These development secrets are not production
 secrets.
@@ -74,13 +72,6 @@ npm --prefix apps/web run dev
 Open http://127.0.0.1:5173. Check API health at
 http://127.0.0.1:8000/health and the versioned endpoint at
 http://127.0.0.1:8000/api/v1/health.
-
-Create an administrator after role seeding. The command prompts for the
-password; do not add a password argument:
-
-~~~sh
-docker compose run --rm api python -m presensi_api.auth.create_user --email admin@example.edu --full-name "Local Admin" --role ADMIN
-~~~
 
 For a teacher-owned schedule/session demo, create a separate TEACHER account
 with the same command and role TEACHER. Use only fictional master-data records

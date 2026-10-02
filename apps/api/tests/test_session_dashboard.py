@@ -170,9 +170,16 @@ def dashboard_database(
     engine.dispose()
 
 
-def access_token(*, now: datetime | None = None) -> str:
+def access_token(
+    *, now: datetime | None = None, password_change_only: bool = False
+) -> str:
     settings = AuthSettings(signing_secret="session-dashboard-test-secret-000000")
-    token, _ = issue_access_token(UUID(int=9401), settings, now=now)
+    token, _ = issue_access_token(
+        UUID(int=9401),
+        settings,
+        password_change_only=password_change_only,
+        now=now,
+    )
     return token
 
 
@@ -276,6 +283,23 @@ def test_websocket_rejects_expired_access_token(
             ) as websocket:
                 websocket.send_json(
                     {"type": "authenticate", "access_token": expired_token}
+                )
+                websocket.receive_json()
+    assert disconnected.value.code == 4401
+
+
+def test_websocket_rejects_bootstrap_password_change_token(
+    dashboard_database: tuple[sessionmaker[Session], dict[str, UUID]],
+) -> None:
+    _, ids = dashboard_database
+    restricted_token = access_token(password_change_only=True)
+    with TestClient(app) as client:
+        with pytest.raises(WebSocketDisconnect) as disconnected:
+            with client.websocket_connect(
+                f"/api/v1/sessions/{ids['session']}/updates"
+            ) as websocket:
+                websocket.send_json(
+                    {"type": "authenticate", "access_token": restricted_token}
                 )
                 websocket.receive_json()
     assert disconnected.value.code == 4401

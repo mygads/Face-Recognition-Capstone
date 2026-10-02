@@ -164,6 +164,7 @@ def test_openapi_documents_oauth_password_login_and_bearer_auth() -> None:
     document = app.openapi()
     login = document["paths"]["/api/v1/auth/login"]["post"]
     authenticated_me = document["paths"]["/api/v1/auth/me"]["get"]
+    change_password = document["paths"]["/api/v1/auth/change-password"]["post"]
 
     assert "application/x-www-form-urlencoded" in login["requestBody"]["content"]
     assert authenticated_me["security"] == [{"OAuth2PasswordBearer": []}]
@@ -171,6 +172,10 @@ def test_openapi_documents_oauth_password_login_and_bearer_auth() -> None:
         "flows"
     ]["password"]
     assert password_flow["tokenUrl"] == "/api/v1/auth/login"
+    assert (
+        change_password["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+        == "#/components/schemas/PasswordChangeRequest"
+    )
 
 
 def test_schedule_endpoint_returns_empty_page_when_no_schedules_exist() -> None:

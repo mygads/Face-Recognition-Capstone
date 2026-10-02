@@ -17,6 +17,10 @@ from sqlalchemy.pool import StaticPool
 from presensi_api.api.security.dependencies import get_current_user
 from presensi_api.api.security.passwords import hash_password
 from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
+from presensi_api.auth.bootstrap_admin import (
+    BOOTSTRAP_EMAIL,
+    bootstrap_development_admin,
+)
 from presensi_api.db.base import Base
 from presensi_api.db.models import AuditLog, Role, User, UserRole
 from presensi_api.db.seed_roles import seed_roles
@@ -112,6 +116,7 @@ def test_oauth_login_issues_expiring_access_token_and_me(
     token_data = response.json()
     assert token_data["token_type"] == "bearer"
     assert token_data["expires_in_seconds"] == 900
+    assert token_data["password_change_required"] is False
     assert "refresh_token" not in token_data
     claims = jwt.decode(
         token_data["access_token"],
@@ -130,6 +135,7 @@ def test_oauth_login_issues_expiring_access_token_and_me(
         "email": "teacher@example.edu",
         "full_name": "Test Teacher",
         "roles": ["TEACHER"],
+        "must_change_password": False,
     }
     with api_database() as session:
         events = session.scalars(select(AuditLog)).all()
@@ -138,6 +144,81 @@ def test_oauth_login_issues_expiring_access_token_and_me(
     assert events[0].after_state == {"method": "password", "result": "success"}
     assert password not in str(events[0].after_state)
     assert token_data["access_token"] not in str(events[0].after_state)
+
+
+def test_development_bootstrap_requires_password_change_before_app_access(
+    api_database: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    with api_database.begin() as session:
+        seed_roles(session)
+        temporary_password = bootstrap_development_admin(session)
+        assert temporary_password is not None
+        assert bootstrap_development_admin(session) is None
+
+    login_response = request(
+        "POST",
+        "/api/v1/auth/login",
+        form={"username": BOOTSTRAP_EMAIL, "password": temporary_password},
+    )
+    assert login_response.status_code == 200
+    login_data = login_response.json()
+    assert login_data["password_change_required"] is True
+    restricted_token = login_data["access_token"]
+    denied_me = request("GET", "/api/v1/auth/me", token=restricted_token)
+    assert denied_me.status_code == 403
+
+    new_password = secrets.token_urlsafe(24)
+    change_response = request(
+        "POST",
+        "/api/v1/auth/change-password",
+        body={
+            "current_password": temporary_password,
+            "new_password": new_password,
+        },
+        token=restricted_token,
+    )
+    assert change_response.status_code == 200
+    assert change_response.json() == {
+        "password_changed": True,
+        "sign_in_again": True,
+    }
+    assert request("GET", "/api/v1/auth/me", token=restricted_token).status_code == 401
+
+    new_login = request(
+        "POST",
+        "/api/v1/auth/login",
+        form={"username": BOOTSTRAP_EMAIL, "password": new_password},
+    )
+    assert new_login.status_code == 200
+    assert new_login.json()["password_change_required"] is False
+    me = request("GET", "/api/v1/auth/me", token=new_login.json()["access_token"])
+    assert me.status_code == 200
+    assert me.json()["must_change_password"] is False
+
+    with api_database() as session:
+        account = session.scalar(select(User).where(User.email == BOOTSTRAP_EMAIL))
+        events = session.scalars(select(AuditLog)).all()
+    assert account is not None
+    assert account.must_change_password is False
+    assert account.auth_token_version == 1
+    assert all(
+        temporary_password not in str(event.after_state)
+        and new_password not in str(event.after_state)
+        for event in events
+    )
+    assert "auth.password_changed" in [event.action for event in events]
+
+
+def test_bootstrap_refuses_non_development_environment(
+    api_database: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    with api_database.begin() as session:
+        with pytest.raises(RuntimeError, match="only in development"):
+            bootstrap_development_admin(session)
 
 
 def test_failed_login_audits_successfully_without_credentials(

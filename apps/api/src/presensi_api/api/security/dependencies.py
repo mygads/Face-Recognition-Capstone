@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID, uuid4
@@ -33,7 +34,12 @@ def get_auth_settings() -> AuthSettings:
 
 
 def issue_access_token(
-    subject: UUID, settings: AuthSettings, *, now: datetime | None = None
+    subject: UUID,
+    settings: AuthSettings,
+    *,
+    password_change_only: bool = False,
+    token_version: int = 0,
+    now: datetime | None = None,
 ) -> tuple[str, int]:
     issued_at = now or datetime.now(UTC)
     expires_in_seconds = settings.access_token_ttl_minutes * 60
@@ -44,15 +50,24 @@ def issue_access_token(
         "jti": str(uuid4()),
         "iss": settings.issuer,
         "token_use": "access",
+        "password_change_only": password_change_only,
+        "token_version": token_version,
     }
     token = jwt.encode(claims, settings.signing_secret, algorithm="HS256")
     return token, expires_in_seconds
 
 
-def get_token_subject(
+@dataclass(frozen=True)
+class AccessTokenClaims:
+    user_id: UUID
+    password_change_only: bool
+    token_version: int
+
+
+def get_access_token_claims(
     token: Annotated[str, Depends(oauth2_scheme)],
     settings: Annotated[AuthSettings, Depends(get_auth_settings)],
-) -> UUID:
+) -> AccessTokenClaims:
     credentials_error = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid authentication credentials.",
@@ -69,14 +84,24 @@ def get_token_subject(
         if claims.get("token_use") != "access":
             raise credentials_error
         user_id = UUID(claims["sub"])
+        password_change_only = claims.get("password_change_only", False)
+        token_version = claims.get("token_version", 0)
+        if not isinstance(password_change_only, bool):
+            raise credentials_error
+        if type(token_version) is not int or token_version < 0:
+            raise credentials_error
     except (jwt.InvalidTokenError, KeyError, TypeError, ValueError) as exc:
         raise credentials_error from exc
 
-    return user_id
+    return AccessTokenClaims(
+        user_id=user_id,
+        password_change_only=password_change_only,
+        token_version=token_version,
+    )
 
 
 def get_current_user(
-    user_id: Annotated[UUID, Depends(get_token_subject)],
+    claims: Annotated[AccessTokenClaims, Depends(get_access_token_claims)],
     session: Annotated[Session, Depends(get_db_session)],
 ) -> AuthenticatedUser:
     credentials_error = HTTPException(
@@ -84,13 +109,39 @@ def get_current_user(
         detail="Invalid authentication credentials.",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    user = session.get(User, user_id)
+    user = session.get(User, claims.user_id)
     if user is None or not user.is_active:
         raise credentials_error
+    if user.auth_token_version != claims.token_version:
+        raise credentials_error
+    if claims.password_change_only or user.must_change_password:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Change the temporary password before using the application.",
+        )
     principal = principal_for_user(session, user)
     if not principal.roles:
         raise credentials_error
     return principal
+
+
+def get_password_change_user(
+    claims: Annotated[AccessTokenClaims, Depends(get_access_token_claims)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> AuthenticatedUser:
+    credentials_error = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid authentication credentials.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    user = session.get(User, claims.user_id)
+    if (
+        user is None
+        or not user.is_active
+        or user.auth_token_version != claims.token_version
+    ):
+        raise credentials_error
+    return principal_for_user(session, user)
 
 
 def require_permissions(*required: Permission) -> Callable[..., AuthenticatedUser]:

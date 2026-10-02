@@ -12,6 +12,10 @@ const password = ref('')
 async function submitLogin(): Promise<void> {
   try {
     await auth.login(email.value, password.value)
+    if (auth.passwordChangeRequired) {
+      await router.replace({ name: 'change-password' })
+      return
+    }
     const requestedPath = route.query.redirect
     const safeDestination =
       typeof requestedPath === 'string' &&
@@ -37,6 +41,9 @@ async function submitLogin(): Promise<void> {
     <h1 id="login-title">Masuk ke akun</h1>
     <p class="auth-card__description">
       Gunakan akun internal sekolah untuk membuka ruang kerja presensi praktikum.
+    </p>
+    <p v-if="route.query.passwordChanged === '1'" class="profile-view__success" role="status">
+      Kata sandi berhasil diperbarui. Silakan masuk kembali.
     </p>
 
     <form class="auth-card__form" @submit.prevent="submitLogin">

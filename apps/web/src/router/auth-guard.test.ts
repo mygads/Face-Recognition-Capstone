@@ -28,6 +28,7 @@ describe('route authorization', () => {
         email: 'teacher@example.test',
         full_name: 'Test Teacher',
         roles: ['TEACHER'],
+        must_change_password: false,
       },
     })
     const router = createAppRouter(createMemoryHistory())
@@ -55,6 +56,7 @@ describe('route authorization', () => {
         email: 'teacher@example.test',
         full_name: 'Test Teacher',
         roles: ['TEACHER'],
+        must_change_password: false,
       },
     })
     const router = createAppRouter(createMemoryHistory())
@@ -80,6 +82,7 @@ describe('route authorization', () => {
         email: 'teacher@example.test',
         full_name: 'Test Teacher',
         roles: ['TEACHER'],
+        must_change_password: false,
       },
     })
     const router = createAppRouter(createMemoryHistory())
@@ -88,5 +91,21 @@ describe('route authorization', () => {
     await router.push('/app/master-data')
 
     expect(router.currentRoute.value.name).toBe('forbidden')
+  })
+
+  it('forces a bootstrap user to the password-change page', async () => {
+    const pinia = createPinia()
+    const auth = useAuthStore(pinia)
+    auth.$patch({
+      accessToken: 'unit-fixture-bootstrap-token',
+      expiresAt: Date.now() + 60_000,
+      passwordChangeRequired: true,
+    })
+    const router = createAppRouter(createMemoryHistory())
+    installAuthGuard(router, pinia)
+
+    await router.push('/app/dashboard')
+
+    expect(router.currentRoute.value.name).toBe('change-password')
   })
 })

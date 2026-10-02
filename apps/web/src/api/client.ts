@@ -3,6 +3,8 @@ import type { components, operations, paths } from './generated/schema'
 
 export type AuthenticatedAccount = components['schemas']['CurrentUserResponse']
 export type AccessToken = components['schemas']['TokenResponse']
+export type PasswordChangeRequest = components['schemas']['PasswordChangeRequest']
+export type PasswordChangeResult = components['schemas']['PasswordChangeResponse']
 export type Student = components['schemas']['StudentResponse']
 export type StudentDetails = components['schemas']['StudentDetailResponse']
 export type StudentCreate = components['schemas']['StudentCreateRequest']
@@ -130,6 +132,11 @@ export async function loginWithPassword(email: string, password: string): Promis
 
 export async function getCurrentAccount(): Promise<AuthenticatedAccount> {
   const result = await apiClient.GET('/api/v1/auth/me')
+  return unwrap(result)
+}
+
+export async function changePassword(body: PasswordChangeRequest): Promise<PasswordChangeResult> {
+  const result = await apiClient.POST('/api/v1/auth/change-password', { body })
   return unwrap(result)
 }
 

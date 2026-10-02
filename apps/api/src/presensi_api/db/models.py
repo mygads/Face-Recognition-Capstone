@@ -13,6 +13,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Index,
+    Integer,
     LargeBinary,
     Numeric,
     SmallInteger,
@@ -52,13 +53,24 @@ class TimestampMixin:
 
 class User(UUIDPrimaryKey, TimestampMixin, Base):
     __tablename__ = "users"
-    __table_args__ = (UniqueConstraint("email", name="uq_users_email"),)
+    __table_args__ = (
+        UniqueConstraint("email", name="uq_users_email"),
+        CheckConstraint(
+            "auth_token_version >= 0", name="auth_token_version_nonnegative"
+        ),
+    )
 
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     full_name: Mapped[str] = mapped_column(String(200), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    auth_token_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
     )
 
 
