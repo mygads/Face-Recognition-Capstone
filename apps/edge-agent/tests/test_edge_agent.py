@@ -336,6 +336,87 @@ def test_local_calibration_sample_never_enqueues_attendance(
         outbox.close()
 
 
+def test_live_operator_preview_shows_diagnostic_candidate_without_attendance(
+    tmp_path: Path,
+) -> None:
+    config = load_config(
+        EXAMPLE_CONFIG, environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)}
+    )
+    bundle = parse_session_cache(
+        sample_bundle_payload(),
+        device_id=DEVICE_ID,
+        model_name=MODEL_NAME,
+        model_version=MODEL_VERSION,
+    )
+
+    class FakeCamera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            return False, None
+
+        def close(self) -> None: ...
+
+    class FakeApi:
+        def close(self) -> None: ...
+
+    class AttendanceRecognizer:
+        def process(self, _frame, _gallery, _captured_at) -> TrackDecision:
+            raise AssertionError(
+                "Preview diagnostics must bypass attendance recognition."
+            )
+
+        def reset(self) -> None: ...
+
+    class DiagnosticRecognizer:
+        reset_calls = 0
+
+        def process(self, _frame, _gallery, _captured_at) -> TrackDecision:
+            return TrackDecision(
+                track_id="local-preview",
+                state="accepted",
+                decision=RecognitionDecision(
+                    outcome="matched",
+                    student_id=STUDENT_ID,
+                    confidence=0.951,
+                    margin=0.1,
+                ),
+                observation_count=1,
+            )
+
+        def reset(self) -> None:
+            self.reset_calls += 1
+
+    outbox = EventOutbox(tmp_path / "preview-outbox.sqlite3", max_pending=10)
+    service = EdgeService(
+        config,
+        FakeCamera(),
+        FakeApi(),  # type: ignore[arg-type]
+        outbox,
+        AttendanceRecognizer(),  # type: ignore[arg-type]
+        lambda: {},
+    )
+    probe = DiagnosticRecognizer()
+    service._create_preview_recognizer = lambda: probe  # type: ignore[method-assign]
+    service.cache.replace(bundle)
+    assert service.preview is not None
+    service.preview._sessions["synthetic-operator-viewer"] = time.monotonic() + 30
+
+    try:
+        service._process_frame(object())
+
+        status = service.preview.status()
+        candidate = status["diagnostic_candidate"]
+        assert status["recognition_state"] == "waiting_for_calibration"
+        assert isinstance(candidate, dict)
+        assert candidate["display_name"] == "Synthetic Student"
+        assert candidate["similarity"] == pytest.approx(0.902)
+        assert probe.reset_calls == 1
+        assert outbox.counts() == (0, 0)
+    finally:
+        outbox.close()
+
+
 def test_config_rejects_liveness_required_without_enabling_it(tmp_path: Path) -> None:
     config_path = tmp_path / "edge.yaml"
     config_path.write_text(

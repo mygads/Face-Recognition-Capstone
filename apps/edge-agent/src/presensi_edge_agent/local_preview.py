@@ -77,6 +77,7 @@ class LocalCameraPreview:
             "session_active": False,
             "recognition_state": "starting",
             "display_name": None,
+            "diagnostic_candidate": None,
             "attendance_result": None,
             "camera_observation": {
                 "state": "pending",
@@ -103,6 +104,16 @@ class LocalCameraPreview:
     def status(self) -> dict[str, object]:
         with self._lock:
             payload = dict(self._status)
+            candidate = payload.get("diagnostic_candidate")
+            candidate_updated_at = (
+                candidate.get("updated_at") if isinstance(candidate, dict) else None
+            )
+            if isinstance(candidate, dict) and (
+                not isinstance(candidate_updated_at, (int, float))
+                or time.time() - candidate_updated_at > 3.0
+            ):
+                payload["diagnostic_candidate"] = None
+                self._status["diagnostic_candidate"] = None
             payload["calibration"] = self._calibration_status_locked()
             return payload
 
@@ -666,10 +677,34 @@ class LocalCameraPreview:
                 "face_count": 0,
                 "faces": [],
             }
+            self._status["diagnostic_candidate"] = None
 
     def update_status(self, **values: object) -> None:
         with self._lock:
             self._status.update(values)
+            self._status["updated_at"] = time.time()
+
+    def update_diagnostic_candidate(
+        self, display_name: str | None, similarity: float | None
+    ) -> None:
+        """Publish a transient top candidate to the authenticated operator preview."""
+        candidate: dict[str, object] | None = None
+        if (
+            isinstance(display_name, str)
+            and isinstance(similarity, (int, float))
+            and math.isfinite(similarity)
+            and -1 <= similarity <= 1
+        ):
+            safe_name = "".join(char for char in display_name if char.isprintable())
+            safe_name = safe_name.strip()[:120]
+            if safe_name:
+                candidate = {
+                    "display_name": safe_name,
+                    "similarity": float(similarity),
+                    "updated_at": time.time(),
+                }
+        with self._lock:
+            self._status["diagnostic_candidate"] = candidate
             self._status["updated_at"] = time.time()
 
     def update_camera_observation(self, payload: dict[str, object]) -> None:

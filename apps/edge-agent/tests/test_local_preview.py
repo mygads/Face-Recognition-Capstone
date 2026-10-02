@@ -121,6 +121,7 @@ def test_preview_requires_operator_session_and_serves_no_store_status(
                 ],
             }
         )
+        preview.update_diagnostic_candidate(" Candidate Adult\n", 0.902)
         with pytest.raises(urllib.error.HTTPError) as unauthorized:
             _request(port, "/v1/status")
         assert unauthorized.value.code == 401
@@ -131,8 +132,13 @@ def test_preview_requires_operator_session_and_serves_no_store_status(
         assert status["recognition_state"] == "waiting_for_calibration"
         assert status["display_name"] is None
         assert status["camera_observation"]["state"] == "ready"
+        candidate = status["diagnostic_candidate"]
+        assert isinstance(candidate, dict)
+        assert candidate["display_name"] == "Candidate Adult"
+        assert candidate["similarity"] == pytest.approx(0.902)
         serialized_status = json.dumps(status)
         assert "embedding" not in serialized_status.lower()
+        assert "student_id" not in candidate
         assert "should not be exposed" not in serialized_status.lower()
         _request(port, "/v1/session", method="DELETE", token=token)
         assert preview.has_active_viewer() is False

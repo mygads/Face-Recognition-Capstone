@@ -1890,6 +1890,39 @@ a:focus-visible {
   grid-column: 1 / -1;
 }
 
+.ai-setup-view__shared-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.ai-setup-view__shared-toggle input {
+  width: 1rem;
+  min-height: 1rem;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+.ai-setup-view__shared-quality {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface-secondary);
+}
+
+.ai-setup-view__shared-quality p {
+  flex: 1 1 20rem;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 .ai-setup-view__device-picker {
   display: grid;
   width: min(100%, 460px);
@@ -2618,17 +2651,16 @@ a:focus-visible {
   pointer-events: none;
 }
 
-.camera-preview-view__face-ring {
-  fill: color-mix(in srgb, #f0a83a 9%, transparent);
+.camera-preview-view__face-box {
+  fill: none;
   stroke: #f0a83a;
-  stroke-width: 6px;
+  stroke-width: 4px;
   vector-effect: non-scaling-stroke;
 }
 
-.camera-preview-view__face-ring.is-ready {
-  fill: color-mix(in srgb, #32c48d 9%, transparent);
+.camera-preview-view__face-box.is-ready {
   stroke: #32c48d;
-  animation: camera-ready-pulse 1.8s ease-in-out infinite;
+  stroke-width: 5px;
 }
 
 .camera-preview-view__guidance {
@@ -2664,12 +2696,6 @@ a:focus-visible {
 
 .camera-preview-view__guidance.is-unavailable {
   border-color: #d66b6b;
-}
-
-@keyframes camera-ready-pulse {
-  50% {
-    stroke-width: 9px;
-  }
 }
 
 .camera-preview-view__placeholder {
@@ -2729,6 +2755,57 @@ a:focus-visible {
   color: var(--text);
   font-size: 0.78rem;
   font-weight: 600;
+}
+
+.camera-preview-view__candidate {
+  display: grid;
+  gap: 0.35rem;
+  margin: var(--space-4) 0;
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--border-color-light));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--primary) 5%, var(--bg-surface));
+}
+
+.camera-preview-view__candidate > span {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+.camera-preview-view__candidate > strong {
+  color: var(--text);
+  font-size: 1.1rem;
+}
+
+.camera-preview-view__candidate > b {
+  color: var(--primary);
+  font-size: 1.3rem;
+}
+
+.camera-preview-view__candidate > small {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.camera-preview-view__candidate-empty {
+  display: grid;
+  gap: 0.3rem;
+  margin: var(--space-4) 0;
+  padding: var(--space-3);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+}
+
+.camera-preview-view__candidate-empty strong {
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+.camera-preview-view__candidate-empty small {
+  font-size: 0.72rem;
+  line-height: 1.45;
 }
 
 .camera-preview-view__identity .camera-preview-view__privacy {

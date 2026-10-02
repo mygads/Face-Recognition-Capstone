@@ -100,6 +100,14 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
           session_active: true,
           recognition_state: recognitionState,
           display_name: 'Yoga',
+          diagnostic_candidate:
+            recognitionState === 'waiting_for_calibration'
+              ? {
+                  display_name: 'Yoga',
+                  similarity: 0.902,
+                  updated_at: Date.now() / 1000,
+                }
+              : null,
           updated_at: Date.now() / 1000,
           camera_observation: {
             state: 'ready',
@@ -148,13 +156,22 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
 
   await expect(page.getByRole('heading', { name: 'Preview kamera presensi' })).toBeVisible()
   await expect(page.getByRole('img', { name: 'Preview langsung kamera presensi' })).toBeVisible()
-  await expect(page.locator('.camera-preview-view__face-ring.is-ready')).toBeVisible()
+  await expect(page.locator('.camera-preview-view__face-box.is-ready')).toBeVisible()
   await expect(page.getByText('Frame siap diperiksa', { exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'AI belum dikalibrasi' })).toBeVisible()
   await expect(page.getByText(/Pengenalan belum aktif.*threshold Top-1 dan margin/)).toBeVisible()
   await expect(page.getByRole('link', { name: 'Buka AI & kamera' })).toBeVisible()
+  await expect(page.getByText('Uji kamera · kandidat terdekat di roster sesi')).toBeVisible()
+  await expect(page.getByText('Yoga', { exact: true })).toBeVisible()
+  await expect(page.getByText('90.2% kemiripan')).toBeVisible()
+  await expect(page.getByText(/bukan probabilitas atau tingkat akurasi/)).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Uji kecocokan kamera' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: /Ambil sampel/ })).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Tampilan depan kamera' }).click()
+  await expect(page.getByText('Uji kamera · kandidat terdekat di roster sesi')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Keluar layar penuh' }).click()
+  await expect(page.getByText('Uji kamera · kandidat terdekat di roster sesi')).toBeVisible()
 
   recognitionState = 'accepted'
   await expect(page.getByRole('heading', { name: 'Yoga' })).toBeVisible()
@@ -163,6 +180,7 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
 
   await page.getByRole('button', { name: 'Tampilan depan kamera' }).click()
   await expect(page.locator('.camera-preview-view')).toBeVisible()
+  await expect(page.getByText('Uji kamera · kandidat terdekat di roster sesi')).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Memeriksa presensi' })).toBeVisible()
   await expect(page.locator('.camera-preview-view__identity h3')).not.toHaveText('Yoga')
   attendanceRecorded = true

@@ -32,9 +32,16 @@ const isSaving = ref(false)
 const errorMessage = ref<string | null>(null)
 const successMessage = ref<string | null>(null)
 const activeTab = ref<SettingsTab>('enrollment')
+const useSharedQuality = ref(true)
 const settingsTabs = computed<{ id: SettingsTab; label: string }[]>(() => {
   const tabs: { id: SettingsTab; label: string }[] = [
-    { id: 'enrollment', label: 'Kualitas enrollment' },
+    {
+      id: 'enrollment',
+      label:
+        readiness.value?.deployment_profile === 'AI_EDGE'
+          ? 'Kualitas capture'
+          : 'Kualitas enrollment',
+    },
     {
       id: 'devices',
       label: readiness.value?.deployment_profile === 'AI_EDGE' ? 'PC edge' : 'STB gateway',
@@ -71,6 +78,21 @@ const gatewayForm = ref<StbGatewayConfiguration>({
 
 const selectedDevice = computed(
   () => devices.value.find((device) => device.device_id === selectedDeviceId.value) ?? null,
+)
+const displayedEdgeQuality = computed(() =>
+  useSharedQuality.value
+    ? {
+        min_face_pixels: enrollmentForm.value.min_face_pixels,
+        min_laplacian_variance: enrollmentForm.value.min_sharpness,
+        min_brightness: enrollmentForm.value.min_brightness,
+        max_brightness: enrollmentForm.value.max_brightness,
+      }
+    : {
+        min_face_pixels: edgeForm.value.min_face_pixels,
+        min_laplacian_variance: edgeForm.value.min_laplacian_variance,
+        min_brightness: edgeForm.value.min_brightness,
+        max_brightness: edgeForm.value.max_brightness,
+      },
 )
 const edgeThresholdsConfigured = computed(
   () => edgeForm.value.min_top1_similarity !== null && edgeForm.value.min_top1_top2_margin !== null,
@@ -129,6 +151,42 @@ function recognitionFrom(settings: UnknownSettings): RecognitionConfiguration {
     max_history_frames: numeric(settings, 'max_history_frames', defaults.max_history_frames),
     calibration_reference:
       typeof settings.calibration_reference === 'string' ? settings.calibration_reference : null,
+  }
+}
+
+function enrollmentQualityMatchesEdge(): boolean {
+  return (
+    edgeForm.value.min_face_pixels === enrollmentForm.value.min_face_pixels &&
+    edgeForm.value.min_laplacian_variance === enrollmentForm.value.min_sharpness &&
+    edgeForm.value.min_brightness === enrollmentForm.value.min_brightness &&
+    edgeForm.value.max_brightness === enrollmentForm.value.max_brightness
+  )
+}
+
+function copyEnrollmentQualityToEdge(): void {
+  edgeForm.value = {
+    ...edgeForm.value,
+    min_face_pixels: enrollmentForm.value.min_face_pixels,
+    min_laplacian_variance: enrollmentForm.value.min_sharpness,
+    min_brightness: enrollmentForm.value.min_brightness,
+    max_brightness: enrollmentForm.value.max_brightness,
+  }
+}
+
+function onSharedQualityChange(): void {
+  if (useSharedQuality.value) copyEnrollmentQualityToEdge()
+}
+
+function updateSavedDevice(saved: DeviceRuntimeConfiguration): void {
+  deviceConfiguration.value = saved
+  const index = devices.value.findIndex((item) => item.device_id === saved.device_id)
+  if (index >= 0) {
+    devices.value[index] = {
+      ...devices.value[index],
+      config_applied_revision: saved.applied_revision,
+      config_apply_status: saved.apply_status,
+      config_error_code: saved.error_code ?? null,
+    }
   }
 }
 
@@ -220,6 +278,7 @@ async function loadDeviceConfiguration(deviceId: string): Promise<void> {
     deviceConfiguration.value = result
     if (result.deployment_profile === 'AI_EDGE') {
       edgeForm.value = recognitionFrom(result.settings as UnknownSettings)
+      useSharedQuality.value = enrollmentQualityMatchesEdge()
     } else {
       gatewayForm.value = gatewayFrom(result.settings as UnknownSettings)
     }
@@ -233,7 +292,27 @@ async function saveEnrollment(): Promise<void> {
   await saveSettings(async () => {
     const saved = await saveEnrollmentQualityConfiguration(enrollmentForm.value)
     if (readiness.value) readiness.value.enrollment_quality_revision = saved.revision
-  }, 'Kualitas enrollment diterbitkan. Pengaturan berlaku pada capture berikutnya.')
+    if (
+      readiness.value?.deployment_profile === 'AI_EDGE' &&
+      selectedDevice.value?.deployment_profile === 'AI_EDGE' &&
+      useSharedQuality.value
+    ) {
+      copyEnrollmentQualityToEdge()
+      try {
+        const deviceSaved = await saveEdgeDeviceConfiguration(
+          selectedDeviceId.value,
+          edgeForm.value,
+        )
+        updateSavedDevice(deviceSaved)
+      } catch (error) {
+        const detail = error instanceof Error ? ` ${error.message}` : ''
+        throw new Error(
+          `Kualitas enrollment tersimpan, tetapi pengaturan AI_EDGE belum tersinkron.${detail}`,
+          { cause: error },
+        )
+      }
+    }
+  }, 'Kualitas capture tersimpan. Perangkat AI_EDGE terpilih akan menerapkannya saat tersambung.')
 }
 
 async function saveCentral(): Promise<void> {
@@ -246,20 +325,14 @@ async function saveCentral(): Promise<void> {
 async function saveDevice(): Promise<void> {
   if (!selectedDevice.value) return
   await saveSettings(async () => {
-    const saved =
-      selectedDevice.value?.deployment_profile === 'AI_EDGE'
-        ? await saveEdgeDeviceConfiguration(selectedDeviceId.value, edgeForm.value)
-        : await saveGatewayDeviceConfiguration(selectedDeviceId.value, gatewayForm.value)
-    deviceConfiguration.value = saved
-    const index = devices.value.findIndex((item) => item.device_id === saved.device_id)
-    if (index >= 0) {
-      devices.value[index] = {
-        ...devices.value[index],
-        config_applied_revision: saved.applied_revision,
-        config_apply_status: saved.apply_status,
-        config_error_code: saved.error_code ?? null,
-      }
+    let saved: DeviceRuntimeConfiguration
+    if (selectedDevice.value?.deployment_profile === 'AI_EDGE') {
+      if (useSharedQuality.value) copyEnrollmentQualityToEdge()
+      saved = await saveEdgeDeviceConfiguration(selectedDeviceId.value, edgeForm.value)
+    } else {
+      saved = await saveGatewayDeviceConfiguration(selectedDeviceId.value, gatewayForm.value)
     }
+    updateSavedDevice(saved)
   }, 'Konfigurasi perangkat diterbitkan. Perangkat menerapkannya saat tersambung.')
 }
 
@@ -271,8 +344,7 @@ async function saveSettings(action: () => Promise<void>, message: string): Promi
     await action()
     successMessage.value = message
   } catch (error) {
-    errorMessage.value =
-      error instanceof ApiError ? error.message : 'Pengaturan tidak dapat disimpan.'
+    errorMessage.value = error instanceof Error ? error.message : 'Pengaturan tidak dapat disimpan.'
   } finally {
     isSaving.value = false
   }
@@ -435,13 +507,33 @@ onBeforeUnmount(() => {
             <p class="master-data__eyebrow">
               Core API · revisi {{ readiness.enrollment_quality_revision }}
             </p>
-            <h2>Kualitas capture pendaftaran</h2>
+            <h2>
+              {{
+                readiness.deployment_profile === 'AI_EDGE' &&
+                selectedDevice?.deployment_profile === 'AI_EDGE' &&
+                useSharedQuality
+                  ? 'Kualitas capture bersama'
+                  : 'Kualitas capture pendaftaran'
+              }}
+            </h2>
           </div>
         </div>
         <p class="ai-setup-view__note">
-          Nilai ini memeriksa ukuran wajah, ketajaman, dan pencahayaan pada setiap capture. Mulai
-          dari default yang ada; sesuaikan jika capture yang baik sering ditolak. Perubahan berlaku
-          pada pendaftaran berikutnya.
+          <template
+            v-if="
+              readiness.deployment_profile === 'AI_EDGE' &&
+              selectedDevice?.deployment_profile === 'AI_EDGE' &&
+              useSharedQuality
+            "
+          >
+            Nilai ini memeriksa ukuran wajah, ketajaman, dan pencahayaan pada pendaftaran serta PC
+            AI_EDGE terpilih. Keduanya memakai angka yang sama.
+          </template>
+          <template v-else>
+            Nilai ini memeriksa ukuran wajah, ketajaman, dan pencahayaan pada setiap capture
+            pendaftaran. Mulai dari default yang ada; sesuaikan jika capture yang baik sering
+            ditolak. Perangkat AI_EDGE dapat memakai override terpisah.
+          </template>
         </p>
         <form class="master-data__form ai-setup-view__form" @submit.prevent="saveEnrollment">
           <label>
@@ -489,7 +581,7 @@ onBeforeUnmount(() => {
           </label>
           <div class="master-data__form-actions">
             <button class="button button--primary" type="submit" :disabled="isSaving">
-              {{ isSaving ? 'Menyimpan…' : 'Simpan pengaturan enrollment' }}
+              {{ isSaving ? 'Menyimpan…' : 'Simpan kualitas capture' }}
             </button>
           </div>
         </form>
@@ -535,41 +627,63 @@ onBeforeUnmount(() => {
         <template v-if="selectedDevice?.deployment_profile === 'AI_EDGE'">
           <h3>AI_EDGE · kebijakan pengenalan</h3>
           <form class="master-data__form ai-setup-view__form" @submit.prevent="saveDevice">
-            <label
-              >Ukuran wajah minimum<input
-                v-model.number="edgeForm.min_face_pixels"
-                type="number"
-                min="16"
-                max="2048"
-                required
-            /></label>
-            <label
-              >Ketajaman minimum<input
-                v-model.number="edgeForm.min_laplacian_variance"
-                type="number"
-                min="0"
-                max="100000"
-                step="any"
-                required
-            /></label>
-            <label
-              >Kecerahan minimum<input
-                v-model.number="edgeForm.min_brightness"
-                type="number"
-                min="0"
-                max="254"
-                step="any"
-                required
-            /></label>
-            <label
-              >Kecerahan maksimum<input
-                v-model.number="edgeForm.max_brightness"
-                type="number"
-                min="1"
-                max="255"
-                step="any"
-                required
-            /></label>
+            <label class="ai-setup-view__form-wide ai-setup-view__shared-toggle">
+              <input v-model="useSharedQuality" type="checkbox" @change="onSharedQualityChange" />
+              Gunakan kualitas yang sama dengan pendaftaran
+            </label>
+            <div
+              v-if="useSharedQuality"
+              class="ai-setup-view__shared-quality ai-setup-view__form-wide"
+            >
+              <p>
+                Ukuran wajah, ketajaman, dan pencahayaan mengikuti tab Kualitas capture. Perubahan
+                disimpan untuk enrollment dan perangkat AI_EDGE terpilih.
+              </p>
+              <button
+                class="button button--secondary"
+                type="button"
+                @click="activeTab = 'enrollment'"
+              >
+                Ubah kualitas bersama
+              </button>
+            </div>
+            <template v-else>
+              <label
+                >Ukuran wajah minimum<input
+                  v-model.number="edgeForm.min_face_pixels"
+                  type="number"
+                  min="16"
+                  max="2048"
+                  required
+              /></label>
+              <label
+                >Ketajaman minimum<input
+                  v-model.number="edgeForm.min_laplacian_variance"
+                  type="number"
+                  min="0"
+                  max="100000"
+                  step="any"
+                  required
+              /></label>
+              <label
+                >Kecerahan minimum<input
+                  v-model.number="edgeForm.min_brightness"
+                  type="number"
+                  min="0"
+                  max="254"
+                  step="any"
+                  required
+              /></label>
+              <label
+                >Kecerahan maksimum<input
+                  v-model.number="edgeForm.max_brightness"
+                  type="number"
+                  min="1"
+                  max="255"
+                  step="any"
+                  required
+              /></label>
+            </template>
             <label
               >Top-1 similarity<input
                 :value="edgeForm.min_top1_similarity ?? ''"
@@ -646,9 +760,10 @@ onBeforeUnmount(() => {
               <div>
                 <dt>Quality awal</dt>
                 <dd>
-                  Wajah ≥ {{ edgeForm.min_face_pixels }} px · tajam ≥
-                  {{ edgeForm.min_laplacian_variance }} · cahaya {{ edgeForm.min_brightness }}–{{
-                    edgeForm.max_brightness
+                  Wajah ≥ {{ displayedEdgeQuality.min_face_pixels }} px · tajam ≥
+                  {{ displayedEdgeQuality.min_laplacian_variance }} · cahaya
+                  {{ displayedEdgeQuality.min_brightness }}–{{
+                    displayedEdgeQuality.max_brightness
                   }}
                 </dd>
               </div>

@@ -7,6 +7,7 @@ type PreviewStatus = {
   session_active: boolean
   recognition_state: string
   display_name: string | null
+  diagnostic_candidate?: DiagnosticCandidate | null
   updated_at: number | null
   camera_observation?: CameraObservation
   attendance_result?: AttendanceResult | null
@@ -41,11 +42,26 @@ type AttendanceResult = {
   updated_at: number
 }
 
+type DiagnosticCandidate = {
+  display_name: string
+  similarity: number
+  updated_at: number
+}
+
 const auth = useAuthStore()
 const previewToken = ref<string | null>(null)
 const frameUrl = ref<string | null>(null)
 const previewStatus = ref<PreviewStatus | null>(null)
 const cameraObservation = computed(() => previewStatus.value?.camera_observation ?? null)
+const diagnosticCandidate = computed(() => {
+  const candidate = previewStatus.value?.diagnostic_candidate
+  if (!candidate || Date.now() / 1000 - candidate.updated_at > 3) return null
+  return candidate
+})
+const diagnosticSimilarityPercent = computed(() => {
+  const similarity = diagnosticCandidate.value?.similarity
+  return similarity === undefined ? null : `${(similarity * 100).toFixed(1)}%`
+})
 const errorMessage = ref<string | null>(null)
 const isStarting = ref(true)
 const isFullscreen = ref(false)
@@ -364,17 +380,14 @@ onBeforeUnmount(() => {
             preserveAspectRatio="xMidYMid meet"
             aria-hidden="true"
           >
-            <ellipse
+            <rect
               v-for="(face, index) in cameraObservation.faces"
               :key="`${index}-${cameraObservation.state}`"
-              :cx="(face.x + face.width / 2) * cameraObservation.frame_width"
-              :cy="(face.y + face.height / 2) * cameraObservation.frame_height"
-              :rx="face.width * cameraObservation.frame_width * 0.58"
-              :ry="face.height * cameraObservation.frame_height * 0.62"
-              :class="[
-                'camera-preview-view__face-ring',
-                face.acceptable ? 'is-ready' : 'is-adjust',
-              ]"
+              :x="face.x * cameraObservation.frame_width"
+              :y="face.y * cameraObservation.frame_height"
+              :width="face.width * cameraObservation.frame_width"
+              :height="face.height * cameraObservation.frame_height"
+              :class="['camera-preview-view__face-box', face.acceptable ? 'is-ready' : 'is-adjust']"
             />
           </svg>
           <div
@@ -400,6 +413,38 @@ onBeforeUnmount(() => {
         <p class="master-data__eyebrow">Hasil pengenalan</p>
         <h3>{{ identityTitle }}</h3>
         <p>{{ identityDisplayMessage }}</p>
+        <div
+          v-if="!isFullscreen && diagnosticCandidate"
+          class="camera-preview-view__candidate"
+          role="status"
+          aria-live="polite"
+        >
+          <span>Uji kamera · kandidat terdekat di roster sesi</span>
+          <strong>{{ diagnosticCandidate.display_name }}</strong>
+          <b>{{ diagnosticSimilarityPercent }} kemiripan</b>
+          <small>
+            Skor cosine ini bukan probabilitas atau tingkat akurasi. Threshold belum dikalibrasi;
+            hasil ini tidak membuat presensi.
+          </small>
+        </div>
+        <div
+          v-else-if="
+            !isFullscreen && previewStatus?.recognition_state === 'waiting_for_calibration'
+          "
+          class="camera-preview-view__candidate-empty"
+          role="status"
+        >
+          <strong>Mencari kandidat di roster sesi</strong>
+          <small v-if="!previewStatus?.session_active">
+            Guru perlu membuka sesi praktikum terlebih dahulu.
+          </small>
+          <small v-else-if="cameraObservation?.state !== 'ready'">
+            {{ cameraObservation?.message ?? 'Menunggu satu wajah dengan kualitas yang cukup.' }}
+          </small>
+          <small v-else>
+            Pastikan siswa sudah terdaftar dan memiliki template aktif untuk sesi ini.
+          </small>
+        </div>
         <RouterLink
           v-if="
             !isFullscreen &&
@@ -426,8 +471,8 @@ onBeforeUnmount(() => {
             Nama dan status hanya tampil setelah Core API mengonfirmasi presensi.
           </template>
           <template v-else>
-            Nama kandidat hanya tampil pada halaman operator setelah kebijakan pengenalan cocok.
-            Keputusan kehadiran tetap divalidasi API.
+            Kandidat pada uji kamera hanya untuk petugas. Presensi baru tercatat setelah threshold
+            aktif dan Core API mengonfirmasi hasil.
           </template>
         </p>
       </aside>

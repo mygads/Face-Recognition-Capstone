@@ -193,9 +193,9 @@ test('admin can publish enrollment quality settings from the dashboard', async (
 
   await expect(page.getByRole('heading', { name: 'AI & kamera' }).first()).toBeVisible()
   await page.getByLabel('Ukuran wajah minimum (piksel)').fill('96')
-  await page.getByRole('button', { name: 'Simpan pengaturan enrollment' }).click()
+  await page.getByRole('button', { name: 'Simpan kualitas capture' }).click()
 
-  await expect(page.getByRole('status')).toContainText('Kualitas enrollment diterbitkan')
+  await expect(page.getByRole('status')).toContainText('Kualitas capture tersimpan')
   await expect(page.getByText('Core API · revisi 1')).toBeVisible()
 })
 
@@ -264,6 +264,10 @@ test('edge profile hides central settings and lists only active edge devices', a
   ]
   await stubSettingsApi(page, 'AI_EDGE', devices)
   await loginAsAdmin(page)
+  const settingsUpdates: string[] = []
+  page.on('request', (request) => {
+    if (request.method() === 'PUT') settingsUpdates.push(request.url())
+  })
 
   await expect(page.getByText('AI Central', { exact: true })).toHaveCount(0)
   await expect(page.getByText('Tidak digunakan pada profile ini')).toHaveCount(0)
@@ -272,8 +276,17 @@ test('edge profile hides central settings and lists only active edge devices', a
   await expect(page.getByText('tes-perangkat1')).toHaveCount(0)
   await expect(page.getByText('stb-gateway')).toHaveCount(0)
 
+  await page.getByLabel('Ukuran wajah minimum (piksel)').fill('96')
+  await page.getByRole('button', { name: 'Simpan kualitas capture' }).click()
+  await expect(page.getByRole('status')).toContainText('Kualitas capture tersimpan')
+  await expect.poll(() => settingsUpdates.length).toBe(2)
+  expect(settingsUpdates.some((url) => url.endsWith('/enrollment-quality'))).toBe(true)
+  expect(settingsUpdates.some((url) => url.endsWith('/device-edge/ai-edge'))).toBe(true)
+
   await page.getByRole('button', { name: 'PC edge' }).click()
   await expect(page.getByRole('heading', { name: 'Perangkat AI_EDGE' })).toBeVisible()
+  await expect(page.getByLabel('Gunakan kualitas yang sama dengan pendaftaran')).toBeChecked()
+  await expect(page.getByRole('button', { name: 'Ubah kualitas bersama' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Pratinjau konfigurasi' })).toBeVisible()
   await expect(page.getByText('Belum aktif — menunggu kalibrasi')).toBeVisible()
   await page.getByRole('button', { name: 'Terapkan ke perangkat' }).click()

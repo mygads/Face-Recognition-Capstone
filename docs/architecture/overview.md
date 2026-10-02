@@ -58,6 +58,12 @@ Profil ini memusatkan pengelolaan model dan mengurangi kebutuhan PC kuat per lab
 - AI/edge mengirim recognition event dengan `event_id` stabil agar retry jaringan idempotent.
 - Core API menolak event di luar sesi atau roster, mencegah presensi ganda, menentukan status hadir/terlambat, dan mencatat audit.
 - Frame mentah diproses sementara dan tidak disimpan secara default. Embedding template disimpan sebagai ciphertext AES-256-GCM. Log dan respons operator tidak berisi gambar, embedding, token, password, atau secret; gallery berisi embedding terdekripsi hanya untuk perangkat terautentikasi pada sesi/lab aktif.
+
+## Preview kamera operator
+
+Preview lokal operator yang terautentikasi menampilkan kotak wajah dari pemeriksa kualitas kamera. Saat threshold AI_EDGE belum diatur, agent boleh menjalankan pencocokan diagnostik satu frame secara berkala terhadap roster sesi aktif, hanya selama halaman preview operator yang berwenang terbuka. Halaman operator hanya menerima nama kandidat teratas dan skor cosine mentah; skor bukan probabilitas atau perkiraan akurasi. Frame dan skor hanya berada sementara di memori, kandidat tidak ditampilkan pada layar penuh untuk siswa, dan jalur diagnostik ini tidak pernah membuat recognition event atau attendance record. Pengenalan production tetap nonaktif sampai threshold hasil kalibrasi diterapkan.
+
+Untuk AI_EDGE, admin dapat memakai satu pengaturan kualitas capture bersama bagi enrollment Core API dan perangkat edge terpilih. Keduanya tetap merupakan cakupan konfigurasi berversi yang terpisah (enrollment global dan pengenalan per perangkat); dashboard menerbitkan keduanya dan melaporkan jika pembaruan perangkat gagal. Opsi ini dapat dimatikan untuk mempertahankan override kualitas per perangkat. Filter gambar ringan STB_GATEWAY tidak terpengaruh.
 - Data biometrik siswa nyata/minor tidak digunakan di cloud/CI dan tidak dimasukkan ke repository.
 - Template wajah menyimpan nama dan versi model. Pilihan model/pretrained weight memerlukan tinjauan lisensi dan validasi lokal sebelum dipakai.
 

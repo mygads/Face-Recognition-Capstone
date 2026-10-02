@@ -90,6 +90,9 @@ class EdgeService:
         self._gallery: tuple[GalleryEntry, ...] = ()
         self._last_decision: tuple[str, str | None, str | None] | None = None
         self._calibration_recognizer: FrameRecognizer | None = None
+        self._preview_recognizer: FrameRecognizer | None = None
+        self._last_preview_probe_at = 0.0
+        self._preview_diagnostic_error_reported = False
         self._camera_frame_inspector: CameraFrameInspector | None = None
         self._camera_inspector_attempted = False
         self._last_camera_inspection = 0.0
@@ -304,6 +307,7 @@ class EdgeService:
                     recognition_state="waiting_for_session",
                     display_name=None,
                 )
+                self.preview.update_diagnostic_candidate(None, None)
                 self.preview.update_attendance_result(None)
             if self._active_session_id is not None:
                 expired_session_id = str(self._active_session_id)
@@ -354,10 +358,16 @@ class EdgeService:
                     else "checking",
                     display_name=None,
                 )
+                self.preview.update_diagnostic_candidate(None, None)
         if cache_changed:
             if self._calibration_recognizer is not None:
                 self._calibration_recognizer.reset()
                 self._calibration_recognizer = None
+            if self._preview_recognizer is not None:
+                self._preview_recognizer.reset()
+                self._preview_recognizer = None
+            self._last_preview_probe_at = 0.0
+            self._preview_diagnostic_error_reported = False
             self._gallery = bundle.gallery()
             if self.preview is not None:
                 self.preview.update_calibration_students(
@@ -384,7 +394,20 @@ class EdgeService:
                     recognition_state="waiting_for_calibration",
                     display_name=None,
                 )
+                has_viewer = self.preview.has_active_viewer()
+                if not has_viewer or not self._gallery:
+                    self.preview.update_diagnostic_candidate(None, None)
+                    if not has_viewer and self._preview_recognizer is not None:
+                        self._preview_recognizer.reset()
+                        self._preview_recognizer = None
+                    return
+                now = time.monotonic()
+                if now - self._last_preview_probe_at >= 0.8:
+                    self._last_preview_probe_at = now
+                    self._process_live_preview_candidate(frame, bundle)
             return
+        if self.preview is not None:
+            self.preview.update_diagnostic_candidate(None, None)
         captured_at = datetime.now(UTC)
         decision = self.recognizer.process(frame, self._gallery, captured_at)
         if self.preview is not None:
@@ -453,6 +476,74 @@ class EdgeService:
             recognition_outcome=str(payload["outcome"]),
             pending_events=pending,
         )
+
+    def _process_live_preview_candidate(
+        self, frame: object, bundle: SessionCacheBundle
+    ) -> None:
+        """Show an ephemeral top candidate to an operator; never enqueue an event."""
+        preview = self.preview
+        if preview is None:
+            return
+        try:
+            if self._preview_recognizer is None:
+                self._preview_recognizer = self._create_preview_recognizer()
+            decision = self._preview_recognizer.process(
+                frame,
+                self._gallery,
+                datetime.now(UTC),
+            )
+            self._preview_diagnostic_error_reported = False
+            student_id = decision.decision.student_id
+            confidence = decision.decision.confidence
+            if decision.state != "accepted" or student_id is None or confidence is None:
+                preview.update_diagnostic_candidate(None, None)
+                return
+            student = next(
+                (item for item in bundle.students if item.student_id == student_id),
+                None,
+            )
+            if student is None:
+                preview.update_diagnostic_candidate(None, None)
+                return
+            # recognition-core normalizes cosine similarity to [0, 1] for its
+            # decision object; restore the raw cosine value for an honest label.
+            preview.update_diagnostic_candidate(
+                student.full_name,
+                2 * confidence - 1,
+            )
+        except Exception as exc:
+            preview.update_diagnostic_candidate(None, None)
+            self._last_preview_probe_at = time.monotonic() + 4.0
+            if not self._preview_diagnostic_error_reported:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "live_preview_diagnostic_unavailable",
+                    exception_type=type(exc).__name__,
+                )
+                self._preview_diagnostic_error_reported = True
+            self._preview_recognizer = None
+        finally:
+            if self._preview_recognizer is not None:
+                self._preview_recognizer.reset()
+
+    def _create_preview_recognizer(self) -> FrameRecognizer:
+        """Use one quality-checked frame for a non-attendance camera preview."""
+        if self.config.device_id is None:
+            raise ValueError("device_id is required for live preview diagnostics.")
+        from presensi_edge_agent.recognition import LocalRecognizer, build_pipeline
+
+        diagnostic_recognition = replace(
+            self.config.recognition,
+            min_top1_similarity=-1.0,
+            min_top1_top2_margin=0.0,
+            minimum_agreeing_frames=1,
+            sample_every_n_frames=1,
+            best_frame_count=1,
+            max_history_frames=1,
+        )
+        diagnostic_config = replace(self.config, recognition=diagnostic_recognition)
+        return LocalRecognizer(build_pipeline(diagnostic_config), self.device_id)
 
     def _process_calibration_frame(self, frame: object) -> None:
         preview = self.preview
@@ -590,6 +681,16 @@ class EdgeService:
                     self.config, revision=revision, settings=settings
                 )
                 self.config = updated_config
+                if self._preview_recognizer is not None:
+                    self._preview_recognizer.reset()
+                    self._preview_recognizer = None
+                if self._calibration_recognizer is not None:
+                    self._calibration_recognizer.reset()
+                    self._calibration_recognizer = None
+                self._last_preview_probe_at = 0.0
+                self._preview_diagnostic_error_reported = False
+                if self.preview is not None:
+                    self.preview.update_diagnostic_candidate(None, None)
                 self._camera_frame_inspector = None
                 self._camera_inspector_attempted = False
             report(revision=revision, status="applied")
