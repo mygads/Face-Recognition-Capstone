@@ -66,6 +66,13 @@ privat. Preview pada Ubuntu tanpa desktop/GUI tidak dapat membuka jendelanya.
 
 ## Development: enrollment camera di browser
 
+Di Windows 11 buka **Settings → Privacy & security → Camera**, aktifkan
+**Camera access** dan **Let desktop apps access your camera**. Di Windows 10,
+buka **Settings → Privacy → Camera** dan izinkan akses desktop. Setelah itu,
+izinkan kamera untuk `127.0.0.1` pada prompt browser. [Panduan Microsoft untuk
+izin kamera Windows](https://support.microsoft.com/en-us/windows/privacy/manage-app-permissions-for-a-camera-in-windows)
+menjelaskan pengaturan desktop app untuk Windows 10/11.
+
 1. Start API/database dengan `py -3 scripts/dev.py dev-up` (Ubuntu:
    `python3 scripts/dev.py dev-up`), lalu Vite dengan
    `npm ci --prefix apps/web` dan `npm --prefix apps/web run dev`.

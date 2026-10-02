@@ -28,13 +28,20 @@ edge capture at the same time if the webcam driver only allows one application.
 
 | Windows | Ubuntu |
 | --- | --- |
-| Docker Desktop using Linux containers and WSL2; Python 3.11+; Git; Node version allowed by apps/web/package.json; npm 10+ | Docker Engine with the Compose plugin; Python 3.11+; Git; Node version allowed by apps/web/package.json; npm 10+ |
+| Docker Desktop using Linux containers and WSL2; Python 3.11+; Git; Node 22.22.2 or 24.15.0+; npm 10+ | Docker Engine with the Compose plugin; Python 3.11+; Git; Node 22.22.2 or 24.15.0+; npm 10+ |
 | Allow desktop applications to access the camera in Windows Privacy settings. | Give the interactive user/service access to the camera device; check V4L2 permissions. |
 | Use a terminal with access to the cloned repository. | Use a desktop session for the calibration preview; a headless session cannot open its GUI window. |
 
-The repository currently declares Node ranges in apps/web/package.json. Use an
-LTS release in that declared range; do not rely on a different odd-numbered
-Node release just because Vite happens to start.
+The repository declares its Node range in apps/web/package.json. Node 23 is
+outside that range even if Vite happens to start. If changing the host Node
+installation is inconvenient, the optional web container uses Node 24:
+
+~~~powershell
+py -3 scripts/dev.py dev-up --web-container
+~~~
+
+Use either native Vite or the web container on port 5173 at a time; stop the
+existing Vite terminal before starting the container profile.
 
 ### Start database and Core API
 
@@ -74,8 +81,17 @@ http://127.0.0.1:8000/health and the versioned endpoint at
 http://127.0.0.1:8000/api/v1/health.
 
 For a teacher-owned schedule/session demo, create a separate TEACHER account
-with the same command and role TEACHER. Use only fictional master-data records
-and an adult volunteer who agrees to a local camera test.
+from a second PowerShell window after the API is healthy. The CLI prompts for
+the password without echoing it or putting it in shell history:
+
+~~~powershell
+docker compose exec -it api python -m presensi_api.auth.create_user --email guru@local.test --full-name "Guru Demo" --role TEACHER
+~~~
+
+Use the password you entered when signing in as that teacher. To create a
+LABORANT account, change `--role TEACHER` to `--role LABORANT`. Use only
+fictional master-data records and an adult volunteer who agrees to a local
+camera test.
 
 ### Test the webcam and prepare recognition
 
