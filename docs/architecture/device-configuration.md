@@ -21,6 +21,48 @@ lokasi inference menentukan setting yang berlaku.
 | Liveness | Model dan policy lokal | Model dan policy di AI Central | Tetap pada konfigurasi service sampai model/izin disetujui; tidak diedit dashboard |
 | Cache/offline/retry | Gallery memory dan SQLite outbox | Session cache dan SQLite outbox | YAML lokal; ditujukan untuk operasi perangkat, bukan kalibrasi kualitas |
 
+## URL dapat diubah manual
+
+URL bukan bagian dari konfigurasi kualitas di dashboard **AI & kamera**.
+Bundle setup hanya mengisi nilai awal; setiap host kamera menyimpan URL yang
+dipakainya sendiri. Ini memungkinkan perangkat development tetap memakai
+localhost sementara device deployment memakai hostname/IP production.
+
+| Host/profile | URL yang perlu dijangkau | Nilai manual |
+| --- | --- | --- |
+| AI_EDGE | Core API | `api.base_url` di YAML atau `PRESENSI_EDGE_API_BASE_URL` |
+| STB_GATEWAY | Core API dan AI Central | `api.base_url` dan `central_ai.base_url` di YAML, atau `PRESENSI_EDGE_API_BASE_URL` dan `PRESENSI_EDGE_AI_BASE_URL` |
+| AI Central server | Core API | `PRESENSI_AI_CORE_API_BASE_URL` di environment server/Compose |
+
+Di halaman **Perangkat**, default URL yang disimpan di browser admin hanya
+dipakai untuk membuat bundle baru. Bundle dapat diberi URL override untuk satu
+device. Jika server atau jaringan berubah setelah instalasi, edit konfigurasi
+lokal host yang terdampak lalu restart servicenya. Untuk STB, ganti kedua URL
+bila Core API dan AI Central sama-sama berpindah. Setelah mengganti URL Core API
+di deployment, samakan `PRESENSI_AI_CORE_API_BASE_URL` pada AI Central. Token
+sinkronisasi Core API–AI Central tetap sama dan perlu berada di secret store
+keduanya.
+
+Contoh AI_EDGE pada Windows/Ubuntu development lokal yang servernya satu laptop:
+
+```yaml
+api:
+  base_url: http://127.0.0.1:8000
+```
+
+Contoh host kamera terpisah pada jaringan deployment:
+
+```yaml
+api:
+  base_url: https://attendance.example.edu
+central_ai:
+  base_url: https://ai.attendance.example.edu
+```
+
+`127.0.0.1` hanya menunjuk ke komputer yang menjalankan agent. Jangan gunakan
+URL development itu dari STB atau PC kamera lain. Env override dapat dipakai
+tanpa mengedit YAML; nilai environment mengalahkan nilai di YAML.
+
 ## Perbedaan setting antar-profile
 
 `AI_EDGE` menjalankan YuNet/SFace dan `recognition-core` pada PC kamera. Quality

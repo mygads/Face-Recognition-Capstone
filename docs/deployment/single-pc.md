@@ -12,15 +12,19 @@ For the first full local camera path, use AI_EDGE:
 | Part | Runs where | Why |
 | --- | --- | --- |
 | PostgreSQL | Docker | Repeatable local database; default Compose publishes it only on loopback. |
-| Core API | Docker | Reuses the same API/domain code as both server deployments. |
+| Core API | Docker Compose | Reuses the same API/domain code as both server deployments. |
 | Vue web | Native Vite for development; static files behind Nginx for deployment | HMR is easier natively; deployment serves the built SPA. |
 | Edge-agent and webcam | Native host process/service | Direct UVC access avoids Docker Desktop device passthrough differences. |
-| AI service | Optional Docker central profile | Needed only to experiment with STB_GATEWAY + AI_CENTRAL on the same computer. |
+| AI service | Optional Docker Compose `central` profile | Needed only to experiment with STB_GATEWAY + AI_CENTRAL on the same computer. |
 
 The project does not configure the host webcam as a Compose device. Linux can
 pass a device node to a container, but that mode is not the project's tested
 default. On Windows, keep the camera process native. Do not run enrollment and
 edge capture at the same time if the webcam driver only allows one application.
+
+For deployment, use Docker Compose for PostgreSQL/Core API and add AI Central
+only for the central profile. Build Vue as static assets behind Nginx. Keep
+AI_EDGE and STB_GATEWAY agents outside Docker on the camera hosts.
 
 ## Development: Windows and Ubuntu
 

@@ -21,6 +21,23 @@ ikuti runbook khusus di bagian akhir; contoh nilai domain/IP bukan nilai siap pa
 kamera ringan yang mengirim frame ke AI_CENTRAL. Satu laptop development dapat
 menjalankan beberapa proses lokal, tetapi tidak menambah profile recognition.
 
+### Pembagian Docker dan native
+
+| Komponen | Development satu komputer | Production |
+| --- | --- | --- |
+| PostgreSQL | Docker Compose | Docker Compose pada server; port database tetap internal/private |
+| Core API | Docker Compose | Docker Compose pada server |
+| Web Vue | Native Vite untuk HMR; container web opsional | Dibuild menjadi file statis dan disajikan melalui Nginx/reverse proxy |
+| AI Central | Container hanya jika profile `central` dipilih | Container Compose pada server central |
+| AI_EDGE camera agent | Native di Windows/Ubuntu host kamera | Native service pada PC Ubuntu/Windows kamera |
+| STB_GATEWAY camera agent | Native pada host Linux/Armbian | Native `systemd` service di STB; bukan Docker |
+
+Jadi Compose utama menjalankan database dan Core API. Pada development, profile
+AI Central menambah container inference. Pada production central, Compose
+deployment menjalankan PostgreSQL, Core API, dan AI Central; web production
+disajikan oleh reverse proxy. Agent kamera tetap native supaya akses webcam,
+resolusi/FPS, permission, dan pemulihan setelah reboot dikelola host kameranya.
+
 ## 2. Yang dikonfigurasi lewat web, CLI, dan file
 
 | Pengaturan | Dashboard web | Installer/CLI | `.env` atau YAML / operator |
@@ -39,6 +56,15 @@ menjalankan beberapa proses lokal, tetapi tidak menambah profile recognition.
 | Liveness | Tidak | Tidak | Tetap nonaktif pada contoh. Kandidat model perlu persetujuan lisensi dan kalibrasi terpisah. |
 | Start/restart service production | Tidak; tidak ada tombol restart service | Installer saat ini hanya menawarkan menjalankan agent di terminal | Restart AI/API lewat Docker Compose supervisor; restart kamera production lewat systemd sesuai runbook. |
 | Domain, TLS, firewall, backup, secret store | Tidak | Tidak ada wizard production satu-perintah | Dikonfigurasi operator server mengikuti runbook sekolah. |
+
+URL dapat diubah setelah provisioning. Untuk AI_EDGE edit `api.base_url` pada
+YAML agent atau set `PRESENSI_EDGE_API_BASE_URL`. Untuk STB edit kedua key
+`api.base_url` dan `central_ai.base_url`, atau set `PRESENSI_EDGE_API_BASE_URL`
+dan `PRESENSI_EDGE_AI_BASE_URL`. AI Central server memakai
+`PRESENSI_AI_CORE_API_BASE_URL`. Setelah perubahan URL, restart agent atau
+recreate service AI Central agar URL baru dipakai. Default URL di halaman
+Perangkat hanya memengaruhi bundle berikutnya; ia tidak mengubah server atau
+device yang sudah terpasang.
 
 ### Kamera yang dimaksud ada dua
 

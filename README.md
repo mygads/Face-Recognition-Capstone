@@ -103,6 +103,12 @@ Database tidak boleh diakses dari Internet. Untuk domain dan tunnel, baca
 Development menggunakan hot reload, port localhost, dan secret acak lokal.
 Deployment menggunakan rilis yang disetujui, secret terlindungi, migration
 terkontrol, HTTPS/reverse proxy, backup, retensi, dan service restart saat boot.
+Untuk development, Docker menjalankan PostgreSQL dan Core API; AI Central
+ditambahkan hanya dengan profile `central`, Vue memakai Vite native secara
+default, dan agent kamera berjalan native. Untuk production, Compose menjalankan
+PostgreSQL/Core API dan AI Central bila profile central dipakai; Vue dibuild
+sebagai file statis di reverse proxy. AI_EDGE dan STB_GATEWAY tetap native pada
+host kameranya—keduanya tidak memerlukan Docker.
 Untuk uraian komponen dan konfigurasi dari clone sampai production, lihat
 [panduan instalasi dan konfigurasi](docs/deployment/installation-and-configuration.md).
 Lihat [development dan deployment satu komputer](docs/deployment/single-pc.md)
@@ -251,6 +257,7 @@ terpisah: npm --prefix apps/web run test:e2e.
 | Jadwal, sesi, presensi, laporan | [Schedules](docs/architecture/schedules.md), [sessions](docs/architecture/attendance-sessions.md), [decision](docs/architecture/attendance-decisions.md), [reports](docs/architecture/attendance-reports.md) |
 | Enrollment dan device | [Enrollment](docs/architecture/enrollment.md), [device registry](docs/architecture/device-registry.md) |
 | AI Central dan edge-agent | [AI service](docs/architecture/ai-service.md), [edge-agent](docs/architecture/edge-agent.md) |
+| URL server, kamera, Docker/native | [Device configuration](docs/architecture/device-configuration.md), [installation guide](docs/deployment/installation-and-configuration.md) |
 | Model dan benchmark | [Model provenance/recommendation](docs/models.md), [AI benchmark](tests/ai-benchmark/README.md) |
 | Commissioning | [Walk-through field test](docs/test-plans/walkthrough-field-test.md), [deployment benchmark](tests/deployment-benchmark/README.md) |
 | VPS, STB, single host, domain/tunnel | [Deployment index](docs/deployment/README.md) |
