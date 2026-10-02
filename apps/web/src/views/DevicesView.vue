@@ -3,6 +3,11 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import PageHeader from '../components/PageHeader.vue'
 import {
+  buildDeviceSetupCommand,
+  type DeviceConnectionMode,
+  type DeviceSetupPlatform,
+} from '../devices/deviceSetup'
+import {
   ApiError,
   createDevice,
   listDevices,
@@ -47,6 +52,9 @@ const rotationReason = ref('')
 const coreApiUrl = ref('')
 const centralAiUrl = ref('')
 const modelVersion = ref('opencv-zoo-sface-2021dec')
+const installPlatform = ref<DeviceSetupPlatform>('windows')
+const connectionMode = ref<DeviceConnectionMode>('same-host')
+const installCommandMessage = ref<string | null>(null)
 const bundleMessage = ref<string | null>(null)
 const isCredentialLoading = ref(false)
 const isRotationOpen = ref(false)
@@ -62,6 +70,40 @@ function emptyForm(): DeviceForm {
 }
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
+
+const setupCommandState = computed(() => {
+  const device = credentialDevice.value
+  if (!device || !issuedCredential.value) return { command: '', error: null }
+  try {
+    const coreOrigin = normalizeServerOrigin(coreApiUrl.value, 'URL Core API')
+    validateConnectionOrigin(connectionMode.value, coreOrigin, 'URL Core API')
+    const centralOrigin =
+      device.deployment_profile === 'STB_GATEWAY'
+        ? normalizeServerOrigin(centralAiUrl.value, 'URL AI Central')
+        : undefined
+    if (centralOrigin) {
+      validateConnectionOrigin(connectionMode.value, centralOrigin, 'URL AI Central')
+    }
+    return {
+      command: buildDeviceSetupCommand({
+        profile: device.deployment_profile,
+        platform: installPlatform.value,
+        connectionMode: connectionMode.value,
+        coreApiUrl: coreOrigin,
+        centralAiUrl: centralOrigin,
+        deviceId: device.device_id,
+        modelVersion: modelVersion.value.trim(),
+        useWorkingCopy: connectionMode.value === 'same-host',
+      }),
+      error: null,
+    }
+  } catch (error) {
+    return {
+      command: '',
+      error: error instanceof Error ? error.message : 'Perintah setup belum siap.',
+    }
+  }
+})
 
 function formatError(error: unknown): string {
   if (error instanceof ApiError) {
@@ -199,9 +241,14 @@ function openCredential(device: Device): void {
   credentialError.value = null
   credentialCopyMessage.value = null
   rotationReason.value = ''
-  coreApiUrl.value = defaultCoreApiUrl()
+  const browserIsLocal = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
+  const defaultsToSameHost = browserIsLocal && device.deployment_profile === 'AI_EDGE'
+  coreApiUrl.value = defaultsToSameHost ? defaultCoreApiUrl() : ''
   centralAiUrl.value = ''
   modelVersion.value = 'opencv-zoo-sface-2021dec'
+  installPlatform.value = device.deployment_profile === 'STB_GATEWAY' ? 'armbian' : 'windows'
+  connectionMode.value = defaultsToSameHost ? 'same-host' : 'private-network'
+  installCommandMessage.value = null
   bundleMessage.value = null
   isRotationOpen.value = false
 }
@@ -212,6 +259,7 @@ function closeCredential(): void {
   credentialDevice.value = null
   credentialError.value = null
   credentialCopyMessage.value = null
+  installCommandMessage.value = null
   bundleMessage.value = null
   rotationReason.value = ''
   isRotationOpen.value = false
@@ -313,7 +361,78 @@ function normalizeServerOrigin(value: string, label: string): string {
   ) {
     throw new Error(`${label} harus berupa alamat origin HTTP(S) tanpa path atau secret.`)
   }
+  const isLoopback = ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
+  if (parsed.protocol === 'http:' && !isLoopback) {
+    throw new Error(
+      `${label} wajib memakai HTTPS di jaringan; HTTP hanya diizinkan untuk localhost.`,
+    )
+  }
   return parsed.origin
+}
+
+function validateConnectionOrigin(mode: DeviceConnectionMode, origin: string, label: string): void {
+  const parsed = new URL(origin)
+  const isLoopback = ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
+  if (mode === 'same-host' && !isLoopback) {
+    throw new Error(`${label} harus localhost karena pilihan koneksi adalah satu komputer.`)
+  }
+  if (mode === 'private-network' && parsed.protocol !== 'https:') {
+    throw new Error(`${label} pada LAN/VPN harus HTTPS dengan sertifikat yang dipercaya.`)
+  }
+}
+
+function isLoopbackOrigin(value: string): boolean {
+  try {
+    return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(value).hostname)
+  } catch {
+    return false
+  }
+}
+
+function selectConnectionMode(mode: DeviceConnectionMode): void {
+  connectionMode.value = mode
+  installCommandMessage.value = null
+  bundleMessage.value = null
+  if (mode === 'same-host') {
+    coreApiUrl.value = 'http://127.0.0.1:8000'
+    if (credentialDevice.value?.deployment_profile === 'STB_GATEWAY') {
+      centralAiUrl.value = 'http://127.0.0.1:8001'
+    }
+    return
+  }
+  if (isLoopbackOrigin(coreApiUrl.value)) {
+    coreApiUrl.value = ''
+  }
+  if (isLoopbackOrigin(centralAiUrl.value)) {
+    centralAiUrl.value = ''
+  }
+}
+
+function onConnectionModeChange(event: Event): void {
+  const mode = (event.currentTarget as HTMLSelectElement).value
+  if (
+    mode === 'same-host' ||
+    mode === 'private-network' ||
+    mode === 'public-domain' ||
+    mode === 'cloudflare-tunnel'
+  ) {
+    selectConnectionMode(mode)
+  }
+}
+
+async function copyInstallCommand(): Promise<void> {
+  installCommandMessage.value = null
+  if (!setupCommandState.value.command) {
+    installCommandMessage.value = setupCommandState.value.error ?? 'Perintah setup belum siap.'
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(setupCommandState.value.command)
+    installCommandMessage.value =
+      'Perintah disalin. Token tidak ada di command; masukkan UUID:token pada prompt tersembunyi.'
+  } catch {
+    installCommandMessage.value = 'Clipboard tidak tersedia. Salin perintah yang ditampilkan.'
+  }
 }
 
 function downloadSetupBundle(): void {
@@ -322,6 +441,11 @@ function downloadSetupBundle(): void {
   if (!device || !credential) return
   bundleMessage.value = null
   try {
+    if (connectionMode.value === 'public-domain' || connectionMode.value === 'cloudflare-tunnel') {
+      throw new Error(
+        'Jalur publik belum diaktifkan karena perangkat mengambil gallery template biometrik dari Core API. Gunakan LAN/VPN privat.',
+      )
+    }
     const bundle = {
       schema_version: 1,
       device_id: device.device_id,
@@ -338,6 +462,10 @@ function downloadSetupBundle(): void {
     }
     if (device.deployment_profile === 'AI_EDGE' && !bundle.model_version) {
       throw new Error('Versi model diperlukan untuk profil AI_EDGE.')
+    }
+    validateConnectionOrigin(connectionMode.value, bundle.core_api_url, 'URL Core API')
+    if (bundle.central_ai_url) {
+      validateConnectionOrigin(connectionMode.value, bundle.central_ai_url, 'URL AI Central')
     }
     const file = new Blob([`${JSON.stringify(bundle, null, 2)}\n`], {
       type: 'application/json;charset=utf-8',
@@ -626,6 +754,52 @@ onBeforeUnmount(() => {
               mendeteksi profile dari registry, lalu mengunduh source dan memasang agent. Jangan
               tempelkan kredensial ke perintah terminal.
             </p>
+            <label for="device-install-platform">Sistem operasi perangkat</label>
+            <select id="device-install-platform" v-model="installPlatform">
+              <option
+                value="windows"
+                :disabled="credentialDevice.deployment_profile === 'STB_GATEWAY'"
+              >
+                Windows (AI_EDGE)
+              </option>
+              <option
+                value="ubuntu"
+                :disabled="credentialDevice.deployment_profile === 'STB_GATEWAY'"
+              >
+                Ubuntu Linux (AI_EDGE)
+              </option>
+              <option value="armbian" :disabled="credentialDevice.deployment_profile === 'AI_EDGE'">
+                Armbian Linux (STB_GATEWAY)
+              </option>
+            </select>
+            <label for="device-connection-mode">Jaringan dari perangkat kamera ke server</label>
+            <select
+              id="device-connection-mode"
+              :value="connectionMode"
+              @change="onConnectionModeChange"
+            >
+              <option
+                value="same-host"
+                :disabled="credentialDevice.deployment_profile === 'STB_GATEWAY'"
+              >
+                Satu komputer — localhost
+              </option>
+              <option value="private-network">LAN/VPN sekolah — HTTPS privat</option>
+              <option value="public-domain">Domain publik — belum diaktifkan</option>
+              <option value="cloudflare-tunnel">Cloudflare Tunnel — belum diaktifkan</option>
+            </select>
+            <p v-if="connectionMode === 'same-host'">
+              Pilih ini hanya jika kamera, API, dan checkout project berada di komputer yang sama.
+              Command akan memakai repo lokal dan tidak mengunduh repo ulang.
+            </p>
+            <p v-else-if="connectionMode === 'private-network'">
+              Gunakan HTTPS internal yang hanya bisa dijangkau melalui LAN/VPN sekolah. STB baru
+              mengunduh source bootstrap, tanpa perlu clone manual.
+            </p>
+            <p v-else class="devices-view__credential-warning" role="alert">
+              Jalur publik belum diaktifkan. AI_EDGE mengambil gallery template wajah dari Core API;
+              Cloudflare Access service identity belum didukung agent. Gunakan LAN/VPN privat.
+            </p>
             <label for="device-core-api-url">URL Core API yang bisa dijangkau kamera</label>
             <input
               id="device-core-api-url"
@@ -676,7 +850,29 @@ onBeforeUnmount(() => {
             <p v-if="bundleMessage" class="devices-view__credential-status" role="status">
               {{ bundleMessage }}
             </p>
-            <button class="button button--primary" type="button" @click="downloadSetupBundle">
+            <pre v-if="setupCommandState.command" data-testid="device-install-command"><code>{{
+              setupCommandState.command
+            }}</code></pre>
+            <p v-if="setupCommandState.error" class="devices-view__credential-warning" role="alert">
+              {{ setupCommandState.error }}
+            </p>
+            <p v-if="installCommandMessage" class="devices-view__credential-status" role="status">
+              {{ installCommandMessage }}
+            </p>
+            <button
+              class="button button--secondary"
+              type="button"
+              :disabled="!setupCommandState.command"
+              @click="copyInstallCommand"
+            >
+              Salin perintah instalasi perangkat
+            </button>
+            <button
+              class="button button--primary"
+              type="button"
+              :disabled="!setupCommandState.command"
+              @click="downloadSetupBundle"
+            >
               Unduh paket setup perangkat
             </button>
           </section>
@@ -693,23 +889,11 @@ onBeforeUnmount(() => {
               {{ formatCredentialExpiry(issuedCredential.previous_token_valid_until) }}.
             </span>
           </div>
-          <div
-            class="devices-view__credential-commands"
-            aria-label="Variabel konfigurasi perangkat"
-          >
-            <p>Untuk bootstrap tanpa clone manual, jalankan command sesuai OS pada host kamera:</p>
-            <pre
-              v-if="credentialDevice.deployment_profile === 'AI_EDGE'"
-            ><code>Windows: irm https://raw.githubusercontent.com/mygads/Face-Recognition-Capstone/main/scripts/bootstrap-camera-device.ps1 | iex
-Linux:   curl -fsSL https://raw.githubusercontent.com/mygads/Face-Recognition-Capstone/main/scripts/bootstrap-camera-device.sh | bash</code></pre>
-            <pre
-              v-else
-            ><code>Armbian: curl -fsSL https://raw.githubusercontent.com/mygads/Face-Recognition-Capstone/main/scripts/bootstrap-camera-device.sh | bash</code></pre>
-            <p>
-              Profile dideteksi dari Core API. Untuk STB, installer juga meminta URL AI Central.
-              Instalasi produksi tetap memerlukan langkah systemd pada runbook.
-            </p>
-          </div>
+          <p class="devices-view__credential-instructions">
+            Command membawa URL dan UUID device, tetapi token sengaja tidak dimasukkan ke riwayat
+            terminal. Tempel UUID:token pada prompt tersembunyi. Profile dibaca otomatis dari
+            registry; pemasangan systemd production mengikuti runbook.
+          </p>
           <div class="master-data__form-actions">
             <button class="button button--primary" type="button" @click="closeCredential">
               Saya sudah menyimpan token

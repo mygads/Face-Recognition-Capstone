@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import sys
@@ -26,8 +27,17 @@ def _url(value: object, field: str, *, required: bool) -> str | None:
     if not isinstance(value, str):
         raise ValueError(f"{field} must be a URL string.")
     parsed = urlsplit(value.strip())
+    is_loopback = parsed.hostname in {"localhost", "::1"}
+    if parsed.hostname:
+        try:
+            is_loopback = (
+                is_loopback or ipaddress.ip_address(parsed.hostname).is_loopback
+            )
+        except ValueError:
+            pass
     if (
         parsed.scheme not in {"http", "https"}
+        or (parsed.scheme == "http" and not is_loopback)
         or not parsed.hostname
         or parsed.username
         or parsed.password

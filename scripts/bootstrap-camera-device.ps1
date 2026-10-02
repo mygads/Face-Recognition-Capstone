@@ -1,3 +1,7 @@
+param(
+    [switch]$UseWorkingCopy
+)
+
 $ErrorActionPreference = 'Stop'
 $installRef = if ($env:PRESENSI_INSTALL_REF) { $env:PRESENSI_INSTALL_REF } else { 'main' }
 
@@ -34,7 +38,7 @@ function ConvertTo-Origin([string]$Value, [bool]$AllowLocalHttp) {
     return $parsed.GetLeftPart([UriPartial]::Authority).TrimEnd('/')
 }
 
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+if (-not $UseWorkingCopy -and -not (Get-Command git -ErrorAction SilentlyContinue)) {
     Write-Host 'Git belum terpasang; mencoba memasangnya melalui winget...'
     Install-WinGetPackage 'Git.Git'
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -60,7 +64,10 @@ if ($LASTEXITCODE -ne 0) {
     if ($LASTEXITCODE -ne 0) { throw 'Python 3.11+ belum tersedia setelah instalasi.' }
 }
 
-$apiInput = Read-Host 'URL origin Core API (misalnya https://presensi.sekolah.id)'
+$apiInput = $env:PRESENSI_CORE_API_URL
+if (-not $apiInput) {
+    $apiInput = Read-Host 'URL origin Core API (misalnya https://presensi.sekolah.id)'
+}
 $apiUrl = ConvertTo-Origin $apiInput $true
 $secureCredential = Read-Host 'Kredensial bootstrap (UUID:token) dari halaman Perangkat' -AsSecureString
 $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureCredential)
@@ -74,6 +81,12 @@ try {
         throw 'Kredensial harus berformat UUID:token.'
     }
     $deviceId = ([Guid]$plainCredential.Substring(0, $separator)).ToString()
+    if ($env:PRESENSI_DEVICE_ID) {
+        $expectedDeviceId = ([Guid]$env:PRESENSI_DEVICE_ID).ToString()
+        if ($deviceId -ne $expectedDeviceId) {
+            throw 'Token tidak cocok dengan UUID perangkat pada command.'
+        }
+    }
     $token = $plainCredential.Substring($separator + 1)
     if ($token.Length -lt 40 -or $token -notmatch '^[A-Za-z0-9_-]+$') {
         throw 'Token perangkat tidak valid.'
@@ -99,32 +112,45 @@ try {
         throw 'Windows bootstrap mendukung profile AI_EDGE. Untuk STB_GATEWAY, gunakan bootstrap Linux di Armbian.'
     }
 
-    $modelVersion = Read-Host 'Versi model template (default opencv-zoo-sface-2021dec)'
+    $modelVersion = $env:PRESENSI_MODEL_VERSION
+    if (-not $modelVersion) {
+        $modelVersion = Read-Host 'Versi model template (default opencv-zoo-sface-2021dec)'
+    }
     if (-not $modelVersion) { $modelVersion = 'opencv-zoo-sface-2021dec' }
     if ($modelVersion.Length -gt 128) { throw 'Versi model terlalu panjang.' }
 
-    $sourceDir = Join-Path $env:LOCALAPPDATA 'Presensi/source'
-    $sourceParent = Split-Path -Parent $sourceDir
+    if ($UseWorkingCopy) {
+        $sourceDir = (Get-Location).Path
+        if (-not (Test-Path -LiteralPath (Join-Path $sourceDir 'scripts/install-camera-device.ps1'))) {
+            throw 'Jalankan command local bootstrap dari root checkout Face-Recognition-Capstone.'
+        }
+    }
+    else {
+        $sourceDir = Join-Path $env:LOCALAPPDATA 'Presensi/source'
+    }
+    $sourceParent = Join-Path $env:LOCALAPPDATA 'Presensi'
     New-Item -ItemType Directory -Path $sourceParent -Force | Out-Null
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
     & icacls.exe $sourceParent '/inheritance:r' '/grant:r' "${identity}:(OI)(CI)F" 'SYSTEM:(OI)(CI)F' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Tidak dapat melindungi folder setup lokal.' }
 
-    if (Test-Path -LiteralPath $sourceDir) {
-        if (-not (Test-Path -LiteralPath (Join-Path $sourceDir '.git'))) {
-            throw "Folder $sourceDir ada tetapi bukan checkout repository."
+    if (-not $UseWorkingCopy) {
+        if (Test-Path -LiteralPath $sourceDir) {
+            if (-not (Test-Path -LiteralPath (Join-Path $sourceDir '.git'))) {
+                throw "Folder $sourceDir ada tetapi bukan checkout repository."
+            }
+            $changes = & git -C $sourceDir status --porcelain
+            if ($changes) { throw "Checkout $sourceDir memiliki perubahan lokal; simpan/pindahkan dulu." }
+            & git -C $sourceDir fetch --depth 1 origin $installRef
+            if ($LASTEXITCODE -ne 0) { throw 'Tidak dapat mengunduh source terbaru dari GitHub.' }
+            & git -C $sourceDir checkout --detach FETCH_HEAD
+            if ($LASTEXITCODE -ne 0) { throw 'Tidak dapat memilih source yang diunduh.' }
         }
-        $changes = & git -C $sourceDir status --porcelain
-        if ($changes) { throw "Checkout $sourceDir memiliki perubahan lokal; simpan/pindahkan dulu." }
-        & git -C $sourceDir fetch --depth 1 origin $installRef
-        if ($LASTEXITCODE -ne 0) { throw 'Tidak dapat mengunduh source terbaru dari GitHub.' }
-        & git -C $sourceDir checkout --detach FETCH_HEAD
-        if ($LASTEXITCODE -ne 0) { throw 'Tidak dapat memilih source yang diunduh.' }
-    }
-    else {
-        & git clone --depth 1 --branch $installRef `
-            https://github.com/mygads/Face-Recognition-Capstone.git $sourceDir
-        if ($LASTEXITCODE -ne 0) { throw 'Tidak dapat mengunduh source dari GitHub.' }
+        else {
+            & git clone --depth 1 --branch $installRef `
+                https://github.com/mygads/Face-Recognition-Capstone.git $sourceDir
+            if ($LASTEXITCODE -ne 0) { throw 'Tidak dapat mengunduh source dari GitHub.' }
+        }
     }
 
     $bundlePath = Join-Path $sourceParent ("bootstrap-{0}.json" -f [Guid]::NewGuid())

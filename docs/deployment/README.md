@@ -49,6 +49,11 @@ source; it is a commissioning helper, not a persistent service. Use the
 deployment-specific systemd runbook for reboot survival. The profile in the
 registry selects local AI_EDGE versus STB_GATEWAY forwarding.
 
+On the first local launch, choose whether this computer also runs AI_CENTRAL.
+The choice is stored in ignored `.env`; change it later with
+`scripts/start-local.py --profile edge` or `--profile central`. Starting this
+service does not download model weights or calibrate decision thresholds.
+
 Production server provisioning remains in the runbooks. Domain, TLS, firewall,
 secret-store, backup, model approval, calibration, and school policy are
 installation-specific. The camera installer is for commissioning and does not

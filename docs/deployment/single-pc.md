@@ -63,6 +63,12 @@ py -3 scripts/start-local.py
 python3 scripts/start-local.py
 ~~~
 
+Saat pertama kali dijalankan, pilih `1` untuk AI_EDGE (Core API/web saja;
+inference tetap di PC kamera) atau `2` untuk AI_CENTRAL (Core API/web dan AI
+service). Pilihan disimpan di `.env`. Untuk mengganti pilihan di kemudian hari,
+jalankan `scripts/start-local.py --profile edge` atau
+`scripts/start-local.py --profile central`.
+
 Open `http://127.0.0.1:5173`. Press Ctrl+C to stop Vite. The API/database
 continue in Docker so that they can be reused; stop them when finished:
 
