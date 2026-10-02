@@ -58,9 +58,11 @@ the camera index is used instead. Re-run the wizard with:
 .venv-edge-agent/bin/presensi-edge-agent --config apps/edge-agent/config/stb-gateway.yaml configure-camera
 ```
 
-This is commissioning setup, not a persistent service. If readiness checks
-pass, it offers to run the agent in the current terminal so the first
-heartbeat can be seen; Ctrl+C stops that run. `AI_EDGE` requires local
+This is commissioning setup, not a persistent service. If the Core API,
+camera, and local models are available, it offers to run the agent in the
+current terminal so the first heartbeat can be seen; Ctrl+C stops that run.
+The `waiting_for_calibration` status is safe for camera/heartbeat/config sync,
+but identity recognition and attendance submission remain paused. `AI_EDGE` requires local
 YuNet/SFace files and a calibrated policy from the admin dashboard. The AI_EDGE
 installer automatically downloads and checksum-verifies the pinned YuNet/SFace
 files. It never fills guessed thresholds. The agent can start in waiting mode

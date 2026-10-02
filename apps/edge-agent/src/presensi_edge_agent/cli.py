@@ -102,12 +102,22 @@ def _diagnostics(config: EdgeConfig, *, include_cameras: bool) -> int:
     token = resolve_api_token(config)
     ai_token = resolve_ai_token(config)
     try:
-        config.require_runtime(api_token=token, ai_token=ai_token)
+        config.require_runtime(
+            api_token=token,
+            ai_token=ai_token,
+            allow_unconfigured_thresholds=config.mode == "AI_EDGE",
+        )
         runtime_ready = True
         configuration_error = None
     except EdgeConfigError as exc:
         runtime_ready = False
         configuration_error = str(exc)
+    recognition_ready = (
+        None
+        if config.mode == "STB_GATEWAY"
+        else config.recognition.min_top1_similarity is not None
+        and config.recognition.min_top1_top2_margin is not None
+    )
     selected_camera_available = (
         None if cameras is None else config.camera.index in cameras
     )
@@ -139,9 +149,11 @@ def _diagnostics(config: EdgeConfig, *, include_cameras: bool) -> int:
         "service": "presensi-edge-agent",
         "profile": config.mode,
         "status": (
-            "ok"
-            if dependencies_reachable and (agent_ready or not include_cameras)
-            else "degraded"
+            "degraded"
+            if not dependencies_reachable or not (agent_ready or not include_cameras)
+            else "waiting_for_calibration"
+            if recognition_ready is False
+            else "ok"
         ),
         "api_reachable": health.reachable,
         "api_status_code": health.status_code,
@@ -157,6 +169,7 @@ def _diagnostics(config: EdgeConfig, *, include_cameras: bool) -> int:
         "selected_camera_available": selected_camera_available,
         "camera_error": camera_error,
         "runtime_ready": runtime_ready,
+        "recognition_ready": recognition_ready,
         "configuration_error": configuration_error,
         "cache_endpoint": config.api.cache_path,
         "cache_endpoint_implemented_by_core_api": cache_provider_ready,

@@ -13,7 +13,8 @@ import httpx
 import pytest
 
 from presensi_edge_agent import camera as camera_module
-from presensi_edge_agent.api import ApiCallError, CoreApiClient
+from presensi_edge_agent import cli as cli_module
+from presensi_edge_agent.api import ApiCallError, ApiHealth, CoreApiClient
 from presensi_edge_agent.cache import (
     ActiveSessionCache,
     CacheSchemaError,
@@ -138,6 +139,52 @@ def test_runtime_config_requires_calibrated_thresholds_and_model_files(
     config = replace(config, models=model_config)
     with pytest.raises(EdgeConfigError, match="thresholds"):
         config.require_runtime(api_token="injected-test-token")
+
+
+def test_status_allows_safe_edge_start_while_thresholds_wait_for_calibration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = load_config(
+        EXAMPLE_CONFIG, environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)}
+    )
+    model_path = tmp_path / "model.onnx"
+    model_path.write_bytes(b"synthetic model placeholder")
+    config = replace(
+        config,
+        models=replace(
+            config.models,
+            yunet_path=model_path,
+            sface_path=model_path,
+        ),
+    )
+
+    class FakeApi:
+        def health(self) -> ApiHealth:
+            return ApiHealth(reachable=True, status_code=200)
+
+        def fetch_active_session_cache(self) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(cli_module, "load_cached_configuration", lambda item: item)
+    monkeypatch.setattr(cli_module, "_api_client", lambda _config: FakeApi())
+    monkeypatch.setattr(cli_module, "_camera_indices", lambda _config: [0])
+    monkeypatch.setattr(
+        cli_module, "resolve_api_token", lambda _config: "synthetic-token"
+    )
+    monkeypatch.setattr(cli_module, "resolve_ai_token", lambda _config: None)
+
+    exit_code = cli_module._diagnostics(config, include_cameras=True)
+
+    result = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert result["status"] == "waiting_for_calibration"
+    assert result["runtime_ready"] is True
+    assert result["recognition_ready"] is False
+    assert result["selected_camera_available"] is True
+    assert result["configuration_error"] is None
 
 
 def test_config_rejects_liveness_required_without_enabling_it(tmp_path: Path) -> None:

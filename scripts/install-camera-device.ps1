@@ -107,15 +107,16 @@ Write-Host "Config: $configPath"
 Write-Host "Protected token file: $tokenPath"
 Write-Host ''
 Write-Host 'Checking Core API, model/config readiness, and selected camera.'
+Write-Host 'Without calibrated thresholds, AI_EDGE can still run camera, heartbeat, and config sync; recognition stays paused.'
 & $agent --config $configPath status
 $runtimeStatus = $LASTEXITCODE
 if ($runtimeStatus -eq 0) {
-    $startNow = Read-Host 'Start the agent now in this terminal? [Y/n]'
+    $startNow = Read-Host 'Start camera and heartbeat now? Recognition remains paused until thresholds are calibrated. [Y/n]'
     if ($startNow -notin @('n', 'N', 'no', 'NO')) {
         Write-Host 'Agent is running. Press Ctrl+C to stop this commissioning run.'
         & $agent --config $configPath run
     }
 } else {
-    Write-Warning 'Resolve the status output first. AI_EDGE requires local YuNet/SFace files and calibrated Top-1/margin thresholds.'
-    Write-Host "After readiness is green: `"$agent`" --config `"$configPath`" run"
+    Write-Warning 'Resolve API, credential, model, or camera issues shown in the status output before starting the agent.'
+    Write-Host "After those issues are fixed: `"$agent`" --config `"$configPath`" run"
 }

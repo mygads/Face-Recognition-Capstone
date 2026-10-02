@@ -1814,6 +1814,55 @@ a:focus-visible {
   color: #65470f !important;
 }
 
+.ai-setup-view__preview {
+  display: grid;
+  min-width: 0;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.55rem;
+  background: var(--bg-surface-secondary);
+}
+
+.ai-setup-view__preview h3,
+.ai-setup-view__preview p {
+  margin: 0;
+}
+
+.ai-setup-view__preview dl {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.ai-setup-view__preview dl > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.35rem 1rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.ai-setup-view__preview dt {
+  color: var(--text-secondary);
+}
+
+.ai-setup-view__preview dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--text);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.ai-setup-view__preview p {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 .ai-setup-view__tabs {
   display: flex;
   flex-wrap: wrap;

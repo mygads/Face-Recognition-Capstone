@@ -42,7 +42,27 @@ async function loginAsAdmin(page: Page): Promise<void> {
   await expect(page).toHaveURL(/\/app\/ai-setup$/)
 }
 
-async function stubSettingsApi(page: Page): Promise<void> {
+type MockDevice = {
+  id: string
+  device_id: string
+  name: string
+  deployment_profile: 'AI_EDGE' | 'STB_GATEWAY'
+  is_active: boolean
+  laboratory_code: string
+  laboratory_name: string
+  model_version: string | null
+  camera_status: string
+  health_status: string
+  config_apply_status: 'not_configured' | 'pending' | 'applied' | 'error'
+  config_applied_revision: number
+  config_error_code: string | null
+}
+
+async function stubSettingsApi(
+  page: Page,
+  profile: 'AI_EDGE' | 'AI_CENTRAL' = 'AI_CENTRAL',
+  deviceItems: MockDevice[] = [],
+): Promise<void> {
   const recognitionSettings = {
     min_face_pixels: 80,
     min_laplacian_variance: 45,
@@ -67,26 +87,47 @@ async function stubSettingsApi(page: Page): Promise<void> {
     route.fulfill({
       status: 200,
       json: {
-        deployment_profile: 'AI_CENTRAL',
+        deployment_profile: profile,
         enrollment_models_ready: true,
         enrollment_quality_revision: 0,
-        central_ai_status: 'degraded',
-        central_ai_models_ready: true,
-        central_ai_model_version: 'synthetic-model-v1',
-        central_ai_thresholds_configured: false,
-        central_ai_recognition_ready: false,
-        central_ai_config_desired_revision: 0,
-        central_ai_config_applied_revision: 0,
-        central_ai_config_sync_status: 'pending',
+        central_ai_status: profile === 'AI_CENTRAL' ? 'degraded' : 'disabled',
+        central_ai_models_ready: profile === 'AI_CENTRAL' ? true : null,
+        central_ai_model_version: profile === 'AI_CENTRAL' ? 'synthetic-model-v1' : null,
+        central_ai_thresholds_configured: profile === 'AI_CENTRAL' ? false : null,
+        central_ai_recognition_ready: profile === 'AI_CENTRAL' ? false : null,
+        central_ai_config_desired_revision: profile === 'AI_CENTRAL' ? 0 : null,
+        central_ai_config_applied_revision: profile === 'AI_CENTRAL' ? 0 : null,
+        central_ai_config_sync_status: profile === 'AI_CENTRAL' ? 'pending' : null,
       },
     }),
   )
   await page.route('**/api/v1/devices?**', (route) =>
     route.fulfill({
       status: 200,
-      json: { items: [], pagination: { total: 0, limit: 100, offset: 0 } },
+      json: {
+        items: deviceItems,
+        pagination: { total: deviceItems.length, limit: 100, offset: 0 },
+      },
     }),
   )
+  await page.route('**/api/v1/admin/settings/devices/**', (route) => {
+    const method = route.request().method()
+    const deviceConfiguration = route.request().url().includes('/device-edge')
+    const settings = method === 'PUT' ? route.request().postDataJSON() : recognitionSettings
+    return route.fulfill({
+      status: 200,
+      json: {
+        device_id: 'device-edge',
+        deployment_profile: deviceConfiguration ? 'AI_EDGE' : 'STB_GATEWAY',
+        revision: method === 'PUT' ? 1 : 0,
+        settings,
+        applied_revision: 0,
+        apply_status: method === 'PUT' ? 'pending' : 'not_configured',
+        error_code: null,
+        updated_at: null,
+      },
+    })
+  })
   await page.route('**/api/v1/admin/settings/enrollment-quality', (route) => {
     if (route.request().method() === 'GET') {
       return route.fulfill({
@@ -171,4 +212,73 @@ test('central thresholds require a calibration reference before publish', async 
   await page.getByLabel('Referensi laporan kalibrasi').fill(calibrationReference)
   await page.getByRole('button', { name: 'Simpan dan terapkan' }).click()
   await expect(page.getByRole('status')).toContainText('Pengaturan AI Central diterbitkan')
+})
+
+test('edge profile hides central settings and lists only active edge devices', async ({ page }) => {
+  const devices: MockDevice[] = [
+    {
+      id: 'device-edge',
+      device_id: 'device-edge',
+      name: 'tes-local',
+      deployment_profile: 'AI_EDGE',
+      is_active: true,
+      laboratory_code: 'K-1',
+      laboratory_name: 'Kimia 1',
+      model_version: null,
+      camera_status: 'unknown',
+      health_status: 'offline',
+      config_apply_status: 'not_configured',
+      config_applied_revision: 0,
+      config_error_code: null,
+    },
+    {
+      id: 'deleted-device',
+      device_id: 'deleted-device',
+      name: 'tes-perangkat1',
+      deployment_profile: 'AI_EDGE',
+      is_active: false,
+      laboratory_code: 'K-1',
+      laboratory_name: 'Kimia 1',
+      model_version: null,
+      camera_status: 'offline',
+      health_status: 'offline',
+      config_apply_status: 'not_configured',
+      config_applied_revision: 0,
+      config_error_code: null,
+    },
+    {
+      id: 'gateway-device',
+      device_id: 'gateway-device',
+      name: 'stb-gateway',
+      deployment_profile: 'STB_GATEWAY',
+      is_active: true,
+      laboratory_code: 'K-2',
+      laboratory_name: 'Fisika 1',
+      model_version: null,
+      camera_status: 'offline',
+      health_status: 'offline',
+      config_apply_status: 'not_configured',
+      config_applied_revision: 0,
+      config_error_code: null,
+    },
+  ]
+  await stubSettingsApi(page, 'AI_EDGE', devices)
+  await loginAsAdmin(page)
+
+  await expect(page.getByText('AI Central', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('Tidak digunakan pada profile ini')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'AI Central' })).toHaveCount(0)
+  await expect(page.getByText('tes-local')).toBeVisible()
+  await expect(page.getByText('tes-perangkat1')).toHaveCount(0)
+  await expect(page.getByText('stb-gateway')).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'PC edge' }).click()
+  await expect(page.getByRole('heading', { name: 'Perangkat AI_EDGE' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Pratinjau konfigurasi' })).toBeVisible()
+  await expect(page.getByText('Belum aktif — menunggu kalibrasi')).toBeVisible()
+  await page.getByRole('button', { name: 'Terapkan ke perangkat' }).click()
+  await expect(
+    page.getByText('Konfigurasi perangkat diterbitkan. Perangkat menerapkannya saat tersambung.'),
+  ).toBeVisible()
+  await expect(page.getByText('Belum aktif — menunggu kalibrasi')).toBeVisible()
 })

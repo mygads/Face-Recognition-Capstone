@@ -32,13 +32,22 @@ const isSaving = ref(false)
 const errorMessage = ref<string | null>(null)
 const successMessage = ref<string | null>(null)
 const activeTab = ref<SettingsTab>('enrollment')
-const settingsTabs: { id: SettingsTab; label: string }[] = [
-  { id: 'enrollment', label: 'Kualitas enrollment' },
-  { id: 'devices', label: 'PC edge & STB' },
-  { id: 'central', label: 'AI Central' },
-]
+const settingsTabs = computed<{ id: SettingsTab; label: string }[]>(() => {
+  const tabs: { id: SettingsTab; label: string }[] = [
+    { id: 'enrollment', label: 'Kualitas enrollment' },
+    {
+      id: 'devices',
+      label: readiness.value?.deployment_profile === 'AI_EDGE' ? 'PC edge' : 'STB gateway',
+    },
+  ]
+  if (readiness.value?.deployment_profile === 'AI_CENTRAL') {
+    tabs.push({ id: 'central', label: 'AI Central' })
+  }
+  return tabs
+})
 let refreshTimer: ReturnType<typeof setInterval> | undefined
-let loadedSettings = false
+let loadedEnrollmentSettings = false
+let loadedCentralSettings = false
 
 const enrollmentForm = ref<EnrollmentQualityConfiguration>({
   min_face_pixels: 80,
@@ -62,6 +71,9 @@ const gatewayForm = ref<StbGatewayConfiguration>({
 
 const selectedDevice = computed(
   () => devices.value.find((device) => device.device_id === selectedDeviceId.value) ?? null,
+)
+const edgeThresholdsConfigured = computed(
+  () => edgeForm.value.min_top1_similarity !== null && edgeForm.value.min_top1_top2_margin !== null,
 )
 
 function recognitionDefaults(): RecognitionConfiguration {
@@ -138,17 +150,29 @@ async function refreshReadiness(forceSettings = false): Promise<void> {
   isLoading.value = true
   errorMessage.value = null
   try {
-    const [nextReadiness, nextDevices] = await Promise.all([
-      getAiReadiness(),
-      listDevices({ limit: 100, offset: 0 }),
+    const nextReadiness = await getAiReadiness()
+    const expectedDeviceProfile =
+      nextReadiness.deployment_profile === 'AI_EDGE' ? 'AI_EDGE' : 'STB_GATEWAY'
+    const [nextDevices, enrollment, central] = await Promise.all([
+      listDevices({
+        limit: 100,
+        offset: 0,
+        deployment_profile: expectedDeviceProfile,
+        is_active: true,
+      }),
+      !loadedEnrollmentSettings || forceSettings ? getEnrollmentQualityConfiguration() : null,
+      nextReadiness.deployment_profile === 'AI_CENTRAL' && (!loadedCentralSettings || forceSettings)
+        ? getCentralRecognitionConfiguration()
+        : null,
     ])
     readiness.value = nextReadiness
-    devices.value = nextDevices.items
-    if (!loadedSettings || forceSettings) {
-      const [enrollment, central] = await Promise.all([
-        getEnrollmentQualityConfiguration(),
-        getCentralRecognitionConfiguration(),
-      ])
+    devices.value = nextDevices.items.filter(
+      (device) => device.is_active && device.deployment_profile === expectedDeviceProfile,
+    )
+    if (nextReadiness.deployment_profile !== 'AI_CENTRAL' && activeTab.value === 'central') {
+      activeTab.value = 'devices'
+    }
+    if (enrollment) {
       const enrollmentSettings = enrollment.settings as UnknownSettings
       enrollmentForm.value = {
         min_face_pixels: numeric(enrollmentSettings, 'min_face_pixels', 80),
@@ -156,11 +180,15 @@ async function refreshReadiness(forceSettings = false): Promise<void> {
         min_brightness: numeric(enrollmentSettings, 'min_brightness', 25),
         max_brightness: numeric(enrollmentSettings, 'max_brightness', 235),
       }
-      centralForm.value = recognitionFrom(central.settings as UnknownSettings)
-      loadedSettings = true
+      loadedEnrollmentSettings = true
     }
-    if (!selectedDeviceId.value) {
-      selectedDeviceId.value = devices.value.find((item) => item.is_active)?.device_id ?? ''
+    if (central) {
+      centralForm.value = recognitionFrom(central.settings as UnknownSettings)
+      loadedCentralSettings = true
+    }
+    if (!devices.value.some((item) => item.device_id === selectedDeviceId.value)) {
+      selectedDeviceId.value = devices.value[0]?.device_id ?? ''
+      deviceConfiguration.value = null
     }
     if (
       selectedDeviceId.value &&
@@ -171,6 +199,8 @@ async function refreshReadiness(forceSettings = false): Promise<void> {
       deviceConfiguration.value.applied_revision = selectedDevice.value.config_applied_revision
       deviceConfiguration.value.apply_status = selectedDevice.value.config_apply_status
       deviceConfiguration.value.error_code = selectedDevice.value.config_error_code
+    } else if (!selectedDeviceId.value) {
+      deviceConfiguration.value = null
     }
   } catch (error) {
     errorMessage.value =
@@ -319,7 +349,7 @@ onBeforeUnmount(() => {
     <PageHeader
       eyebrow="Administrasi sistem"
       title="AI & kamera"
-      description="Pantau kesiapan dan atur kualitas pengenalan untuk enrollment, PC AI_EDGE, STB, dan AI Central."
+      description="Pantau kesiapan dan atur kualitas enrollment serta konfigurasi untuk profile server yang aktif."
     >
       <template #actions>
         <button
@@ -363,7 +393,7 @@ onBeforeUnmount(() => {
             {{ statusLabel(readiness.enrollment_models_ready) }}
           </span>
         </article>
-        <article class="ai-setup-view__card">
+        <article v-if="readiness.deployment_profile === 'AI_CENTRAL'" class="ai-setup-view__card">
           <p class="master-data__eyebrow">AI Central</p>
           <h2>{{ serviceLabel(readiness.central_ai_status) }}</h2>
           <dl class="ai-setup-view__checks">
@@ -472,23 +502,31 @@ onBeforeUnmount(() => {
         <div class="master-data__panel-heading">
           <div>
             <p class="master-data__eyebrow">Konfigurasi jarak jauh</p>
-            <h2>Perangkat AI_EDGE atau STB_GATEWAY</h2>
+            <h2>
+              {{
+                readiness.deployment_profile === 'AI_EDGE'
+                  ? 'Perangkat AI_EDGE'
+                  : 'Perangkat STB_GATEWAY'
+              }}
+            </h2>
           </div>
         </div>
         <p class="ai-setup-view__note">
-          Pilih perangkat untuk mengatur quality/temporal pada AI_EDGE atau burst/filter ringan pada
-          STB. Kamera, resolusi, dan FPS dipilih saat instalasi di host kamera dan tetap dapat
-          diubah lokal dengan wizard kamera.
+          <template v-if="readiness.deployment_profile === 'AI_EDGE'">
+            Pilih PC AI_EDGE untuk melihat kualitas frame dan sampling. Kamera, resolusi, dan FPS
+            diatur di host kamera. Nilai awal kualitas sudah terisi untuk dicoba dan dapat diubah
+            kapan saja.
+          </template>
+          <template v-else>
+            Pilih STB gateway untuk mengatur burst dan filter capture. Kamera, resolusi, dan FPS
+            diatur di host gateway.
+          </template>
         </p>
         <label class="ai-setup-view__device-picker">
           Perangkat
           <select v-model="selectedDeviceId" @change="loadDeviceConfiguration(selectedDeviceId)">
             <option value="">Pilih perangkat aktif</option>
-            <option
-              v-for="device in devices.filter((item) => item.is_active)"
-              :key="device.device_id"
-              :value="device.device_id"
-            >
+            <option v-for="device in devices" :key="device.device_id" :value="device.device_id">
               {{ device.name }} · {{ device.deployment_profile }}
             </option>
           </select>
@@ -539,7 +577,7 @@ onBeforeUnmount(() => {
                 min="-1"
                 max="1"
                 step="any"
-                required
+                :required="edgeForm.min_top1_top2_margin !== null"
                 @input="setEdgeTop1"
             /></label>
             <label
@@ -549,7 +587,7 @@ onBeforeUnmount(() => {
                 min="0"
                 max="2"
                 step="any"
-                required
+                :required="edgeForm.min_top1_similarity !== null"
                 @input="setEdgeMargin"
             /></label>
             <label
@@ -589,7 +627,7 @@ onBeforeUnmount(() => {
                 v-model="edgeForm.calibration_reference"
                 type="text"
                 maxlength="200"
-                required
+                :required="edgeThresholdsConfigured"
                 placeholder="ID/nama laporan kalibrasi yang disetujui"
             /></label>
             <div class="master-data__form-actions ai-setup-view__form-wide">
@@ -598,6 +636,46 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </form>
+          <aside class="ai-setup-view__preview" aria-label="Pratinjau konfigurasi AI_EDGE">
+            <h3>Pratinjau konfigurasi</h3>
+            <dl>
+              <div>
+                <dt>Proses pengenalan</dt>
+                <dd>PC kamera AI_EDGE</dd>
+              </div>
+              <div>
+                <dt>Quality awal</dt>
+                <dd>
+                  Wajah ≥ {{ edgeForm.min_face_pixels }} px · tajam ≥
+                  {{ edgeForm.min_laplacian_variance }} · cahaya {{ edgeForm.min_brightness }}–{{
+                    edgeForm.max_brightness
+                  }}
+                </dd>
+              </div>
+              <div>
+                <dt>Sampling</dt>
+                <dd>
+                  {{ edgeForm.minimum_agreeing_frames }} frame sepakat · setiap
+                  {{ edgeForm.sample_every_n_frames }} frame · pilih
+                  {{ edgeForm.best_frame_count }} terbaik
+                </dd>
+              </div>
+              <div>
+                <dt>Identifikasi</dt>
+                <dd>
+                  {{
+                    edgeThresholdsConfigured
+                      ? 'Threshold terisi'
+                      : 'Belum aktif — menunggu kalibrasi'
+                  }}
+                </dd>
+              </div>
+            </dl>
+            <p v-if="!edgeThresholdsConfigured" role="status">
+              Nilai quality dan sampling bisa diterapkan sekarang. Agent baru mengidentifikasi siswa
+              setelah Top-1 dan margin diisi dari laporan kalibrasi.
+            </p>
+          </aside>
         </template>
 
         <template v-else-if="selectedDevice?.deployment_profile === 'STB_GATEWAY'">
@@ -690,7 +768,8 @@ onBeforeUnmount(() => {
           </form>
         </template>
         <p v-else class="master-data__empty">
-          Pilih perangkat AI_EDGE atau STB_GATEWAY untuk mengatur nilainya.
+          Belum ada perangkat aktif
+          {{ readiness.deployment_profile === 'AI_EDGE' ? 'AI_EDGE' : 'STB_GATEWAY' }}.
         </p>
 
         <div v-if="deviceConfiguration" class="ai-setup-view__apply-state" role="status">
@@ -702,7 +781,7 @@ onBeforeUnmount(() => {
           <code v-if="deviceConfiguration.error_code">{{ deviceConfiguration.error_code }}</code>
         </div>
 
-        <div class="ai-setup-view__device-status">
+        <div v-if="devices.length" class="ai-setup-view__device-status">
           <h3>Status sinkronisasi</h3>
           <div v-for="device in devices" :key="device.device_id" class="ai-setup-view__device-row">
             <span
@@ -713,9 +792,13 @@ onBeforeUnmount(() => {
             <code v-if="device.config_error_code">{{ device.config_error_code }}</code>
           </div>
         </div>
+        <p v-else class="master-data__empty">Belum ada status perangkat aktif untuk profile ini.</p>
       </section>
 
-      <section v-else class="master-data__panel ai-setup-view__settings">
+      <section
+        v-else-if="activeTab === 'central' && readiness.deployment_profile === 'AI_CENTRAL'"
+        class="master-data__panel ai-setup-view__settings"
+      >
         <div class="master-data__panel-heading">
           <div>
             <p class="master-data__eyebrow">
