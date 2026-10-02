@@ -5,6 +5,7 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
   page,
 }) => {
   let diagnosticSamples = 0
+  let attendanceRecorded = false
   await page.route('**/api/v1/**', (route) =>
     route.fulfill({
       status: 200,
@@ -100,6 +101,35 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
           recognition_state: 'accepted',
           display_name: 'Yoga',
           updated_at: Date.now() / 1000,
+          camera_observation: {
+            state: 'ready',
+            message:
+              'Frame siap diperiksa. Indikator ini belum memastikan identitas atau mencatat presensi.',
+            frame_width: 1280,
+            frame_height: 720,
+            face_count: 1,
+            faces: [
+              {
+                x: 0.4,
+                y: 0.15,
+                width: 0.2,
+                height: 0.32,
+                acceptable: true,
+                quality_score: 0.9,
+                reason_codes: [],
+                face_pixels: 200,
+                sharpness: 72,
+                brightness: 96,
+              },
+            ],
+          },
+          attendance_result: attendanceRecorded
+            ? {
+                decision: 'recorded',
+                attendance_status: 'present',
+                updated_at: Date.now() / 1000,
+              }
+            : null,
           calibration: {
             students: [
               {
@@ -150,6 +180,8 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
 
   await expect(page.getByRole('heading', { name: 'Preview kamera presensi' })).toBeVisible()
   await expect(page.getByRole('img', { name: 'Preview langsung kamera presensi' })).toBeVisible()
+  await expect(page.locator('.camera-preview-view__face-ring.is-ready')).toBeVisible()
+  await expect(page.getByText('Frame siap diperiksa', { exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Yoga' })).toBeVisible()
   await expect(page.getByText(/Presensi menunggu validasi Core API/)).toBeVisible()
   await expect(page.getByRole('img')).toHaveCount(1)
@@ -164,4 +196,14 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
   await expect(page.getByRole('cell', { name: '1', exact: true })).toBeVisible()
   expect(diagnosticSamples).toBe(1)
   await expect(page.getByRole('img')).toHaveCount(1)
+
+  await page.getByRole('button', { name: 'Tampilan depan kamera' }).click()
+  await expect(page.locator('.camera-preview-view')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Memeriksa presensi' })).toBeVisible()
+  await expect(page.locator('.camera-preview-view__identity h3')).not.toHaveText('Yoga')
+  attendanceRecorded = true
+  await expect(page.getByRole('heading', { name: 'Presensi tercatat' })).toBeVisible({
+    timeout: 5000,
+  })
+  await expect(page.getByText('Presensi tercatat sebagai hadir')).toBeVisible()
 })

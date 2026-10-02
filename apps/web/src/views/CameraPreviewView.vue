@@ -8,7 +8,37 @@ type PreviewStatus = {
   recognition_state: string
   display_name: string | null
   updated_at: number | null
+  camera_observation?: CameraObservation
+  attendance_result?: AttendanceResult | null
   calibration?: CalibrationStatus
+}
+
+type CameraFaceObservation = {
+  x: number
+  y: number
+  width: number
+  height: number
+  acceptable: boolean
+  quality_score?: number
+  reason_codes: string[]
+  face_pixels?: number
+  sharpness?: number
+  brightness?: number
+}
+
+type CameraObservation = {
+  state: 'pending' | 'ready' | 'adjust' | 'no_face' | 'multiple_faces' | 'unavailable'
+  message: string
+  frame_width: number
+  frame_height: number
+  face_count: number
+  faces: CameraFaceObservation[]
+}
+
+type AttendanceResult = {
+  decision: 'pending' | 'recorded' | 'not_recorded'
+  attendance_status: 'present' | 'late' | null
+  updated_at: number
 }
 
 type CalibrationSummary = {
@@ -37,8 +67,10 @@ const previewToken = ref<string | null>(null)
 const frameUrl = ref<string | null>(null)
 const previewStatus = ref<PreviewStatus | null>(null)
 const calibration = computed(() => previewStatus.value?.calibration ?? null)
+const cameraObservation = computed(() => previewStatus.value?.camera_observation ?? null)
 const errorMessage = ref<string | null>(null)
 const isStarting = ref(true)
+const isFullscreen = ref(false)
 const selectedStudentId = ref('')
 const isRequestingCalibrationSample = ref(false)
 const identityConfirmed = ref(false)
@@ -46,6 +78,76 @@ const volunteerConsented = ref(false)
 let frameTimer: ReturnType<typeof setTimeout> | undefined
 let statusTimer: ReturnType<typeof setTimeout> | undefined
 let stopped = false
+
+const recentAttendanceResult = computed(() => {
+  const result = previewStatus.value?.attendance_result
+  if (!result || Date.now() / 1000 - result.updated_at > 15) return null
+  return result
+})
+
+const cameraObservationLabel = computed(() => {
+  switch (cameraObservation.value?.state) {
+    case 'ready':
+      return 'Frame siap diperiksa'
+    case 'adjust':
+      return 'Atur posisi atau kualitas'
+    case 'no_face':
+      return 'Mencari wajah'
+    case 'multiple_faces':
+      return 'Pastikan satu orang di frame'
+    case 'unavailable':
+      return 'Pemeriksaan kamera tidak tersedia'
+    default:
+      return 'Menyiapkan pemeriksaan kamera'
+  }
+})
+
+const identityTitle = computed(() => {
+  if (!isFullscreen.value) {
+    return previewStatus.value?.recognition_state === 'accepted'
+      ? (previewStatus.value.display_name ?? 'Identitas cocok')
+      : 'Belum teridentifikasi'
+  }
+  if (recentAttendanceResult.value?.decision === 'recorded') return 'Presensi tercatat'
+  if (recentAttendanceResult.value?.decision === 'not_recorded') return 'Presensi belum tercatat'
+  if (
+    recentAttendanceResult.value?.decision === 'pending' ||
+    previewStatus.value?.recognition_state === 'accepted'
+  )
+    return 'Memeriksa presensi'
+  if (cameraObservation.value?.state === 'ready') return 'Wajah siap diperiksa'
+  return 'Posisikan wajah di kamera'
+})
+
+const identityDisplayMessage = computed(() => {
+  if (!isFullscreen.value) {
+    if (recentAttendanceResult.value?.decision === 'recorded') {
+      return recentAttendanceResult.value.attendance_status === 'late'
+        ? 'Presensi sudah tercatat sebagai terlambat.'
+        : 'Presensi sudah tercatat sebagai hadir.'
+    }
+    if (recentAttendanceResult.value?.decision === 'not_recorded') {
+      return 'Kandidat belum menghasilkan presensi. Periksa alasan pada status sesi atau minta bantuan petugas.'
+    }
+    return recognitionMessage.value
+  }
+  if (!previewStatus.value?.session_active) return 'Sesi praktikum belum dibuka.'
+  if (recentAttendanceResult.value?.decision === 'recorded') {
+    return recentAttendanceResult.value.attendance_status === 'late'
+      ? 'Terima kasih. Presensi tercatat sebagai terlambat.'
+      : 'Terima kasih. Presensi tercatat sebagai hadir.'
+  }
+  if (recentAttendanceResult.value?.decision === 'not_recorded') {
+    return 'Presensi belum tercatat. Silakan minta bantuan petugas.'
+  }
+  if (
+    recentAttendanceResult.value?.decision === 'pending' ||
+    previewStatus.value?.recognition_state === 'accepted'
+  ) {
+    return 'Kecocokan sedang divalidasi server. Tunggu sebentar.'
+  }
+  return cameraObservation.value?.message ?? recognitionMessage.value
+})
 
 const previewHost = computed(() => {
   const hostname = window.location.hostname
@@ -175,6 +277,26 @@ async function requestCalibrationSample(phase: 'genuine' | 'impostor'): Promise<
   }
 }
 
+async function toggleFullscreen(): Promise<void> {
+  const preview = document.querySelector<HTMLElement>('.camera-preview-view')
+  if (!preview) return
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen()
+    } else if (preview.requestFullscreen) {
+      await preview.requestFullscreen()
+    } else {
+      errorMessage.value = 'Mode layar penuh tidak didukung browser ini.'
+    }
+  } catch {
+    errorMessage.value = 'Mode layar penuh tidak dapat diaktifkan.'
+  }
+}
+
+function syncFullscreenState(): void {
+  isFullscreen.value = Boolean(document.fullscreenElement)
+}
+
 function formatScore(value: number | undefined): string {
   return value === undefined ? '—' : value.toFixed(3)
 }
@@ -222,6 +344,7 @@ async function pollStatus(): Promise<void> {
 }
 
 onMounted(async () => {
+  document.addEventListener('fullscreenchange', syncFullscreenState)
   try {
     previewToken.value = await openPreviewSession()
     if (stopped) return
@@ -235,6 +358,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('fullscreenchange', syncFullscreenState)
   stopped = true
   if (frameTimer) clearTimeout(frameTimer)
   if (statusTimer) clearTimeout(statusTimer)
@@ -274,13 +398,46 @@ onBeforeUnmount(() => {
               : 'Menunggu kamera'
         }}
       </span>
+      <button class="button button--secondary" type="button" @click="toggleFullscreen">
+        {{ isFullscreen ? 'Keluar layar penuh' : 'Tampilan depan kamera' }}
+      </button>
     </div>
 
     <p v-if="errorMessage" class="master-data__alert" role="alert">{{ errorMessage }}</p>
 
     <div class="camera-preview-view__layout">
       <figure class="camera-preview-view__frame">
-        <img v-if="frameUrl" :src="frameUrl" alt="Preview langsung kamera presensi" />
+        <div v-if="frameUrl" class="camera-preview-view__frame-stage">
+          <img :src="frameUrl" alt="Preview langsung kamera presensi" />
+          <svg
+            v-if="cameraObservation && cameraObservation.frame_width > 0"
+            class="camera-preview-view__face-overlay"
+            :viewBox="`0 0 ${cameraObservation.frame_width} ${cameraObservation.frame_height}`"
+            preserveAspectRatio="xMidYMid meet"
+            aria-hidden="true"
+          >
+            <ellipse
+              v-for="(face, index) in cameraObservation.faces"
+              :key="`${index}-${cameraObservation.state}`"
+              :cx="(face.x + face.width / 2) * cameraObservation.frame_width"
+              :cy="(face.y + face.height / 2) * cameraObservation.frame_height"
+              :rx="face.width * cameraObservation.frame_width * 0.58"
+              :ry="face.height * cameraObservation.frame_height * 0.62"
+              :class="[
+                'camera-preview-view__face-ring',
+                face.acceptable ? 'is-ready' : 'is-adjust',
+              ]"
+            />
+          </svg>
+          <div
+            class="camera-preview-view__guidance"
+            :class="`is-${cameraObservation?.state ?? 'pending'}`"
+            role="status"
+          >
+            <strong>{{ cameraObservationLabel }}</strong>
+            <span>{{ cameraObservation?.message ?? 'Menunggu status kamera…' }}</span>
+          </div>
+        </div>
         <div v-else class="camera-preview-view__placeholder" role="status">
           <span aria-hidden="true">◉</span>
           <strong>{{ isStarting ? 'Menghubungkan ke agent…' : 'Preview belum tersedia' }}</strong>
@@ -293,14 +450,8 @@ onBeforeUnmount(() => {
 
       <aside class="camera-preview-view__identity" aria-label="Status pengenalan siswa">
         <p class="master-data__eyebrow">Hasil pengenalan</p>
-        <h3>
-          {{
-            previewStatus?.recognition_state === 'accepted'
-              ? previewStatus.display_name
-              : 'Belum teridentifikasi'
-          }}
-        </h3>
-        <p>{{ recognitionMessage }}</p>
+        <h3>{{ identityTitle }}</h3>
+        <p>{{ identityDisplayMessage }}</p>
         <dl>
           <div>
             <dt>Sesi praktikum</dt>
@@ -312,8 +463,14 @@ onBeforeUnmount(() => {
           </div>
         </dl>
         <p class="camera-preview-view__privacy">
-          Nama hanya tampil setelah kecocokan melewati kebijakan yang dikonfigurasi. Keputusan
-          kehadiran tetap divalidasi API.
+          <template v-if="isFullscreen">
+            Layar siswa tidak menampilkan nama atau kandidat. Status berhasil hanya tampil setelah
+            Core API mengonfirmasi presensi.
+          </template>
+          <template v-else>
+            Nama kandidat hanya tampil pada halaman operator setelah kebijakan pengenalan cocok.
+            Keputusan kehadiran tetap divalidasi API.
+          </template>
         </p>
       </aside>
     </div>

@@ -368,15 +368,111 @@ def test_core_api_client_uses_bearer_header_for_heartbeat_and_event() -> None:
         client=http,
     )
     client.heartbeat()
-    client.submit_recognition_event({"event_id": str(uuid4())})
+    decision = client.submit_recognition_event({"event_id": str(uuid4())})
 
     assert requests[0].url.path == f"/api/v1/devices/{DEVICE_ID}/device-heartbeat"
     assert requests[0].headers["X-Device-ID"] == str(DEVICE_ID)
     assert requests[0].headers["Authorization"] == "Bearer short-lived-test-token"
     assert requests[1].url.path == f"/api/v1/devices/{DEVICE_ID}/recognition-events"
     assert requests[1].headers["X-Device-ID"] == str(DEVICE_ID)
+    assert decision == {"status": "ok"}
     client.close()
     http.close()
+
+
+def test_camera_preview_skips_face_detection_without_an_active_viewer(
+    tmp_path: Path,
+) -> None:
+    config = load_config(
+        EXAMPLE_CONFIG,
+        environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)},
+    )
+
+    class FakeCamera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            return False, None
+
+        def close(self) -> None: ...
+
+    class FakeApi:
+        def close(self) -> None: ...
+
+    class FakeRecognizer:
+        def reset(self) -> None: ...
+
+    outbox = EventOutbox(tmp_path / "preview-viewer.sqlite3", max_pending=10)
+    service = EdgeService(
+        config,
+        FakeCamera(),
+        FakeApi(),  # type: ignore[arg-type]
+        outbox,
+        FakeRecognizer(),  # type: ignore[arg-type]
+        lambda: {},
+    )
+    try:
+        assert service.preview is not None
+        assert service.preview.has_active_viewer() is False
+
+        service._update_camera_diagnostics(object())
+
+        assert service._camera_inspector_attempted is False
+    finally:
+        outbox.close()
+
+
+def test_confirmed_attendance_feedback_contains_status_without_student_identity(
+    tmp_path: Path,
+) -> None:
+    config = load_config(
+        EXAMPLE_CONFIG,
+        environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)},
+    )
+
+    class FakeCamera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            return False, None
+
+        def close(self) -> None: ...
+
+    class FakeApi:
+        def close(self) -> None: ...
+
+    class FakeRecognizer:
+        def reset(self) -> None: ...
+
+    outbox = EventOutbox(tmp_path / "preview-feedback.sqlite3", max_pending=10)
+    service = EdgeService(
+        config,
+        FakeCamera(),
+        FakeApi(),  # type: ignore[arg-type]
+        outbox,
+        FakeRecognizer(),  # type: ignore[arg-type]
+        lambda: {},
+    )
+    service._active_session_id = SESSION_ID
+    try:
+        service._update_preview_attendance_result(
+            {"session_id": str(SESSION_ID)},
+            {
+                "decision": "attendance_recorded",
+                "attendance": {
+                    "status": "present",
+                    "student_id": str(STUDENT_ID),
+                },
+            },
+        )
+
+        assert service.preview is not None
+        status = service.preview.status()
+        assert status["attendance_result"]["decision"] == "recorded"  # type: ignore[index]
+        assert status["attendance_result"]["attendance_status"] == "present"  # type: ignore[index]
+        assert str(STUDENT_ID) not in json.dumps(status["attendance_result"])
+    finally:
+        outbox.close()
 
 
 def test_core_api_client_renews_device_credential_from_protected_file(

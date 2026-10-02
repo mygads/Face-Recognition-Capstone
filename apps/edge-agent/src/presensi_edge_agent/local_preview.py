@@ -77,6 +77,15 @@ class LocalCameraPreview:
             "session_active": False,
             "recognition_state": "starting",
             "display_name": None,
+            "attendance_result": None,
+            "camera_observation": {
+                "state": "pending",
+                "message": "Menunggu pemeriksaan frame kamera.",
+                "frame_width": 0,
+                "frame_height": 0,
+                "face_count": 0,
+                "faces": [],
+            },
             "updated_at": None,
         }
         self._sessions: dict[str, float] = {}
@@ -96,6 +105,16 @@ class LocalCameraPreview:
             payload = dict(self._status)
             payload["calibration"] = self._calibration_status_locked()
             return payload
+
+    def has_active_viewer(self) -> bool:
+        now = time.monotonic()
+        with self._lock:
+            self._sessions = {
+                token: expiry
+                for token, expiry in self._sessions.items()
+                if expiry > now
+            }
+            return bool(self._sessions)
 
     def update_calibration_students(
         self,
@@ -639,10 +658,98 @@ class LocalCameraPreview:
         with self._lock:
             self._frame = None
             self._last_frame_at = 0.0
+            self._status["camera_observation"] = {
+                "state": "unavailable",
+                "message": "Frame kamera terputus.",
+                "frame_width": 0,
+                "frame_height": 0,
+                "face_count": 0,
+                "faces": [],
+            }
 
     def update_status(self, **values: object) -> None:
         with self._lock:
             self._status.update(values)
+            self._status["updated_at"] = time.time()
+
+    def update_camera_observation(self, payload: dict[str, object]) -> None:
+        """Publish only bounded face boxes and quality signals to the local preview."""
+        allowed_states = {
+            "pending",
+            "ready",
+            "adjust",
+            "no_face",
+            "multiple_faces",
+            "unavailable",
+        }
+        state = payload.get("state")
+        if not isinstance(state, str) or state not in allowed_states:
+            state = "unavailable"
+        message = payload.get("message")
+        if not isinstance(message, str) or len(message) > 240:
+            message = "Pemeriksaan kamera tidak tersedia."
+        frame_width = payload.get("frame_width")
+        frame_height = payload.get("frame_height")
+        face_count = payload.get("face_count")
+        safe_faces: list[dict[str, object]] = []
+        faces = payload.get("faces")
+        if isinstance(faces, list):
+            for face in faces[:10]:
+                if not isinstance(face, dict):
+                    continue
+                box = {key: face.get(key) for key in ("x", "y", "width", "height")}
+                if not all(
+                    isinstance(value, (int, float)) and 0 <= value <= 1
+                    for value in box.values()
+                ):
+                    continue
+                safe_face: dict[str, object] = box
+                acceptable = face.get("acceptable")
+                safe_face["acceptable"] = acceptable is True
+                score = face.get("quality_score")
+                if isinstance(score, (int, float)) and 0 <= score <= 1:
+                    safe_face["quality_score"] = float(score)
+                reason_codes = face.get("reason_codes")
+                safe_face["reason_codes"] = (
+                    [code[:40] for code in reason_codes[:6] if isinstance(code, str)]
+                    if isinstance(reason_codes, list)
+                    else []
+                )
+                for key in ("face_pixels", "sharpness", "brightness"):
+                    value = face.get(key)
+                    if isinstance(value, (int, float)) and math.isfinite(value):
+                        safe_face[key] = float(value)
+                safe_faces.append(safe_face)
+        observation = {
+            "state": state,
+            "message": message,
+            "frame_width": frame_width if type(frame_width) is int else 0,
+            "frame_height": frame_height if type(frame_height) is int else 0,
+            "face_count": face_count if type(face_count) is int else len(safe_faces),
+            "faces": safe_faces,
+        }
+        with self._lock:
+            self._status["camera_observation"] = observation
+            self._status["updated_at"] = time.time()
+
+    def update_attendance_result(
+        self, decision: str | None, attendance_status: str | None = None
+    ) -> None:
+        result: dict[str, str | float | None] | None
+        if decision is None:
+            result = None
+        elif decision == "pending":
+            result = {"decision": decision, "attendance_status": None}
+        elif decision == "recorded" and attendance_status in {"present", "late"}:
+            result = {"decision": decision, "attendance_status": attendance_status}
+        elif decision == "not_recorded":
+            result = {"decision": decision, "attendance_status": None}
+        else:
+            result = None
+        if result is not None:
+            result["updated_at"] = time.time()
+        with self._lock:
+            self._status["attendance_result"] = result
             self._status["updated_at"] = time.time()
 
     def stop(self) -> None:

@@ -144,6 +144,18 @@ frames to Core API or persist them. No preview listener starts for
 `STB_GATEWAY`. The dashboard must use a localhost origin listed in
 `preview.allowed_origins`.
 
+While an operator preview session is open, the agent samples YuNet detection
+and the shared quality assessor at most once every 750 ms. It overlays an oval
+around detected faces: green means
+the current frame passes the configured face-size, sharpness, and brightness
+checks; amber asks the operator to adjust framing or lighting. Green does not
+mean an identity match or an attendance record. This observation contains only
+normalized face boxes and quality signals, never a name, embedding, or image.
+The full-screen student display hides diagnostics and candidate names. It shows
+an attendance result only after Core API returns its final attendance decision.
+Missing calibrated identity thresholds continue to pause AI_EDGE recognition;
+the preview does not loosen enrollment or attendance quality rules.
+
 Liveness is disabled in the sample config. That mode requires documented
 physical/session controls at the lab station. The available anti-spoof model
 candidate still has a deployment-license warning; do not enable it in a

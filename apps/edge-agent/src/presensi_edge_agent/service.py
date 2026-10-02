@@ -17,6 +17,10 @@ from presensi_edge_agent.cache import (
     parse_session_cache,
 )
 from presensi_edge_agent.camera import CameraUnavailableError
+from presensi_edge_agent.camera_diagnostics import (
+    CameraFrameInspector,
+    build_camera_frame_inspector,
+)
 from presensi_edge_agent.config import EdgeConfig, resolve_api_token
 from presensi_edge_agent.events import event_payload
 from presensi_edge_agent.local_preview import LocalCameraPreview
@@ -86,6 +90,10 @@ class EdgeService:
         self._gallery: tuple[GalleryEntry, ...] = ()
         self._last_decision: tuple[str, str | None, str | None] | None = None
         self._calibration_recognizer: FrameRecognizer | None = None
+        self._camera_frame_inspector: CameraFrameInspector | None = None
+        self._camera_inspector_attempted = False
+        self._last_camera_inspection = 0.0
+        self._camera_inspector_error_reported = False
         self._camera_open = False
         self.preview = (
             LocalCameraPreview(config)
@@ -183,6 +191,7 @@ class EdgeService:
                         raise CameraUnavailableError("Camera frame read failed.")
                     if self.preview is not None:
                         self.preview.update_frame(frame)
+                        self._update_camera_diagnostics(frame)
                 except Exception as exc:
                     self.camera.close()
                     self._camera_open = False
@@ -233,6 +242,58 @@ class EdgeService:
     def stop(self) -> None:
         self.stop_event.set()
 
+    def _update_camera_diagnostics(self, frame: object) -> None:
+        preview = self.preview
+        if preview is None or not preview.has_active_viewer():
+            return
+        now = time.monotonic()
+        if now - self._last_camera_inspection < 0.75:
+            return
+        self._last_camera_inspection = now
+        try:
+            if not self._camera_inspector_attempted:
+                pipeline = getattr(self.recognizer, "pipeline", None)
+                detector = getattr(pipeline, "detector", None)
+                quality_assessor = getattr(pipeline, "quality_assessor", None)
+                if detector is not None and quality_assessor is not None:
+                    self._camera_frame_inspector = CameraFrameInspector(
+                        detector,
+                        quality_assessor,
+                    )
+                else:
+                    self._camera_frame_inspector = build_camera_frame_inspector(
+                        self.config
+                    )
+                self._camera_inspector_attempted = True
+            assert self._camera_frame_inspector is not None
+            observation = self._camera_frame_inspector.inspect(frame)
+            preview.update_camera_observation(observation.as_payload())
+            self._camera_inspector_error_reported = False
+        except Exception as exc:
+            message = (
+                "Model deteksi wajah belum tersedia. Jalankan installer model AI_EDGE."
+                if isinstance(exc, FileNotFoundError)
+                else "Pemeriksaan wajah gagal. Periksa model YuNet dan log agent."
+            )
+            preview.update_camera_observation(
+                {
+                    "state": "unavailable",
+                    "message": message,
+                    "frame_width": 0,
+                    "frame_height": 0,
+                    "face_count": 0,
+                    "faces": [],
+                }
+            )
+            if not self._camera_inspector_error_reported:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "camera_preview_diagnostics_unavailable",
+                    exception_type=type(exc).__name__,
+                )
+                self._camera_inspector_error_reported = True
+
     def _process_frame(self, frame: object) -> None:
         bundle = self.cache.current()
         if bundle is None:
@@ -243,6 +304,7 @@ class EdgeService:
                     recognition_state="waiting_for_session",
                     display_name=None,
                 )
+                self.preview.update_attendance_result(None)
             if self._active_session_id is not None:
                 expired_session_id = str(self._active_session_id)
                 self._active_session_id = None
@@ -283,6 +345,7 @@ class EdgeService:
             )
             if self.preview is not None:
                 self.preview.clear_calibration_session()
+                self.preview.update_attendance_result(None)
                 self.preview.update_status(
                     session_active=True,
                     recognition_state="waiting_for_calibration"
@@ -380,6 +443,8 @@ class EdgeService:
                 exception_type=type(exc).__name__,
             )
             return
+        if self.preview is not None:
+            self.preview.update_attendance_result("pending")
         pending, _ = self.outbox.counts()
         log_event(
             logger,
@@ -525,6 +590,8 @@ class EdgeService:
                     self.config, revision=revision, settings=settings
                 )
                 self.config = updated_config
+                self._camera_frame_inspector = None
+                self._camera_inspector_attempted = False
             report(revision=revision, status="applied")
             log_event(
                 logger,
@@ -626,7 +693,7 @@ class EdgeService:
     def _flush_outbox(self) -> None:
         for queued_event in self.outbox.due(limit=50):
             try:
-                self.api.submit_recognition_event(queued_event.payload)
+                response = self.api.submit_recognition_event(queued_event.payload)
             except ApiCallError as exc:
                 if exc.retryable:
                     self.outbox.retry(
@@ -653,5 +720,33 @@ class EdgeService:
                     status_code=exc.status_code,
                 )
             else:
+                self._update_preview_attendance_result(
+                    queued_event.payload,
+                    response,
+                )
                 self.outbox.acknowledge(queued_event.event_id)
                 log_event(logger, logging.INFO, "recognition_event_delivered")
+
+    def _update_preview_attendance_result(
+        self,
+        payload: dict[str, object],
+        response: object,
+    ) -> None:
+        preview = self.preview
+        if (
+            preview is None
+            or self._active_session_id is None
+            or payload.get("session_id") != str(self._active_session_id)
+            or not isinstance(response, dict)
+        ):
+            return
+        decision = response.get("decision")
+        if decision == "attendance_recorded":
+            attendance = response.get("attendance")
+            status = attendance.get("status") if isinstance(attendance, dict) else None
+            preview.update_attendance_result(
+                "recorded",
+                status if status in {"present", "late"} else None,
+            )
+        elif decision == "no_attendance":
+            preview.update_attendance_result("not_recorded")

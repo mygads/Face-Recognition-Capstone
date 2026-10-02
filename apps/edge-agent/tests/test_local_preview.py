@@ -93,11 +93,33 @@ def test_preview_requires_operator_session_and_serves_no_store_status(
 ) -> None:
     preview, port, token = _start_preview(monkeypatch, ["ADMIN"])
     try:
+        assert preview.has_active_viewer() is True
         preview.update_status(
             camera_open=True,
             session_active=True,
             recognition_state="waiting_for_calibration",
             display_name=None,
+        )
+        preview.update_camera_observation(
+            {
+                "state": "ready",
+                "message": "Frame siap diperiksa.",
+                "frame_width": 1280,
+                "frame_height": 720,
+                "face_count": 1,
+                "faces": [
+                    {
+                        "x": 0.5,
+                        "y": 0.25,
+                        "width": 0.15,
+                        "height": 0.3,
+                        "acceptable": True,
+                        "quality_score": 0.9,
+                        "embedding": [1.0, 2.0],
+                        "student_name": "Should not be exposed",
+                    }
+                ],
+            }
         )
         with pytest.raises(urllib.error.HTTPError) as unauthorized:
             _request(port, "/v1/status")
@@ -108,6 +130,12 @@ def test_preview_requires_operator_session_and_serves_no_store_status(
         assert status["camera_open"] is True
         assert status["recognition_state"] == "waiting_for_calibration"
         assert status["display_name"] is None
+        assert status["camera_observation"]["state"] == "ready"
+        serialized_status = json.dumps(status)
+        assert "embedding" not in serialized_status.lower()
+        assert "should not be exposed" not in serialized_status.lower()
+        _request(port, "/v1/session", method="DELETE", token=token)
+        assert preview.has_active_viewer() is False
         assert response.headers["Cache-Control"].startswith("no-store")
         assert response.headers["Access-Control-Allow-Origin"] == ORIGIN
     finally:

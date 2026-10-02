@@ -2586,6 +2586,92 @@ a:focus-visible {
   object-fit: contain;
 }
 
+.camera-preview-view__frame-stage {
+  position: relative;
+  width: 100%;
+  min-height: 220px;
+  max-height: 65vh;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: #131923;
+}
+
+.camera-preview-view__frame-stage > img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  aspect-ratio: auto;
+  object-fit: contain;
+}
+
+.camera-preview-view__face-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.camera-preview-view__face-ring {
+  fill: color-mix(in srgb, #f0a83a 9%, transparent);
+  stroke: #f0a83a;
+  stroke-width: 6px;
+  vector-effect: non-scaling-stroke;
+}
+
+.camera-preview-view__face-ring.is-ready {
+  fill: color-mix(in srgb, #32c48d 9%, transparent);
+  stroke: #32c48d;
+  animation: camera-ready-pulse 1.8s ease-in-out infinite;
+}
+
+.camera-preview-view__guidance {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, #f0a83a 45%, transparent);
+  border-radius: var(--radius-md);
+  color: #fff;
+  background: rgb(16 24 38 / 82%);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  backdrop-filter: blur(8px);
+}
+
+.camera-preview-view__guidance strong {
+  font-size: 0.83rem;
+}
+
+.camera-preview-view__guidance.is-ready {
+  border-color: #32c48d;
+}
+
+.camera-preview-view__guidance.is-no_face,
+.camera-preview-view__guidance.is-multiple_faces,
+.camera-preview-view__guidance.is-adjust {
+  border-color: #f0a83a;
+}
+
+.camera-preview-view__guidance.is-unavailable {
+  border-color: #d66b6b;
+}
+
+@keyframes camera-ready-pulse {
+  50% {
+    stroke-width: 9px;
+  }
+}
+
 .camera-preview-view__placeholder {
   align-content: center;
   gap: var(--space-2);
@@ -2837,5 +2923,60 @@ a:focus-visible {
 
   .camera-preview-view__diagnostics-heading {
     flex-direction: column;
+  }
+}
+
+.camera-preview-view:fullscreen {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  box-sizing: border-box;
+  width: 100vw;
+  height: 100vh;
+  overflow: auto;
+  margin: 0;
+  padding: clamp(12px, 2vw, 28px);
+  background: var(--bg-page);
+}
+
+.camera-preview-view:fullscreen .camera-preview-view__diagnostics {
+  display: none;
+}
+
+.camera-preview-view:fullscreen .camera-preview-view__layout {
+  grid-template-columns: minmax(0, 1.8fr) minmax(280px, 0.8fr);
+  align-items: stretch;
+}
+
+.camera-preview-view:fullscreen .camera-preview-view__frame-stage {
+  max-height: calc(100vh - 230px);
+}
+
+.camera-preview-view:fullscreen .camera-preview-view__identity {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+}
+
+.camera-preview-view:fullscreen .camera-preview-view__identity h3 {
+  font-size: clamp(2rem, 5vw, 4rem);
+}
+
+.camera-preview-view:fullscreen .camera-preview-view__identity > p {
+  font-size: clamp(1rem, 1.8vw, 1.4rem);
+}
+
+.camera-preview-view:fullscreen .camera-preview-view__identity dl {
+  text-align: left;
+}
+
+@media (max-width: 850px) {
+  .camera-preview-view:fullscreen .camera-preview-view__layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .camera-preview-view:fullscreen .camera-preview-view__frame-stage {
+    max-height: 58vh;
   }
 }

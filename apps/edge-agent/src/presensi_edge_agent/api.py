@@ -177,12 +177,19 @@ class CoreApiClient:
             raise ApiCallError(response.status_code, retryable=False)
         return cast(list[dict[str, Any]], payload)
 
-    def submit_recognition_event(self, payload: dict[str, object]) -> None:
-        self._request(
+    def submit_recognition_event(self, payload: dict[str, object]) -> dict[str, Any]:
+        response = self._request(
             "POST",
             f"/api/v1/devices/{self.device_id}/recognition-events",
             payload=payload,
         )
+        try:
+            result = response.json()
+        except ValueError as exc:
+            raise ApiCallError(response.status_code, retryable=True) from exc
+        if not isinstance(result, dict):
+            raise ApiCallError(response.status_code, retryable=True)
+        return cast(dict[str, Any], result)
 
     def fetch_runtime_configuration(self) -> dict[str, object]:
         response = self._request(
