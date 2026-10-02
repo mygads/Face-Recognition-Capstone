@@ -1,197 +1,147 @@
 # Presensi Praktikum Face Recognition
 
-Monorepo untuk sistem presensi praktikum berbasis face recognition. Kedua deployment profile berbagi Vue SPA, Core API/domain, PostgreSQL, dan `libs/recognition-core`.
+Monorepo aplikasi presensi praktikum sekolah. Frontend Vue, Core API,
+database, dan pipeline pengenalan dipisah menjadi service. Presensi final hanya
+dibuat Core API setelah memeriksa sesi, snapshot roster, perangkat, grace period,
+dan idempotency.
 
-## Prasyarat
+## Mulai di satu komputer
 
-- Docker Desktop (Windows) atau Docker Engine + Compose plugin (Linux).
-- Node.js 22.22.2+, 24.15+, atau 26+ dan npm 10+ untuk tooling web.
-- Python 3.11+ untuk task runner.
+Untuk development pada Windows atau Ubuntu, jalankan database dan API dalam
+Docker, web Vite native, serta edge-agent native agar webcam diakses langsung
+oleh OS. Webcam tidak dipasang ke Docker Compose default.
 
-## Siapkan environment
-
-`.env.example` tidak berisi password atau signing secret. Task runner membuat password PostgreSQL dan signing key JWT acak di `.env` yang diabaikan Git:
-
-```powershell
-# Windows PowerShell
-Copy-Item .env.example .env
-```
-
-```bash
-# Linux
-cp .env.example .env
-```
-
-Jalankan `dev-up` task runner sebelum perintah `docker compose` langsung agar `.env` lokal sudah dibuat dan diisi.
-
-## Perintah development
-
-Perintah ini sama di Windows dan Linux; gunakan `py -3` di Windows dan `python3` di Linux:
-
-| Tujuan | Windows PowerShell | Linux |
+| Bagian | Windows | Ubuntu |
 | --- | --- | --- |
-| PostgreSQL + Core API | `py -3 scripts/dev.py dev-up` | `python3 scripts/dev.py dev-up` |
-| Tambahkan central AI service | `py -3 scripts/dev.py dev-up --central` | `python3 scripts/dev.py dev-up --central` |
-| Tambahkan web dalam Docker | `py -3 scripts/dev.py dev-up --web-container` | `python3 scripts/dev.py dev-up --web-container` |
-| Hentikan services | `py -3 scripts/dev.py dev-down` | `python3 scripts/dev.py dev-down` |
-| Build web + test API/AI | `py -3 scripts/dev.py test` | `python3 scripts/dev.py test` |
+| Prasyarat | Docker Desktop + WSL2, Python 3.11+, Node sesuai engines di apps/web/package.json, npm 10+ | Docker Engine + Compose plugin, Python 3.11+, Node sesuai engines di apps/web/package.json, npm 10+ |
+| Server | py -3 scripts/dev.py dev-up | python3 scripts/dev.py dev-up |
+| Migration dan role | docker compose run --rm api alembic upgrade head lalu docker compose run --rm api python -m presensi_api.db.seed_roles | Perintah yang sama |
+| Web | npm ci --prefix apps/web lalu npm --prefix apps/web run dev | Perintah yang sama |
+| URL | Web http://127.0.0.1:5173, API http://127.0.0.1:8000 | Sama |
 
-`dev-up` default hanya menjalankan PostgreSQL dan Core API. AI service tersedia terpisah melalui Compose profile `central`. Edge agent dan webcam tidak dimasukkan ke Compose. `dev-down` mempertahankan named volume PostgreSQL.
+Task runner membuat .env lokal jika belum ada dan menghasilkan password
+database, signing key JWT, serta keyring template development yang acak. File
+.env diabaikan Git. Setelah role di-seed, buat akun admin development:
 
-## Web development dengan HMR
+~~~sh
+docker compose run --rm api python -m presensi_api.auth.create_user --email admin@example.edu --full-name "Local Admin" --role ADMIN
+~~~
 
-Native Vite direkomendasikan untuk hot reload:
+Password diminta secara interaktif. Login melalui web setelah akun dibuat.
+Untuk menghentikan database dan API gunakan py -3 scripts/dev.py dev-down di
+Windows atau python3 scripts/dev.py dev-down di Ubuntu. Volume database tetap
+tersimpan.
 
-```powershell
-cd apps/web
-npm ci
-npm run dev
-```
+Mode development belum menjalankan pengenalan wajah sampai model disediakan dan
+threshold dikalibrasi. Lihat [panduan satu komputer](docs/deployment/single-pc.md)
+untuk webcam, model, edge-agent, dan alur pengujian.
 
-Saat Core API berjalan, generate ulang tipe client dari OpenAPI setelah kontrak backend berubah:
+## Tiga topologi penggunaan
 
-```sh
-npm run api:generate
-```
+Project tetap memiliki dua profil pengenalan: **AI_EDGE** dan
+**STB_GATEWAY + AI_CENTRAL**. Single-computer adalah topologi development/demo
+yang memakai salah satu profil, bukan profil algoritma ketiga.
 
-Frontend menggunakan `openapi-fetch` untuk request bertipe terhadap schema hasil generator. Access token hanya
-berada di memori tab browser; reload halaman meminta pengguna masuk kembali.
+| Topologi | Penempatan | Kapan dipakai | Panduan |
+| --- | --- | --- | --- |
+| Edge computer + VPS | VPS Ubuntu menjalankan PostgreSQL, Core API, dan web. PC lab Ubuntu menjalankan edge-agent dan inference lokal. | Pilot dengan PC kamera di setiap lab; profil awal yang direkomendasikan setelah model, threshold, hardware, dan kebijakan sekolah siap. | [AI_EDGE deployment](docs/deployment/ai-edge.md) |
+| STB gateway + AI server | Server pusat Ubuntu menjalankan PostgreSQL, Core API, dan AI service. STB ARM64 dengan image Armbian yang cocok menjadi gateway kamera. | Lab memakai gateway hemat daya dan server pusat punya resource inference. | [AI_CENTRAL + STB deployment](docs/deployment/ai-central-stb.md) |
+| Satu komputer | Laptop/PC yang sama menjalankan server lokal, web, webcam, dan edge-agent. Windows untuk development/demo; Ubuntu untuk demo satu host atau deployment terbatas. | Development, demonstrasi, commissioning awal; bukan high availability. | [Panduan satu komputer](docs/deployment/single-pc.md) |
 
-Perintah yang sama berlaku di Linux. Jika ingin seluruh UI berjalan dalam container, gunakan opsi `--web-container`; service itu memakai polling file watcher agar perubahan bind mount Windows tetap terdeteksi. Jangan jalankan web native dan container bersamaan pada port yang sama.
+CasaOS bukan prasyarat: jalankan agent STB sebagai service native pada OS/image
+yang kompatibilitasnya sudah diverifikasi. Panduan memilih Armbian sebagai
+baseline gateway; CasaOS hanya dashboard opsional dan belum menjadi target uji
+hardware repository ini.
 
-## URL dan health checks
+Database tidak boleh diakses dari Internet. Untuk domain dan tunnel, baca
+[panduan domain dan Cloudflare Tunnel](docs/deployment/cloudflare-tunnel.md).
 
-- Web native: `http://127.0.0.1:5173`
-- Core API: `http://127.0.0.1:8000/health`
-- API v1 health: `http://127.0.0.1:8000/api/v1/health`
-- FastAPI OpenAPI: `http://127.0.0.1:8000/openapi.json`
-- PostgreSQL: `127.0.0.1:5432` (dapat diubah lewat `.env`)
-- Central AI (profile `central`): `http://127.0.0.1:8001/health`
+## Development berbeda dari deployment
 
-Camera agents run natively on their target devices, not in default Compose.
-Setup, device credential provisioning, Windows/Linux commands, and camera
-diagnostics are in [apps/edge-agent/README.md](apps/edge-agent/README.md).
-Enrollment vectors are encrypted at rest and distributed only through
-device-authenticated active-session gallery requests. Hardware checks, local
-recognition-threshold calibration, provisioning approved model files, and
-liveness license clearance remain deployment tasks; see
-[edge-agent architecture](docs/architecture/edge-agent.md) and [model provenance](docs/models.md).
+Development menggunakan hot reload, port localhost, dan secret acak lokal.
+Deployment menggunakan rilis yang disetujui, secret terlindungi, migration
+terkontrol, HTTPS/reverse proxy, backup, retensi, dan service restart saat boot.
+Lihat [development dan deployment satu komputer](docs/deployment/single-pc.md)
+serta [index runbook deployment](docs/deployment/README.md).
 
-Compose menunggu PostgreSQL sehat sebelum memulai API dan menggunakan healthcheck untuk API serta AI service. Skema awal API dikelola dengan Alembic. Setelah service siap, terapkan migration dan seed role:
+Tidak ada installer satu-perintah yang aman untuk semua OS. Satu command
+menyalakan Compose setelah Docker dan tool host terpasang. Model, device
+credential, izin webcam, threshold, domain, dan kebijakan data disiapkan terpisah.
 
-```sh
-docker compose run --rm api alembic upgrade head
-docker compose run --rm api python -m presensi_api.db.seed_roles
-```
+## Status kesiapan pengenalan wajah
 
-`scripts/dev.py dev-up` membuat password PostgreSQL dan signing key JWT acak pada `.env` lokal jika nilainya kosong. Untuk login development, buat akun awal setelah seed role:
+| Item | Status repository | Persiapan untuk tes fisik |
+| --- | --- | --- |
+| YuNet + SFace | Adapter OpenCV/pipeline tersedia; model tidak masuk Git dan tidak diunduh otomatis. | Sediakan file model yang disetujui pada path konfigurasi; catat versi dan checksum. |
+| Threshold Top-1/margin | Tidak ada nilai final default; agent gagal terbuka jika kosong. | Kalibrasi pada data berizin yang mewakili kamera kelas. Prioritaskan false acceptance rendah; laporkan FMR/FNMR. |
+| Webcam/PC lab/STB | Utility kamera dan test mock tersedia; uji lapangan belum dilakukan. | Uji webcam UVC, posisi, pencahayaan, dan OS target; ukur CPU/RAM/suhu STB nyata. |
+| Liveness | Adapter/code path tersedia tetapi contoh nonaktif. Kandidat yang terdokumentasi belum cleared untuk operasi sekolah. | Tinjau lisensi/provenance, uji code path dan threshold sendiri, atau operasikan kontrol fisik/sesi yang disetujui. |
+| Template metadata lama | Migration mencabut template aktif tanpa ciphertext agar tidak dianggap enrolled. | Setelah migration diterapkan pada database lama, siswa terkait perlu enrollment baru. |
 
-```powershell
-# Windows PowerShell
-docker compose run --rm api python -m presensi_api.auth.create_user --email admin@example.edu --full-name "School Administrator" --role ADMIN
-```
+Ini bukan klaim akurasi atau kepatuhan hukum. Sekolah perlu menyetujui tujuan,
+notice/dasar pemrosesan, retensi, akses, fallback manual, koreksi, dan respons
+insiden sebelum memakai data siswa. Gunakan data sintetis atau relawan dewasa
+yang menyetujui untuk development; jangan commit foto, embedding, secret, atau
+hasil benchmark privat.
 
-Perintah yang sama berlaku di Linux. Password diminta secara interaktif dan tidak diberikan di argumen shell. API menyediakan `POST /api/v1/auth/login` (OAuth2 password form), `GET /api/v1/auth/me`, dan token bearer berumur default 15 menit. Lihat [authentication.md](docs/architecture/authentication.md) untuk permission, audit login, dan batas akses per kelas/laboratorium.
+## Arsitektur untuk developer baru
 
-API healthcheck hanya memeriksa kesiapan proses HTTP; migration dijalankan eksplisit sebagai langkah development.
+Mulai dari [panduan sistem dan onboarding developer](docs/architecture/developer-guide.md),
+[architecture overview](docs/architecture/overview.md), dan
+[ADR-001](docs/adr/ADR-001-shared-recognition-core.md). Panduan menjelaskan
+komponen, alur data, domain ownership, security boundary, serta keputusan
+arsitektur.
 
-Runbook production [AI_EDGE](docs/deployment/ai-edge.md) dan [AI_CENTRAL + STB Armbian](docs/deployment/ai-central-stb.md) mencakup Compose server privat, reverse proxy HTTPS, credential perangkat, backup/restore, dan acceptance checklist. `docker-compose.yml` root tetap khusus development.
+Stack utama: Vue 3 + Vite + TypeScript; FastAPI + SQLAlchemy 2 + Alembic;
+PostgreSQL 16; recognition package Python; OpenCV/ONNX Runtime untuk adapter
+lokal. TypeScript API types dibuat dari OpenAPI. Gentelella v4 adalah referensi
+visual; interaksi tetap memakai komponen Vue.
 
-## Quality checks
+## Quality checks dan regression
 
-Pasang dependency tooling Python dalam virtual environment dan dependency web sekali setelah clone:
-
-```powershell
-# Windows PowerShell
-py -3 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements-dev.txt
-npm ci --prefix apps/web
-```
-
-```bash
-# Linux
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements-dev.txt
-npm ci --prefix apps/web
-```
-
-Dari root repository, satu command menjalankan Ruff lint/format check, mypy, seluruh pytest, serta ESLint, Prettier, TypeScript strict check untuk web dan E2E, dan Vitest:
-
-```powershell
-# Windows PowerShell
+~~~sh
+# Windows
 py -3 scripts/check.py
-```
-
-```bash
-# Linux
-python3 scripts/check.py
-```
-
-Playwright E2E smoke test terpisah dapat dijalankan dengan `npm --prefix apps/web run test:e2e`. Untuk instalasi browser lokal, jalankan `npm --prefix apps/web exec -- playwright install chromium` terlebih dahulu. Workflow GitHub Actions menjalankan migration PostgreSQL, seed, model/schema drift check, quality checks dan E2E tanpa langkah deployment.
-
-Jalankan regression suite alur presensi sintetis dari root repository dengan satu command:
-
-```powershell
-# Windows PowerShell
 py -3 scripts/regression.py
-```
 
-```bash
-# Linux
+# Ubuntu
+python3 scripts/check.py
 python3 scripts/regression.py
-```
+~~~
 
-Suite ini mencakup import siswa, enrollment melalui processor fake, pembukaan sesi, keputusan PRESENT/LATE, roster rejection, retry idempotent, audit permintaan koreksi, penolakan setelah sesi ditutup, dan export CSV. Tidak diperlukan webcam atau model wajah.
+Regression memakai data sintetis, tanpa webcam atau wajah siswa. Playwright E2E
+terpisah: npm --prefix apps/web run test:e2e.
 
-## Struktur utama
+## Runbook dan referensi
 
-```text
-apps/web                 Vue 3 + Vite + TypeScript
-apps/api                 FastAPI Core API
-apps/edge-agent          camera/edge package (native; tidak ada di Compose default)
-apps/ai-service          central inference service (Compose profile: central)
-libs/recognition-core    shared Python recognition package
-infra/docker             Dockerfile development untuk service Python
-scripts/dev.py           task runner lintas Windows/Linux
-tests/                   health tests dan ruang test berikutnya
-docs/architecture/       arsitektur sistem
-docs/adr/                keputusan arsitektur
-docs/test-plans/         baseline dan protokol uji
-```
+| Topik | Dokumen |
+| --- | --- |
+| System, profile, dan alur | [System guide](docs/architecture/developer-guide.md), [overview](docs/architecture/overview.md) |
+| Schema dan migration | [Database schema](docs/architecture/database-schema.md) |
+| Auth, permission, privacy | [Authentication](docs/architecture/authentication.md), [security/privacy](docs/security-and-privacy.md) |
+| Jadwal, sesi, presensi, laporan | [Schedules](docs/architecture/schedules.md), [sessions](docs/architecture/attendance-sessions.md), [decision](docs/architecture/attendance-decisions.md), [reports](docs/architecture/attendance-reports.md) |
+| Enrollment dan device | [Enrollment](docs/architecture/enrollment.md), [device registry](docs/architecture/device-registry.md) |
+| AI Central dan edge-agent | [AI service](docs/architecture/ai-service.md), [edge-agent](docs/architecture/edge-agent.md) |
+| Model dan benchmark | [Model provenance/recommendation](docs/models.md), [AI benchmark](tests/ai-benchmark/README.md) |
+| Commissioning | [Walk-through field test](docs/test-plans/walkthrough-field-test.md), [deployment benchmark](tests/deployment-benchmark/README.md) |
+| VPS, STB, single host, domain/tunnel | [Deployment index](docs/deployment/README.md) |
 
-Detail tabel, aturan integritas, index, dan migration ada di [docs/architecture/database-schema.md](docs/architecture/database-schema.md).
-Kontrol data biometrik, akses, CORS, rate limit, retensi, dan reverse proxy HTTPS ada di [docs/security-and-privacy.md](docs/security-and-privacy.md).
-Strategi API versioning dan pembuatan TypeScript client dari OpenAPI dijelaskan di [docs/architecture/api-contract.md](docs/architecture/api-contract.md).
-CRUD siswa, kelas, laboratorium, roster kelas, permission, dan soft-deactivation dijelaskan di [docs/architecture/master-data.md](docs/architecture/master-data.md).
-Registry perangkat, heartbeat timeout, status kesehatan, dan audit assignment lab dijelaskan di [docs/architecture/device-registry.md](docs/architecture/device-registry.md).
-Laporan kehadiran, semantik roster dan status, batas akses guru, pagination, serta ekspor CSV/XLSX dijelaskan di [docs/architecture/attendance-reports.md](docs/architecture/attendance-reports.md).
-Jadwal praktikum mingguan, aturan bentrok, dan batas akses guru dijelaskan di [docs/architecture/schedules.md](docs/architecture/schedules.md).
-Snapshot roster, grace period, lifecycle sesi, dan batas roster untuk presensi final dijelaskan di [docs/architecture/attendance-sessions.md](docs/architecture/attendance-sessions.md).
-Kontrak pipeline bersama dua deployment profile dijelaskan di [docs/architecture/recognition-core.md](docs/architecture/recognition-core.md).
-Device authentication, burst limits, safe image decode, gallery cache lifecycle,
-dan latency metrics AI_CENTRAL dijelaskan di
-[docs/architecture/ai-service.md](docs/architecture/ai-service.md) dan
-[apps/ai-service/README.md](apps/ai-service/README.md).
-Baseline YuNet + SFace, lisensi model, konfigurasi path, dan CLI benchmark dijelaskan di [docs/models.md](docs/models.md).
-Shell Vue, layout router, tema, dan penggunaan token Gentelella dijelaskan di [docs/architecture/frontend-shell.md](docs/architecture/frontend-shell.md).
+## Repository map
 
-Harness evaluasi genuine/impostor, FAR/FMR dan FRR/FNMR pada banyak threshold,
-latency per tahap, serta aturan dataset lokal ada di
-[tests/ai-benchmark/README.md](tests/ai-benchmark/README.md). Data wajah, bobot
-model, dan laporan benchmark lokal tidak boleh di-commit.
+~~~text
+apps/web                 Vue SPA
+apps/api                 FastAPI Core API dan attendance authority
+apps/edge-agent          Native UVC edge/gateway agent
+apps/ai-service          Central inference service
+libs/recognition-core    Shared, framework-independent recognition pipeline
+infra/deployment         Production Compose dan database setup
+infra/docker             Service Dockerfiles
+scripts                  Development/check/regression task runner
+tests                    Synthetic, benchmark, dan integration harness
+docs/architecture        System architecture dan feature contracts
+docs/deployment          Operating runbooks
+docs/test-plans          Manual acceptance protocol
+~~~
 
-Benchmark deployment AI_EDGE vs AI_CENTRAL mengukur decision p50/p95, latency
-per tahap, CPU/RAM edge/server, bytes HTTP/event, sequential/two-lab throughput,
-serta retry/error rate. Jalankan dari root repository:
-
-```powershell
-py -3 tests/deployment-benchmark/benchmark.py --output-dir tests/deployment-benchmark/reports/runs/bench-01
-```
-
-Di Linux gunakan `python3` menggantikan `py -3`. Tanpa fixture/model/session
-aktif, CSV/JSON/Markdown akan menandai hasil `PENDING HARDWARE`; cara konfigurasi dan batas pengukuran ada di
-[tests/deployment-benchmark/README.md](tests/deployment-benchmark/README.md).
-
-Baca [arsitektur](docs/architecture/overview.md), [ADR-001](docs/adr/ADR-001-shared-recognition-core.md), dan [AGENTS.md](AGENTS.md) sebelum mengubah struktur/domain. Compose hanya untuk development, bukan deployment production.
+Detail batas implementasi terakhir ada di
+[final architecture/code audit](docs/final-audit.md).

@@ -252,6 +252,17 @@ dan [first boot](https://docs.armbian.com/getting-started/first-boot-and-login/)
 Pada first boot, ganti password awal dan buat akun admin lokal; jangan biarkan
 akses default.
 
+Armbian minimal/server adalah baseline yang didokumentasikan karena agent
+berjalan sebagai service systemd native dan tidak memerlukan desktop/container
+dashboard. Periksa daftar board dan image yang masih didukung pada situs resmi
+[Armbian](https://docs.armbian.com/getting-started/choosing-an-image/) sebelum
+memilih image. CasaOS bukan sistem operasi yang diperlukan oleh agent; bila STB
+sudah memakai CasaOS, pastikan OS dasar, Python, UVC/V4L2, permission kamera,
+dan reboot service benar-benar bekerja pada board itu. CasaOS menjadi lapisan
+dashboard opsional, bukan bagian runtime yang diuji repository ini. Lihat
+[dukungan upstream CasaOS](https://github.com/IceWhaleTech/CasaOS) dan tetap
+gunakan unit systemd edge-agent dari repository.
+
 Hubungkan Ethernet kabel, update OS, pasang OpenCV/V4L2 diagnostics, dan set
 waktu. Project memerlukan Python 3.11+; jika image board lebih lama, gunakan
 image Armbian didukung dengan Python yang memenuhi syarat.

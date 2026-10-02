@@ -1,5 +1,58 @@
 # Model assets
 
+## Practical recommendation
+
+For the current codebase, keep OpenCV Zoo YuNet 2023mar plus SFace 2021dec as
+the first pair to evaluate locally. These are already supported by the shared
+recognition-core adapter and their model directories identify MIT and
+Apache-2.0 licensing respectively. This makes their provenance easier to review
+than alternatives whose public pretrained weights carry research-only terms.
+It does not prove that the pair is the most accurate for this school, nor does
+it approve use with student biometrics. Review the exact model files and notices
+before redistribution or operational use.
+
+The current adapter targets OpenCV 4. OpenCV Zoo now also lists a newer dynamic
+input YuNet artifact intended for OpenCV 5. Do not replace the current file as a
+drop-in upgrade: first update and test the detector adapter, pin the OpenCV
+runtime, run legal/provenance review, and repeat threshold calibration. Keep the
+model version and checksum fixed across enrollment and inference.
+
+No actual model weights are included or downloaded by this repository. The
+recommended pair is a practical evaluation baseline, not a production selection.
+Provide the exact files locally, store their trusted SHA-256 values in the
+deployment record, and test on lawfully collected data representative of the
+camera height, distance, lighting, motion, glasses, and student population.
+
+### Candidate choices
+
+| Option | Detection + recognition | Repository status | Licensing / decision |
+| --- | --- | --- | --- |
+| OpenCV Zoo baseline | YuNet 2023mar + SFace 2021dec | Implemented and covered by recognition-core adapters | Best starting point for this project because it is already integrated and the model directories declare MIT and Apache-2.0. Still requires review of the exact artifact and local school evaluation. |
+| InsightFace family | SCRFD + ArcFace-derived recognition, for example a public model package | Not integrated; would need an adapter, dependency/runtime pinning, compatibility tests and new calibration | InsightFace library code is MIT, but its public pretrained weights are licensed for non-commercial research. Do not assume school attendance use is covered; require separate written licensing clearance before evaluation for operations. |
+| Licensed vendor or institution-approved model | Vendor-selected detector/recognizer and optional PAD | Not integrated; can be added behind existing detector/embedder/liveness protocols | Consider if the vendor provides clear deployment rights, provenance, support, security updates and acceptable processing terms. Require a technical benchmark and procurement/privacy review; a vendor claim alone is not proof of fit. |
+
+Recommendation: use the existing OpenCV Zoo pair for a controlled, local,
+non-production fit and robustness evaluation first. Do not spend time swapping
+to a model advertised as state of the art until its weight license is usable,
+its runtime fits the target PC/server, and it wins a reproducible test on the
+school camera conditions. A model family name or public benchmark does not
+establish recognition performance for this deployment.
+
+The listed OpenCV Zoo folder licenses are useful provenance, but do not alone
+approve processing student biometrics, settle every upstream/data-rights
+question, or replace the school's own privacy and procurement review. Preserve
+all model notices and separately record the exact weight source and any terms
+that apply to those weights.
+
+Do not select an acceptance threshold from internet examples or total accuracy.
+Create genuine and impostor comparisons, inspect false match and false
+non-match rates across candidate thresholds, and prioritize a low false
+acceptance rate together with a documented manual fallback. Report relevant
+conditions separately; image quality, lighting, height, angle, and demographic
+groups can affect measured face-recognition errors. See the [NIST demographic
+effects evaluation](https://pages.nist.gov/frvt/html/frvt_demographics.html)
+and the [NIST report](https://nvlpubs.nist.gov/nistpubs/ir/2019/NIST.IR.8280.pdf).
+
 ## OpenCV Zoo YuNet + SFace baseline
 
 `libs/recognition-core` contains optional adapters for OpenCV Zoo's YuNet face
@@ -50,10 +103,11 @@ review false-match/false-nonmatch results before selecting an operational policy
 
 ## Liveness / presentation-attack detection
 
-### Evaluation candidate: Open Model Zoo `anti-spoof-mn3`
+### Evaluation-only candidate: Open Model Zoo anti-spoof-mn3
 
-The selected candidate for an initial technical evaluation is MobileNetV3
-`anti-spoof-mn3`. It is a single-frame face anti-spoof classifier trained on
+No liveness model has been selected or approved for operational use. The
+integration has an evaluation-only MobileNetV3 anti-spoof-mn3 adapter. It is a
+single-frame face anti-spoof classifier trained on
 CelebA-Spoof. The model card reports 3.02 million parameters, 0.15 GFLOPs and
 3.81% ACER on its reported evaluation; those figures are not a result for our
 cameras, lighting, student population, or deployment hardware. The Open Model Zoo
@@ -71,7 +125,10 @@ candidate and weights as **not cleared for operational attendance or
 redistribution** until the institution has reviewed weight provenance and obtained
 any needed written permission or legal clearance. No pretrained weights are
 included in this repository, fetched at runtime, or approved as a production
-default.
+default. Keep liveness disabled in example configuration until that review,
+hardware evaluation, and local score calibration are complete. Until then,
+follow an approved supervised session/physical control and manual attendance
+fallback.
 
 The package provides an optional `ONNXRuntimeAntiSpoofMN3` adapter for locally
 provisioned `.onnx` files. It does no downloads; the local weights and model
@@ -133,6 +190,8 @@ process those images. Never use real student/minor images in cloud CI.
 - [YuNet directory MIT license](https://github.com/opencv/opencv_zoo/blob/main/models/face_detection_yunet/LICENSE)
 - [SFace model README](https://github.com/opencv/opencv_zoo/blob/main/models/face_recognition_sface/README.md)
 - [SFace directory license](https://github.com/opencv/opencv_zoo/blob/main/models/face_recognition_sface/LICENSE)
+- [InsightFace model zoo and pretrained-model license terms](https://github.com/deepinsight/insightface/blob/master/python-package/docs/model_zoo.md)
+- [NIST face-recognition demographic evaluation](https://pages.nist.gov/frvt/html/frvt_demographics.html)
 - [OpenCV DNN face detection and recognition tutorial](https://docs.opencv.org/4.x/d0/dd4/tutorial_dnn_face.html)
 - [Open Model Zoo `anti-spoof-mn3` model card and model license](https://github.com/openvinotoolkit/open_model_zoo/blob/master/models/public/anti-spoof-mn3/README.md)
 - [Open Model Zoo `anti-spoof-mn3` artifact metadata and license](https://github.com/openvinotoolkit/open_model_zoo/blob/master/models/public/anti-spoof-mn3/model.yml)

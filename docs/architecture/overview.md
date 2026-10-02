@@ -86,6 +86,25 @@ session-configuration limitations, are documented in [edge-agent.md](edge-agent.
 Both remain outside default Compose because USB camera passthrough and driver
 selection are host-specific.
 
+## Physical deployment shapes
+
+The two profiles above can be deployed in three physical layouts. A single
+computer runs one of the existing profiles; it does not add another recognition
+pipeline. For a laptop, use Windows or Ubuntu in development mode with Docker
+for PostgreSQL/Core API, native Vite, and a native camera agent. For deployed
+AI_EDGE PCs and the AI_CENTRAL server, the documented OS target is Ubuntu. The
+STB runs a supported ARM64 Linux image; Armbian minimal/server is the documented
+baseline, while CasaOS is optional and not a tested agent runtime.
+
+Development and deployment are separate operating modes even on a single
+computer. Development uses hot reload and generated local secrets. Ubuntu
+single-host deployment uses production Compose, a built Vue SPA behind a local
+reverse proxy, protected secrets, migrations and backups, and a native systemd
+camera agent. This repository does not provide a hardened all-in-one Windows
+production installer. See the [deployment index](../deployment/README.md),
+[single-computer guide](../deployment/single-pc.md), and
+[domain/tunnel guide](../deployment/cloudflare-tunnel.md).
+
 The `AI_CENTRAL` inference contract, device authentication, bounded image handling,
 and memory-only session cache lifecycle are documented in [ai-service.md](ai-service.md).
 

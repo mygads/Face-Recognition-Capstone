@@ -13,9 +13,11 @@ needed for certificate issuance/redirects); never open ports 5432, 8000, or
 
 ## 1. Deployment prerequisites
 
-Use a supported Linux server with Docker Engine and the Compose plugin, a school
-DNS name, and an institution-managed TLS certificate. Lab PCs need outbound
-HTTPS to the API name. Restrict SSH to the management network.
+Use Ubuntu Linux on the server and deployed lab PCs. The server needs Docker
+Engine and the Compose plugin, a school DNS name, and an institution-managed
+TLS certificate. Lab PCs need outbound HTTPS to the API name. Restrict SSH to
+the management network. Windows is covered for local development and supervised
+demos; it is not the documented unattended deployment target.
 
 Before real student data is used, the school must approve its purpose,
 notice/consent or other lawful basis for minors, roles, retention, manual
@@ -401,9 +403,9 @@ healthy at `/app/devices`. Logs omit frames, embeddings, and credentials. For an
 offline device, check lab assignment, UUID, outbound DNS/TLS, `video` group
 access, token-file permissions, and model paths/checksums.
 
-### Windows lab PC
+### Optional Windows development/demo client
 
-The edge-agent can run natively on Windows; do not pass the webcam into the
+The edge-agent can run natively on Windows for a supervised demo; do not pass the webcam into the
 server Compose stack. Install the approved source/model versions in a dedicated
 Python virtual environment, choose a camera backend (`msmf`, `dshow`, or
 `auto`), and keep the SQLite outbox and token under `C:\ProgramData\Presensi`.
