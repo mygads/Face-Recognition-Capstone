@@ -16,6 +16,7 @@ import ForbiddenView from '../views/ForbiddenView.vue'
 import LoginView from '../views/LoginView.vue'
 import MasterDataView from '../views/MasterDataView.vue'
 import ChangePasswordView from '../views/ChangePasswordView.vue'
+import AccountsView from '../views/AccountsView.vue'
 import ProfileView from '../views/ProfileView.vue'
 import ReportsView from '../views/ReportsView.vue'
 import ScheduleView from '../views/ScheduleView.vue'
@@ -75,6 +76,16 @@ export const routes: RouteRecordRaw[] = [
         meta: {
           title: 'Data master',
           description: 'Kelola data siswa, kelas, dan laboratorium.',
+          requiredRoles: ['ADMIN'],
+        },
+      },
+      {
+        path: 'accounts',
+        name: 'accounts',
+        component: AccountsView,
+        meta: {
+          title: 'Kelola akun staf',
+          description: 'Buat akun guru dan laboran untuk menggunakan sistem.',
           requiredRoles: ['ADMIN'],
         },
       },

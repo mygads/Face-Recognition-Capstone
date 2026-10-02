@@ -27,6 +27,8 @@ export type ScheduleCreate = components['schemas']['ScheduleCreateRequest']
 export type ScheduleUpdate = components['schemas']['ScheduleUpdateRequest']
 export type ScheduleTeacher = components['schemas']['ScheduleTeacherResponse']
 export type AttendanceSession = components['schemas']['AttendanceSessionResponse']
+export type StaffAccountCreate = components['schemas']['StaffAccountCreateRequest']
+export type StaffAccountCreated = components['schemas']['StaffAccountCreatedResponse']
 export type AttendanceReportQuery =
   operations['get_attendance_report_api_v1_reports_attendance_get']['parameters']['query']
 export type AttendanceReportSummary = components['schemas']['AttendanceReportResponse']
@@ -137,6 +139,11 @@ export async function getCurrentAccount(): Promise<AuthenticatedAccount> {
 
 export async function changePassword(body: PasswordChangeRequest): Promise<PasswordChangeResult> {
   const result = await apiClient.POST('/api/v1/auth/change-password', { body })
+  return unwrap(result)
+}
+
+export async function createStaffAccount(body: StaffAccountCreate): Promise<StaffAccountCreated> {
+  const result = await apiClient.POST('/api/v1/accounts', { body })
   return unwrap(result)
 }
 

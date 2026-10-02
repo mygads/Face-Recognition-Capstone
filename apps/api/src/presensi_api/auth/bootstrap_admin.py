@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import secrets
 import sys
 
 from sqlalchemy import select
@@ -13,6 +12,7 @@ from presensi_api.db.session import get_session_factory
 
 BOOTSTRAP_EMAIL = "admin@local.test"
 BOOTSTRAP_NAME = "Administrator Lokal"
+BOOTSTRAP_PASSWORD = "123456789abcd"
 
 
 def bootstrap_development_admin(session: Session) -> str | None:
@@ -28,11 +28,10 @@ def bootstrap_development_admin(session: Session) -> str | None:
     if role is None:
         raise RuntimeError("Roles are not seeded; run the role seed command first.")
 
-    temporary_password = secrets.token_urlsafe(24)
     user = User(
         email=BOOTSTRAP_EMAIL,
         full_name=BOOTSTRAP_NAME,
-        password_hash=hash_password(temporary_password),
+        password_hash=hash_password(BOOTSTRAP_PASSWORD),
         must_change_password=True,
     )
     session.add(user)
@@ -46,7 +45,7 @@ def bootstrap_development_admin(session: Session) -> str | None:
             after_state={"role": "ADMIN", "must_change_password": True},
         )
     )
-    return temporary_password
+    return BOOTSTRAP_PASSWORD
 
 
 def main() -> int:
@@ -70,8 +69,8 @@ def main() -> int:
 
     print("Created local development administrator.")
     print(f"Email: {BOOTSTRAP_EMAIL}")
-    print(f"One-time password: {temporary_password}")
-    print("Change this password at first sign-in. Save it before closing the terminal.")
+    print("The local bootstrap password is documented in the README.")
+    print("Change it at first sign-in before using the application.")
     return 0
 
 

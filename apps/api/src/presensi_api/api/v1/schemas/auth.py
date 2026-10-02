@@ -1,3 +1,4 @@
+from typing import Literal
 from uuid import UUID
 
 from pydantic import AwareDatetime, ConfigDict, Field, field_validator
@@ -45,3 +46,36 @@ class AccountResponse(ApiSchema):
     full_name: str
     is_active: bool
     created_at: AwareDatetime
+
+
+class StaffAccountCreateRequest(ApiSchema):
+    full_name: str = Field(min_length=2, max_length=200)
+    email: str = Field(min_length=6, max_length=320)
+    role: Literal["TEACHER", "LABORANT"]
+
+    @field_validator("email")
+    @classmethod
+    def normalize_and_validate_email(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        local_part, separator, domain = normalized.partition("@")
+        if (
+            not separator
+            or not local_part
+            or not domain
+            or any(character.isspace() for character in normalized)
+            or "." not in domain
+            or domain.startswith(".")
+            or domain.endswith(".")
+        ):
+            raise ValueError("Masukkan alamat email yang valid.")
+        return normalized
+
+
+class StaffAccountCreatedResponse(ApiSchema):
+    id: UUID
+    email: str
+    full_name: str
+    role: Literal["TEACHER", "LABORANT"]
+    is_active: bool
+    must_change_password: bool
+    temporary_password: str

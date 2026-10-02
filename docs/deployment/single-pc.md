@@ -59,8 +59,10 @@ python3 scripts/dev.py dev-up
 
 The task runner copies .env.example to .env if needed and fills blank local
 database/JWT/encrypted-template secrets, applies migrations, seeds roles, and
-creates a local administrator only when the user table is empty. It prints a
-random one-time password; change it at first sign-in. The .env file is ignored by Git. Keep
+creates a local administrator only when the user table is empty. Sign in as
+`admin@local.test` with `123456789abcd` and change it at first sign-in. This
+fixed password is for local development only; do not expose the development
+stack before changing it. The .env file is ignored by Git. Keep
 the local generated keyring with the database volume; losing it makes encrypted
 templates in that volume unusable. These development secrets are not production
 secrets.
@@ -80,18 +82,11 @@ Open http://127.0.0.1:5173. Check API health at
 http://127.0.0.1:8000/health and the versioned endpoint at
 http://127.0.0.1:8000/api/v1/health.
 
-For a teacher-owned schedule/session demo, create a separate TEACHER account
-from a second PowerShell window after the API is healthy. The CLI prompts for
-the password without echoing it or putting it in shell history:
-
-~~~powershell
-docker compose exec -it api python -m presensi_api.auth.create_user --email guru@local.test --full-name "Guru Demo" --role TEACHER
-~~~
-
-Use the password you entered when signing in as that teacher. To create a
-LABORANT account, change `--role TEACHER` to `--role LABORANT`. Use only
-fictional master-data records and an adult volunteer who agrees to a local
-camera test.
+After first login, open **Kelola akun staf** in the left menu to create a
+TEACHER or LABORANT account. The page shows the generated temporary password
+once; share it directly with the account owner. They must set their own
+password at first sign-in. Use only fictional master-data records and an adult
+volunteer who agrees to a local camera test.
 
 ### Test the webcam and prepare recognition
 

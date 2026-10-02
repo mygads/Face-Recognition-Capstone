@@ -30,6 +30,7 @@ const canViewReports = computed(
   () => auth.account?.roles.some((role) => role === 'ADMIN' || role === 'TEACHER') ?? false,
 )
 const canManageMasterData = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
+const canManageAccounts = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
 </script>
 
 <template>
@@ -83,6 +84,21 @@ const canManageMasterData = computed(() => auth.account?.roles.includes('ADMIN')
           <path d="M8 9.5v5M17.5 9.5v5" />
         </svg>
         <span class="app-sidebar__link-label">Data master</span>
+      </RouterLink>
+      <RouterLink
+        v-if="canManageAccounts"
+        class="app-sidebar__link"
+        active-class="app-sidebar__link--active"
+        to="/app/accounts"
+        :aria-label="collapsed ? 'Kelola akun staf' : undefined"
+        data-testid="accounts-link"
+        @click="emit('navigate')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="9" cy="8" r="3" />
+          <path d="M3.5 19c.5-3.2 2.3-5 5.5-5s5 1.8 5.5 5M17 8v6M14 11h6" />
+        </svg>
+        <span class="app-sidebar__link-label">Kelola akun staf</span>
       </RouterLink>
       <RouterLink
         v-if="canManageSchedules"

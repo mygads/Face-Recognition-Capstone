@@ -91,7 +91,11 @@ export interface paths {
          */
         get: operations["list_accounts_api_v1_accounts_get"];
         put?: never;
-        post?: never;
+        /**
+         * Create a teacher or laborant account
+         * @description Creates a staff account with a one-time temporary password. The user must set a private password before accessing the application.
+         */
+        post: operations["create_staff_account_api_v1_accounts_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2136,6 +2140,41 @@ export interface components {
              */
             normalized: true;
         };
+        /** StaffAccountCreateRequest */
+        StaffAccountCreateRequest: {
+            /** Full Name */
+            full_name: string;
+            /** Email */
+            email: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "TEACHER" | "LABORANT";
+        };
+        /** StaffAccountCreatedResponse */
+        StaffAccountCreatedResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Email */
+            email: string;
+            /** Full Name */
+            full_name: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "TEACHER" | "LABORANT";
+            /** Is Active */
+            is_active: boolean;
+            /** Must Change Password */
+            must_change_password: boolean;
+            /** Temporary Password */
+            temporary_password: string;
+        };
         /** StudentClassResponse */
         StudentClassResponse: {
             /**
@@ -2772,6 +2811,147 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PageResponse_AccountResponse_"];
+                };
+            };
+            /** @description The request could not be processed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Authentication is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description You are not allowed to perform this action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The requested resource was not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This method is not allowed for the resource. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The uploaded file exceeds the allowed size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The file extension or media type is not supported. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Request validation failed. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many requests. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description An unexpected server error occurred. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This API operation is not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The service is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    create_staff_account_api_v1_accounts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffAccountCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffAccountCreatedResponse"];
                 };
             };
             /** @description The request could not be processed. */

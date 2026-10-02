@@ -668,6 +668,9 @@ def main(argv: list[str] | None = None) -> int:
     except (CalibrationError, EdgeConfigError, OSError, ValueError) as exc:
         print(f"camera calibration error: {exc}", file=sys.stderr)
         return 2
+    except KeyboardInterrupt:
+        print("Camera preview stopped by user.", file=sys.stderr)
+        return 130
 
 
 if __name__ == "__main__":

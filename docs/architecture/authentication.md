@@ -31,9 +31,11 @@ Enrollment and operator template metadata routes require `ADMIN` or `LABORANT`. 
 ## Local development bootstrap
 
 Local development startup applies migrations, seeds roles, and creates
-admin@local.test on an empty database. It generates a random one-time password
-and forces password change before normal API access. The bootstrap command is
-guarded by APP_ENV=development and is not called by production deployment.
+admin@local.test on an empty database. Its local-only initial password is
+`123456789abcd`; the account must change it before normal API access. This
+fixed development credential is intentionally limited to `APP_ENV=development`
+and is not called by production deployment. Do not expose a development stack
+before changing it.
 
 The temporary access token is restricted to the password-change endpoint; the
 REST API and attendance websocket deny access until the user signs in again.
@@ -53,6 +55,12 @@ The password is not a command-line argument and is never printed by this
 production provisioner. It enforces a minimum of 12 characters and stores only
 the Argon2 hash. Creating an account also writes a minimal account.created audit
 event.
+
+After the first production administrator is provisioned, that administrator
+can create TEACHER and LABORANT accounts from the **Kelola akun staf** page. The
+API generates a random temporary password and returns it only in the successful
+create response to an administrator. It is not logged or saved as plaintext;
+the new user must change it before accessing normal application routes.
 
 ## Changing a password
 

@@ -21,16 +21,18 @@ oleh OS. Webcam tidak dipasang ke Docker Compose default.
 
 Task runner membuat .env lokal jika belum ada, menghasilkan secret development,
 menjalankan migration dan role seed, lalu membuat akun admin lokal hanya jika
-belum ada akun pada database. Simpan kata sandi sementara yang dicetak satu
-kali di terminal.
-Emailnya admin@local.test; kata sandi wajib diganti sebelum aplikasi bisa
-digunakan. Bootstrap ini hanya berjalan dengan Compose development; deployment
-production tidak membuat akun bawaan.
+belum ada akun pada database. Untuk instalasi lokal, login dengan
+`admin@local.test` / `123456789abcd`; aplikasi wajib mengganti kata sandi pada
+login pertama. Kredensial tetap ini hanya untuk Compose development di mesin
+lokal. Jangan expose server sebelum kata sandi diganti dan jangan gunakan
+bootstrap development untuk deployment production. Production tidak membuat
+akun bawaan.
 
-Kata sandi admin/admin yang tetap bukan pilihan aman walaupun ada menu ganti
-sandi: akun bisa terekspos sebelum operator sempat menggantinya. Karena itu
-bootstrap development membuat kata sandi acak sementara dan memaksa pergantian
-pada login pertama. Setelahnya, menu Profil menyediakan perubahan kata sandi.
+Setelah login sebagai admin, buka menu **Kelola akun staf** untuk membuat akun
+Guru atau Laboran tanpa command line. Sistem membuat kata sandi acak sementara
+dan hanya menampilkannya setelah akun dibuat; berikan kepada pemilik akun agar
+mereka menggantinya saat login pertama. Menu **Profil** dapat digunakan untuk
+mengganti kata sandi setelahnya.
 Untuk menghentikan database dan API gunakan py -3 scripts/dev.py dev-down di
 Windows atau python3 scripts/dev.py dev-down di Ubuntu. Volume database tetap
 tersimpan.

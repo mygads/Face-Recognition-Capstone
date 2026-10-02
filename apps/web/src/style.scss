@@ -849,6 +849,7 @@ a:focus-visible {
 
 .master-data__search input,
 .master-data__form input:not([type='checkbox']),
+.master-data__form select,
 .master-data__enroll select {
   width: 100%;
   min-height: 38px;
@@ -863,6 +864,7 @@ a:focus-visible {
 
 .master-data__search input:focus,
 .master-data__form input:focus,
+.master-data__form select:focus,
 .master-data__enroll select:focus {
   border-color: var(--primary);
   outline: 0;
@@ -1094,6 +1096,76 @@ a:focus-visible {
 
 .master-data__import-invalid {
   color: var(--red);
+}
+
+.accounts-view {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.accounts-view__created {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.accounts-view__created h2 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.accounts-view__created p {
+  margin: 6px 0 0;
+  line-height: 1.55;
+}
+
+.accounts-view__details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin: 0;
+}
+
+.accounts-view__details dt,
+.accounts-view__password-label {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.accounts-view__details dd {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+}
+
+.accounts-view__password-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.accounts-view__password-row input {
+  min-width: min(100%, 260px);
+  min-height: 38px;
+  padding: 8px 11px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--bg-surface);
+  font: inherit;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.82rem;
+}
+
+.accounts-view__copy-message,
+.accounts-view__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  line-height: 1.55;
+}
+
+.accounts-view__hint {
+  margin-top: var(--space-3);
 }
 
 .master-data__preview-table-wrap {
