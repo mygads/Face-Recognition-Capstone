@@ -285,24 +285,13 @@ In the administrator UI at `/app/devices`, create a separate device per lab:
 type `edge_pc`, profile `AI_EDGE`, and the assigned laboratory. Record its UUID;
 do not share an ID across PCs.
 
-The UI currently supports device registration and lab assignment but does not
-expose the one-time credential action. Use an authenticated ADMIN API client for
-`POST /api/v1/devices/{device_id}/credentials`. This operation returns the raw
-credential once. Never place it in a shell command, ticket, chat, screenshot, or
-log. Transfer it directly into that PC's protected token file. If lost, rotate
-the credential and provision only the affected device.
-
-An authenticated admin can use the interactive OpenAPI client without
-publishing it through Nginx by opening an SSH tunnel from an authorized
-workstation:
-
-```bash
-ssh -N -L 18000:127.0.0.1:8000 admin@presensi-server.example.edu
-```
-
-While connected, open `http://127.0.0.1:18000/docs`, authorize with the ADMIN
-account, and execute the device-credential operation. The response shows the
-raw device credential once; copy it directly to the target PC's secure file.
+In the device row, choose **Kredensial** and then **Buat token pertama**. The UI
+returns the raw token once with copy and download actions. Save it directly to
+that PC's protected token file; do not place it in a shell command, ticket,
+chat, screenshot, or log. Closing the panel clears the token from the page, and
+it cannot be retrieved again. If the token file is lost, choose the rotation
+flow, enter an audit reason, and install the new token promptly; the previous
+verifier overlaps for a limited period.
 
 Device credentials renew automatically when the agent loads them from a token
 file. The file must be writable by the service account because renewal replaces

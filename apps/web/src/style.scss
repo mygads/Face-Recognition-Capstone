@@ -1746,6 +1746,197 @@ a:focus-visible {
   white-space: nowrap;
 }
 
+.devices-view__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.devices-view__modal-backdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  overflow-y: auto;
+  place-items: center;
+  padding: 24px;
+  background: rgb(9 17 28 / 58%);
+}
+
+.devices-view__credential-modal {
+  display: grid;
+  width: min(100%, 680px);
+  max-height: min(90vh, 860px);
+  gap: var(--space-4);
+  overflow-y: auto;
+  padding: var(--space-5);
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--bg-surface);
+  box-shadow: 0 20px 60px rgb(9 17 28 / 28%);
+}
+
+.devices-view__credential-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-color-light);
+}
+
+.devices-view__credential-heading h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.devices-view__credential-heading small {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}
+
+.devices-view__credential-warning {
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid color-mix(in srgb, var(--primary) 35%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: color-mix(in srgb, var(--primary) 8%, var(--bg-surface));
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+
+.devices-view__token-label,
+.devices-view__rotation-form label {
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.devices-view__token-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+}
+
+.devices-view__token-row input,
+.devices-view__rotation-form input {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--bg-surface-secondary);
+  font: inherit;
+  font-size: 0.72rem;
+}
+
+.devices-view__token-row input {
+  font-family: var(--font-mono, monospace);
+}
+
+.devices-view__credential-status,
+.devices-view__credential-instructions,
+.devices-view__rotation-form p,
+.devices-view__credential-commands p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.devices-view__credential-instructions code,
+.devices-view__credential-commands pre {
+  color: var(--text);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
+.devices-view__credential-meta {
+  display: grid;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+.devices-view__credential-commands {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface-secondary);
+}
+
+.devices-view__credential-commands pre {
+  max-width: 100%;
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.devices-view__credential-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.devices-view__rotation {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-color-light);
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.devices-view__rotation summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.devices-view__rotation-form {
+  display: grid;
+  gap: 9px;
+  margin-top: var(--space-3);
+}
+
+.devices-view__rotation-form button {
+  justify-self: start;
+}
+
+.devices-view__credential-modal .master-data__form-actions {
+  margin-top: 2px;
+}
+
+@media (max-width: 650px) {
+  .devices-view__modal-backdrop {
+    padding: 10px;
+  }
+
+  .devices-view__credential-modal {
+    max-height: 96vh;
+    padding: var(--space-4);
+  }
+
+  .devices-view__token-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .devices-view__token-row button,
+  .devices-view__credential-actions button,
+  .devices-view__rotation-form button {
+    width: 100%;
+  }
+}
+
 .enrollment-view {
   gap: var(--space-4);
 }

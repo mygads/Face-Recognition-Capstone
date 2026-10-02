@@ -20,6 +20,7 @@ export type LaboratoryUpdate = components['schemas']['LaboratoryUpdateRequest']
 export type Device = components['schemas']['DeviceResponse']
 export type DeviceCreate = components['schemas']['DeviceCreateRequest']
 export type DeviceUpdate = components['schemas']['DeviceUpdateRequest']
+export type DeviceCredential = components['schemas']['DeviceCredentialResponse']
 export type StudentImportPreview = components['schemas']['StudentImportPreviewResponse']
 export type StudentImportCommit = components['schemas']['StudentImportCommitResponse']
 export type Schedule = components['schemas']['ScheduleResponse']
@@ -262,6 +263,24 @@ export async function updateDevice(deviceId: string, body: DeviceUpdate): Promis
   const result = await apiClient.PATCH('/api/v1/devices/{device_id}', {
     params: { path: { device_id: deviceId } },
     body,
+  })
+  return unwrap(result)
+}
+
+export async function provisionDeviceCredential(deviceId: string): Promise<DeviceCredential> {
+  const result = await apiClient.POST('/api/v1/devices/{device_id}/credentials', {
+    params: { path: { device_id: deviceId } },
+  })
+  return unwrap(result)
+}
+
+export async function rotateDeviceCredential(
+  deviceId: string,
+  reason: string,
+): Promise<DeviceCredential> {
+  const result = await apiClient.POST('/api/v1/devices/{device_id}/credentials/rotate', {
+    params: { path: { device_id: deviceId } },
+    body: { reason },
   })
   return unwrap(result)
 }

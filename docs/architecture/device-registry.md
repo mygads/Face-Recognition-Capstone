@@ -40,7 +40,12 @@ The API computes health at read time:
 | Online | Device is active, heartbeat is recent, and camera status is `online`. |
 
 The registry page refreshes every 15 seconds and lets an administrator register a
-device or reassign its laboratory. Initial assignment and every actual reassignment
-write `device.laboratory_assigned` to `audit_logs`, with the actor and assigned
-laboratory UUIDs; reassignment records both previous and new IDs. Reassigning to the
-current lab does not add a duplicate audit row.
+device, reassign its laboratory, and provision or rotate its agent credential.
+The raw credential is shown only in the immediate one-time result panel, with
+copy and download actions; closing the panel clears it from the page, and there
+is no endpoint or UI to retrieve an existing raw token. Rotations require an
+audit reason and retain the previous verifier for the documented overlap window.
+Initial assignment and every actual reassignment write `device.laboratory_assigned`
+to `audit_logs`, with the actor and assigned laboratory UUIDs; reassignment records
+both previous and new IDs. Reassigning to the current lab does not add a duplicate
+audit row.

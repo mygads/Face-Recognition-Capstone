@@ -157,10 +157,10 @@ conditions; do not copy a threshold from an article or another camera.
 
 Follow [edge-agent setup](../../apps/edge-agent/README.md) to install the
 headless runtime, register an AI_EDGE device, assign its laboratory, provision
-its credential to a protected token file, enroll the adult demo identity,
-create a schedule, open an active session, and start the agent. The backend
-will not create final attendance unless device, laboratory, session, roster,
-model, liveness policy, grace period, and idempotency checks pass.
+its one-time credential from `/app/devices` into a protected token file, enroll
+the adult demo identity, create a schedule, open an active session, and start the
+agent. The backend will not create final attendance unless device, laboratory,
+session, roster, model, liveness policy, grace period, and idempotency checks pass.
 
 ### Optional central-profile development on the same host
 

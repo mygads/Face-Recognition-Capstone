@@ -7,8 +7,11 @@ import {
   createDevice,
   listDevices,
   listLaboratories,
+  provisionDeviceCredential,
+  rotateDeviceCredential,
   updateDevice,
   type Device,
+  type DeviceCredential,
   type Laboratory,
 } from '../api/client'
 
@@ -36,6 +39,13 @@ const isFormOpen = ref(false)
 const isSaving = ref(false)
 const editingDeviceId = ref<string | null>(null)
 const form = ref<DeviceForm>(emptyForm())
+const credentialDevice = ref<Device | null>(null)
+const issuedCredential = ref<DeviceCredential | null>(null)
+const credentialError = ref<string | null>(null)
+const credentialCopyMessage = ref<string | null>(null)
+const rotationReason = ref('')
+const isCredentialLoading = ref(false)
+const isRotationOpen = ref(false)
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 
 function emptyForm(): DeviceForm {
@@ -59,6 +69,12 @@ function formatError(error: unknown): string {
 
 function formatLastSeen(value: string | null): string {
   if (!value) return 'Belum pernah'
+  return new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(
+    new Date(value),
+  )
+}
+
+function formatCredentialExpiry(value: string): string {
   return new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(
     new Date(value),
   )
@@ -166,6 +182,93 @@ async function submitForm(): Promise<void> {
   }
 }
 
+function openCredential(device: Device): void {
+  credentialDevice.value = device
+  issuedCredential.value = null
+  credentialError.value = null
+  credentialCopyMessage.value = null
+  rotationReason.value = ''
+  isRotationOpen.value = false
+}
+
+function closeCredential(): void {
+  if (isCredentialLoading.value) return
+  issuedCredential.value = null
+  credentialDevice.value = null
+  credentialError.value = null
+  credentialCopyMessage.value = null
+  rotationReason.value = ''
+  isRotationOpen.value = false
+}
+
+function handleCredentialBackdropClick(): void {
+  if (!issuedCredential.value) closeCredential()
+}
+
+function handleCredentialKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && !issuedCredential.value) closeCredential()
+}
+
+async function issueCredential(action: 'provision' | 'rotate'): Promise<void> {
+  const device = credentialDevice.value
+  if (!device || isCredentialLoading.value) return
+  credentialError.value = null
+  credentialCopyMessage.value = null
+  if (action === 'rotate' && !rotationReason.value.trim()) {
+    credentialError.value = 'Isi alasan rotasi agar perubahan tercatat di audit.'
+    isRotationOpen.value = true
+    return
+  }
+
+  isCredentialLoading.value = true
+  try {
+    issuedCredential.value =
+      action === 'provision'
+        ? await provisionDeviceCredential(device.device_id)
+        : await rotateDeviceCredential(device.device_id, rotationReason.value.trim())
+    isRotationOpen.value = false
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'device_credential_exists') {
+      credentialError.value =
+        'Kredensial pernah dibuat dan tidak dapat ditampilkan ulang. Jika file token hilang, rotasi kredensial untuk membuat token baru.'
+      isRotationOpen.value = true
+    } else {
+      credentialError.value = formatError(error)
+    }
+  } finally {
+    isCredentialLoading.value = false
+  }
+}
+
+async function copyCredential(): Promise<void> {
+  if (!issuedCredential.value) return
+  try {
+    await navigator.clipboard.writeText(issuedCredential.value.token)
+    credentialCopyMessage.value = 'Token disalin. Simpan segera ke file token perangkat.'
+  } catch {
+    credentialCopyMessage.value = 'Salin token dari kotak secara manual sebelum menutup panel.'
+  }
+}
+
+function downloadCredential(): void {
+  if (!issuedCredential.value) return
+  const file = new Blob([`${issuedCredential.value.token}\n`], {
+    type: 'text/plain;charset=utf-8',
+  })
+  const url = URL.createObjectURL(file)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'device.token'
+  link.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  credentialCopyMessage.value =
+    'File device.token diunduh. Pindahkan ke folder token agent pada komputer perangkat.'
+}
+
+function onRotationToggle(event: Event): void {
+  isRotationOpen.value = (event.currentTarget as HTMLDetailsElement).open
+}
+
 function goToPage(nextPage: number): void {
   if (nextPage < 0 || nextPage >= totalPages.value || nextPage === page.value) return
   page.value = nextPage
@@ -179,6 +282,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   if (refreshTimer) clearInterval(refreshTimer)
+  issuedCredential.value = null
 })
 </script>
 
@@ -323,7 +427,22 @@ onBeforeUnmount(() => {
               </span>
             </td>
             <td v-if="canManage" data-label="Aksi">
-              <button class="button button--text" @click="openEdit(device)">Ubah</button>
+              <div class="devices-view__actions">
+                <button class="button button--text" @click="openEdit(device)">Ubah</button>
+                <button
+                  class="button button--secondary"
+                  type="button"
+                  :disabled="!device.is_active"
+                  :title="
+                    device.is_active
+                      ? 'Buat atau rotasi token agent'
+                      : 'Aktifkan perangkat lebih dulu'
+                  "
+                  @click="openCredential(device)"
+                >
+                  Kredensial
+                </button>
+              </div>
             </td>
           </tr>
         </tbody>
@@ -346,5 +465,148 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </footer>
+
+    <div
+      v-if="credentialDevice"
+      class="devices-view__modal-backdrop"
+      role="presentation"
+      @click.self="handleCredentialBackdropClick"
+      @keydown="handleCredentialKeydown"
+    >
+      <section
+        class="devices-view__credential-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="device-credential-title"
+        tabindex="-1"
+        data-testid="device-credential-dialog"
+      >
+        <header class="devices-view__credential-heading">
+          <div>
+            <p class="master-data__eyebrow">Akses agent perangkat</p>
+            <h2 id="device-credential-title">{{ credentialDevice.name }}</h2>
+            <small>{{ credentialDevice.device_id }}</small>
+          </div>
+          <button
+            v-if="!issuedCredential"
+            class="button button--text"
+            type="button"
+            aria-label="Tutup kredensial"
+            :disabled="isCredentialLoading"
+            @click="closeCredential"
+          >
+            Tutup
+          </button>
+        </header>
+
+        <template v-if="issuedCredential">
+          <p class="devices-view__credential-warning" role="alert">
+            Token ini hanya ditampilkan sekarang. Salin atau unduh sebelum menutup panel. Sistem
+            hanya menyimpan verifier token dan tidak dapat menampilkan token lama kembali.
+          </p>
+          <label class="devices-view__token-label" for="device-token">Token perangkat</label>
+          <div class="devices-view__token-row">
+            <input
+              id="device-token"
+              :value="issuedCredential.token"
+              type="text"
+              readonly
+              autocomplete="off"
+              spellcheck="false"
+              aria-label="Token perangkat, hanya ditampilkan setelah dibuat"
+              data-testid="device-token-value"
+            />
+            <button class="button button--secondary" type="button" @click="copyCredential">
+              Salin
+            </button>
+            <button class="button button--secondary" type="button" @click="downloadCredential">
+              Unduh device.token
+            </button>
+          </div>
+          <p v-if="credentialCopyMessage" class="devices-view__credential-status" role="status">
+            {{ credentialCopyMessage }}
+          </p>
+          <p class="devices-view__credential-instructions">
+            Simpan file sebagai
+            <code>%ProgramData%\Presensi\device.token</code> pada komputer agent. Jangan masukkan
+            token ke chat, screenshot, atau perintah shell.
+          </p>
+          <div class="devices-view__credential-meta">
+            <span>Berlaku sampai {{ formatCredentialExpiry(issuedCredential.expires_at) }}</span>
+            <span v-if="issuedCredential.previous_token_valid_until">
+              Token lama masih berlaku sementara sampai
+              {{ formatCredentialExpiry(issuedCredential.previous_token_valid_until) }}.
+            </span>
+          </div>
+          <div
+            class="devices-view__credential-commands"
+            aria-label="Variabel konfigurasi perangkat"
+          >
+            <p>Di PowerShell perangkat, gunakan ID dan lokasi file token berikut:</p>
+            <pre><code>$env:PRESENSI_EDGE_DEVICE_ID = "{{ credentialDevice.device_id }}"
+$env:PRESENSI_EDGE_API_TOKEN_FILE = "$env:ProgramData\Presensi\device.token"</code></pre>
+          </div>
+          <div class="master-data__form-actions">
+            <button class="button button--primary" type="button" @click="closeCredential">
+              Saya sudah menyimpan token
+            </button>
+          </div>
+        </template>
+
+        <template v-else>
+          <p class="devices-view__credential-instructions">
+            Buat token untuk pemasangan pertama agent. Token tidak bisa dibuka ulang setelah panel
+            ditutup. Jika token lama hilang, gunakan rotasi untuk menerbitkan token pengganti.
+          </p>
+          <p v-if="credentialError" class="master-data__alert" role="alert">
+            {{ credentialError }}
+          </p>
+          <div class="devices-view__credential-actions">
+            <button
+              class="button button--primary"
+              type="button"
+              :disabled="isCredentialLoading"
+              @click="issueCredential('provision')"
+            >
+              {{ isCredentialLoading ? 'Membuat token…' : 'Buat token pertama' }}
+            </button>
+          </div>
+          <details :open="isRotationOpen" class="devices-view__rotation" @toggle="onRotationToggle">
+            <summary>Token pernah dibuat, hilang, atau perlu diganti?</summary>
+            <form class="devices-view__rotation-form" @submit.prevent="issueCredential('rotate')">
+              <label for="credential-rotation-reason">Alasan rotasi</label>
+              <input
+                id="credential-rotation-reason"
+                v-model="rotationReason"
+                required
+                maxlength="200"
+                placeholder="Contoh: token hilang saat pemasangan ulang"
+              />
+              <p>
+                Token lama dan baru memiliki masa tumpang tindih singkat agar agent dapat berpindah
+                dengan aman. Pasang file token baru segera.
+              </p>
+              <button
+                class="button button--secondary"
+                type="submit"
+                :disabled="isCredentialLoading || !rotationReason.trim()"
+              >
+                {{ isCredentialLoading ? 'Merotasi…' : 'Rotasi dan tampilkan token baru' }}
+              </button>
+            </form>
+          </details>
+          <div class="master-data__form-actions">
+            <button
+              class="button button--text"
+              type="button"
+              :disabled="isCredentialLoading"
+              @click="closeCredential"
+            >
+              Batal
+            </button>
+          </div>
+        </template>
+      </section>
+    </div>
   </section>
 </template>
