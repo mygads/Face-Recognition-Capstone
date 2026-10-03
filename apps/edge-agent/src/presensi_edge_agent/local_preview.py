@@ -738,6 +738,13 @@ class LocalCameraPreview:
                 ):
                     continue
                 safe_face: dict[str, object] = box
+                detection_confidence = face.get("detection_confidence")
+                if (
+                    isinstance(detection_confidence, (int, float))
+                    and math.isfinite(detection_confidence)
+                    and 0 <= detection_confidence <= 1
+                ):
+                    safe_face["detection_confidence"] = float(detection_confidence)
                 acceptable = face.get("acceptable")
                 safe_face["acceptable"] = acceptable is True
                 score = face.get("quality_score")

@@ -18,6 +18,7 @@ type CameraFaceObservation = {
   y: number
   width: number
   height: number
+  detection_confidence?: number
   acceptable: boolean
   quality_score?: number
   reason_codes: string[]
@@ -63,6 +64,11 @@ const cameraFaceMetrics = computed(() => {
   const face = cameraObservation.value?.faces[0]
   if (!face) return []
   const metrics: string[] = []
+  if (face.detection_confidence !== undefined) {
+    metrics.push(
+      `Confidence deteksi ${Math.round(face.detection_confidence * 100)}% · bukan akurasi identitas`,
+    )
+  }
   if (face.face_pixels !== undefined) {
     const minimum = face.min_face_pixels
     metrics.push(
@@ -84,6 +90,25 @@ const cameraFaceMetrics = computed(() => {
   }
   return metrics
 })
+const detectionLabel = (face: CameraFaceObservation) => {
+  const observation = cameraObservation.value
+  if (!observation) return null
+  const fontSize = Math.max(16, Math.min(30, observation.frame_width / 55))
+  const width = fontSize * 7.8
+  const height = fontSize * 1.55
+  const x = Math.max(0, Math.min(face.x * observation.frame_width, observation.frame_width - width))
+  const y = Math.max(0, face.y * observation.frame_height - height)
+  return {
+    x,
+    y,
+    width,
+    height,
+    fontSize,
+    textX: x + fontSize * 0.45,
+    textY: y + height * 0.68,
+    text: `DETEKSI ${Math.round((face.detection_confidence ?? 0) * 100)}%`,
+  }
+}
 const diagnosticCandidate = computed(() => {
   const candidate = previewStatus.value?.diagnostic_candidate
   if (!candidate || Date.now() / 1000 - candidate.updated_at > 3) return null
@@ -414,15 +439,42 @@ onBeforeUnmount(() => {
             preserveAspectRatio="xMidYMid meet"
             aria-hidden="true"
           >
-            <rect
+            <g
               v-for="(face, index) in cameraObservation.faces"
               :key="`${index}-${cameraObservation.state}`"
-              :x="face.x * cameraObservation.frame_width"
-              :y="face.y * cameraObservation.frame_height"
-              :width="face.width * cameraObservation.frame_width"
-              :height="face.height * cameraObservation.frame_height"
-              :class="['camera-preview-view__face-box', face.acceptable ? 'is-ready' : 'is-adjust']"
-            />
+              :class="[
+                'camera-preview-view__face-mark',
+                face.acceptable ? 'is-ready' : 'is-adjust',
+              ]"
+            >
+              <rect
+                :x="face.x * cameraObservation.frame_width"
+                :y="face.y * cameraObservation.frame_height"
+                :width="face.width * cameraObservation.frame_width"
+                :height="face.height * cameraObservation.frame_height"
+                class="camera-preview-view__face-box"
+              />
+              <template v-if="face.detection_confidence !== undefined">
+                <rect
+                  v-if="detectionLabel(face)"
+                  :x="detectionLabel(face)?.x"
+                  :y="detectionLabel(face)?.y"
+                  :width="detectionLabel(face)?.width"
+                  :height="detectionLabel(face)?.height"
+                  rx="5"
+                  class="camera-preview-view__confidence-bg"
+                />
+                <text
+                  v-if="detectionLabel(face)"
+                  :x="detectionLabel(face)?.textX"
+                  :y="detectionLabel(face)?.textY"
+                  :font-size="detectionLabel(face)?.fontSize"
+                  class="camera-preview-view__confidence-text"
+                >
+                  {{ detectionLabel(face)?.text }}
+                </text>
+              </template>
+            </g>
           </svg>
           <div
             class="camera-preview-view__guidance"

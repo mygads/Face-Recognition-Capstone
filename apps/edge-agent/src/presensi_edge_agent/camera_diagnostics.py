@@ -51,8 +51,8 @@ class CameraFrameInspector:
             return CameraFrameDiagnostics(
                 state="no_face",
                 message=(
-                    "Wajah belum tertangkap. Arahkan kamera ke siswa dan posisikan "
-                    "wajah di tengah frame."
+                    "Wajah belum tertangkap. Pastikan seluruh wajah terlihat di "
+                    "tengah frame dan kamera fokus."
                 ),
                 frame_width=width,
                 frame_height=height,
@@ -112,6 +112,7 @@ class CameraFrameInspector:
             "y": min(1.0, box.y / frame_height),
             "width": min(1.0, box.width / frame_width),
             "height": min(1.0, box.height / frame_height),
+            "detection_confidence": detection.confidence,
             "acceptable": quality.acceptable,
             "quality_score": quality.score,
             "reason_codes": list(quality.reason_codes),
