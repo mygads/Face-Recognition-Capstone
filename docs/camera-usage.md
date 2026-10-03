@@ -188,11 +188,20 @@ di belakang siswa. Jika wajah menjadi terlalu kecil pada 640×480, gunakan mode
 resolusi lebih tinggi atau ubah posisi/FOV kamera. Jangan menurunkan threshold
 identitas hanya untuk menutupi blur atau deteksi yang gagal.
 
-Matcher juga diukur dengan 900 identitas sintetis, masing-masing empat embedding
-128 dimensi. Vectorisasi menurunkan waktu matcher lokal dari p50 208 ms / p95
-328 ms menjadi p50 38 ms / p95 43 ms. Pengukuran ini hanya mencakup cosine
-matching pada vector sintetis; tidak mencakup kamera, model inference, jaringan,
-atau akurasi wajah nyata.
+Satu sesi praktikum biasanya hanya memproses roster satu kelas, sekitar 30–50
+siswa, bukan seluruh 900 siswa. Pada benchmark lokal dengan data sintetis,
+masing-masing siswa memiliki empat embedding 128 dimensi. Setelah lima warm-up,
+kami mengukur 30 pencocokan per ukuran roster. Waktu cosine matcher
+vectorized pada laptop ini adalah p50/p95 1,4/4,1 ms untuk 30 siswa dan
+4,2/6,6 ms untuk 50 siswa. Matcher Python sebelumnya memerlukan 6,5/8,4 ms
+dan 11,2/17,0 ms pada ukuran yang sama.
+
+Pengukuran 900 identitas sintetis tetap berguna sebagai stress-test: vectorisasi
+menurunkan waktu matcher dari p50 208 ms / p95 328 ms menjadi p50 38 ms / p95
+43 ms. Ukuran 900 bukan beban normal satu sesi kelas. Semua angka di atas hanya
+mencakup cosine matching pada vector sintetis; tidak mencakup kamera, model
+inference, jaringan, atau akurasi wajah nyata. Identifikasi operasional tetap
+perlu diuji dengan roster aktif dan kondisi kamera sebenarnya.
 
 Preview tetap menampilkan kamera ketika recognition belum siap. Dalam status
 `waiting_for_calibration`, belum ada nama yang ditampilkan atau recognition
