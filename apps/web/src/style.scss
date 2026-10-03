@@ -1903,26 +1903,6 @@ a:focus-visible {
   accent-color: var(--primary);
 }
 
-.ai-setup-view__shared-quality {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  border: 1px solid var(--border-color-light);
-  border-radius: var(--radius-md);
-  background: var(--bg-surface-secondary);
-}
-
-.ai-setup-view__shared-quality p {
-  flex: 1 1 20rem;
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.78rem;
-  line-height: 1.5;
-}
-
 .ai-setup-view__device-picker {
   display: grid;
   width: min(100%, 460px);

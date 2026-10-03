@@ -43,7 +43,8 @@ const settingsTabs = computed<{ id: SettingsTab; label: string }[]>(() => {
     },
     {
       id: 'devices',
-      label: readiness.value?.deployment_profile === 'AI_EDGE' ? 'PC edge' : 'STB gateway',
+      label:
+        readiness.value?.deployment_profile === 'AI_EDGE' ? 'Pengenalan AI_EDGE' : 'STB gateway',
     },
   ]
   if (readiness.value?.deployment_profile === 'AI_CENTRAL') {
@@ -78,12 +79,6 @@ const gatewayForm = ref<StbGatewayConfiguration>({
 const selectedDevice = computed(
   () => devices.value.find((device) => device.device_id === selectedDeviceId.value) ?? null,
 )
-const displayedEdgeQuality = computed(() => ({
-  min_face_pixels: enrollmentForm.value.min_face_pixels,
-  min_laplacian_variance: enrollmentForm.value.min_sharpness,
-  min_brightness: enrollmentForm.value.min_brightness,
-  max_brightness: enrollmentForm.value.max_brightness,
-}))
 const edgeThresholdsConfigured = computed(
   () => edgeForm.value.min_top1_similarity !== null && edgeForm.value.min_top1_top2_margin !== null,
 )
@@ -503,10 +498,14 @@ onBeforeUnmount(() => {
             Nilai ini memeriksa ukuran wajah, ketajaman, dan pencahayaan pada pendaftaran serta PC
             AI_EDGE terpilih. Keduanya memakai angka yang sama.
           </template>
+          <template v-else-if="readiness.deployment_profile === 'AI_EDGE'">
+            Nilai ini dipakai bersama untuk kualitas capture pendaftaran dan presensi AI_EDGE. Atur
+            kualitas hanya di sini; tidak ada pengaturan kualitas kedua pada perangkat.
+          </template>
           <template v-else>
             Nilai ini memeriksa ukuran wajah, ketajaman, dan pencahayaan pada setiap capture
             pendaftaran. Mulai dari default yang ada; sesuaikan jika capture yang baik sering
-            ditolak. Perangkat AI_EDGE dapat memakai override terpisah.
+            ditolak. Filter ringan STB diatur terpisah pada tab STB gateway.
           </template>
         </p>
         <form class="master-data__form ai-setup-view__form" @submit.prevent="saveEnrollment">
@@ -579,9 +578,9 @@ onBeforeUnmount(() => {
         </div>
         <p class="ai-setup-view__note">
           <template v-if="readiness.deployment_profile === 'AI_EDGE'">
-            Pilih PC AI_EDGE untuk melihat kualitas frame dan sampling. Kamera, resolusi, dan FPS
-            diatur di host kamera. Nilai awal kualitas sudah terisi untuk dicoba dan dapat diubah
-            kapan saja.
+            Pilih PC AI_EDGE untuk mengatur threshold pengenalan dan sampling. Kualitas capture
+            bersama diatur satu kali pada tab Kualitas capture. Kamera, resolusi, dan FPS diatur di
+            host kamera.
           </template>
           <template v-else>
             Pilih STB gateway untuk mengatur burst dan filter capture. Kamera, resolusi, dan FPS
@@ -601,19 +600,6 @@ onBeforeUnmount(() => {
         <template v-if="selectedDevice?.deployment_profile === 'AI_EDGE'">
           <h3>AI_EDGE · kebijakan pengenalan</h3>
           <form class="master-data__form ai-setup-view__form" @submit.prevent="saveDevice">
-            <div class="ai-setup-view__shared-quality ai-setup-view__form-wide">
-              <p>
-                Kualitas wajah, ketajaman, dan pencahayaan memakai satu pengaturan yang sama untuk
-                pendaftaran serta presensi PC AI_EDGE. Ubah nilainya pada tab Kualitas capture.
-              </p>
-              <button
-                class="button button--secondary"
-                type="button"
-                @click="activeTab = 'enrollment'"
-              >
-                Ubah kualitas bersama
-              </button>
-            </div>
             <label
               >Top-1 similarity<input
                 :value="edgeForm.min_top1_similarity ?? ''"
@@ -686,16 +672,6 @@ onBeforeUnmount(() => {
               <div>
                 <dt>Proses pengenalan</dt>
                 <dd>PC kamera AI_EDGE</dd>
-              </div>
-              <div>
-                <dt>Quality awal</dt>
-                <dd>
-                  Wajah ≥ {{ displayedEdgeQuality.min_face_pixels }} px · tajam ≥
-                  {{ displayedEdgeQuality.min_laplacian_variance }} · cahaya
-                  {{ displayedEdgeQuality.min_brightness }}–{{
-                    displayedEdgeQuality.max_brightness
-                  }}
-                </dd>
               </div>
               <div>
                 <dt>Sampling</dt>
