@@ -43,6 +43,9 @@ const FALLBACK_MODEL_VERSION = 'opencv-zoo-sface-2021dec'
 
 const auth = useAuthStore()
 const canManage = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
+const canPreviewCamera = computed(
+  () => auth.account?.roles.some((role) => role === 'ADMIN' || role === 'LABORANT') ?? false,
+)
 const devices = ref<Device[]>([])
 const laboratories = ref<Laboratory[]>([])
 const aiReadiness = ref<AiReadiness | null>(null)
@@ -268,6 +271,46 @@ function cameraLabel(device: Device): string {
     error: 'Gangguan',
     disabled: 'Dijeda admin',
   }[device.camera_status]
+}
+
+function cameraModeLabel(device: Device): string {
+  const metrics = device.camera_metrics
+  if (!metrics) return 'Belum ada pengukuran kamera'
+  const mode =
+    metrics.frame_width && metrics.frame_height
+      ? `${metrics.frame_width} × ${metrics.frame_height}`
+      : 'Resolusi belum dilaporkan'
+  const fps =
+    typeof metrics.capture_fps === 'number'
+      ? `${metrics.capture_fps.toFixed(1)} FPS aktual`
+      : 'FPS aktual belum terukur'
+  return `${mode} · ${fps}`
+}
+
+function cameraQualityLabel(device: Device): string {
+  const metrics = device.camera_metrics
+  if (!metrics) return 'Belum diperiksa'
+  const checkedAt = metrics.quality_checked_at
+  if (checkedAt && Date.now() - new Date(checkedAt).getTime() > 120_000) {
+    return 'Pengukuran lama · uji ulang di preview'
+  }
+  return (
+    {
+      not_checked: 'Belum diperiksa',
+      ready: 'Wajah siap diperiksa',
+      adjust: 'Perlu atur posisi atau cahaya',
+      no_face: 'Wajah belum terdeteksi',
+      multiple_faces: 'Lebih dari satu wajah',
+      unavailable: 'Pemeriksaan tidak tersedia',
+    }[metrics.quality_state] ?? 'Belum diperiksa'
+  )
+}
+
+function cameraQualitySourceLabel(device: Device): string | null {
+  const source = device.camera_metrics?.quality_source
+  if (source === 'face_check') return 'Uji wajah di preview AI_EDGE'
+  if (source === 'frame_filter') return 'Uji cahaya/ketajaman ringan gateway'
+  return null
 }
 
 function requestCameraToggle(device: Device): void {
@@ -893,6 +936,11 @@ onBeforeUnmount(() => {
         <input v-model="includeInactive" type="checkbox" /> Tampilkan perangkat nonaktif
       </label>
     </div>
+    <p class="devices-view__camera-help">
+      Resolusi dan FPS aktual berasal dari kamera pada host. Uji wajah di Preview kamera; kualitas
+      frame dan sampling dapat diatur di AI &amp; kamera. Resolusi/FPS diubah lewat wizard kamera di
+      host perangkat.
+    </p>
 
     <section v-if="isFormOpen" class="master-data__panel devices-view__form-panel">
       <div class="master-data__panel-heading">
@@ -941,7 +989,7 @@ onBeforeUnmount(() => {
             <th scope="col">Laboratorium</th>
             <th scope="col">Deployment</th>
             <th scope="col">Versi app / model</th>
-            <th scope="col">Kamera</th>
+            <th scope="col">Kamera &amp; kualitas</th>
             <th scope="col">Heartbeat</th>
             <th scope="col">Latency p50 / p95</th>
             <th scope="col">Status</th>
@@ -971,7 +1019,28 @@ onBeforeUnmount(() => {
               <strong>{{ device.app_version ?? 'Belum dilaporkan' }}</strong>
               <small>Model: {{ device.model_version ?? '—' }}</small>
             </td>
-            <td data-label="Kamera">{{ cameraLabel(device) }}</td>
+            <td data-label="Kamera & kualitas">
+              <strong>{{ cameraLabel(device) }}</strong>
+              <small>{{ cameraModeLabel(device) }}</small>
+              <small>Kualitas: {{ cameraQualityLabel(device) }}</small>
+              <small v-if="cameraQualitySourceLabel(device)">
+                {{ cameraQualitySourceLabel(device) }}
+              </small>
+              <RouterLink
+                v-if="canPreviewCamera && device.deployment_profile === 'AI_EDGE'"
+                class="devices-view__camera-link"
+                to="/app/camera-preview"
+              >
+                Uji kamera
+              </RouterLink>
+              <RouterLink
+                v-else-if="canManage"
+                class="devices-view__camera-link"
+                to="/app/ai-setup"
+              >
+                Atur kualitas
+              </RouterLink>
+            </td>
             <td data-label="Heartbeat">
               {{ formatLastSeen(device.last_seen_at) }}
               <small>Timeout {{ device.heartbeat_timeout_seconds }} detik</small>

@@ -246,6 +246,7 @@ class Device(UUIDPrimaryKey, TimestampMixin, Base):
         Boolean, nullable=False, default=True, server_default=text("true")
     )
     latency_summary: Mapped[dict[str, object] | None] = mapped_column(JSON_OBJECT)
+    camera_metrics: Mapped[dict[str, object] | None] = mapped_column(JSON_OBJECT)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     credential_hash: Mapped[str | None] = mapped_column(String(64))
     credential_expires_at: Mapped[datetime | None] = mapped_column(

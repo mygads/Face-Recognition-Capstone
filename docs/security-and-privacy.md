@@ -16,6 +16,7 @@ data.
 | Ordinary operator response | Pydantic DTOs contain status, model metadata, quality metadata, and duplicate warning; they never contain vectors or ciphertext. Recognition response and logs likewise omit embeddings and frame bytes. |
 | Device gallery response | Decrypted normalized vectors are returned only to an active, credential-authenticated device assigned to the session laboratory. This is a service boundary, not an operator endpoint. Use TLS between the device, AI service, and Core API in deployed networks. |
 | Offline edge queue | Stores idempotent recognition event metadata, not camera frames or embeddings. Device-local storage must be access-controlled and encrypted by the operating system/disk policy. |
+| Device camera heartbeat | Stores capture dimensions/FPS, the requested/driver FPS, a coarse quality state, and check time. It never stores frames, face boxes, face pixel size, sharpness/brightness measurements, identity scores, or candidate names. Face-quality measurements stay in the authenticated local preview session. |
 | Debug artifacts | No debug-image/artifact writer or debug-image mode is implemented. Do not add one enabled by default. The ignored `debug-artifacts/` path is reserved for future, explicitly development-only artifacts; any future writer must enforce a configurable TTL and deletion job before use. |
 
 All model and event metadata is treated as sensitive student-linked data. No real

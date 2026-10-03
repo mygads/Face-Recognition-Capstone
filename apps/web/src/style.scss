@@ -2038,6 +2038,26 @@ a:focus-visible {
   font-size: 0.76rem;
 }
 
+.devices-view__camera-help {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.devices-view__camera-link {
+  display: inline-block;
+  margin-top: 0.35rem;
+  color: var(--primary);
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.devices-view__camera-link:hover {
+  text-decoration: underline;
+}
+
 .devices-view__table .status-badge {
   white-space: nowrap;
 }
@@ -2600,6 +2620,39 @@ a:focus-visible {
   font-size: 0.82rem;
 }
 
+.camera-preview-view__telemetry {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.camera-preview-view__telemetry > div {
+  display: grid;
+  align-content: start;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.camera-preview-view__telemetry span,
+.camera-preview-view__telemetry small {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+.camera-preview-view__telemetry strong {
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 0.92rem;
+}
+
+.camera-preview-view__telemetry small {
+  line-height: 1.4;
+}
+
 .camera-preview-view__badge {
   flex: 0 0 auto;
   padding: 5px 10px;
@@ -2948,6 +3001,10 @@ a:focus-visible {
   .camera-preview-view__layout {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  .camera-preview-view__telemetry {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 520px) {
@@ -2960,6 +3017,10 @@ a:focus-visible {
   .camera-preview-view__frame,
   .camera-preview-view__identity {
     padding: var(--space-3);
+  }
+
+  .camera-preview-view__telemetry {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

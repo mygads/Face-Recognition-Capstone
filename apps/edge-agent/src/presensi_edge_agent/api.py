@@ -48,6 +48,7 @@ class CoreApiClient:
         self._heartbeat_metadata = heartbeat_metadata or {}
         self._last_heartbeat_expiry: datetime | None = None
         self._camera_status_provider: Callable[[], str] | None = None
+        self._camera_metrics_provider: Callable[[], dict[str, object]] | None = None
         self._client = client or httpx.Client(
             base_url=settings.base_url,
             timeout=settings.timeout_seconds,
@@ -106,6 +107,8 @@ class CoreApiClient:
         payload = dict(self._heartbeat_metadata)
         if self._camera_status_provider is not None:
             payload["camera_status"] = self._camera_status_provider()
+        if self._camera_metrics_provider is not None:
+            payload["camera_metrics"] = self._camera_metrics_provider()
         response = self._request(
             "POST",
             f"/api/v1/devices/{self.device_id}/device-heartbeat",
@@ -141,6 +144,11 @@ class CoreApiClient:
 
     def set_camera_status_provider(self, provider: Callable[[], str]) -> None:
         self._camera_status_provider = provider
+
+    def set_camera_metrics_provider(
+        self, provider: Callable[[], dict[str, object]]
+    ) -> None:
+        self._camera_metrics_provider = provider
 
     def fetch_active_session_cache(self) -> dict[str, Any]:
         version = str(self._heartbeat_metadata.get("model_version", ""))

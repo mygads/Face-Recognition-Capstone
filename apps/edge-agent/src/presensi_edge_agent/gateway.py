@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 from presensi_edge_agent.api import ApiCallError, CoreApiClient
 from presensi_edge_agent.camera import CameraUnavailableError
+from presensi_edge_agent.camera_metrics import CameraRuntimeMetrics
 from presensi_edge_agent.central_ai import BurstFrame, CentralDecision
 from presensi_edge_agent.config import EdgeConfig, resolve_ai_token, resolve_api_token
 from presensi_edge_agent.logging import log_event
@@ -122,6 +123,7 @@ class StbGatewayService:
         self._active_session_expires_at = config.gateway.session_ends_at
         self.camera = camera
         self.api = api
+        self.camera_metrics = CameraRuntimeMetrics(config.camera.fps)
         self._camera_enabled = True
         if isinstance(api, CoreApiClient):
             api.set_camera_status_provider(
@@ -133,6 +135,7 @@ class StbGatewayService:
                     else "offline"
                 )
             )
+            api.set_camera_metrics_provider(self.camera_metrics.snapshot)
         self.ai = ai
         self.outbox = outbox
         self.processor = processor
@@ -192,12 +195,52 @@ class StbGatewayService:
                     self.stop_event.wait(0.25)
                     continue
                 if not self._session_active():
+                    # Keep a low-rate camera health sample so the registry can
+                    # report that the UVC device is reachable outside a session.
+                    try:
+                        if not self._camera_open:
+                            self.camera.open()
+                            self._camera_open = True
+                            get_mode = getattr(self.camera, "reported_mode", None)
+                            try:
+                                mode = get_mode() if callable(get_mode) else None
+                            except Exception:
+                                mode = None
+                            if isinstance(mode, dict):
+                                self.camera_metrics.set_driver_mode(mode)
+                        ok, health_frame = self.camera.read()
+                        if not ok or health_frame is None:
+                            raise CameraUnavailableError("Camera health sample failed.")
+                        self.camera_metrics.record_frame(health_frame)
+                        assessment = self.processor.assess(health_frame)
+                        self.camera_metrics.set_quality_state(
+                            "ready" if self._quality_ok(assessment) else "adjust",
+                            source="frame_filter",
+                        )
+                    except Exception as exc:
+                        self.camera.close()
+                        self._camera_open = False
+                        log_event(
+                            logger,
+                            logging.WARNING,
+                            "gateway_camera_health_sample_failed",
+                            exception_type=type(exc).__name__,
+                        )
+                        self.stop_event.wait(self.config.camera.reconnect_seconds)
+                        continue
                     self.stop_event.wait(1.0)
                     continue
                 try:
                     if not self._camera_open:
                         self.camera.open()
                         self._camera_open = True
+                        get_mode = getattr(self.camera, "reported_mode", None)
+                        try:
+                            mode = get_mode() if callable(get_mode) else None
+                        except Exception:
+                            mode = None
+                        if isinstance(mode, dict):
+                            self.camera_metrics.set_driver_mode(mode)
                         log_event(
                             logger,
                             logging.INFO,
@@ -210,7 +253,12 @@ class StbGatewayService:
                     ok, frame = self.camera.read()
                     if not ok or frame is None:
                         raise CameraUnavailableError("Camera frame read failed.")
+                    self.camera_metrics.record_frame(frame)
                     assessment = self.processor.assess(frame)
+                    self.camera_metrics.set_quality_state(
+                        "ready" if self._quality_ok(assessment) else "adjust",
+                        source="frame_filter",
+                    )
                     now = time.monotonic()
                     if not self._quality_ok(assessment):
                         continue
@@ -345,7 +393,12 @@ class StbGatewayService:
                 if not ok or next_frame is None:
                     break
                 frame = next_frame
+                self.camera_metrics.record_frame(frame)
                 assessment = self.processor.assess(frame)
+                self.camera_metrics.set_quality_state(
+                    "ready" if self._quality_ok(assessment) else "adjust",
+                    source="frame_filter",
+                )
         return captured
 
     def _submit_burst(self, frames: list[BurstFrame]) -> None:

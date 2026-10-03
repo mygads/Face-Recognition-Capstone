@@ -10,7 +10,20 @@ type PreviewStatus = {
   diagnostic_candidate?: DiagnosticCandidate | null
   updated_at: number | null
   camera_observation?: CameraObservation
+  camera_metrics?: CameraRuntimeMetrics
   attendance_result?: AttendanceResult | null
+}
+
+type CameraRuntimeMetrics = {
+  frame_width: number | null
+  frame_height: number | null
+  capture_fps: number | null
+  requested_fps: number | null
+  driver_fps: number | null
+  quality_state: string
+  quality_source: 'face_check' | 'frame_filter' | null
+  quality_checked_at: string | null
+  measured_at: string | null
 }
 
 type CameraFaceObservation = {
@@ -60,10 +73,17 @@ const previewToken = ref<string | null>(null)
 const frameUrl = ref<string | null>(null)
 const previewStatus = ref<PreviewStatus | null>(null)
 const cameraObservation = computed(() => previewStatus.value?.camera_observation ?? null)
+const cameraMetrics = computed(() => previewStatus.value?.camera_metrics ?? null)
+const previewFps = ref<number | null>(null)
+const previewFrameTimes: number[] = []
+let lastPreviewFpsUpdate = 0
 const cameraFaceMetrics = computed(() => {
   const face = cameraObservation.value?.faces[0]
   if (!face) return []
   const metrics: string[] = []
+  if (face.quality_score !== undefined) {
+    metrics.push(`Kualitas frame ${(face.quality_score * 100).toFixed(0)}% · bukan akurasi`)
+  }
   if (face.detection_confidence !== undefined) {
     metrics.push(
       `Confidence deteksi ${Math.round(face.detection_confidence * 100)}% · bukan akurasi identitas`,
@@ -164,6 +184,47 @@ const cameraObservationLabel = computed(() => {
       return 'Menyiapkan pemeriksaan kamera'
   }
 })
+
+const cameraQualityLabel = computed(() => {
+  const state = cameraObservation.value?.state ?? cameraMetrics.value?.quality_state
+  switch (state) {
+    case 'ready':
+      return 'Wajah siap diperiksa'
+    case 'adjust':
+      return 'Perlu atur posisi atau cahaya'
+    case 'no_face':
+      return 'Wajah belum terdeteksi'
+    case 'multiple_faces':
+      return 'Lebih dari satu wajah'
+    case 'unavailable':
+      return 'Pemeriksaan tidak tersedia'
+    default:
+      return 'Belum diuji'
+  }
+})
+
+const cameraResolutionLabel = computed(() => {
+  const width = cameraMetrics.value?.frame_width ?? cameraObservation.value?.frame_width
+  const height = cameraMetrics.value?.frame_height ?? cameraObservation.value?.frame_height
+  return width && height ? `${width} × ${height}` : 'Belum tersedia'
+})
+
+const cameraFpsLabel = computed(() => {
+  const fps = cameraMetrics.value?.capture_fps
+  return typeof fps === 'number' ? `${fps.toFixed(1)} FPS` : 'Mengukur…'
+})
+
+function recordPreviewFrame(): void {
+  const now = performance.now()
+  previewFrameTimes.push(now)
+  while (previewFrameTimes.length > 1 && now - previewFrameTimes[0] > 3000) {
+    previewFrameTimes.shift()
+  }
+  if (previewFrameTimes.length < 2 || now - lastPreviewFpsUpdate < 500) return
+  const elapsed = now - previewFrameTimes[0]
+  if (elapsed > 0) previewFps.value = Math.round(((previewFrameTimes.length - 1) * 1000) / elapsed)
+  lastPreviewFpsUpdate = now
+}
 
 const identityTitle = computed(() => {
   if (recentAttendanceResult.value?.decision === 'recorded') {
@@ -463,10 +524,41 @@ onBeforeUnmount(() => {
 
     <p v-if="errorMessage" class="master-data__alert" role="alert">{{ errorMessage }}</p>
 
+    <section
+      v-if="!isFullscreen"
+      class="camera-preview-view__telemetry"
+      aria-label="Kualitas dan kinerja kamera"
+    >
+      <div>
+        <span>Resolusi aktual</span>
+        <strong>{{ cameraResolutionLabel }}</strong>
+      </div>
+      <div>
+        <span>FPS capture aktual</span>
+        <strong>{{ cameraFpsLabel }}</strong>
+        <small>
+          Target {{ cameraMetrics?.requested_fps ?? '—' }} FPS · driver
+          {{ cameraMetrics?.driver_fps ?? '—' }} FPS
+        </small>
+      </div>
+      <div>
+        <span>FPS preview browser</span>
+        <strong>{{ previewFps === null ? 'Mengukur…' : `${previewFps} FPS` }}</strong>
+      </div>
+      <div>
+        <span>Kualitas frame</span>
+        <strong>{{ cameraQualityLabel }}</strong>
+        <small v-if="cameraMetrics?.quality_source === 'frame_filter'">
+          Pemeriksaan cahaya dan ketajaman ringan dari gateway.
+        </small>
+        <small v-else>Ketajaman, cahaya, dan ukuran wajah terlihat pada kotak kamera.</small>
+      </div>
+    </section>
+
     <div class="camera-preview-view__layout">
       <figure class="camera-preview-view__frame">
         <div v-if="frameUrl" class="camera-preview-view__frame-stage">
-          <img :src="frameUrl" alt="Preview langsung kamera presensi" />
+          <img :src="frameUrl" alt="Preview langsung kamera presensi" @load="recordPreviewFrame" />
           <svg
             v-if="cameraObservation && cameraObservation.frame_width > 0"
             class="camera-preview-view__face-overlay"
@@ -586,15 +678,11 @@ onBeforeUnmount(() => {
           </small>
         </div>
         <RouterLink
-          v-if="
-            !isFullscreen &&
-            previewStatus?.recognition_state === 'waiting_for_calibration' &&
-            auth.account?.roles.includes('ADMIN')
-          "
+          v-if="auth.account?.roles.includes('ADMIN') && !isFullscreen"
           class="button button--secondary camera-preview-view__settings-link"
           to="/app/ai-setup"
         >
-          Buka AI & kamera
+          Atur kualitas &amp; pengenalan
         </RouterLink>
         <dl>
           <div>

@@ -1637,6 +1637,34 @@ export interface components {
             /** Enabled */
             enabled: boolean;
         };
+        /** DeviceCameraMetrics */
+        DeviceCameraMetrics: {
+            /** Frame Width */
+            frame_width?: number | null;
+            /** Frame Height */
+            frame_height?: number | null;
+            /** Capture Fps */
+            capture_fps?: number | null;
+            /** Requested Fps */
+            requested_fps?: number | null;
+            /** Driver Fps */
+            driver_fps?: number | null;
+            /**
+             * Quality State
+             * @default not_checked
+             * @enum {string}
+             */
+            quality_state: "not_checked" | "ready" | "adjust" | "no_face" | "multiple_faces" | "unavailable";
+            /** Quality Source */
+            quality_source?: ("face_check" | "frame_filter") | null;
+            /** Quality Checked At */
+            quality_checked_at?: string | null;
+            /**
+             * Measured At
+             * Format: date-time
+             */
+            measured_at: string;
+        };
         /** DeviceConfigurationResponse */
         DeviceConfigurationResponse: {
             /**
@@ -1752,6 +1780,7 @@ export interface components {
             /** Camera Status */
             camera_status?: ("unknown" | "online" | "offline" | "error" | "disabled") | null;
             latency_summary?: components["schemas"]["DeviceLatencySummary"] | null;
+            camera_metrics?: components["schemas"]["DeviceCameraMetrics"] | null;
         };
         /** DeviceHeartbeatResponse */
         DeviceHeartbeatResponse: {
@@ -1813,6 +1842,7 @@ export interface components {
             /** Camera Enabled */
             camera_enabled: boolean;
             latency_summary: components["schemas"]["DeviceLatencySummary"] | null;
+            camera_metrics: components["schemas"]["DeviceCameraMetrics"] | null;
             /** Config Applied Revision */
             config_applied_revision: number;
             /**

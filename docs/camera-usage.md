@@ -161,11 +161,25 @@ localhost yang persis pada `preview.allowed_origins`; jangan gunakan wildcard
 atau bind address `0.0.0.0`.
 
 Preview menampilkan kamera, bounding oval kualitas frame, status sesi, dan
-status pengenalan. Bagian ini tidak menjalankan diagnostik skor. Saat konfigurasi
+status pengenalan. Panel kamera menampilkan resolusi hasil capture, FPS capture
+terukur, FPS preview browser, dan ukuran/ketajaman/pencahayaan wajah. Nilai mutu
+wajah hanya tampil lokal pada preview; heartbeat perangkat hanya menyimpan
+resolusi, FPS, dan status kualitas umum tanpa gambar, nama, skor identitas, atau
+ukuran wajah. Halaman **Perangkat** menampilkan laporan heartbeat terakhir dan
+tautan untuk menguji ulang kamera. Saat konfigurasi
 threshold belum diterapkan, halaman menyatakan bahwa pengenalan dijeda dan
 presensi tidak dicatat. Setelah threshold dikalibrasi dan diterapkan, nama siswa
 hanya ditampilkan pada layar operator saat cocok dan pada layar depan setelah
 Core API mengonfirmasi presensi.
+
+Kualitas frame dan sampling pengenalan dapat diatur dari **AI & kamera**. Resolusi,
+index webcam, dan FPS target tetap diatur di komputer kamera menggunakan wizard
+`presensi-edge-agent --config apps/edge-agent/config/edge-agent.yaml configure-camera`.
+FPS capture aktual pada UI dihitung dari frame yang benar-benar dibaca agent;
+angka FPS driver dan nilai target ditampilkan terpisah. Untuk STB_GATEWAY, status
+kualitas hanya memakai filter cahaya/ketajaman ringan. Saat tidak ada sesi, STB
+mengambil satu frame per detik untuk pemeriksaan koneksi dan kualitas, lalu
+mengikuti sampling burst yang dikonfigurasi saat sesi aktif.
 
 ### Mengatasi preview patah-patah saat development
 

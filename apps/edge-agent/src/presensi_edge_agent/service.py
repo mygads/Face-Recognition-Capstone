@@ -22,6 +22,7 @@ from presensi_edge_agent.camera_diagnostics import (
     CameraFrameInspector,
     build_camera_frame_inspector,
 )
+from presensi_edge_agent.camera_metrics import CameraRuntimeMetrics
 from presensi_edge_agent.config import EdgeConfig, resolve_api_token
 from presensi_edge_agent.events import event_payload
 from presensi_edge_agent.local_preview import LocalCameraPreview
@@ -77,6 +78,7 @@ class EdgeService:
         self.device_id = config.device_id
         self.camera = camera
         self.api = api
+        self.camera_metrics = CameraRuntimeMetrics(config.camera.fps)
         if isinstance(api, CoreApiClient):
             api.set_camera_status_provider(
                 lambda: (
@@ -87,6 +89,7 @@ class EdgeService:
                     else "offline"
                 )
             )
+            api.set_camera_metrics_provider(self.camera_metrics.snapshot)
         self.outbox = outbox
         self.recognizer = recognizer
         self.performance = EdgePerformanceMonitor.from_environment()
@@ -112,6 +115,7 @@ class EdgeService:
         self._camera_inspector_attempted = False
         self._last_camera_inspection = 0.0
         self._camera_inspector_error_reported = False
+        self._last_camera_metrics_publish = 0.0
         self._camera_open = False
         self._camera_enabled = True
         self.preview_cache = ActiveSessionCache()
@@ -269,6 +273,7 @@ class EdgeService:
                         if self.preview is not None:
                             self.preview.update_status(camera_open=True)
                         actual_mode = self._reported_camera_mode() or {}
+                        self.camera_metrics.set_driver_mode(actual_mode)
                         log_event(
                             logger,
                             logging.INFO,
@@ -292,6 +297,8 @@ class EdgeService:
                         raise CameraUnavailableError("Camera frame read failed.")
                     if self.performance is not None:
                         self.performance.increment("camera_frames")
+                    self.camera_metrics.record_frame(frame)
+                    self._publish_camera_metrics()
                     if self.preview is not None and self.preview.has_active_viewer():
                         preview_started = time.perf_counter_ns()
                         if (
@@ -396,6 +403,10 @@ class EdgeService:
             assert self._camera_frame_inspector is not None
             inspect_started = time.perf_counter_ns()
             observation = self._camera_frame_inspector.inspect(frame)
+            self.camera_metrics.set_quality_state(
+                observation.state, source="face_check"
+            )
+            self._publish_camera_metrics(force=True)
             if self.performance is not None:
                 self.performance.observe(
                     "camera_diagnostics_ms",
@@ -419,6 +430,8 @@ class EdgeService:
                     "faces": [],
                 }
             )
+            self.camera_metrics.set_quality_state("unavailable", source="face_check")
+            self._publish_camera_metrics(force=True)
             if not self._camera_inspector_error_reported:
                 log_event(
                     logger,
@@ -427,6 +440,16 @@ class EdgeService:
                     exception_type=type(exc).__name__,
                 )
                 self._camera_inspector_error_reported = True
+
+    def _publish_camera_metrics(self, *, force: bool = False) -> None:
+        preview = self.preview
+        if preview is None:
+            return
+        now = time.monotonic()
+        if not force and now - self._last_camera_metrics_publish < 1.0:
+            return
+        self._last_camera_metrics_publish = now
+        preview.update_camera_metrics(self.camera_metrics.snapshot())
 
     def _process_frame(self, frame: object) -> None:
         bundle = self.cache.current()

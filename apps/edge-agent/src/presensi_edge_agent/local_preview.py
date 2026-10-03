@@ -6,6 +6,7 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Literal, cast
 from urllib.parse import urlsplit
@@ -86,6 +87,17 @@ class LocalCameraPreview:
                 "frame_height": 0,
                 "face_count": 0,
                 "faces": [],
+            },
+            "camera_metrics": {
+                "frame_width": None,
+                "frame_height": None,
+                "capture_fps": None,
+                "requested_fps": float(config.camera.fps),
+                "driver_fps": None,
+                "quality_state": "not_checked",
+                "quality_source": None,
+                "quality_checked_at": None,
+                "measured_at": datetime.now(UTC).isoformat(),
             },
             "updated_at": None,
         }
@@ -782,6 +794,49 @@ class LocalCameraPreview:
         }
         with self._lock:
             self._status["camera_observation"] = observation
+            self._status["updated_at"] = time.time()
+
+    def update_camera_metrics(self, payload: dict[str, object]) -> None:
+        """Publish bounded operational measurements; never accept image data."""
+        metrics: dict[str, object] = {}
+        for key in ("frame_width", "frame_height"):
+            value = payload.get(key)
+            metrics[key] = value if type(value) is int and 1 <= value <= 8192 else None
+        for key in ("capture_fps", "requested_fps", "driver_fps"):
+            value = payload.get(key)
+            metrics[key] = (
+                round(float(value), 1)
+                if isinstance(value, (int, float))
+                and math.isfinite(value)
+                and 0 <= value <= 240
+                else None
+            )
+        quality_state = payload.get("quality_state")
+        allowed_states = {
+            "not_checked",
+            "ready",
+            "adjust",
+            "no_face",
+            "multiple_faces",
+            "unavailable",
+        }
+        metrics["quality_state"] = (
+            quality_state
+            if isinstance(quality_state, str) and quality_state in allowed_states
+            else "unavailable"
+        )
+        quality_source = payload.get("quality_source")
+        metrics["quality_source"] = (
+            quality_source
+            if isinstance(quality_source, str)
+            and quality_source in {"face_check", "frame_filter"}
+            else None
+        )
+        for key in ("quality_checked_at", "measured_at"):
+            value = payload.get(key)
+            metrics[key] = value[:64] if isinstance(value, str) else None
+        with self._lock:
+            self._status["camera_metrics"] = metrics
             self._status["updated_at"] = time.time()
 
     def update_attendance_result(

@@ -15,6 +15,7 @@ from presensi_api.api.security.roles import AuthenticatedUser, Permission
 from presensi_api.api.v1.schemas.common import PageResponse, Pagination
 from presensi_api.api.v1.schemas.laboratories import (
     DeviceCameraControlRequest,
+    DeviceCameraMetrics,
     DeviceCreateRequest,
     DeviceHeartbeatRequest,
     DeviceHeartbeatResponse,
@@ -72,6 +73,11 @@ def _device_response(
         latency_summary=(
             DeviceLatencySummary.model_validate(device.latency_summary)
             if device.latency_summary is not None
+            else None
+        ),
+        camera_metrics=(
+            DeviceCameraMetrics.model_validate(device.camera_metrics)
+            if device.camera_metrics is not None
             else None
         ),
         config_applied_revision=device.config_applied_revision,

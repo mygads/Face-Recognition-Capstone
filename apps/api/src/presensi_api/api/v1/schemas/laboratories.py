@@ -74,6 +74,20 @@ class DeviceLatencySummary(ApiSchema):
     p95_ms: float | None = Field(default=None, ge=0, le=600_000)
 
 
+class DeviceCameraMetrics(ApiSchema):
+    frame_width: int | None = Field(default=None, ge=1, le=8192)
+    frame_height: int | None = Field(default=None, ge=1, le=8192)
+    capture_fps: float | None = Field(default=None, ge=0, le=240)
+    requested_fps: float | None = Field(default=None, ge=1, le=240)
+    driver_fps: float | None = Field(default=None, ge=0, le=240)
+    quality_state: Literal[
+        "not_checked", "ready", "adjust", "no_face", "multiple_faces", "unavailable"
+    ] = "not_checked"
+    quality_source: Literal["face_check", "frame_filter"] | None = None
+    quality_checked_at: AwareDatetime | None = None
+    measured_at: AwareDatetime
+
+
 class DeviceHeartbeatRequest(ApiSchema):
     deployment_profile: Literal["AI_EDGE", "STB_GATEWAY"] | None = None
     app_version: str | None = Field(default=None, min_length=1, max_length=80)
@@ -82,6 +96,7 @@ class DeviceHeartbeatRequest(ApiSchema):
         Literal["unknown", "online", "offline", "error", "disabled"] | None
     ) = None
     latency_summary: DeviceLatencySummary | None = None
+    camera_metrics: DeviceCameraMetrics | None = None
 
 
 class DeviceResponse(ApiSchema):
@@ -97,6 +112,7 @@ class DeviceResponse(ApiSchema):
     camera_status: Literal["unknown", "online", "offline", "error", "disabled"]
     camera_enabled: bool
     latency_summary: DeviceLatencySummary | None
+    camera_metrics: DeviceCameraMetrics | None
     config_applied_revision: int = Field(ge=0)
     config_apply_status: Literal["not_configured", "pending", "applied", "error"]
     config_error_code: str | None

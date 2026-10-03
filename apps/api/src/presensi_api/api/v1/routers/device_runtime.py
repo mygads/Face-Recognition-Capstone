@@ -583,6 +583,10 @@ def device_heartbeat(
             device.latency_summary = request.latency_summary.model_dump(
                 exclude_unset=True
             )
+        if request.camera_metrics is not None:
+            device.camera_metrics = request.camera_metrics.model_dump(
+                mode="json", exclude_unset=True
+            )
     now = datetime.now(UTC)
     device.last_seen_at = now
     if device.credential_expires_at is None:
