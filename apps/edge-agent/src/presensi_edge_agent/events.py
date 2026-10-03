@@ -9,6 +9,11 @@ from recognition_core.domain import TrackDecision
 RecognitionOutcome = Literal["matched", "ambiguous", "no_match", "error"]
 
 
+def _api_score(value: float | None) -> float | None:
+    """Match the API's six-decimal score contract."""
+    return round(value, 6) if value is not None else None
+
+
 def event_payload(
     decision: TrackDecision,
     *,
@@ -47,11 +52,11 @@ def event_payload(
 
     confidence = result.confidence
     similarity = (
-        max(-1.0, min(1.0, confidence * 2.0 - 1.0))
+        _api_score(max(-1.0, min(1.0, confidence * 2.0 - 1.0)))
         if outcome == "matched" and confidence is not None
         else None
     )
-    margin = result.margin if outcome == "matched" else None
+    margin = _api_score(result.margin) if outcome == "matched" else None
     return {
         "event_id": str(uuid4()),
         "device_id": str(device_id),
@@ -59,10 +64,10 @@ def event_payload(
         "student_id": str(result.student_id) if outcome == "matched" else None,
         "outcome": outcome,
         "similarity": similarity,
-        "confidence": confidence if outcome == "matched" else None,
+        "confidence": _api_score(confidence) if outcome == "matched" else None,
         "margin": margin,
         "liveness_passed": liveness_passed,
-        "liveness_score": result.liveness_score,
+        "liveness_score": _api_score(result.liveness_score),
         "occurred_at": occurred_at.isoformat(),
         "model_name": model_name,
         "model_version": model_version,

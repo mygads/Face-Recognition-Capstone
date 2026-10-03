@@ -41,7 +41,7 @@ type CameraObservation = {
 }
 
 type AttendanceResult = {
-  decision: 'pending' | 'recorded' | 'not_recorded'
+  decision: 'pending' | 'recorded' | 'already_recorded' | 'not_recorded' | 'delivery_failed'
   attendance_status: 'present' | 'late' | null
   display_name?: string | null
   class_name?: string | null
@@ -127,8 +127,25 @@ let stopped = false
 
 const recentAttendanceResult = computed(() => {
   const result = previewStatus.value?.attendance_result
-  if (!result || Date.now() / 1000 - result.updated_at > 15) return null
+  if (!result) return null
+  if (result.decision === 'recorded' && Date.now() / 1000 - result.updated_at > 15) {
+    return null
+  }
   return result
+})
+const identityMatched = computed(
+  () =>
+    previewStatus.value?.recognition_state === 'accepted' ||
+    recentAttendanceResult.value?.decision === 'recorded' ||
+    recentAttendanceResult.value?.decision === 'already_recorded',
+)
+const identityPanelClass = computed(() => {
+  const decision = recentAttendanceResult.value?.decision
+  if (decision === 'delivery_failed' || decision === 'not_recorded') return 'is-rejected'
+  if (decision === 'recorded' || decision === 'already_recorded') return 'is-recorded'
+  if (identityMatched.value) return 'is-matched'
+  if (decision === 'pending') return 'is-pending'
+  return ''
 })
 
 const cameraObservationLabel = computed(() => {
@@ -152,15 +169,24 @@ const identityTitle = computed(() => {
   if (recentAttendanceResult.value?.decision === 'recorded') {
     return recentAttendanceResult.value.display_name ?? 'Presensi tercatat'
   }
-  if (recentAttendanceResult.value?.decision === 'not_recorded') return 'Presensi belum tercatat'
+  if (recentAttendanceResult.value?.decision === 'already_recorded') {
+    return recentAttendanceResult.value.display_name ?? 'Presensi sudah tercatat'
+  }
+  if (recentAttendanceResult.value?.decision === 'not_recorded') {
+    return previewStatus.value?.display_name ?? 'Presensi belum tercatat'
+  }
+  if (recentAttendanceResult.value?.decision === 'delivery_failed') {
+    return recentAttendanceResult.value.display_name ?? 'Presensi belum tercatat'
+  }
   if (diagnosticCandidate.value) return diagnosticCandidate.value.display_name
+  if (previewStatus.value?.recognition_state === 'accepted') {
+    return previewStatus.value.display_name ?? 'Identitas cocok'
+  }
   if (!isFullscreen.value) {
     if (previewStatus.value?.recognition_state === 'waiting_for_calibration') {
       return 'AI belum dikalibrasi'
     }
-    return previewStatus.value?.recognition_state === 'accepted'
-      ? (previewStatus.value.display_name ?? 'Identitas cocok')
-      : 'Belum teridentifikasi'
+    return 'Belum teridentifikasi'
   }
   if (previewStatus.value?.recognition_state === 'waiting_for_calibration') {
     return 'AI belum dikalibrasi'
@@ -182,8 +208,14 @@ const identityDisplayMessage = computed(() => {
       ? `${prefix}Presensi sudah tercatat sebagai terlambat.`
       : `${prefix}Presensi sudah tercatat sebagai hadir.`
   }
+  if (recentAttendanceResult.value?.decision === 'already_recorded') {
+    return 'Presensi siswa ini sudah tercatat pada sesi aktif. Tidak perlu memindai ulang.'
+  }
   if (recentAttendanceResult.value?.decision === 'not_recorded') {
-    return 'Presensi belum tercatat. Silakan minta bantuan petugas.'
+    return 'Identitas cocok, tetapi sesi atau aturan server belum mengizinkan presensi. Minta petugas memeriksa.'
+  }
+  if (recentAttendanceResult.value?.decision === 'delivery_failed') {
+    return 'Identitas cocok, tetapi server menolak data presensi. Minta petugas memeriksa status perangkat.'
   }
   if (diagnosticCandidate.value) {
     const candidate = diagnosticCandidate.value
@@ -233,7 +265,7 @@ const recognitionMessage = computed(() => {
       return 'Sedang memeriksa beberapa frame. Minta siswa menghadap kamera.'
     case 'accepted':
       return previewStatus.value.display_name
-        ? `Teridentifikasi: ${previewStatus.value.display_name}. Presensi menunggu validasi Core API.`
+        ? 'Identitas cocok. Mengirim presensi untuk konfirmasi server.'
         : 'Identitas cocok, tetapi nama roster tidak tersedia.'
     case 'retry_frontal':
       return 'Belum cukup yakin. Minta siswa menghadap lurus ke kamera.'
@@ -444,7 +476,7 @@ onBeforeUnmount(() => {
               :key="`${index}-${cameraObservation.state}`"
               :class="[
                 'camera-preview-view__face-mark',
-                face.acceptable ? 'is-ready' : 'is-adjust',
+                face.acceptable || identityMatched ? 'is-ready' : 'is-adjust',
               ]"
             >
               <rect
@@ -498,9 +530,25 @@ onBeforeUnmount(() => {
         </figcaption>
       </figure>
 
-      <aside class="camera-preview-view__identity" aria-label="Status pengenalan siswa">
+      <aside
+        class="camera-preview-view__identity"
+        :class="identityPanelClass"
+        aria-label="Status pengenalan siswa"
+      >
         <p class="master-data__eyebrow">Hasil pengenalan</p>
         <h3>{{ identityTitle }}</h3>
+        <span v-if="identityMatched" class="camera-preview-view__match-badge" role="status">
+          <span aria-hidden="true">✓</span>
+          {{
+            recentAttendanceResult?.decision === 'recorded' ||
+            recentAttendanceResult?.decision === 'already_recorded'
+              ? 'Presensi tercatat'
+              : recentAttendanceResult?.decision === 'delivery_failed' ||
+                  recentAttendanceResult?.decision === 'not_recorded'
+                ? 'Identitas cocok · presensi belum tercatat'
+                : 'Identitas cocok · menunggu konfirmasi server'
+          }}
+        </span>
         <p>{{ identityDisplayMessage }}</p>
         <div
           v-if="diagnosticCandidate"

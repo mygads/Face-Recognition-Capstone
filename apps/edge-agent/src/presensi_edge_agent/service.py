@@ -500,7 +500,7 @@ class EdgeService:
                 exception_type=type(exc).__name__,
             )
             return
-        if self.preview is not None:
+        if self.preview is not None and payload.get("outcome") == "matched":
             self.preview.update_attendance_result("pending")
         pending, _ = self.outbox.counts()
         log_event(
@@ -941,6 +941,15 @@ class EdgeService:
                     queued_event.event_id,
                     status_code=exc.status_code,
                 )
+                if self.preview is not None:
+                    display_name, class_name = self._preview_student_identity(
+                        queued_event.payload.get("student_id")
+                    )
+                    self.preview.update_attendance_result(
+                        "delivery_failed",
+                        display_name=display_name,
+                        class_name=class_name,
+                    )
                 log_event(
                     logger,
                     logging.ERROR,
@@ -1002,4 +1011,27 @@ class EdgeService:
                 class_name,
             )
         elif decision == "no_attendance":
-            preview.update_attendance_result("not_recorded")
+            if response.get("reason") == "attendance_already_recorded":
+                display_name, class_name = self._preview_student_identity(
+                    payload.get("student_id")
+                )
+                preview.update_attendance_result(
+                    "already_recorded", display_name=display_name, class_name=class_name
+                )
+            elif response.get("outcome") == "matched":
+                preview.update_attendance_result("not_recorded")
+
+    def _preview_student_identity(
+        self, student_id: object
+    ) -> tuple[str | None, str | None]:
+        bundle = self._active_bundle
+        if bundle is None or not isinstance(student_id, str):
+            return None, None
+        student = next(
+            (item for item in bundle.students if str(item.student_id) == student_id),
+            None,
+        )
+        if student is None:
+            return None, None
+        class_name = " · ".join(student.class_names) or None
+        return student.full_name, class_name

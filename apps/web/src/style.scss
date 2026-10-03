@@ -2635,6 +2635,44 @@ a:focus-visible {
   background: var(--bg-surface);
 }
 
+.camera-preview-view__identity.is-matched,
+.camera-preview-view__identity.is-recorded {
+  border-color: color-mix(in srgb, var(--green) 58%, var(--border-color-light));
+  background: color-mix(in srgb, var(--green) 5%, var(--bg-surface));
+}
+
+.camera-preview-view__identity.is-matched h3,
+.camera-preview-view__identity.is-recorded h3 {
+  color: var(--green);
+}
+
+.camera-preview-view__identity.is-pending {
+  border-color: color-mix(in srgb, #d28a19 45%, var(--border-color-light));
+}
+
+.camera-preview-view__identity.is-rejected {
+  border-color: color-mix(in srgb, #c2413b 48%, var(--border-color-light));
+}
+
+.camera-preview-view__match-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  margin-top: var(--space-2);
+  padding: 5px 9px;
+  border-radius: 99px;
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.camera-preview-view__identity.is-rejected .camera-preview-view__match-badge {
+  color: #a33a2e;
+  background: color-mix(in srgb, #c2413b 12%, transparent);
+}
+
 .camera-preview-view__frame img,
 .camera-preview-view__placeholder {
   display: grid;

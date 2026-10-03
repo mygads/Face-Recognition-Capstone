@@ -794,6 +794,19 @@ class LocalCameraPreview:
             result = None
         elif decision == "pending":
             result = {"decision": decision, "attendance_status": None}
+        elif decision in {"already_recorded", "delivery_failed"}:
+            result = {"decision": decision, "attendance_status": None}
+            if isinstance(display_name, str):
+                safe_name = "".join(char for char in display_name if char.isprintable())
+                safe_name = safe_name.strip()[:120]
+                if safe_name:
+                    result["display_name"] = safe_name
+            if isinstance(class_name, str):
+                safe_class_name = "".join(
+                    char for char in class_name if char.isprintable()
+                ).strip()[:160]
+                if safe_class_name:
+                    result["class_name"] = safe_class_name
         elif decision == "recorded" and attendance_status in {"present", "late"}:
             result = {"decision": decision, "attendance_status": attendance_status}
             if isinstance(display_name, str):
