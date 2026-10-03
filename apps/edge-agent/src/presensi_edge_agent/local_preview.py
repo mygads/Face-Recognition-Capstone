@@ -622,11 +622,12 @@ class LocalCameraPreview:
         )
         self._thread.start()
 
-    def update_frame(self, frame: object) -> None:
+    def update_frame(self, frame: object) -> bool:
         updated_at = time.monotonic()
+        minimum_interval = 1 / max(1, min(30, self.config.camera.fps))
         with self._lock:
-            if updated_at - self._last_frame_at < 0.1:
-                return
+            if updated_at - self._last_frame_at < minimum_interval:
+                return False
         try:
             import cv2
 
@@ -645,16 +646,17 @@ class LocalCameraPreview:
                 [cv2.IMWRITE_JPEG_QUALITY, self.settings.jpeg_quality],
             )
             if not ok:
-                return
+                return False
             jpeg = encoded.tobytes()
         except Exception:
             # A failed preview encode must not interrupt camera capture or inference.
-            return
+            return False
         with self._lock:
-            if updated_at - self._last_frame_at < 0.1:
-                return
+            if updated_at - self._last_frame_at < minimum_interval:
+                return False
             self._jpeg_frame = jpeg
             self._last_frame_at = updated_at
+        return True
 
     def clear_frame(self) -> None:
         with self._lock:

@@ -159,6 +159,20 @@ never reveal a name on the student display.
 Missing calibrated identity thresholds continue to pause AI_EDGE recognition;
 the preview does not loosen enrollment or attendance quality rules.
 
+### Local performance diagnostics
+
+For development only, set `PRESENSI_EDGE_PERFORMANCE_LOGS=1` before starting the
+agent. Once per ten-second window it writes an `edge_performance_window` JSON
+record with camera/preview FPS and p50/p95 milliseconds for camera reads,
+preview encoding, camera diagnostics, recognition stages, and event delivery.
+These summaries contain no student name/ID, similarity score, frame, embedding,
+or credential. The default is off. The preview encoder runs only while an
+operator has opened the preview, follows the camera's captured frame rate (up
+to 30 FPS), and the browser displays up to 15 FPS. Recognition uses a separate
+latest-frame consumer, so slow inference no longer pauses camera capture or the
+preview. Actual rates still depend on camera negotiation and host capacity.
+Keep the page open while collecting a representative window.
+
 Liveness is disabled in the sample config. That mode requires documented
 physical/session controls at the lab station. The available anti-spoof model
 candidate still has a deployment-license warning; do not enable it in a

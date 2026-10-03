@@ -167,6 +167,33 @@ presensi tidak dicatat. Setelah threshold dikalibrasi dan diterapkan, nama siswa
 hanya ditampilkan pada layar operator saat cocok dan pada layar depan setelah
 Core API mengonfirmasi presensi.
 
+### Mengatasi preview patah-patah saat development
+
+Jangan mengandalkan angka FPS yang dilaporkan driver saja. Baca `camera_read_fps`
+di ringkasan agent untuk FPS capture yang benar-benar tercapai; `actual_fps` pada
+log pembukaan kamera adalah nilai yang dilaporkan driver. Preview menggunakan
+latest-frame consumer supaya inference yang lebih lambat tidak menahan capture.
+Dashboard menampilkan sampai sekitar 15 FPS.
+
+Pada sesi pengukuran laptop development ini, kamera UVC index 0 menghasilkan
+sekitar 8,5 FPS pada 1280×720 dan 24,9 FPS pada 640×480 ketika hanya mengukur
+capture. Dengan agent aktif pada 640×480, hasilnya sekitar 29,6 FPS capture dan
+17,8 FPS frame encode preview; browser tetap menampilkan maksimal sekitar 15 FPS.
+Angka ini spesifik pada laptop/kamera tersebut dan bukan jaminan hardware lain.
+
+Untuk development, coba 640×480 terlebih dahulu bila preview tersendat. Pastikan
+oval wajah tetap hijau dan wajah pada jarak terjauh masih memenuhi ukuran minimum
+80 px. Tambahkan cahaya lembut dari depan wajah dan hindari jendela/lampu terang
+di belakang siswa. Jika wajah menjadi terlalu kecil pada 640×480, gunakan mode
+resolusi lebih tinggi atau ubah posisi/FOV kamera. Jangan menurunkan threshold
+identitas hanya untuk menutupi blur atau deteksi yang gagal.
+
+Matcher juga diukur dengan 900 identitas sintetis, masing-masing empat embedding
+128 dimensi. Vectorisasi menurunkan waktu matcher lokal dari p50 208 ms / p95
+328 ms menjadi p50 38 ms / p95 43 ms. Pengukuran ini hanya mencakup cosine
+matching pada vector sintetis; tidak mencakup kamera, model inference, jaringan,
+atau akurasi wajah nyata.
+
 Preview tetap menampilkan kamera ketika recognition belum siap. Dalam status
 `waiting_for_calibration`, belum ada nama yang ditampilkan atau recognition
 event yang dibuat. Setelah sesi aktif, template model/version cocok, dan admin

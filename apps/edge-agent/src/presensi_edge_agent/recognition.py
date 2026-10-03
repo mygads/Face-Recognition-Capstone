@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import threading
+import time
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
@@ -91,6 +93,12 @@ class LocalRecognizer:
         self.pipeline = pipeline
         self.track_id = f"camera-{device_id}"
         self._pipeline_lock = threading.RLock()
+        self._timing_observer: Callable[[str, float], None] | None = None
+
+    def set_timing_observer(
+        self, observer: Callable[[str, float], None] | None
+    ) -> None:
+        self._timing_observer = observer
 
     def process(
         self,
@@ -105,11 +113,20 @@ class LocalRecognizer:
             # Top-1 vs Top-2 correctly when the gallery has multiple templates per
             # student. Return all template matches; the engine collapses by student.
             self.pipeline.max_candidates = max(2, len(gallery))
-            return self.pipeline.process(
+            observer = self._timing_observer
+            started = time.perf_counter_ns() if observer is not None else 0
+            decision = self.pipeline.process(
                 frame,
                 gallery,
                 FrameObservation(track_id=self.track_id, captured_at=captured_at),
+                timing_observer=observer,
             )
+            if observer is not None:
+                observer(
+                    "pipeline_total_ms",
+                    (time.perf_counter_ns() - started) / 1_000_000,
+                )
+            return decision
 
     def apply_configuration(self, config: EdgeConfig) -> None:
         next_pipeline = (

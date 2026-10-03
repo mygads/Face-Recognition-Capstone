@@ -128,6 +128,16 @@ class OpenCVCamera:
                     )
         return bool(ok), frame
 
+    def reported_mode(self) -> dict[str, int | float] | None:
+        """Return the camera driver's negotiated mode when the stream is open."""
+        if self._capture is None:
+            return None
+        return {
+            "width": int(self._capture.get(self._cv2.CAP_PROP_FRAME_WIDTH)),
+            "height": int(self._capture.get(self._cv2.CAP_PROP_FRAME_HEIGHT)),
+            "fps": round(float(self._capture.get(self._cv2.CAP_PROP_FPS)), 1),
+        }
+
     def close(self) -> None:
         if self._capture is not None:
             self._capture.release()

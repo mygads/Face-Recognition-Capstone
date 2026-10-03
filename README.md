@@ -87,6 +87,23 @@ jalankan satu edge-agent native agar ia menjadi satu-satunya pemilik webcam:
 .\.venv-edge-agent\Scripts\presensi-edge-agent.exe --config apps/edge-agent/config/edge-agent.yaml run
 ```
 
+Untuk mengukur kelancaran preview di development, set log performa sebelum
+menjalankan agent. Ringkasan tiap 10 detik berisi FPS dan p50/p95 waktu tiap
+tahap; nilainya tidak memuat nama siswa, skor kecocokan, frame, embedding, atau
+token.
+
+```powershell
+$env:PRESENSI_EDGE_PERFORMANCE_LOGS = '1'
+$env:PRESENSI_EDGE_LOG_LEVEL = 'INFO'
+.\.venv-edge-agent\Scripts\presensi-edge-agent.exe --config apps/edge-agent/config/edge-agent.yaml run
+```
+
+Linux/macOS shell:
+
+```bash
+PRESENSI_EDGE_PERFORMANCE_LOGS=1 PRESENSI_EDGE_LOG_LEVEL=INFO .venv-edge-agent/bin/presensi-edge-agent --config apps/edge-agent/config/edge-agent.yaml run
+```
+
 Jika installer membuat executable pada direktori virtual environment lain,
 gunakan path executable yang ditampilkan installer. Jangan jalankan utility
 calibration atau halaman enrollment bersamaan dengan agent pada kamera fisik

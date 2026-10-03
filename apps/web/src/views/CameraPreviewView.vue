@@ -358,6 +358,7 @@ function syncFullscreenState(): void {
 
 async function pollFrame(): Promise<void> {
   if (stopped) return
+  const requestStartedAt = performance.now()
   try {
     const response = await authorizedFetch('/v1/frame.jpg')
     if (!response.ok) {
@@ -381,7 +382,9 @@ async function pollFrame(): Promise<void> {
       errorMessage.value = error instanceof Error ? error.message : 'Preview kamera tidak tersedia.'
     }
   } finally {
-    if (!stopped) frameTimer = setTimeout(() => void pollFrame(), 100)
+    const targetFrameIntervalMs = 1000 / 15
+    const waitMs = Math.max(0, targetFrameIntervalMs - (performance.now() - requestStartedAt))
+    if (!stopped) frameTimer = setTimeout(() => void pollFrame(), waitMs)
   }
 }
 
