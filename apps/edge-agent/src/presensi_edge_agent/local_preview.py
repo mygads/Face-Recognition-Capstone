@@ -70,7 +70,7 @@ class LocalCameraPreview:
         self.config = config
         self.settings = settings or config.preview
         self._lock = threading.RLock()
-        self._frame: Any | None = None
+        self._jpeg_frame: bytes | None = None
         self._last_frame_at = 0.0
         self._status: dict[str, object] = {
             "camera_open": False,
@@ -597,40 +597,10 @@ class LocalCameraPreview:
                     return
                 if self.path == "/v1/frame.jpg":
                     with preview._lock:
-                        frame = (
-                            preview._frame.copy()
-                            if preview._frame is not None
-                            else None
-                        )
-                    if frame is None:
+                        jpeg = preview._jpeg_frame
+                    if jpeg is None:
                         self._send_json(
                             503, {"error": "camera_frame_unavailable"}, origin
-                        )
-                        return
-                    try:
-                        import cv2
-
-                        height, width = frame.shape[:2]
-                        if width > preview.settings.max_width:
-                            target_height = max(
-                                1, round(height * preview.settings.max_width / width)
-                            )
-                            frame = cv2.resize(
-                                frame,
-                                (preview.settings.max_width, target_height),
-                                interpolation=cv2.INTER_AREA,
-                            )
-                        ok, encoded = cv2.imencode(
-                            ".jpg",
-                            frame,
-                            [cv2.IMWRITE_JPEG_QUALITY, preview.settings.jpeg_quality],
-                        )
-                        if not ok:
-                            raise ValueError("jpeg encoding failed")
-                        jpeg = encoded.tobytes()
-                    except (ImportError, AttributeError, ValueError):
-                        self._send_json(
-                            503, {"error": "frame_encoding_unavailable"}, origin
                         )
                         return
                     self._send(200, jpeg, "image/jpeg", origin)
@@ -655,19 +625,40 @@ class LocalCameraPreview:
     def update_frame(self, frame: object) -> None:
         updated_at = time.monotonic()
         with self._lock:
-            if updated_at - self._last_frame_at < 0.25:
+            if updated_at - self._last_frame_at < 0.1:
                 return
         try:
-            copied = cast(Any, frame).copy()
-        except AttributeError:
+            import cv2
+
+            image = cast(Any, frame)
+            height, width = image.shape[:2]
+            if width > self.settings.max_width:
+                target_height = max(1, round(height * self.settings.max_width / width))
+                image = cv2.resize(
+                    image,
+                    (self.settings.max_width, target_height),
+                    interpolation=cv2.INTER_AREA,
+                )
+            ok, encoded = cv2.imencode(
+                ".jpg",
+                image,
+                [cv2.IMWRITE_JPEG_QUALITY, self.settings.jpeg_quality],
+            )
+            if not ok:
+                return
+            jpeg = encoded.tobytes()
+        except Exception:
+            # A failed preview encode must not interrupt camera capture or inference.
             return
         with self._lock:
-            self._frame = copied
+            if updated_at - self._last_frame_at < 0.1:
+                return
+            self._jpeg_frame = jpeg
             self._last_frame_at = updated_at
 
     def clear_frame(self) -> None:
         with self._lock:
-            self._frame = None
+            self._jpeg_frame = None
             self._last_frame_at = 0.0
             self._status["camera_observation"] = {
                 "state": "unavailable",
@@ -762,6 +753,15 @@ class LocalCameraPreview:
                     value = face.get(key)
                     if isinstance(value, (int, float)) and math.isfinite(value):
                         safe_face[key] = float(value)
+                for key in (
+                    "min_face_pixels",
+                    "min_sharpness",
+                    "min_brightness",
+                    "max_brightness",
+                ):
+                    value = face.get(key)
+                    if isinstance(value, (int, float)) and math.isfinite(value):
+                        safe_face[key] = float(value)
                 safe_faces.append(safe_face)
         observation = {
             "state": state,
@@ -820,7 +820,7 @@ class LocalCameraPreview:
             self._thread = None
         with self._lock:
             self._sessions.clear()
-            self._frame = None
+            self._jpeg_frame = None
             self._last_frame_at = 0.0
 
 

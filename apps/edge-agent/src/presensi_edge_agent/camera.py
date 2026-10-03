@@ -97,6 +97,10 @@ class OpenCVCamera:
         capture.set(self._cv2.CAP_PROP_FRAME_WIDTH, self.settings.width)
         capture.set(self._cv2.CAP_PROP_FRAME_HEIGHT, self.settings.height)
         capture.set(self._cv2.CAP_PROP_FPS, self.settings.fps)
+        autofocus_property = getattr(self._cv2, "CAP_PROP_AUTOFOCUS", None)
+        if autofocus_property is not None:
+            # Best effort only; fixed-focus and unsupported cameras ignore this.
+            capture.set(autofocus_property, 1)
         if hasattr(self._cv2, "CAP_PROP_BUFFERSIZE"):
             capture.set(self._cv2.CAP_PROP_BUFFERSIZE, 1)
         if self.max_frame_size is not None:

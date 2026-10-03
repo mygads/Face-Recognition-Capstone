@@ -2714,6 +2714,15 @@ a:focus-visible {
   font-size: 0.83rem;
 }
 
+.camera-preview-view__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+  margin-top: 3px;
+  color: rgb(255 255 255 / 86%);
+  font-size: 0.7rem;
+}
+
 .camera-preview-view__guidance.is-ready {
   border-color: #32c48d;
 }

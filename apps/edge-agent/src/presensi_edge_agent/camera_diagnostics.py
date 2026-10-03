@@ -118,6 +118,12 @@ class CameraFrameInspector:
             "face_pixels": signals.get("face_size_px"),
             "sharpness": signals.get("sharpness"),
             "brightness": signals.get("brightness"),
+            "min_face_pixels": getattr(self.quality_assessor, "min_face_pixels", None),
+            "min_sharpness": getattr(
+                self.quality_assessor, "min_laplacian_variance", None
+            ),
+            "min_brightness": getattr(self.quality_assessor, "min_brightness", None),
+            "max_brightness": getattr(self.quality_assessor, "max_brightness", None),
         }
 
     @staticmethod

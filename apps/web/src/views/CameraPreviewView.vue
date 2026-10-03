@@ -24,6 +24,10 @@ type CameraFaceObservation = {
   face_pixels?: number
   sharpness?: number
   brightness?: number
+  min_face_pixels?: number
+  min_sharpness?: number
+  min_brightness?: number
+  max_brightness?: number
 }
 
 type CameraObservation = {
@@ -55,6 +59,31 @@ const previewToken = ref<string | null>(null)
 const frameUrl = ref<string | null>(null)
 const previewStatus = ref<PreviewStatus | null>(null)
 const cameraObservation = computed(() => previewStatus.value?.camera_observation ?? null)
+const cameraFaceMetrics = computed(() => {
+  const face = cameraObservation.value?.faces[0]
+  if (!face) return []
+  const metrics: string[] = []
+  if (face.face_pixels !== undefined) {
+    const minimum = face.min_face_pixels
+    metrics.push(
+      `Ukuran wajah ${Math.round(face.face_pixels)} px${minimum === undefined ? '' : ` · min ${Math.round(minimum)} px`}`,
+    )
+  }
+  if (face.sharpness !== undefined) {
+    const minimum = face.min_sharpness
+    metrics.push(
+      `Ketajaman ${face.sharpness.toFixed(1)}${minimum === undefined ? '' : ` · min ${minimum.toFixed(1)}`}`,
+    )
+  }
+  if (face.brightness !== undefined) {
+    const range =
+      face.min_brightness === undefined || face.max_brightness === undefined
+        ? ''
+        : ` · target ${Math.round(face.min_brightness)}–${Math.round(face.max_brightness)}`
+    metrics.push(`Cahaya ${face.brightness.toFixed(1)}${range}`)
+  }
+  return metrics
+})
 const diagnosticCandidate = computed(() => {
   const candidate = previewStatus.value?.diagnostic_candidate
   if (!candidate || Date.now() / 1000 - candidate.updated_at > 3) return null
@@ -295,7 +324,7 @@ async function pollFrame(): Promise<void> {
       errorMessage.value = error instanceof Error ? error.message : 'Preview kamera tidak tersedia.'
     }
   } finally {
-    if (!stopped) frameTimer = setTimeout(() => void pollFrame(), 250)
+    if (!stopped) frameTimer = setTimeout(() => void pollFrame(), 100)
   }
 }
 
@@ -308,7 +337,7 @@ async function pollStatus(): Promise<void> {
       errorMessage.value = error instanceof Error ? error.message : 'Status kamera tidak tersedia.'
     }
   } finally {
-    if (!stopped) statusTimer = setTimeout(() => void pollStatus(), 1500)
+    if (!stopped) statusTimer = setTimeout(() => void pollStatus(), 500)
   }
 }
 
@@ -402,6 +431,9 @@ onBeforeUnmount(() => {
           >
             <strong>{{ cameraObservationLabel }}</strong>
             <span>{{ cameraObservation?.message ?? 'Menunggu status kamera…' }}</span>
+            <div v-if="cameraFaceMetrics.length" class="camera-preview-view__metrics">
+              <span v-for="metric in cameraFaceMetrics" :key="metric">{{ metric }}</span>
+            </div>
           </div>
         </div>
         <div v-else class="camera-preview-view__placeholder" role="status">
