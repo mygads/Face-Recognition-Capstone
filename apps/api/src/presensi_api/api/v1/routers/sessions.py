@@ -403,7 +403,7 @@ def get_opening_preference(
 ) -> TeacherOpeningPreferenceResponse:
     user = session.get(User, principal.id)
     if user is None:
-        raise ApiProblem(404, "session_not_found", "Sesi presensi tidak ditemukan.")
+        raise ApiProblem(404, "user_not_found", "Pengguna tidak ditemukan.")
     return TeacherOpeningPreferenceResponse(
         opening_mode=cast(Literal["manual", "automatic"], user.opening_mode),
         updated_at=as_utc(user.updated_at),
@@ -423,7 +423,7 @@ def put_opening_preference(
 ) -> TeacherOpeningPreferenceResponse:
     user = session.get(User, principal.id)
     if user is None:
-        raise ApiProblem(404, "session_not_found", "Sesi presensi tidak ditemukan.")
+        raise ApiProblem(404, "user_not_found", "Pengguna tidak ditemukan.")
     before_mode = user.opening_mode
     user.opening_mode = request.opening_mode
     session.add(

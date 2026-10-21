@@ -21,6 +21,15 @@ DEFAULT_SESSION_OPENING_POLICY: dict[str, object] = {
     "auto_open_minutes_after": 15,
     "default_grace_period_minutes": 15,
 }
+AT_RISK_POLICY_SCOPE = "attendance-at-risk-policy"
+# Nilai awal usulan sekolah untuk daftar pantauan kehadiran. Angka ini BUKAN
+# angka final: wajib dikalibrasi/ditetapkan pihak sekolah melalui PUT policy
+# oleh pemegang MANAGE_SETTINGS sebelum dipakai sebagai acuan operasional.
+DEFAULT_AT_RISK_POLICY: dict[str, object] = {
+    "window_days": 30,
+    "absence_pct_threshold": 20.0,
+    "late_count_threshold": 3,
+}
 
 
 def device_scope_key(device_id: UUID) -> str:
@@ -72,6 +81,37 @@ def session_opening_policy(
         value = values.get(key)
         if type(value) is not int or not 0 <= value <= maximum:
             values[key] = default
+    return revision, values, updated_at
+
+
+def at_risk_policy(
+    session: Session,
+) -> tuple[int, dict[str, object], datetime | None]:
+    """Return the validated attendance at-risk watchlist policy.
+
+    Corrupt or out-of-range stored values fall back to
+    ``DEFAULT_AT_RISK_POLICY`` instead of failing open (a broken threshold must
+    never flag every student nor silently disable the watchlist).
+    """
+    revision, stored, updated_at = configuration_values(session, AT_RISK_POLICY_SCOPE)
+    values = {**DEFAULT_AT_RISK_POLICY, **stored}
+    window_days = values.get("window_days")
+    if type(window_days) is not int or not 1 <= window_days <= 180:
+        values["window_days"] = DEFAULT_AT_RISK_POLICY["window_days"]
+    absence_pct = values.get("absence_pct_threshold")
+    if (
+        isinstance(absence_pct, bool)
+        or not isinstance(absence_pct, (int, float))
+        or not 0 <= float(absence_pct) <= 100
+    ):
+        values["absence_pct_threshold"] = DEFAULT_AT_RISK_POLICY[
+            "absence_pct_threshold"
+        ]
+    else:
+        values["absence_pct_threshold"] = float(absence_pct)
+    late_count = values.get("late_count_threshold")
+    if type(late_count) is not int or not 0 <= late_count <= 30:
+        values["late_count_threshold"] = DEFAULT_AT_RISK_POLICY["late_count_threshold"]
     return revision, values, updated_at
 
 

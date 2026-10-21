@@ -1,31 +1,48 @@
-# Architecture overview
+# Arsitektur Presensi Face Recognition
 
-## Purpose and scope
+Pintu masuk sistem: presensi praktikum SMA. Satu Vue SPA, satu Core API FastAPI,
+satu PostgreSQL, satu pipeline recognition (`libs/recognition-core`). Dua
+deployment profile memakai core yang sama; bedanya hanya lokasi inference.
 
-Sistem mencatat presensi praktikum SMA Taruna Nusantara Kampus Cimahi. Rancangan awal menargetkan sekitar 900 siswa dan dua laboratorium. Pengalaman recognition mengutamakan walk-through multi-frame dengan fallback menghadap kamera ketika hasil ambigu atau kualitas frame belum cukup. Angka performa dan threshold adalah target yang harus divalidasi lewat benchmark lokal, bukan klaim awal.
+```text
+kamera lab -> edge-agent/STB -> Core API + PostgreSQL -> dashboard guru
+                (AI_EDGE: inference di PC lab | AI_CENTRAL: inference di server pusat)
+```
 
-Sistem mendukung dua deployment profile. Keduanya memakai satu Vue SPA, satu Core API/domain, satu PostgreSQL, dan satu recognition pipeline di `libs/recognition-core`. Perbedaan utamanya adalah lokasi pemrosesan frame.
+`recognition_events` mencatat keluaran pengenalan (audit, selalu disimpan).
+`attendance_records` hanya lahir setelah Core API memvalidasi sesi aktif,
+snapshot roster, device, grace period, dan idempotency. Hasil AI ambigu tidak
+pernah auto-accept: kembalikan `retry_frontal` / `NEED_FRONTAL_RETRY`.
 
-## Komponen bersama
+Keputusan tim 2026-10-21: **`AI_EDGE` adalah profile default** (inference di PC
+tiap lab). `STB_GATEWAY` + `AI_CENTRAL` didukung penuh dan opsional untuk lab
+tanpa PC memadai. Pilihan akhir per lab wajib dibandingkan pada hardware nyata
+(latency p50/p95, throughput, resource, biaya); angka asumsi bukan hasil
+benchmark. Lihat [ADR-001](../adr/ADR-001-shared-recognition-core.md),
+[ADR-002](../adr/ADR-002-session-opening-and-camera-preview-safety.md), dan
+[ADR-003](../adr/ADR-003-per-teacher-opening-mode-and-manual-override.md).
 
-| Komponen | Tanggung jawab |
-| --- | --- |
-| `apps/web` | Vue 3 SPA untuk pengguna sekolah. Internal dashboard; tidak membutuhkan SSR/SEO. |
-| `apps/api` | FastAPI Core API, OpenAPI contract, aturan session/roster/attendance, dan akses ke database. Ini otoritas domain. |
-| PostgreSQL | Master data, session/roster, encrypted face-template vectors, recognition events, attendance records, dan audit. Embeddings disimpan sebagai AES-256-GCM ciphertext; pgvector tidak dipakai. |
-| `libs/recognition-core` | Pipeline Python yang dapat dipanggil dari edge-agent atau AI service; bukan aplikasi web/API. |
-| `apps/edge-agent` | Camera capture, health, cache, transport, dan offline queue sesuai profil. |
-| `apps/ai-service` | Host inference untuk profil Central; menggunakan recognition-core, bukan salinan pipeline. |
+## Matriks deployment
 
-`recognition_events` mencatat keluaran pengenalan. `attendance_records` hanya dibuat setelah Core API memvalidasi session aktif, roster snapshot, device, grace period, dan idempotency. Hasil AI yang ambigu harus menjadi retry/fallback, bukan otomatis menjadi presensi final.
+| Bentuk | Profile recognition | Di server | Di kamera |
+| --- | --- | --- | --- |
+| VPS + PC edge lab | AI_EDGE | PostgreSQL, Core API, Vue statis/reverse proxy | Native AI_EDGE edge-agent + YuNet/SFace per PC Ubuntu |
+| Server pusat + STB | AI_CENTRAL | PostgreSQL, Core API, Vue, AI service pusat | Native STB_GATEWAY per STB ARM64; tanpa model identitas |
+| Satu komputer | Biasanya AI_EDGE (AI_CENTRAL bisa diuji) | Compose lokal + web | Native edge-agent membuka webcam komputer yang sama |
 
-Pembukaan sesi dapat diatur sebagai `manual` (default, guru membuka sesi) atau `automatic` (Core API membuka sesi dari jadwal dalam jendela yang ditetapkan admin, maksimal 15 menit sebelum/sesudah jam mulai). Kedua cara membuat snapshot roster yang sama dan menutup sesi pada jam akhir jadwal. Grace period otomatis dihitung dari jam mulai jadwal; sesi manual mempertahankan grace period sejak guru membuka sesi. Keputusan tim 2026-10-21 memindahkan mode ke pengaturan per guru (`automatic`/`manual` per guru, default `manual`) plus status `manual_override` untuk sesi yang dibuka paksa guru di luar jendela otomatis — auto-close tetap berlaku. Lihat [ADR-003](../adr/ADR-003-per-teacher-opening-mode-and-manual-override.md) dan [attendance-sessions.md](attendance-sessions.md).
+Single-computer adalah topologi development/demo yang memakai salah satu
+profile, bukan profile recognition ketiga. Untuk development, Docker menampung
+PostgreSQL/Core API, Vite native untuk HMR, edge-agent/webcam native. Target
+deployment PC edge dan semua server pusat: Ubuntu. Windows hanya untuk
+development lokal dan demo supervised. Detail runbook: [deployment](../deployment.md).
 
-Admin dapat menjeda kamera perangkat dari registry tanpa menonaktifkan registry atau mencabut credential agent. Perangkat menerima desired state saat polling konfigurasi, melepas camera device ketika dijeda, dan Core API menolak recognition event baru ketika kamera sedang dijeda. Perubahan diaudit.
+## Profile A — AI_EDGE
 
-## Profile A — AI di Edge PC (`AI_EDGE`)
-
-Setiap laboratorium menghubungkan kamera UVC ke PC edge. Edge agent menjalankan pipeline dari `recognition-core` secara lokal, lalu mengirim recognition event ke Core API. Agent dapat memakai roster dan template untuk sesi aktif yang dicache. Saat API sementara tidak terjangkau, event disimpan dengan UUID idempotency key untuk dikirim ulang setelah koneksi pulih; final attendance tetap mengikuti validasi domain Core API.
+Setiap lab menghubungkan kamera UVC ke PC edge. Agent menjalankan pipeline
+`recognition-core` lokal, memakai gallery sesi aktif yang dicache, lalu mengirim
+recognition event ke Core API dengan UUID idempotency (`event_id`) agar retry
+jaringan aman. Saat API putus sementara, event antre di SQLite outbox; gallery
+memory kedaluwarsa dan agent fail-closed sampai cache segar tiba.
 
 ```mermaid
 flowchart LR
@@ -36,16 +53,20 @@ flowchart LR
   API --> DB[(PostgreSQL)]
 ```
 
-Keunggulan profil ini untuk pilot dua lab adalah inference dan frame tetap di PC lab, latency transfer lebih rendah, serta recognition dapat terus berjalan sementara jika koneksi ke API putus dan cache masih valid. Biayanya adalah pemeliharaan runtime/model dan pemantauan setiap PC.
+## Profile B — STB camera gateway + AI_CENTRAL
 
-## Profile B — STB camera gateway + AI central (`STB_GATEWAY` + `AI_CENTRAL`)
-
-STB ARM64 menjalankan agent ringan tanpa recognition model lokal. Konfigurasi contoh memakai capture UVC 640×360 pada 10 FPS, downsampled motion/quality gate, cooldown, dan periodic fallback. Gateway menemukan sesi aktif melalui Core API untuk laboratorium perangkat dan menolak kondisi lebih dari satu sesi aktif. Ketika ada kandidat, gateway mengirim paling banyak lima JPEG dalam burst melalui LAN tepercaya ke AI service pusat. AI service mengambil gallery sesi aktif dari Core API dengan kredensial perangkat, menjalankan pipeline `recognition-core` yang sama, lalu mengembalikan keputusan terbatas ke gateway untuk dikirim sebagai event ke Core API. Frame bersifat transient dan tidak disimpan secara default.
+STB ARM64 menjalankan agent ringan tanpa model recognition lokal: capture UVC
+640×360 pada 10 FPS (batas runtime 1280×720/15 FPS), motion/quality gate,
+cooldown, lalu burst maksimal 5 JPEG melalui LAN tepercaya ke AI service pusat.
+AI service mengambil gallery sesi aktif dari Core API dengan kredensial
+perangkat, menjalankan `recognition-core` yang sama, mengembalikan keputusan
+terbatas ke gateway untuk dikirim sebagai event ke Core API. Frame transient,
+tidak disimpan default. Gallery AI Central hanya di memory dengan expiry.
 
 ```mermaid
 flowchart LR
   Camera[Webcam lab] --> STB[Edge Agent di STB]
-  STB -->|frame burst melalui LAN| AI[Central AI Service]
+  STB -->|frame burst via LAN| AI[Central AI Service]
   AI --> Core[libs/recognition-core]
   AI -->|hasil recognition| STB
   STB -->|recognition event| API[FastAPI Core API]
@@ -53,81 +74,113 @@ flowchart LR
   API --> DB[(PostgreSQL)]
 ```
 
-Profil ini memusatkan pengelolaan model dan mengurangi kebutuhan PC kuat per lab. Recognition memerlukan LAN dan server AI yang tersedia; frame wajah berpindah di jaringan lokal sehingga pengamanan transport dan akses perangkat diperlukan. Gallery AI Central disimpan di memory saja, dengan expiry dibatasi waktu cache dan jadwal. Kredensial perangkat dapat diperbarui otomatis jika token file dikonfigurasi dan diamankan; sistem operasi tetap perlu melindungi berkas itu.
-
 ## Batas domain dan aliran data
 
-- Saat sesi aktif, matching dibatasi pada snapshot roster sesi; threshold harus dikalibrasi dari data uji lokal.
-- Sebelum/sesudah sesi pada AI_EDGE, tampilan preview boleh memakai gallery sementara yang dibatasi ke siswa bertemplate di kelas dengan jadwal valid pada hari dan laboratorium tersebut. Gallery ini hanya hidup di memory, dibatasi masa cache, dan tidak pernah membuat recognition event atau attendance record. Selama sesi aktif, agent wajib kembali ke snapshot roster sesi.
-- Recognition memakai bukti beberapa frame dan margin Top-1/Top-2. Hasil ambigu meminta retry frontal.
-- AI/edge mengirim recognition event dengan `event_id` stabil agar retry jaringan idempotent.
-- Core API menolak event di luar sesi atau roster, mencegah presensi ganda, menentukan status hadir/terlambat, dan mencatat audit.
-- Frame mentah diproses sementara dan tidak disimpan secara default. Embedding template disimpan sebagai ciphertext AES-256-GCM. Log dan respons operator tidak berisi gambar, embedding, token, password, atau secret; gallery berisi embedding terdekripsi hanya untuk perangkat terautentikasi pada sesi/lab aktif.
+- Matching dibatasi snapshot roster sesi aktif bila memungkinkan; threshold
+  dikalibrasi dari data uji lokal (tanpa default internet).
+- Sebelum/sesudah sesi pada AI_EDGE, preview boleh memakai gallery sementara
+  yang dibatasi siswa bertemplate di kelas dengan jadwal valid hari itu di lab
+  tersebut. Gallery ini hanya di memory, masa cache dibatasi, tidak pernah
+  membuat event/record. Saat sesi aktif, agent wajib kembali ke snapshot roster.
+- Recognition memakai bukti multi-frame dan margin Top-1/Top-2. Ambigu → retry
+  frontal, bukan presensi final.
+- Frame mentah diproses sementara, tidak disimpan default. Embedding template
+  disimpan sebagai ciphertext AES-256-GCM. Log dan respons operator bebas
+  gambar, embedding, token, password, dan secret.
+- Template wajah menyimpan nama dan versi model. Pilihan model butuh tinjauan
+  lisensi dan validasi lokal. Data siswa nyata/minor tidak dipakai di
+  cloud/CI dan tidak masuk repository.
 
-## Preview kamera AI_EDGE
+## Preview kamera pra-sesi (15 menit)
 
-Preview lokal operator yang terautentikasi menampilkan kotak wajah dari pemeriksa kualitas kamera dan kandidat nama/kelas pada layar. Ketika tidak ada sesi aktif, gallery hanya mencakup kelas yang dijadwalkan pada lab tersebut hari itu, dalam jendela mulai 15 menit sebelum jadwal sampai akhir jadwal. Nama ditandai sebagai kandidat; skor cosine bukan probabilitas atau perkiraan akurasi. Frame, template terdekripsi, dan skor hanya sementara di memory. Jalur preview tidak pernah membuat recognition event atau attendance record. Ketika sesi aktif, hanya snapshot roster sesi yang dipakai; event presensi hanya dikirim jika kebijakan pengenalan terkalibrasi lolos dan Core API mengonfirmasi hasil.
+Preview lokal operator terautentikasi (ADMIN/LABORANT) menampilkan kotak wajah
+dari pemeriksa kualitas kamera dan kandidat nama/kelas. Bila tidak ada sesi
+aktif, gallery hanya mencakup kelas yang dijadwalkan di lab itu hari tersebut,
+dalam jendela mulai **15 menit sebelum jadwal sampai akhir jadwal**. Nama
+ditandai kandidat; cosine adalah skor kecocokan, bukan probabilitas. Jalur
+preview tidak pernah membuat recognition event atau attendance record. Saat
+sesi aktif, hanya snapshot roster sesi yang dipakai.
 
-Untuk AI_EDGE, admin memakai satu pengaturan kualitas capture bersama bagi enrollment Core API dan PC edge. Dashboard menerbitkan enrollment global dan kebijakan pengenalan per perangkat sebagai versi terpisah, dengan quality yang sama. Filter gambar ringan STB_GATEWAY tidak terpengaruh.
-- Data biometrik siswa nyata/minor tidak digunakan di cloud/CI dan tidak dimasukkan ke repository.
-- Template wajah menyimpan nama dan versi model. Pilihan model/pretrained weight memerlukan tinjauan lisensi dan validasi lokal sebelum dipakai.
+## Peta repository
 
-## UI baseline: Gentelella + Vue
+| Path | Isi |
+| --- | --- |
+| `apps/web` | Vue UI; type client dari OpenAPI |
+| `apps/api` | HTTP schema/router, permission, service SQLAlchemy, config migrasi |
+| `apps/edge-agent` | Capture UVC native, runtime AI_EDGE dan STB_GATEWAY |
+| `apps/ai-service` | Inference frame terpusat |
+| `libs/recognition-core` | Protokol domain, pipeline, temporal decision |
+| `infra/deployment` | Compose production dan bootstrap DB |
+| `infra/docker` | Image service |
+| `scripts` | Task runner dev/check/regression; `start-local.py` entry point |
+| `docs/architecture` | Kontrak sistem dan keputusan fitur |
+| `tests` | Harness regresi sintetis, AI/deployment benchmark |
 
-`apps/web` adalah satu-satunya aplikasi frontend: Vue 3 + Vite + TypeScript. Baseline visual dipin ke Gentelella v4.1.1. Gentelella dipakai untuk design tokens, SCSS, layout, iconography, dan pola komponen; perilaku UI dibangun sebagai komponen Vue agar Vue tetap mengelola DOM secara reaktif. Jangan menjalankan skrip vanilla template yang memutasi DOM milik Vue, jangan menambahkan dashboard/template frontend kedua, dan jangan mem-port semua halaman contoh.
+## Mulai lokal
 
-UI ditujukan untuk dashboard internal yang responsif di desktop dan tablet. Navigasi hanya memuat halaman yang diimplementasikan, dengan visibilitas menu dan route guard berbasis role; form menampilkan validation/error state.
+```powershell
+# Windows
+py -3 scripts/start-local.py
+# Ubuntu
+python3 scripts/start-local.py
+```
 
-Sumber: [Gentelella getting started](https://gentelella.colorlib.com/docs/getting-started/) dan [repository ColorlibHQ](https://github.com/ColorlibHQ/gentelella). Pertahankan atribusi dan lisensi MIT ketika aset/template didistribusikan.
+Perintah ini membuat `.env` lokal, menjalankan PostgreSQL/Core API, migrasi
+Alembic + seed role, bootstrap admin, memasang dependency web, dan menjalankan
+Vite (`http://127.0.0.1:5173`, API `http://127.0.0.1:8000`). Login awal:
+`admin@local.test` / `1234abcd` (override via `PRESENSI_BOOTSTRAP_PASSWORD`),
+wajib ganti password (min 12 karakter) saat login pertama. Tiga penyebab login
+gagal paling sering: password lama yang salah, bootstrap tidak me-reset akun
+yang sudah ada, dan token awal yang dibatasi endpoint ganti password.
 
-## Pilihan deployment awal
+## Alur enrollment dan session-to-attendance
 
-Keputusan tim 2026-10-21: **`AI_EDGE` adalah profil default** — recognition
-berjalan di PC tiap laboratorium. `STB_GATEWAY` + `AI_CENTRAL` tetap profil yang
-didukung penuh (satu recognition-core, satu API/domain yang sama) dan bersifat
-opsional untuk lab tanpa PC yang memadai. Desain v2 merekomendasikan pilot
-AI_EDGE karena saat ini hanya ada dua lab dan latency walk-through menjadi
-prioritas. Pilihan akhir per lab harus dibandingkan pada hardware nyata melalui
-latency p50/p95, throughput, resource, biaya, dan kebutuhan operasional; angka
-asumsi tidak boleh ditulis sebagai hasil benchmark.
+```mermaid
+sequenceDiagram
+  participant Teacher
+  participant Web as Vue
+  participant API as Core API
+  participant DB as PostgreSQL
+  participant Device as Edge / STB
+  participant AI as recognition-core / AI service
+  Teacher->>Web: Buka sesi terjadwal
+  Web->>API: Open session
+  API->>DB: Buat sesi + snapshot roster
+  Device->>API: Discovery/cache dengan kredensial device
+  API-->>Device: Gallery sesi aktif + expiry
+  Device->>AI: Sampel frame / bounded burst
+  AI-->>Device: Metadata kandidat saja
+  Device->>API: Recognition event + event_id
+  API->>DB: Simpan evidence, validasi, buat presensi final bila sah
+  API-->>Web: Update WebSocket dashboard
+```
 
-## Development environment
+Enrollment: operator ADMIN/LABORANT memilih kelas + siswa, capture 4 frame
+setelah countdown 3 detik, API memproses YuNet/SFace, menolak frame
+buruk/multi-wajah, menyimpan 3–5 embedding terbaik terenkripsi AES-256-GCM.
+Raw capture dibuang. Revokasi menghapus SEMUA template aktif siswa sekaligus.
 
-API v1 contract and frontend client generation follow the strategy in [api-contract.md](api-contract.md).
+## Baseline UI
 
-`docker-compose.yml` menjalankan PostgreSQL dan Core API secara default. PostgreSQL harus healthy sebelum API dimulai; healthcheck API memeriksa `/health`. AI service adalah service terpisah pada profile Compose `central`, dan web dapat dijalankan native untuk HMR atau sebagai service profile `web-container`. Edge agent/webcam tidak dijalankan di Compose karena akses kamera bergantung pada OS dan device passthrough.
+`apps/web` satu-satunya frontend: Vue 3 + Vite + TypeScript. Baseline visual
+Gentelella v4.1.1 dipakai sebagai design token (SCSS, layout, ikon, pola
+komponen); perilaku UI dibangun sebagai komponen Vue — jangan menjalankan
+script vanilla template yang memutasi DOM milik Vue. Router memakai dua branch
+layout: `/auth` (login) dan `/app` (area terautentikasi). Tema tersimpan
+sebagai `presensi.theme` di local storage, fallback ke preferensi OS. Menu
+sidebar hanya memuat rute yang sudah diimplementasikan; atribusi dan lisensi
+MIT Gentelella dipertahankan (lihat `docs/licenses/`).
 
-Development Compose memakai `.env` lokal dari `.env.example`, mengekspos port hanya pada loopback, dan menyimpan data PostgreSQL di named volume. `scripts/dev.py` menyediakan `dev-up`, `dev-down`, dan `test` untuk Windows/Linux.
+## Status implementasi
 
-The native `AI_EDGE` and `STB_GATEWAY` agents, including their provider and
-session-configuration limitations, are documented in [edge-agent.md](edge-agent.md).
-Both remain outside default Compose because USB camera passthrough and driver
-selection are host-specific.
+| Area | Status |
+| --- | --- |
+| Master data, roster, jadwal, sesi, import, device registry, report | Tersedia; lihat sisa tugas di backlog |
+| Enrollment, template terenkripsi, revoke/re-enroll | Tersedia |
+| AI_EDGE dan AI_CENTRAL via recognition-core + otoritas Core API | Tersedia; kalibrasi threshold menyusul |
+| Presensi manual guru, opening_mode per guru, manual_override | Tersedia |
+| Kalibrasi threshold lokal, field test, deployment-benchmark | Belum — `MANUAL HARDWARE TEST REQUIRED` |
 
-## Physical deployment shapes
-
-The two profiles above can be deployed in three physical layouts. A single
-computer runs one of the existing profiles; it does not add another recognition
-pipeline. For a laptop, use Windows or Ubuntu in development mode with Docker
-for PostgreSQL/Core API, native Vite, and a native camera agent. For deployed
-AI_EDGE PCs and the AI_CENTRAL server, the documented OS target is Ubuntu. The
-STB runs a supported ARM64 Linux image; Armbian minimal/server is the documented
-baseline, while CasaOS is optional and not a tested agent runtime.
-
-Development and deployment are separate operating modes even on a single
-computer. Development uses hot reload and generated local secrets. Ubuntu
-single-host deployment uses production Compose, a built Vue SPA behind a local
-reverse proxy, protected secrets, migrations and backups, and a native systemd
-camera agent. This repository does not provide a hardened all-in-one Windows
-production installer. See the [deployment index](../deployment/README.md),
-[single-computer guide](../deployment/single-pc.md), and
-[domain/tunnel guide](../deployment/cloudflare-tunnel.md).
-
-The `AI_CENTRAL` inference contract, device authentication, bounded image handling,
-and memory-only session cache lifecycle are documented in [ai-service.md](ai-service.md).
-
-## Status implementasi dan pekerjaan tersisa
-
-Skema PostgreSQL didefinisikan lewat SQLAlchemy 2 dan Alembic; migration dan seed role dijalankan eksplisit. API memakai Argon2, short-lived JWT operator, kredensial perangkat terpisah, permission checks, dan scope sumber daya pada handler yang sudah diimplementasikan. Attendance decision, sesi/roster, device gallery, enrollment dengan embedding terenkripsi, dan reporting tersedia. Beberapa operasi account/settings dan attendance listing tetap contract placeholder HTTP 501 setelah autentikasi/otorisasi; teacher correction saat ini hanya membuat permintaan pending dan belum memiliki approval workflow; endpoint tandai-manual-langsung untuk kegagalan deteksi belum ada (rencana di [attendance-decisions.md](attendance-decisions.md)). Detail akses tercatat di [authentication.md](authentication.md) dan [api-contract.md](api-contract.md).
-
-Threshold recognition belum dikalibrasi pada dataset/hardware sekolah. Penggunaan liveness tetap bergantung pada clearance lisensi model, dan akurasi/latency perangkat belum diverifikasi lewat field test fisik. Gallery lokal AI_EDGE berada di memory dan agent memerlukan koneksi baru setelah restart offline; event outbox tetap durable. Lihat [model provenance](../models.md), [field-test protocol](../test-plans/walkthrough-field-test.md), dan [deployment runbooks](../deployment/).
+Tabel sisa tugas dan riwayat: [backlog](../backlog.md). Detail tiap subsistem:
+[fondasi backend](fondasi-backend.md), [siklus presensi](siklus-presensi.md),
+[AI inferensi](ai-inferensi.md), [perangkat dan konfigurasi](perangkat-dan-konfigurasi.md).

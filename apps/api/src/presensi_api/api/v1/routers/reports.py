@@ -2,6 +2,7 @@ from datetime import UTC, datetime, time, timedelta
 from io import BytesIO, StringIO
 from typing import Annotated, Any, cast
 from urllib.parse import quote
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query, Response
@@ -17,6 +18,12 @@ from presensi_api.api.security.dependencies import require_permissions
 from presensi_api.api.security.roles import AuthenticatedUser, Permission, RoleCode
 from presensi_api.api.v1.schemas.common import Pagination
 from presensi_api.api.v1.schemas.reports import (
+    AtRiskPage,
+    AtRiskPolicy,
+    AtRiskPolicyResponse,
+    AtRiskQuery,
+    AtRiskReason,
+    AtRiskStudentRow,
     AttendanceReportExportQuery,
     AttendanceReportPage,
     AttendanceReportQuery,
@@ -34,11 +41,19 @@ from presensi_api.db.models import (
     User,
 )
 from presensi_api.db.session import get_db_session
+from presensi_api.runtime_configuration import (
+    AT_RISK_POLICY_SCOPE,
+    at_risk_policy,
+    save_configuration,
+)
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 DbSession = Annotated[Session, Depends(get_db_session)]
 ReportReader = Annotated[
     AuthenticatedUser, Depends(require_permissions(Permission.REPORTS_READ))
+]
+AtRiskPolicyManager = Annotated[
+    AuthenticatedUser, Depends(require_permissions(Permission.MANAGE_SETTINGS))
 ]
 MAX_EXPORT_ROWS = 50_000
 
@@ -212,6 +227,239 @@ def get_attendance_report(
         absent_count=counts.get("absent", 0),
         excused_count=counts.get("excused", 0),
         not_recorded_count=counts.get("not_recorded", 0),
+        generated_at=datetime.now(UTC),
+    )
+
+
+@router.get(
+    "/attendance/at-risk/policy",
+    response_model=AtRiskPolicyResponse,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Read the attendance at-risk watchlist policy",
+)
+def get_at_risk_policy(
+    principal: ReportReader,
+    db: DbSession,
+) -> AtRiskPolicyResponse:
+    """Return the stored watchlist thresholds (school-calibrated operational
+    configuration, not a sanction rule)."""
+    revision, policy, updated_at = at_risk_policy(db)
+    return AtRiskPolicyResponse(
+        **AtRiskPolicy.model_validate(policy).model_dump(),
+        revision=revision,
+        updated_at=_as_utc(updated_at) if updated_at is not None else None,
+    )
+
+
+@router.put(
+    "/attendance/at-risk/policy",
+    response_model=AtRiskPolicyResponse,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Publish the attendance at-risk watchlist policy",
+)
+def put_at_risk_policy(
+    request: AtRiskPolicy,
+    db: DbSession,
+    actor: AtRiskPolicyManager,
+) -> AtRiskPolicyResponse:
+    """Persist school-calibrated watchlist thresholds. The change is audited
+    through the runtime-configuration version log."""
+    version = save_configuration(
+        db,
+        scope_key=AT_RISK_POLICY_SCOPE,
+        settings=request.model_dump(mode="json"),
+        actor=actor,
+    )
+    return AtRiskPolicyResponse(
+        **request.model_dump(),
+        revision=version.revision,
+        updated_at=_as_utc(version.created_at),
+    )
+
+
+def _at_risk_window(query: AtRiskQuery) -> tuple[datetime, datetime]:
+    timezone = ZoneInfo(query.timezone_name)
+    now = datetime.now(UTC)
+    local_start = now.astimezone(timezone) - timedelta(days=query.window_days)
+    start = datetime.combine(local_start.date(), time.min, tzinfo=timezone).astimezone(
+        UTC
+    )
+    return start, now
+
+
+def _at_risk_statement(
+    query: AtRiskQuery,
+    principal: AuthenticatedUser,
+    start: datetime,
+    end: datetime,
+) -> Select[Any]:
+    statement = (
+        select(
+            SessionStudent.student_id.label("student_id"),
+            SessionStudent.student_number_snapshot.label("student_number"),
+            SessionStudent.full_name_snapshot.label("full_name"),
+            SchoolClass.name.label("class_name"),
+            AttendanceSession.id.label("session_id"),
+            AttendanceSession.status.label("session_status"),
+            AttendanceSession.opened_at.label("opened_at"),
+            AttendanceSession.closed_at.label("closed_at"),
+            AttendanceRecord.status.label("record_status"),
+            AttendanceRecord.recorded_at.label("recorded_at"),
+        )
+        .select_from(SessionStudent)
+        .join(
+            AttendanceSession,
+            AttendanceSession.id == SessionStudent.session_id,
+        )
+        .join(
+            PracticumSchedule,
+            PracticumSchedule.id == AttendanceSession.practicum_schedule_id,
+        )
+        .join(SchoolClass, SchoolClass.id == PracticumSchedule.class_id)
+        .outerjoin(
+            AttendanceRecord,
+            and_(
+                AttendanceRecord.session_id == SessionStudent.session_id,
+                AttendanceRecord.student_id == SessionStudent.student_id,
+            ),
+        )
+        .where(
+            AttendanceSession.status != "cancelled",
+            AttendanceSession.opened_at >= start,
+            AttendanceSession.opened_at <= end,
+        )
+    )
+    if query.class_id is not None:
+        statement = statement.where(PracticumSchedule.class_id == query.class_id)
+    if query.laboratory_id is not None:
+        statement = statement.where(
+            PracticumSchedule.laboratory_id == query.laboratory_id
+        )
+    if RoleCode.TEACHER in principal.roles and RoleCode.ADMIN not in principal.roles:
+        statement = statement.where(PracticumSchedule.teacher_user_id == principal.id)
+    return cast(Select[Any], statement)
+
+
+def _aggregate_at_risk_rows(rows: list[Row[Any]]) -> list[dict[str, Any]]:
+    buckets: dict[UUID, dict[str, Any]] = {}
+    for row in rows:
+        mapping = row._mapping
+        student_id = cast(UUID, mapping["student_id"])
+        bucket = buckets.get(student_id)
+        if bucket is None:
+            bucket = {
+                "student_id": student_id,
+                "student_number": mapping["student_number"],
+                "full_name": mapping["full_name"],
+                "class_name": mapping["class_name"],
+                "latest_opened_at": None,
+                "total_sessions": 0,
+                "absent_count": 0,
+                "late_count": 0,
+                "last_absent_at": None,
+            }
+            buckets[student_id] = bucket
+        bucket["total_sessions"] += 1
+        opened_at = _as_utc(cast(datetime, mapping["opened_at"]))
+        assert opened_at is not None
+        if bucket["latest_opened_at"] is None or opened_at > bucket["latest_opened_at"]:
+            bucket["latest_opened_at"] = opened_at
+            bucket["class_name"] = mapping["class_name"]
+        record_status = mapping["record_status"]
+        session_status = mapping["session_status"]
+        absent_at: datetime | None = None
+        if record_status == "absent":
+            absent_at = (
+                _as_utc(cast(datetime | None, mapping["recorded_at"]))
+                or _as_utc(cast(datetime | None, mapping["closed_at"]))
+                or opened_at
+            )
+        elif record_status is None and session_status == "closed":
+            # A closed session without a record means the student never
+            # checked in. Open sessions (not_recorded) never count as absent
+            # so a running session cannot flag its students.
+            absent_at = (
+                _as_utc(cast(datetime | None, mapping["closed_at"])) or opened_at
+            )
+        elif record_status == "late":
+            bucket["late_count"] += 1
+        if absent_at is not None:
+            bucket["absent_count"] += 1
+            if bucket["last_absent_at"] is None or absent_at > bucket["last_absent_at"]:
+                bucket["last_absent_at"] = absent_at
+    return list(buckets.values())
+
+
+@router.get(
+    "/attendance/at-risk",
+    response_model=AtRiskPage,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="List students on the attendance watchlist",
+)
+def list_at_risk_students(
+    query: Annotated[AtRiskQuery, Query()],
+    principal: ReportReader,
+    db: DbSession,
+) -> AtRiskPage:
+    """Return students whose absence rate or lateness reaches the effective
+    thresholds, for manual follow-up by teachers/counselors.
+
+    This is a human watchlist, not a sanction: it never blocks attendance, it
+    sends no external notifications, and every flag cites the effective
+    thresholds so it cannot look like an opaque automated decision.
+    """
+    revision, policy, _updated_at = at_risk_policy(db)
+    effective_absence = (
+        query.absence_pct
+        if query.absence_pct is not None
+        else float(cast(float, policy["absence_pct_threshold"]))
+    )
+    effective_late = (
+        query.late_count
+        if query.late_count is not None
+        else int(cast(int, policy["late_count_threshold"]))
+    )
+    start, end = _at_risk_window(query)
+    statement = _at_risk_statement(query, principal, start, end)
+    buckets = _aggregate_at_risk_rows(list(db.execute(statement).all()))
+    flagged: list[AtRiskStudentRow] = []
+    for bucket in buckets:
+        total = bucket["total_sessions"]
+        absent = bucket["absent_count"]
+        absence_pct = round(absent * 100.0 / total, 2) if total else 0.0
+        reasons: list[AtRiskReason] = []
+        if absence_pct >= effective_absence:
+            reasons.append("tingkat_absen")
+        if bucket["late_count"] >= effective_late:
+            reasons.append("sering_terlambat")
+        if not reasons:
+            continue
+        flagged.append(
+            AtRiskStudentRow(
+                student_id=bucket["student_id"],
+                student_number=bucket["student_number"],
+                full_name=bucket["full_name"],
+                class_name=bucket["class_name"],
+                total_sessions=total,
+                absent_count=absent,
+                late_count=bucket["late_count"],
+                absence_pct=absence_pct,
+                last_absent_at=bucket["last_absent_at"],
+                reasons=reasons,
+            )
+        )
+    flagged.sort(key=lambda item: (-item.absence_pct, -item.late_count, item.full_name))
+    total_flagged = len(flagged)
+    page_items = flagged[query.offset : query.offset + query.limit]
+    return AtRiskPage(
+        items=page_items,
+        pagination=Pagination(
+            total=total_flagged, limit=query.limit, offset=query.offset
+        ),
+        effective_window_days=query.window_days,
+        effective_absence_pct_threshold=effective_absence,
+        effective_late_count_threshold=effective_late,
+        policy_revision=revision,
         generated_at=datetime.now(UTC),
     )
 

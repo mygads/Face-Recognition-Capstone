@@ -1,7 +1,7 @@
 # Kamera dan model lokal
 
 Untuk pembagian konfigurasi AI_EDGE/STB, pengaturan mana yang dapat diubah,
-dan batas dashboard saat ini, lihat [panduan konfigurasi device](architecture/device-configuration.md).
+dan batas dashboard saat ini, lihat [panduan konfigurasi device](architecture/perangkat-dan-konfigurasi.md).
 
 Panduan ini membedakan tiga hal yang sering terlihat sama: kamera di halaman
 enrollment browser, kamera untuk pengenalan saat presensi, utility kalibrasi,
@@ -259,8 +259,8 @@ Jalankan development central stack dengan:
 python scripts/start-local.py --central
 ```
 
-Untuk production, lihat runbook [AI_EDGE](deployment/ai-edge.md)
-atau [AI_CENTRAL + STB](deployment/ai-central-stb.md) untuk provisioning
+Untuk production, lihat runbook [AI_EDGE](deployment.md#3-runbook-ai_edge-server--pc-lab)
+atau [AI_CENTRAL + STB](deployment.md#4-runbook-ai_central--stb_gateway) untuk provisioning
 credential, service systemd, dan upgrade.
 
 Untuk produksi, systemd menjalankan agent headless setelah boot. Pada AI_EDGE,

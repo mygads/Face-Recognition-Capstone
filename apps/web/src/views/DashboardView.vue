@@ -65,7 +65,8 @@ function activityDetail(activity: SessionRecentActivity): string {
 }
 
 function sessionLabel(session: AttendanceSession): string {
-  return `${session.subject} · ${session.class_name} · ${session.laboratory_name}`
+  const base = `${session.subject} · ${session.class_name} · ${session.laboratory_name}`
+  return session.status === 'manual_override' ? `${base} · Override manual` : base
 }
 
 function clearReconnectTimer(): void {
@@ -149,10 +150,17 @@ async function loadDashboard(): Promise<void> {
   isLoading.value = true
   pageError.value = null
   try {
-    const page = await listAttendanceSessions({ status: 'active', limit: 100, offset: 0 })
-    sessions.value = page.items
-    const retainedSession = page.items.find((item) => item.id === selectedSessionId.value)
-    const nextSessionId = (retainedSession ?? page.items[0])?.id ?? ''
+    const [activePage, overridePage] = await Promise.all([
+      listAttendanceSessions({ status: 'active', limit: 100, offset: 0 }),
+      listAttendanceSessions({ status: 'manual_override', limit: 100, offset: 0 }),
+    ])
+    const merged = new Map<string, AttendanceSession>()
+    for (const item of [...activePage.items, ...overridePage.items]) {
+      if (!merged.has(item.id)) merged.set(item.id, item)
+    }
+    sessions.value = [...merged.values()]
+    const retainedSession = sessions.value.find((item) => item.id === selectedSessionId.value)
+    const nextSessionId = (retainedSession ?? sessions.value[0])?.id ?? ''
     await selectSession(nextSessionId)
   } catch (error) {
     pageError.value = formatError(error)
@@ -189,8 +197,12 @@ onBeforeUnmount(() => {
   <section class="dashboard-view" aria-label="Dashboard presensi">
     <div class="dashboard-view__toolbar">
       <label v-if="sessions.length" class="dashboard-view__session-picker">
-        <span>Sesi aktif</span>
-        <select aria-label="Pilih sesi aktif" :value="selectedSessionId" @change="onSessionChange">
+        <span>Sesi berjalan</span>
+        <select
+          aria-label="Pilih sesi berjalan"
+          :value="selectedSessionId"
+          @change="onSessionChange"
+        >
           <option v-for="item in sessions" :key="item.id" :value="item.id">
             {{ sessionLabel(item) }}
           </option>
@@ -212,7 +224,7 @@ onBeforeUnmount(() => {
       data-testid="no-active-session"
     >
       <span class="dashboard-view__empty-mark" aria-hidden="true">✓</span>
-      <h2>Belum ada sesi aktif</h2>
+      <h2>Belum ada sesi berjalan</h2>
       <p>Buka sesi praktikum dari menu Sesi presensi untuk mulai memantau kehadiran.</p>
     </section>
 
@@ -220,7 +232,13 @@ onBeforeUnmount(() => {
       <div class="dashboard-view__session-heading">
         <div>
           <p class="dashboard-view__eyebrow">
-            {{ snapshot.session_status === 'active' ? 'Sedang berlangsung' : 'Sesi berakhir' }}
+            {{
+              snapshot.session_status === 'active'
+                ? 'Sedang berlangsung'
+                : snapshot.session_status === 'manual_override'
+                  ? 'Override manual · berjalan'
+                  : 'Sesi berakhir'
+            }}
           </p>
           <h2>{{ sessions.find((item) => item.id === selectedSessionId)?.subject }}</h2>
           <p>

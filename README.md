@@ -1,356 +1,150 @@
 # Presensi Praktikum Face Recognition
 
-Monorepo aplikasi presensi praktikum sekolah. Frontend Vue, Core API,
-database, dan pipeline pengenalan dipisah menjadi service. Presensi final hanya
-dibuat Core API setelah memeriksa sesi, snapshot roster, perangkat, grace period,
-dan idempotency.
+## 1. Apa ini
 
-## Mulai di satu komputer
+Sistem presensi praktikum SMA: guru membuka sesi, kamera lab mengenali siswa
+walk-through, Core API memutuskan presensi final. Dua profile deployment
+memakai **satu recognition-core yang sama**:
 
-Untuk development pada Windows atau Ubuntu, jalankan database dan API dalam
-Docker, web Vite native, serta edge-agent native agar webcam diakses langsung
-oleh OS. Webcam tidak dipasang ke Docker Compose default.
+- **AI_EDGE** (default): recognition berjalan di PC tiap laboratorium.
+- **AI_CENTRAL**: STB di lab menjadi camera gateway, recognition berjalan di
+  server AI pusat.
 
-| Bagian | Windows | Ubuntu |
-| --- | --- | --- |
-| Prasyarat | Docker Desktop + WSL2, Python 3.11+, Node sesuai engines di apps/web/package.json, npm 10+ | Docker Engine + Compose plugin, Python 3.11+, Node sesuai engines di apps/web/package.json, npm 10+ |
-| Jalankan API, database, dan web | `py -3 scripts/start-local.py` | `python3 scripts/start-local.py` |
-| Setup database dan admin lokal | Otomatis; `.env` lokal dibuat dengan secret acak | Otomatis; `.env` lokal dibuat dengan secret acak |
-| Web | Dependency dipasang otomatis bila perlu; Vite native untuk HMR | Sama |
-| URL | Web http://127.0.0.1:5173, API http://127.0.0.1:8000 | Sama |
+Aturan inti: `recognition_events` (hasil pengenalan, selalu disimpan sebagai
+audit) **bukan** `attendance_records` (hanya lahir setelah validasi sesi aktif,
+snapshot roster, device, grace period, dan idempotency). Setiap sesi menyalin
+snapshot roster kelas; grace period default 15 menit (bisa 0–1440). Hasil
+ambigu tidak pernah auto-accept — sistem meminta retry frontal atau fallback
+manual guru.
 
-Clone lalu jalankan satu command ini dari PowerShell/terminal:
+## 2. Arsitektur
+
+```text
+kamera lab -> edge-agent / STB gateway -> Core API + PostgreSQL -> dashboard guru
+                     AI_EDGE: inference di PC lab | AI_CENTRAL: inference di server pusat
+```
+
+Detail lengkap (profile, batas domain, preview pra-sesi, peta repo, alur
+enrollment dan session-to-attendance): [docs/architecture/overview.md](docs/architecture/overview.md).
+
+Stack: Vue 3 + Vite + TypeScript · FastAPI + SQLAlchemy 2 + Alembic ·
+PostgreSQL 16 · Python + OpenCV + ONNX Runtime via `libs/recognition-core`.
+
+## 3. Jalan 5 menit
+
+Prasyarat: Git, Docker + Compose, Python 3.11+, Node/npm sesuai
+`apps/web/package.json`. Windows: Docker Desktop + WSL2. Ubuntu: Docker Engine
++ plugin Compose.
 
 ```powershell
+# Windows
 git clone https://github.com/mygads/Face-Recognition-Capstone.git
 cd Face-Recognition-Capstone
 py -3 scripts/start-local.py
 ```
 
-Pada peluncuran pertama, script menanyakan pilihan AI_EDGE (API/web saja) atau
-AI_CENTRAL (API/web plus AI service). Pilihan disimpan di `.env`; berikutnya
-script menjalankan pilihan yang sama. Untuk menggantinya, jalankan
-`py -3 scripts/start-local.py --profile edge` atau `--profile central` di
-Windows; di Ubuntu gunakan `python3 scripts/start-local.py --profile edge` atau
-`--profile central`. Flag lama `--central` tetap tersedia. Model harus
-diprovisikan pada host inference dan threshold harus diisi dari laporan
-kalibrasi melalui halaman admin **AI & kamera** sebelum inference dipakai.
-
-Pada setup lokal pertama, YuNet/SFace otomatis diunduh (~39 MB), diverifikasi
-dengan checksum, lalu dipasang ke `models/weights/`. Gunakan
-`py -3 scripts/start-local.py --skip-model-download` untuk melewati unduhan dan
-`py -3 scripts/start-local.py --download-models` untuk mengunduhnya kemudian
-(ganti `py -3` dengan `python3` di Ubuntu). Installer perangkat AI_EDGE juga
-otomatis mengunduh model. File model tidak ikut `git clone`. Untuk AI_CENTRAL
-production, ikuti provisioning pada runbook. SFace masih untuk evaluasi hingga
-izin sekolah ditinjau; threshold recognition harus dikalibrasi. Pada AI_CENTRAL
-lokal, model sudah dipasang tetapi inference belum siap sampai konfigurasi
-berkalibrasi diterbitkan dari dashboard **AI & kamera**.
-
-Satu command startup menyimpan pilihan profile, membuat `.env` lokal jika belum
-ada, menghasilkan secret development, menjalankan migration dan role seed,
-membuat akun admin lokal hanya jika belum ada akun, memasang dependency web bila
-perlu, lalu menjalankan Vite. Buka terminal di root repository. Untuk instalasi lokal, login dengan
-`admin@local.test` / `1234abcd`; aplikasi wajib mengganti kata sandi pada
-login pertama (kata sandi baru minimal 12 karakter). Kredensial tetap ini hanya untuk Compose development di mesin
-lokal. Jangan expose server sebelum kata sandi diganti dan jangan gunakan
-bootstrap development untuk deployment production. Production tidak membuat
-akun bawaan. Operator dapat mengganti password awal lewat
-`PRESENSI_BOOTSTRAP_PASSWORD` di `.env` (lihat `.env.example`).
-
-#### Login gagal? Cek tiga hal ini dulu
-
-1. **Password salah.** Akun awal development adalah `admin@local.test` /
-   `1234abcd` (bukan `123456789abcd` versi lama). Jika `.env` mengatur
-   `PRESENSI_BOOTSTRAP_PASSWORD`, pakai nilai itu.
-2. **Database sudah berisi akun.** Bootstrap hanya berjalan saat tabel user
-   masih kosong; ia tidak me-reset password yang sudah ada. Jika lupa password
-   admin development, kosongkan volume dev lalu jalankan ulang startup
-   (data dev ikut terhapus):
-   `py -3 scripts/dev.py dev-down` lalu
-   `docker compose down -v`, kemudian `py -3 scripts/start-local.py`.
-   Di Ubuntu ganti `py -3` dengan `python3`.
-3. **Belum ganti password pertama.** Setelah login awal, aplikasi mengarahkan
-   ke halaman buat kata sandi baru (minimal 12 karakter, mis.
-   `sekolah-2026-aman!`). Token login awal dibatasi hanya untuk endpoint
-   ganti password sampai penggantian berhasil, lalu masuk kembali.
-
-Prasyarat Windows: Git, Docker Desktop dengan WSL2, Python 3.11+, dan Node/npm
-sesuai `apps/web/package.json`. Jika Python belum tersedia, jalankan `py install 3.12`, buka ulang PowerShell, lalu gunakan `py -3` (jangan pin `py -3.12` jika
-runtime itu belum terpasang). Prasyarat Ubuntu: Git, Docker Engine + Compose,
-Python 3.11+, dan Node/npm sesuai package web. Perintah startup memeriksa tool
-host yang hilang dan menampilkan nama yang harus dipasang; ia tidak memasang
-Docker, Python, atau Node pada komputer server/web. Tekan Ctrl+C untuk
-menghentikan Vite; jalankan `py -3 scripts/dev.py dev-down` di Windows atau
-`python3 scripts/dev.py dev-down` di Ubuntu untuk menghentikan API/database.
-
-Setelah login sebagai admin, buka menu **Kelola akun staf** untuk membuat akun
-Guru atau Laboran tanpa command line. Sistem membuat kata sandi acak sementara
-dan hanya menampilkannya setelah akun dibuat; berikan kepada pemilik akun agar
-mereka menggantinya saat login pertama. Menu **Profil** dapat digunakan untuk
-mengganti kata sandi setelahnya.
-Unduh model evaluasi checksum-pinned dengan `python scripts/download_face_models.py`.
-Threshold tetap harus dikalibrasi. Lihat
-[panduan kamera dan model](docs/camera-usage.md) serta
-[panduan satu komputer](docs/deployment/single-pc.md) untuk preview webcam,
-enrollment, edge-agent, dan alur pengujian. SFace belum cleared untuk deployment
-sekolah sampai provenance/license weight ditinjau.
-
-### Jalankan kamera AI_EDGE dan lihat preview lokal
-
-Untuk satu-PC Windows development, jalankan API/web seperti di atas, lalu
-jalankan satu edge-agent native agar ia menjadi satu-satunya pemilik webcam:
-
-```powershell
-.\.venv-edge-agent\Scripts\presensi-edge-agent.exe --config apps/edge-agent/config/edge-agent.yaml run
-```
-
-Untuk mengukur kelancaran preview di development, set log performa sebelum
-menjalankan agent. Ringkasan tiap 10 detik berisi FPS dan p50/p95 waktu tiap
-tahap; nilainya tidak memuat nama siswa, skor kecocokan, frame, embedding, atau
-token.
-
-```powershell
-$env:PRESENSI_EDGE_PERFORMANCE_LOGS = '1'
-$env:PRESENSI_EDGE_LOG_LEVEL = 'INFO'
-.\.venv-edge-agent\Scripts\presensi-edge-agent.exe --config apps/edge-agent/config/edge-agent.yaml run
-```
-
-Linux/macOS shell:
-
 ```bash
-PRESENSI_EDGE_PERFORMANCE_LOGS=1 PRESENSI_EDGE_LOG_LEVEL=INFO .venv-edge-agent/bin/presensi-edge-agent --config apps/edge-agent/config/edge-agent.yaml run
+# Ubuntu
+git clone https://github.com/mygads/Face-Recognition-Capstone.git
+cd Face-Recognition-Capstone
+python3 scripts/start-local.py
 ```
 
-Jika installer membuat executable pada direktori virtual environment lain,
-gunakan path executable yang ditampilkan installer. Jangan jalankan utility
-calibration atau halaman enrollment bersamaan dengan agent pada kamera fisik
-yang sama. Dengan browser pada komputer AI_EDGE, buka **Perangkat → Preview
-kamera**. Halaman menampilkan satu preview dari frame yang sudah diambil agent;
-ia tidak meminta izin kamera atau membuka webcam kedua. Preview dibatasi ke
-loopback dan akun ADMIN/LABORANT. Gambar hanya berada di memori agent/browser,
-tidak ditulis ke disk. Hentikan agent dengan Ctrl+C untuk kembali memakai
-webcam melalui halaman enrollment.
+Buka `http://127.0.0.1:5173` (API `http://127.0.0.1:8000`). Login awal:
+`admin@local.test` / `1234abcd`, wajib ganti password (min 12 karakter).
 
-Untuk melihat nama siswa, harus ada sesi praktikum aktif dan template untuk
-model/version yang sedang dipakai. Sistem hanya menampilkan nama setelah
-recognition-core menerima identitas berdasarkan threshold Top-1 dan margin yang
-diambil dari laporan kalibrasi. Selama threshold belum dikalibrasi, preview
-tetap tersedia tetapi statusnya **menunggu kalibrasi**; sistem tidak menebak
-identitas dan tidak mengirim presensi.
+Login gagal — cek tiga hal ini dulu:
 
-## Tiga topologi penggunaan
+1. **Password salah.** Pakai `1234abcd` (bukan `123456789abcd` versi lama),
+   atau nilai `PRESENSI_BOOTSTRAP_PASSWORD` di `.env` bila dioverride.
+2. **Database sudah berisi akun.** Bootstrap tidak me-reset akun yang ada;
+   masuk dengan password lama, atau reset volume dev
+   (`scripts/dev.py dev-down` lalu `docker compose down -v`, data dev hilang)
+   dan jalankan `start-local.py` lagi.
+3. **Belum ganti password pertama.** Ikuti redirect buat password baru, lalu
+   masuk kembali. Jangan expose stack dev sebelum password diganti.
 
-Project tetap memiliki dua profil pengenalan: **AI_EDGE** dan
-**STB_GATEWAY + AI_CENTRAL**. Single-computer adalah topologi development/demo
-yang memakai salah satu profil, bukan profil algoritma ketiga.
+Readiness sebelum presensi nyata: model YuNet+SFace terprovisioning
+(checksum-verified otomatis saat setup pertama); **threshold Top-1/margin
+wajib dari kalibrasi lokal** di halaman **AI & kamera** (tanpa ini recognition
+dijeda `waiting_for_calibration`); webcam lolos `presensi-camera-calibration`;
+liveness contoh nonaktif — pakai kontrol sesi/fisik yang disetujui. Jangan
+pakai data siswa nyata/minor untuk development; gunakan data sintetis atau
+relawan dewasa yang menyetujui.
 
-| Topologi | Penempatan | Kapan dipakai | Panduan |
-| --- | --- | --- | --- |
-| Edge computer + VPS | VPS Ubuntu menjalankan PostgreSQL, Core API, dan web. PC lab Ubuntu menjalankan edge-agent dan inference lokal. | Pilot dengan PC kamera di setiap lab; profil awal yang direkomendasikan setelah model, threshold, hardware, dan kebijakan sekolah siap. | [AI_EDGE deployment](docs/deployment/ai-edge.md) |
-| STB gateway + AI server | Server pusat Ubuntu menjalankan PostgreSQL, Core API, dan AI service. STB ARM64 dengan image Armbian yang cocok menjadi gateway kamera. | Lab memakai gateway hemat daya dan server pusat punya resource inference. | [AI_CENTRAL + STB deployment](docs/deployment/ai-central-stb.md) |
-| Satu komputer | Laptop/PC yang sama menjalankan server lokal, web, webcam, dan edge-agent. Windows untuk development/demo; Ubuntu untuk demo satu host atau deployment terbatas. | Development, demonstrasi, commissioning awal; bukan high availability. | [Panduan satu komputer](docs/deployment/single-pc.md) |
+## 4. Cara pakai harian
 
-CasaOS bukan prasyarat: jalankan agent STB sebagai service native pada OS/image
-yang kompatibilitasnya sudah diverifikasi. Panduan memilih Armbian sebagai
-baseline gateway; CasaOS hanya dashboard opsional dan belum menjadi target uji
-hardware repository ini.
+**Guru:** buat jadwal (menu jadwal), buka sesi saat praktikum dimulai
+(roster tersnapshot otomatis), pantau **dashboard live** (ringkasan hadir/
+terlambat/belum tercatat, perangkat, 10 aktivitas terakhir via WebSocket),
+tutup sesi manual bila perlu. Siswa yang gagal dikenali (kamera bermasalah,
+retry berulang) ditandai manual lewat tombol per siswa yang belum tercatat.
+Unduh laporan/ekspor CSV-XLSX (filter tanggal, kelas, lab, status; maks
+50.000 baris per ekspor). Sesi yang masih berjalan tidak melaporkan siswa
+sebagai absen dini.
 
-Database tidak boleh diakses dari Internet. Untuk domain dan tunnel, baca
-[panduan domain dan Cloudflare Tunnel](docs/deployment/cloudflare-tunnel.md).
+**Admin/laboran:** kelola akun staf, master data (siswa/kelas/lab + impor
+CSV/XLSX), enrollment wajah (4 frame per siswa, template terenkripsi),
+perangkat kamera (registrasi + kredensial satu kali + setup bundle), dan
+kebijakan **AI & kamera** (kualitas, threshold terkalibrasi, burst STB).
+Halaman guru tidak menampilkan internals AI atau embedding — hanya status,
+nama roster, dan hasil final yang dikonfirmasi Core API.
 
-## Development berbeda dari deployment
+## 5. Kalau error ke mana
 
-Development menggunakan hot reload, port localhost, dan secret acak lokal.
-Deployment menggunakan rilis yang disetujui, secret terlindungi, migration
-terkontrol, HTTPS/reverse proxy, backup, retensi, dan service restart saat boot.
-Untuk development, Docker menjalankan PostgreSQL dan Core API; AI Central
-ditambahkan hanya dengan profile `central`, Vue memakai Vite native secara
-default, dan agent kamera berjalan native. Untuk production, Compose menjalankan
-PostgreSQL/Core API dan AI Central bila profile central dipakai; Vue dibuild
-sebagai file statis di reverse proxy. AI_EDGE dan STB_GATEWAY tetap native pada
-host kameranya—keduanya tidak memerlukan Docker.
-Untuk uraian komponen dan konfigurasi dari clone sampai production, lihat
-[panduan instalasi dan konfigurasi](docs/deployment/installation-and-configuration.md).
-Lihat [development dan deployment satu komputer](docs/deployment/single-pc.md)
-serta [index runbook deployment](docs/deployment/README.md).
+Log aplikasi aman by design: tanpa raw image, embedding, token, password,
+atau secret. Saat melapor, sertakan pesan error + kode + langkah reproduksi,
+bukan payload mentah.
 
-### Urutan setup pertama dan perangkat kamera
+Cek mandiri:
 
-1. Clone repository, pasang prasyarat host, lalu jalankan satu command startup
-   development di atas. Itu menyiapkan `.env` lokal, database, migrasi, role,
-   admin awal, dependency web, dan server Vite.
-2. Login admin. Buat laboratorium, kelas/tahun ajaran, data siswa, dan akun
-   TEACHER/LABORANT melalui UI. Untuk uji kamera gunakan data sintetis atau
-   relawan dewasa yang setuju.
-3. YuNet/SFace otomatis diunduh dan checksum-diverifikasi saat setup lokal
-   pertama dan saat installer memasang kamera AI_EDGE. `git clone` tidak
-   mengunduh model. Untuk AI_CENTRAL production, provision model di server
-   dengan langkah checksum-pinned pada [runbook AI Central](docs/deployment/ai-central-stb.md).
-   Jika setup lokal melewati unduhan atau unduhannya gagal, jalankan salah satu
-   command berikut dari root repository:
+```sh
+python3 scripts/check.py          # gate wajib hijau (lint, type, unit)
+curl --fail http://127.0.0.1:8000/health
+curl --fail http://127.0.0.1:8000/api/v1/health
+```
 
-   ```powershell
-   py -3 scripts/start-local.py --download-models
-   ```
+Webcam/kamera: `presensi-camera-calibration --list-cameras`, wizard
+`configure-camera` di host kamera, halaman **Preview kamera** (AI_EDGE,
+loopback host yang sama). Auth AI `503 auth_misconfigured` = device_tokens
+belum dikonfigurasi (bukan error jaringan). `401/403` edge agent tidak
+di-retry — perbarui kredensial perangkat.
 
-   ```bash
-   python3 scripts/start-local.py --download-models
-   ```
+Tandai `MANUAL HARDWARE TEST REQUIRED` dan jangan klaim hasil bila:
+threshold belum dikalibrasi lokal, uji walk-through/frontal belum jalan di
+hardware target, atau benchmark deployment belum diukur di PC/STB nyata.
 
-   STB_GATEWAY tidak memerlukan model lokal. SFace masih untuk evaluasi sampai
-   sekolah meninjau izin penggunaannya; threshold harus dikalibrasi terpisah.
-4. Buka **Perangkat**, daftarkan device dengan laboratorium dan profile yang
-   benar, lalu buat kredensial. Token hanya tampil sekali. Pilih OS dan koneksi
-   pada panel setup. Simpan default URL Core API dan AI Central sekali di panel
-   atas halaman Perangkat; default berada hanya pada browser admin ini, bukan
-   konfigurasi server. Bundle dapat memakai default atau override per device.
-   Download paket setup. Paket ini adalah file rahasia berisi
-   alamat, UUID, profile, dan token device. Untuk komputer kamera yang sama,
-   file sudah berada di Downloads. Untuk host lain, pindahkan file ke folder
-   Downloads di kamera lewat USB/SCP. Lalu salin command dari halaman itu.
-   Command tidak mengandung token dan installer tidak meminta UUID/token/URL
-   lagi. Untuk satu PC `AI_EDGE`, pilih localhost
-   agar memakai checkout yang sudah ada. Untuk STB atau host kamera lain,
-   bootstrap mengambil source sendiri.
-5. Jalankan command hasil halaman Perangkat pada host kamera. Installer membaca
-   bundle lokal, memvalidasi profile ke Core API, menyiapkan dependency/config,
-   otomatis mengunduh model bila profile AI_EDGE, lalu menawarkan wizard untuk
-   memilih kamera, resolusi, dan FPS. Pilihan ditulis ke YAML device. Setelah
-   itu installer memeriksa status dan menawarkan menjalankan agent. Pilih
-   **Armbian Linux** untuk STB dan **Windows** atau **Ubuntu** untuk AI_EDGE.
+## 6. Roadmap singkat
 
-   Installer menulis token ke lokasi terlindungi, memeriksa kamera/status, lalu
-   menawarkan menjalankan agent di terminal agar koneksi/heartbeat terlihat.
-   Hapus bundle setup setelah pemasangan. Jangan tempel token ke command line.
-   Bootstrap mengambil source dari branch
-   `main`; untuk production gunakan versi yang sudah ditinjau dan langkah
-   systemd pada runbook. Jalur domain publik dan Cloudflare untuk koneksi agent
-   belum diaktifkan karena agent belum mendukung identitas Cloudflare Access dan
-   jalur device mengakses template biometrik; gunakan LAN/VPN privat. Di Windows,
-   Git dan Python dipasang melalui winget bila belum tersedia; launcher `py`
-   dapat memasang runtime Python 3.12. Di Ubuntu/Armbian, bootstrap membutuhkan
-   Bash, koneksi internet, dan akses `sudo`; ia memasang `curl`, Python, atau Git
-   dari apt bila belum tersedia.
+Sisa tugas: **P0-5** kalibrasi threshold lokal · **P1-1** test pendamping ·
+**P1-4** `model_name` di respons burst · **P1-5** skor quality + operating
+point terkalibrasi · **P1-6** error berkode + tolak roster kosong ·
+**P2-1** field test + benchmark hardware · **P2-2** integration hidup +
+Playwright nyata. Detail status/pemilik: [docs/backlog.md](docs/backlog.md).
 
-6. Installer AI_EDGE memasang model checksum-verified otomatis. Untuk
-   AI_CENTRAL production, provision model saat setup server sesuai runbook.
-   Isi threshold Top-1 dan margin dari laporan kalibrasi pada halaman admin
-   **AI & kamera** sebelum presensi. Untuk `STB_GATEWAY`, pastikan AI
-   Central dan Core API sehat serta STB menjangkau keduanya melalui LAN.
-   Setelah heartbeat muncul **Online**, buat jadwal, buka sesi sebagai guru,
-   lalu uji event dan dashboard.
+Catatan: `docs/final-audit.md` (2026-10-02) sudah basi dan dihapus saat
+konsolidasi docs; snapshot PASS-nya tercatat sebagai arsip di backlog, bukan
+klaim berlaku kini. Gate berjalan: 312 pytest, 32 Vitest, ruff/mypy/
+vue-tsc/eslint hijau.
 
-Pada dev single-PC, URL kamera harus `http://127.0.0.1:8000` dan agent harus
-berjalan di komputer yang sama. API dev sengaja hanya bind ke loopback. Untuk
-kamera di host lain, deploy server dengan LAN/DNS dan reverse proxy HTTPS
-terlebih dahulu; jangan membuka port API development ke jaringan publik.
+## 7. Link docs detail
 
-Lihat [panduan instalasi kamera](apps/edge-agent/README.md) untuk perintah
-Windows/Ubuntu/Armbian dan [matriks konfigurasi profile](docs/architecture/device-configuration.md)
-untuk batas opsi dashboard/installer. Ini adalah installer commissioning yang menyiapkan
-agent dan konfigurasi lokal. Untuk layanan produksi yang berjalan setelah reboot,
-ikuti runbook systemd AI_EDGE atau STB. Tidak ada installer produksi satu
-perintah yang otomatis memilih domain, TLS, secret store, firewall, backup,
-model, threshold, dan kebijakan sekolah; langkah server production tetap
-terkendali di [runbook deployment](docs/deployment/README.md).
-
-Halaman admin **AI & kamera** menampilkan readiness dan mengelola kualitas
-enrollment, kualitas frame, sampling, jumlah frame yang perlu sepakat, threshold
-terkalibrasi AI_EDGE/AI_CENTRAL, serta filter/burst STB. Pengaturan dibuat
-sebagai revisi, dicatat di audit log, lalu ditarik otomatis oleh service tanpa
-restart. Dashboard menampilkan revisi yang diminta dan diterapkan. Kamera,
-resolusi/FPS, model/checksum/version, token, URL service, dan liveness model
-tetap dikonfigurasi pada host; wizard installer mendeteksi pilihan kamera yang
-tersedia. Halaman ini tidak mengunduh model atau memulai ulang service.
-
-## Status kesiapan pengenalan wajah
-
-| Item | Status repository | Persiapan untuk tes fisik |
-| --- | --- | --- |
-| YuNet + SFace | Adapter tersedia; downloader memprovision file lokal ke direktori ignored dengan SHA-256 terverifikasi. **SFace disetujui tim untuk operasional (2026-10-21)**; threshold tetap wajib kalibrasi lokal sebelum jadi kebijakan produksi. | Setup lokal dan installer AI_EDGE mengunduh otomatis; AI_CENTRAL production diprovision dari runbook. Catat versi/checksum dan selesaikan kalibrasi benchmark sebelum deployment. |
-| Threshold Top-1/margin | Tidak ada nilai final default; agent dapat berjalan aman dalam status `waiting_for_calibration`, tetapi tidak mengenali atau mengirim presensi. | Kalibrasi pada data berizin yang mewakili kamera kelas. Prioritaskan false acceptance rendah; laporkan FMR/FNMR. |
-| Webcam/PC lab/STB | Utility kamera dan test mock tersedia; uji lapangan belum dilakukan. | Uji webcam UVC, posisi, pencahayaan, dan OS target; ukur CPU/RAM/suhu STB nyata. |
-| Liveness | Adapter/code path tersedia tetapi contoh nonaktif. Kandidat yang terdokumentasi belum cleared untuk operasi sekolah. | Tinjau lisensi/provenance, uji code path dan threshold sendiri, atau operasikan kontrol fisik/sesi yang disetujui. |
-| Template metadata lama | Migration mencabut template aktif tanpa ciphertext agar tidak dianggap enrolled. | Setelah migration diterapkan pada database lama, siswa terkait perlu enrollment baru. |
-
-Ini bukan klaim akurasi atau kepatuhan hukum. Sekolah perlu menyetujui tujuan,
-notice/dasar pemrosesan, retensi, akses, fallback manual, koreksi, dan respons
-insiden sebelum memakai data siswa. Gunakan data sintetis atau relawan dewasa
-yang menyetujui untuk development; jangan commit foto, embedding, secret, atau
-hasil benchmark privat.
-
-## Arsitektur untuk developer baru
-
-Mulai dari [panduan sistem dan onboarding developer](docs/architecture/developer-guide.md),
-[architecture overview](docs/architecture/overview.md), dan
-[ADR-001](docs/adr/ADR-001-shared-recognition-core.md). Panduan menjelaskan
-komponen, alur data, domain ownership, security boundary, serta keputusan
-arsitektur.
-
-Keputusan tim 2026-10-21 (untuk delegasi tugas, baca ini dulu):
-[ADR-003 mode pembukaan per guru + manual override](docs/adr/ADR-003-per-teacher-opening-mode-and-manual-override.md),
-[rencana presensi manual guru](docs/architecture/attendance-decisions.md#presensi-manual-guru-rencana-keputusan-tim-2026-10-21),
-[persetujuan operasional SFace](docs/models.md), dan
-[backlog berstatus + pemilik](docs/backlog.md) — profil default adalah AI_EDGE,
-STB_GATEWAY + AI_CENTRAL opsional.
-
-Stack utama: Vue 3 + Vite + TypeScript; FastAPI + SQLAlchemy 2 + Alembic;
-PostgreSQL 16; recognition package Python; OpenCV/ONNX Runtime untuk adapter
-lokal. TypeScript API types dibuat dari OpenAPI. Gentelella v4 adalah referensi
-visual; interaksi tetap memakai komponen Vue.
-
-## Quality checks dan regression
-
-~~~sh
-# Windows
-py -3 scripts/check.py
-py -3 scripts/regression.py
-
-# Ubuntu
-python3 scripts/check.py
-python3 scripts/regression.py
-~~~
-
-Regression memakai data sintetis, tanpa webcam atau wajah siswa. Playwright E2E
-terpisah: npm --prefix apps/web run test:e2e.
-
-Baseline hijau 2026-10-21: `scripts/check.py` lolos penuh (ruff, format, mypy
-133 file, **281 pytest passed**); `apps/web`: `vue-tsc --noEmit` + eslint bersih,
-**26 Vitest passed**. Klaim "selesai" hanya sah bila gate ini hijau; angka di
-atas adalah acuan — bila suite bertambah, perbarui backlog P1-8.
-
-## Runbook dan referensi
-
-| Topik | Dokumen |
+| Butuh | Buka |
 | --- | --- |
-| System, profile, dan alur | [System guide](docs/architecture/developer-guide.md), [overview](docs/architecture/overview.md) |
-| Schema dan migration | [Database schema](docs/architecture/database-schema.md) |
-| Auth, permission, privacy | [Authentication](docs/architecture/authentication.md), [security/privacy](docs/security-and-privacy.md) |
-| Jadwal, sesi, presensi, laporan | [Schedules](docs/architecture/schedules.md), [sessions](docs/architecture/attendance-sessions.md), [decision](docs/architecture/attendance-decisions.md), [reports](docs/architecture/attendance-reports.md) |
-| Enrollment dan device | [Enrollment](docs/architecture/enrollment.md), [device registry](docs/architecture/device-registry.md) |
-| AI Central dan edge-agent | [AI service](docs/architecture/ai-service.md), [edge-agent](docs/architecture/edge-agent.md) |
-| URL server, kamera, Docker/native | [Device configuration](docs/architecture/device-configuration.md), [installation guide](docs/deployment/installation-and-configuration.md) |
-| Model dan benchmark | [Model provenance/recommendation](docs/models.md), [AI benchmark](tests/ai-benchmark/README.md) |
-| Commissioning | [Walk-through field test](docs/test-plans/walkthrough-field-test.md), [deployment benchmark](tests/deployment-benchmark/README.md) |
-| VPS, STB, single host, domain/tunnel | [Deployment index](docs/deployment/README.md) |
+| Arsitektur + alur sistem | [docs/architecture/overview.md](docs/architecture/overview.md) |
+| Auth, kontrak API, skema DB, master data, jadwal | [docs/architecture/fondasi-backend.md](docs/architecture/fondasi-backend.md) |
+| Sesi, keputusan presensi, laporan, dashboard, enrollment | [docs/architecture/siklus-presensi.md](docs/architecture/siklus-presensi.md) |
+| recognition-core, AI service, edge/STB agent | [docs/architecture/ai-inferensi.md](docs/architecture/ai-inferensi.md) |
+| Registry + konfigurasi perangkat | [docs/architecture/perangkat-dan-konfigurasi.md](docs/architecture/perangkat-dan-konfigurasi.md) |
+| Deployment 1 file (single-host, AI_EDGE, AI_CENTRAL/STB, tunnel) | [docs/deployment.md](docs/deployment.md) |
+| Pengujian 1 file (lapangan, benchmark, privasi) | [docs/pengujian.md](docs/pengujian.md) |
+| Model, lisensi, kalibrasi | [docs/models.md](docs/models.md) |
+| Kontrol biometrik + retensi | [docs/security-and-privacy.md](docs/security-and-privacy.md) |
+| Kamera dan model lokal | [docs/camera-usage.md](docs/camera-usage.md) |
+| Lisensi Gentelella | [docs/licenses/](docs/licenses/) |
+| Keputusan arsitektur | [docs/adr/](docs/adr/) |
 
-## Repository map
-
-~~~text
-apps/web                 Vue SPA
-apps/api                 FastAPI Core API dan attendance authority
-apps/edge-agent          Native UVC edge/gateway agent
-apps/ai-service          Central inference service
-libs/recognition-core    Shared, framework-independent recognition pipeline
-infra/deployment         Production Compose dan database setup
-infra/docker             Service Dockerfiles
-scripts                  Development/check/regression task runner
-tests                    Synthetic, benchmark, dan integration harness
-docs/architecture        System architecture dan feature contracts
-docs/deployment          Operating runbooks
-docs/test-plans          Manual acceptance protocol
-~~~
-
-Detail batas implementasi terakhir ada di
-[final architecture/code audit](docs/final-audit.md).
+Aturan stop (wajib tanya dulu): ganti pilihan framework · ubah kebijakan
+penyimpanan biometrik · expose endpoint biometrik publik · tambah face-recognition
+SaaS cloud · ganti model berlisensi tak jelas · simpan image siswa by default.
+Lihat [AGENTS.md](AGENTS.md).

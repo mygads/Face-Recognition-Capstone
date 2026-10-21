@@ -34,8 +34,8 @@ API `http://127.0.0.1:8000`.
 ## Verifikasi wajib sebelum klaim selesai (AGENTS.md)
 
 - `py -3 scripts/check.py` (atau `python3` di Ubuntu) — harus hijau.
-  Baseline 2026-10-21: ruff + format + mypy (133 file) + 281 pytest;
-  web: `vue-tsc --noEmit` + eslint + 26 Vitest.
+  Baseline 2026-10-21: ruff + format + mypy (133 file) + 312 pytest;
+  web: `vue-tsc --noEmit` + eslint + 32 Vitest.
 - Tes terkait: `py -3 -m pytest apps/api/tests/test_auth.py -q` untuk perubahan auth.
 - Jangan klaim hasil hardware/performance tanpa perangkat nyata;
   tandai `MANUAL HARDWARE TEST REQUIRED`.
@@ -56,3 +56,12 @@ API `http://127.0.0.1:8000`.
 - Jangan commit dataset wajah, raw image, embedding, token, atau secret.
 - Jangan pakai kredensial bootstrap untuk production.
 - Jangan expose stack development ke internet sebelum password diganti.
+
+## Pointer docs (konsolidasi 2026-10-21)
+
+- Arsitektur: `docs/architecture/overview.md` (pintu masuk),
+  `fondasi-backend.md`, `siklus-presensi.md`, `ai-inferensi.md`,
+  `perangkat-dan-konfigurasi.md`.
+- Deployment 1 file: `docs/deployment.md` · Pengujian 1 file: `docs/pengujian.md`.
+- Sisa tugas: `docs/backlog.md` (P0-5, P1-1, P1-4, P1-5, P1-6, P2-1, P2-2).
+  `docs/final-audit.md` dan `docs/test-plans/` sudah dihapus.

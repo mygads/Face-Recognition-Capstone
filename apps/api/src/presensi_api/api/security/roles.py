@@ -55,6 +55,7 @@ ROLE_PERMISSIONS: dict[RoleCode, FrozenSet[Permission]] = {
             Permission.SESSION_OPERATE,
             Permission.ENROLLMENT_MANAGE,
             Permission.ATTENDANCE_READ,
+            Permission.REPORTS_READ,
         }
     ),
 }

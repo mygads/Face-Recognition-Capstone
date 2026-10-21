@@ -5,7 +5,7 @@ Select the runtime with the root YAML key `mode`. `AI_EDGE` runs
 profile: it loads no local face recognition model, samples the camera at low
 resolution, and sends short JPEG bursts to the authenticated central AI service.
 See `config/stb-gateway.example.yaml` for its separate starting configuration
-and the [AI_CENTRAL + STB deployment runbook](../../docs/deployment/ai-central-stb.md)
+and the [AI_CENTRAL + STB deployment runbook](../../docs/deployment.md#4-runbook-ai_central--stb_gateway)
 for a clean Armbian install, central server, recovery, and acceptance checklists.
 
 ## Quick setup from the device registry
@@ -352,7 +352,7 @@ use device credentials with the Core API.
 The heartbeat reports deployment profile, edge-agent version, configured model
 version when present, and current camera connectivity; central-inference gateway
 model version is refreshed from recognition events. Registry health and timeout
-semantics are described in [device registry architecture](../../docs/architecture/device-registry.md).
+semantics are described in [device registry architecture](../../docs/architecture/perangkat-dan-konfigurasi.md).
 Events are persisted locally with a UUID idempotency key and retried with
 exponential backoff in strict FIFO order. A retrying head event blocks later
 events so reconnect never reorders attendance evidence. SQLite persists the
