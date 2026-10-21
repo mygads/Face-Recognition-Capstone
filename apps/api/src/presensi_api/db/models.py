@@ -58,6 +58,9 @@ class User(UUIDPrimaryKey, TimestampMixin, Base):
         CheckConstraint(
             "auth_token_version >= 0", name="auth_token_version_nonnegative"
         ),
+        CheckConstraint(
+            "opening_mode IN ('manual', 'automatic')", name="user_opening_mode"
+        ),
     )
 
     email: Mapped[str] = mapped_column(String(320), nullable=False)
@@ -71,6 +74,9 @@ class User(UUIDPrimaryKey, TimestampMixin, Base):
     )
     auth_token_version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
+    )
+    opening_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="manual", server_default=text("'manual'")
     )
 
 
@@ -334,7 +340,8 @@ class AttendanceSession(UUIDPrimaryKey, TimestampMixin, Base):
     __tablename__ = "attendance_sessions"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('active', 'closed', 'cancelled')", name="session_status"
+            "status IN ('active', 'manual_override', 'closed', 'cancelled')",
+            name="session_status",
         ),
         CheckConstraint("grace_period_minutes >= 0", name="grace_period_nonnegative"),
         CheckConstraint(
@@ -345,8 +352,8 @@ class AttendanceSession(UUIDPrimaryKey, TimestampMixin, Base):
             "uq_attendance_sessions_active_schedule",
             "practicum_schedule_id",
             unique=True,
-            postgresql_where=text("status = 'active'"),
-            sqlite_where=text("status = 'active'"),
+            postgresql_where=text("status IN ('active', 'manual_override')"),
+            sqlite_where=text("status IN ('active', 'manual_override')"),
         ),
         Index("ix_attendance_sessions_opened_at", "opened_at"),
         Index("ix_attendance_sessions_opened_by_user_id", "opened_by_user_id"),

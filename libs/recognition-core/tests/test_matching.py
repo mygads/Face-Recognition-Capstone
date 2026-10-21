@@ -82,3 +82,25 @@ def test_folder_evaluation_uses_only_explicit_threshold_for_pair_rates() -> None
     assert summary.different_identity.acceptance_rate == 0.0
     with pytest.raises(ValueError, match="between -1 and 1"):
         evaluate_pairs({}, threshold=float("nan"))
+
+
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+def test_cosine_similarity_rejects_non_finite_scores() -> None:
+    # FaceEmbedding itself rejects inf/nan inputs, so this exercises the
+    # fail-closed guard against overflow inside the similarity computation.
+    huge = _embedding((1e308, 1e308))
+    with pytest.raises(ValueError, match="not finite"):
+        cosine_similarity(huge, huge)
+    matcher = CosineSimilarityMatcher()
+    with pytest.raises(ValueError, match="not finite"):
+        matcher.match(huge, [GalleryEntry(UUID(int=9), huge)])
+
+
+def test_cosine_matcher_rejects_non_finite_threshold_inputs() -> None:
+    with pytest.raises(ValueError, match="between -1 and 1"):
+        CosineSimilarityMatcher(minimum_similarity=float("nan"))
+    with pytest.raises(ValueError, match="between -1 and 1"):
+        CosineSimilarityMatcher(minimum_similarity=float("inf"))
+    matcher = CosineSimilarityMatcher(minimum_similarity=0.5)
+    with pytest.raises(ValueError, match="between -1 and 1"):
+        matcher.passes_threshold(float("nan"))

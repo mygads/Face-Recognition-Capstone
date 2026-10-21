@@ -8,7 +8,7 @@ from presensi_api.api.v1.schemas.common import ApiSchema
 
 class ActiveDeviceSessionResponse(ApiSchema):
     session_id: UUID
-    session_status: Literal["active"]
+    session_status: Literal["active", "manual_override"]
     session_starts_at: AwareDatetime
     session_ends_at: AwareDatetime
     generated_at: AwareDatetime

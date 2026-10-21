@@ -20,7 +20,7 @@ class AttendanceSessionCreateRequest(ApiSchema):
 class AttendanceSessionResponse(ApiSchema):
     id: UUID
     practicum_schedule_id: UUID
-    status: Literal["active", "closed", "cancelled"]
+    status: Literal["active", "manual_override", "closed", "cancelled"]
     opened_automatically: bool
     opened_at: AwareDatetime
     closed_at: AwareDatetime | None
@@ -90,8 +90,23 @@ class SessionRecentActivity(ApiSchema):
 
 class SessionDashboardSnapshot(ApiSchema):
     session_id: UUID
-    session_status: Literal["active", "closed", "cancelled"]
+    session_status: Literal["active", "manual_override", "closed", "cancelled"]
     generated_at: AwareDatetime
     summary: SessionAttendanceSummary
     devices: list[SessionDashboardDevice]
     recent_activity: list[SessionRecentActivity]
+
+
+class TeacherOpeningPreference(ApiSchema):
+    opening_mode: Literal["manual", "automatic"]
+
+
+class TeacherOpeningPreferenceResponse(TeacherOpeningPreference):
+    updated_at: AwareDatetime | None = None
+
+
+class SessionRosterEntry(ApiSchema):
+    student_id: UUID
+    student_number: str
+    full_name: str
+    record_status: AttendanceStatus | None = None

@@ -16,12 +16,16 @@ from presensi_api.api.v1.schemas.attendance import (
     AttendanceCorrectionRequest,
     AttendanceCorrectionResponse,
     AttendanceRecordResponse,
+    AttendanceSource,
     AttendanceStatus,
+    ManualMarkRequest,
+    ManualMarkResponse,
     RecognitionEventDecisionResponse,
     RecognitionEventRequest,
 )
 from presensi_api.api.v1.schemas.common import PageResponse
 from presensi_api.attendance_decision import decide_recognition_event
+from presensi_api.attendance_manual import mark_manual_attendance
 from presensi_api.db.models import (
     AttendanceCorrection,
     AttendanceRecord,
@@ -55,6 +59,38 @@ def ingest_recognition_event(
     session: DbSession,
 ) -> RecognitionEventDecisionResponse:
     return decide_recognition_event(session, request, principal)
+
+
+@router.post(
+    "/sessions/{session_id}/manual-marks",
+    response_model=ManualMarkResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Record a teacher-chosen manual attendance mark",
+    description=(
+        "Stores a final attendance record with source 'manual' for a roster "
+        "member without overwriting existing records. Never accepts image or "
+        "embedding fields."
+    ),
+)
+def create_manual_mark(
+    session_id: UUID,
+    request: ManualMarkRequest,
+    principal: AttendanceOperator,
+    session: DbSession,
+) -> ManualMarkResponse:
+    record = mark_manual_attendance(session, session_id, request, principal)
+    return ManualMarkResponse(
+        record=AttendanceRecordResponse(
+            id=record.id,
+            session_id=record.session_id,
+            student_id=record.student_id,
+            status=cast(AttendanceStatus, record.status),
+            source=cast(AttendanceSource, record.source),
+            recognition_event_id=record.recognition_event_id,
+            recorded_at=as_utc(record.recorded_at),
+        )
+    )
 
 
 @router.get(

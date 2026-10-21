@@ -242,3 +242,15 @@ dengan dataset yang memadai, analisis per kelompok, penetration/security review,
 validasi model/liveness, maupun keputusan kebijakan sekolah. Threshold akhir
 harus ditetapkan melalui evaluasi lokal terpisah dengan prioritas false
 acceptance rendah.
+
+## Run sign-off
+
+Salin blok ini ke laporan run. Tidak ada kolom PII baru; gunakan kode `Pxx`.
+
+- Operator / pencatat berkode:
+- Run ID per profile (`AI_EDGE` / `AI_CENTRAL`):
+- Pass count aktual yang dijalankan (min 5/lintasan/relawan/profile):
+- FA / FR count:
+- Fallback / manual count:
+- Verifikasi cleanup (template uji direvoke, session uji ditutup):
+- Approver name/signature + date:

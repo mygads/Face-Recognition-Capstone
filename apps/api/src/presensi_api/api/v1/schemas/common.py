@@ -12,6 +12,7 @@ class ApiSchema(BaseModel):
         extra="forbid",
         from_attributes=False,
         str_strip_whitespace=True,
+        allow_inf_nan=False,
     )
 
 

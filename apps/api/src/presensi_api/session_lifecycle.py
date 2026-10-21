@@ -26,6 +26,11 @@ def as_utc(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
+#: Session statuses that count as "running" for duplicate-open guards,
+#: automatic closing, device galleries, and recognition acceptance.
+RUNNING_SESSION_STATUSES = ("active", "manual_override")
+
+
 def scheduled_end_at(schedule: PracticumSchedule, opened_at: datetime) -> datetime:
     timezone = ZoneInfo(schedule.timezone_name)
     local_opened_at = as_utc(opened_at).astimezone(timezone)
@@ -64,9 +69,11 @@ def close_expired_sessions(
     now: datetime | None = None,
     session_id: UUID | None = None,
 ) -> int:
-    """Close active sessions at their recurring schedule's local end time."""
+    """Close running sessions at their recurring schedule's local end time."""
     current_time = as_utc(now or datetime.now(UTC))
-    query = select(AttendanceSession).where(AttendanceSession.status == "active")
+    query = select(AttendanceSession).where(
+        AttendanceSession.status.in_(RUNNING_SESSION_STATUSES)
+    )
     if session_id is not None:
         query = query.where(AttendanceSession.id == session_id)
     active_sessions = session.scalars(query).all()
@@ -82,11 +89,15 @@ def close_expired_sessions(
         except (ZoneInfoNotFoundError, ValueError, TypeError):
             continue
         if session_end <= current_time:
+            # Capture the running status before the compare-and-swap: the
+            # UPDATE below synchronizes the in-session object, so reading
+            # attendance_session.status afterwards would report "closed".
+            previous_status = attendance_session.status
             result = session.execute(
                 update(AttendanceSession)
                 .where(
                     AttendanceSession.id == attendance_session.id,
-                    AttendanceSession.status == "active",
+                    AttendanceSession.status.in_(RUNNING_SESSION_STATUSES),
                 )
                 .values(status="closed", closed_at=session_end)
                 .returning(AttendanceSession.id)
@@ -99,7 +110,7 @@ def close_expired_sessions(
                     action="attendance_session.closed_automatically",
                     entity_type="attendance_session",
                     entity_id=attendance_session.id,
-                    before_state={"status": "active"},
+                    before_state={"status": previous_status},
                     after_state={
                         "status": "closed",
                         "close_reason": "schedule_end_time",
@@ -118,9 +129,12 @@ def auto_open_due_sessions(
     policy: dict[str, object],
     now: datetime | None = None,
 ) -> int:
-    """Open due schedules in automatic mode using the same roster snapshot rules."""
-    if policy.get("mode") != "automatic":
-        return 0
+    """Open due schedules for teachers in automatic mode.
+
+    The global ``mode`` policy value is no longer enforced here; each teacher's
+    own ``users.opening_mode`` decides whether their schedules auto-open. The
+    ``mode`` key is still read for backward compatibility but ignored.
+    """
     before = policy.get("auto_open_minutes_before", 0)
     after = policy.get("auto_open_minutes_after", 15)
     grace = policy.get("default_grace_period_minutes", 15)
@@ -150,13 +164,25 @@ def auto_open_due_sessions(
     active_schedule_ids = set(
         session.scalars(
             select(AttendanceSession.practicum_schedule_id).where(
-                AttendanceSession.status == "active"
+                AttendanceSession.status.in_(RUNNING_SESSION_STATUSES)
+            )
+        ).all()
+    )
+    teacher_modes = dict(
+        session.execute(
+            select(PracticumSchedule.teacher_user_id, User.opening_mode)
+            .join(User, User.id == PracticumSchedule.teacher_user_id)
+            .where(
+                PracticumSchedule.is_active.is_(True),
+                User.is_active.is_(True),
             )
         ).all()
     )
     created_count = 0
     for schedule in schedules:
         if schedule.id in active_schedule_ids:
+            continue
+        if teacher_modes.get(schedule.teacher_user_id, "manual") != "automatic":
             continue
         try:
             timezone = ZoneInfo(schedule.timezone_name)

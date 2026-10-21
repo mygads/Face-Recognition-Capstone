@@ -53,6 +53,7 @@ from presensi_api.db.models import (
 )
 from presensi_api.db.session import get_db_session
 from presensi_api.session_lifecycle import (
+    RUNNING_SESSION_STATUSES,
     as_utc,
     close_expired_sessions,
     scheduled_end_at,
@@ -85,7 +86,7 @@ def _active_device_sessions(
             PracticumSchedule.id == AttendanceSession.practicum_schedule_id,
         )
         .where(
-            AttendanceSession.status == "active",
+            AttendanceSession.status.in_(RUNNING_SESSION_STATUSES),
             PracticumSchedule.laboratory_id == device.laboratory_id,
         )
         .order_by(AttendanceSession.opened_at, AttendanceSession.id)
@@ -312,7 +313,7 @@ def discover_active_sessions(
     return [
         ActiveDeviceSessionResponse(
             session_id=item.id,
-            session_status="active",
+            session_status=cast(Literal["active", "manual_override"], item.status),
             session_starts_at=as_utc(item.opened_at),
             session_ends_at=end_at,
             generated_at=now,
@@ -429,7 +430,7 @@ def get_active_session_cache(
     return ActiveSessionCacheResponse(
         device_id=device.id,
         session_id=selected.id,
-        session_status="active",
+        session_status=cast(Literal["active", "manual_override"], selected.status),
         session_starts_at=as_utc(selected.opened_at),
         session_ends_at=end_at,
         generated_at=generated_at,

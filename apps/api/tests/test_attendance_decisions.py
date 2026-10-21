@@ -203,6 +203,52 @@ def event_body(
     return body
 
 
+def test_matched_event_on_manual_override_session_records_attendance(
+    attendance_database: tuple[sessionmaker[Session], dict[str, UUID]],
+) -> None:
+    factory, ids = attendance_database
+    with factory.begin() as db:
+        attendance_session = db.get(AttendanceSession, ids["session"])
+        assert attendance_session is not None
+        attendance_session.status = "manual_override"
+        occurred_at = as_utc(attendance_session.opened_at) + timedelta(minutes=14)
+
+    response = post_event(event_body(ids, occurred_at=occurred_at))
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["decision"] == "attendance_recorded"
+    assert body["reason"] is None
+    assert body["attendance"]["status"] == "present"
+    with factory() as db:
+        record = db.scalar(select(AttendanceRecord))
+        assert record is not None
+        assert record.source == "face_recognition"
+
+
+def test_event_on_closed_session_is_audited_without_attendance(
+    attendance_database: tuple[sessionmaker[Session], dict[str, UUID]],
+) -> None:
+    factory, ids = attendance_database
+    with factory.begin() as db:
+        attendance_session = db.get(AttendanceSession, ids["session"])
+        assert attendance_session is not None
+        attendance_session.status = "closed"
+        occurred_at = as_utc(attendance_session.opened_at) + timedelta(minutes=5)
+
+    response = post_event(event_body(ids, occurred_at=occurred_at))
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["decision"] == "no_attendance"
+    assert body["reason"] == "session_inactive"
+    assert body["attendance"] is None
+    with factory() as db:
+        # recognition_events are always audited even when no record is created.
+        assert db.scalar(select(RecognitionEvent)) is not None
+        assert db.scalar(select(AttendanceRecord)) is None
+
+
 def test_present_event_persists_evidence_and_final_attendance(
     attendance_database: tuple[sessionmaker[Session], dict[str, UUID]],
 ) -> None:

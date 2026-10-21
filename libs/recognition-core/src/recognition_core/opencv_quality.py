@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import math
 from typing import Any, cast
 
 from recognition_core.domain import FaceDetection, FaceQuality
@@ -45,6 +46,17 @@ class OpenCVFaceQualityAssessor:
         brightness = float(self._numpy.mean(gray))
         sharpness = float(self._cv2.Laplacian(gray, self._cv2.CV_64F).var())
         face_size = min(right - left, bottom - top)
+        if not (
+            math.isfinite(brightness)
+            and math.isfinite(sharpness)
+            and math.isfinite(float(face_size))
+        ):
+            # Fail closed: non-finite vision signals must never feed scoring.
+            return FaceQuality(
+                score=0.0,
+                acceptable=False,
+                reason_codes=("quality_unavailable",),
+            )
         reasons: list[str] = []
         if face_size < self.min_face_pixels:
             reasons.append("face_too_small")

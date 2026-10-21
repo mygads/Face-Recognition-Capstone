@@ -26,6 +26,8 @@ def cosine_similarity(left: FaceEmbedding, right: FaceEmbedding) -> float:
     score = sum(a * b for a, b in zip(left.values, right.values, strict=True)) / (
         left_norm * right_norm
     )
+    if not math.isfinite(score):
+        raise ValueError("Cosine similarity is not finite.")
     return max(-1.0, min(1.0, score))
 
 
@@ -116,10 +118,15 @@ class CosineSimilarityMatcher(Matcher):
         if bool(numpy.any(gallery_norms <= 0)):
             raise ValueError("Cannot compare a zero-length embedding.")
         similarities = (gallery_values @ probe_values) / (gallery_norms * probe_norm)
-        return [
-            CandidateMatch(
-                student_id=entry.student_id,
-                similarity=max(-1.0, min(1.0, float(similarity))),
+        results: list[CandidateMatch] = []
+        for entry, similarity in zip(gallery, similarities, strict=True):
+            score = float(similarity)
+            if not math.isfinite(score):
+                raise ValueError("Cosine similarity is not finite.")
+            results.append(
+                CandidateMatch(
+                    student_id=entry.student_id,
+                    similarity=max(-1.0, min(1.0, score)),
+                )
             )
-            for entry, similarity in zip(gallery, similarities, strict=True)
-        ]
+        return results

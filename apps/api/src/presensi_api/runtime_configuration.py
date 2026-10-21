@@ -50,6 +50,14 @@ def configuration_values(
 def session_opening_policy(
     session: Session,
 ) -> tuple[int, dict[str, object], datetime | None]:
+    """Return the validated attendance-session opening policy.
+
+    The ``mode`` value is kept for backward compatibility (admin UI default)
+    but is NOT enforced: the session worker opens schedules per each teacher's
+    own ``users.opening_mode``, and the manual-open endpoint never gates on it.
+    Only the auto-open window minutes and the default grace period remain
+    authoritative here.
+    """
     revision, stored, updated_at = configuration_values(
         session, SESSION_OPENING_POLICY_SCOPE
     )

@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal, cast
 from uuid import UUID
 from zoneinfo import ZoneInfoNotFoundError
@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from presensi_api.api.errors import OPENAPI_ERROR_RESPONSES, ApiProblem
 from presensi_api.api.security.dependencies import require_permissions
 from presensi_api.api.security.roles import AuthenticatedUser, Permission, RoleCode
+from presensi_api.api.v1.schemas.attendance import AttendanceStatus
 from presensi_api.api.v1.schemas.common import PageResponse, Pagination
 from presensi_api.api.v1.schemas.sessions import (
     AttendanceSessionCreateRequest,
@@ -18,8 +19,12 @@ from presensi_api.api.v1.schemas.sessions import (
     OpenableScheduleResponse,
     SessionOpeningPolicy,
     SessionOpeningPolicyResponse,
+    SessionRosterEntry,
+    TeacherOpeningPreference,
+    TeacherOpeningPreferenceResponse,
 )
 from presensi_api.db.models import (
+    AttendanceRecord,
     AttendanceSession,
     AuditLog,
     ClassStudent,
@@ -37,9 +42,11 @@ from presensi_api.runtime_configuration import (
     session_opening_policy,
 )
 from presensi_api.session_lifecycle import (
+    RUNNING_SESSION_STATUSES,
     as_utc,
     close_expired_sessions,
     scheduled_end_at,
+    scheduled_start_at,
     session_can_open_today,
 )
 
@@ -51,7 +58,7 @@ SessionOperator = Annotated[
 SessionPolicyManager = Annotated[
     AuthenticatedUser, Depends(require_permissions(Permission.MANAGE_SETTINGS))
 ]
-SessionStatus = Literal["active", "closed", "cancelled"]
+SessionStatus = Literal["active", "manual_override", "closed", "cancelled"]
 
 
 def _teacher_scope_allows(
@@ -173,10 +180,9 @@ def list_openable_schedules(
     principal: SessionOperator,
     session: DbSession,
 ) -> list[OpenableScheduleResponse]:
+    # Manual open is always available as the override path, regardless of any
+    # global automatic policy or the teacher's own opening mode.
     now = datetime.now(UTC)
-    _revision, opening_policy, _updated_at = session_opening_policy(session)
-    if opening_policy["mode"] == "automatic":
-        return []
     query = (
         select(PracticumSchedule)
         .join(SchoolClass, SchoolClass.id == PracticumSchedule.class_id)
@@ -291,18 +297,12 @@ def open_session(
     now = datetime.now(UTC)
     close_expired_sessions(session, now=now)
     _revision, opening_policy, _updated_at = session_opening_policy(session)
-    if opening_policy["mode"] == "automatic":
-        raise ApiProblem(
-            409,
-            "session_opening_is_automatic",
-            "Pembukaan sesi sedang diatur otomatis oleh jadwal.",
-        )
     schedule = _schedule_for_open(session, request.practicum_schedule_id, principal)
     _can_open_today(schedule, now)
     active_session = session.scalar(
         select(AttendanceSession.id).where(
             AttendanceSession.practicum_schedule_id == schedule.id,
-            AttendanceSession.status == "active",
+            AttendanceSession.status.in_(RUNNING_SESSION_STATUSES),
         )
     )
     if active_session is not None:
@@ -312,10 +312,33 @@ def open_session(
             "Sesi untuk jadwal ini masih terbuka.",
         )
 
+    # A manual open inside the automatic window behaves like a worker-opened
+    # session; outside the window it is recorded as a manual override.
+    try:
+        scheduled_start = scheduled_start_at(schedule, now)
+        schedule_end = scheduled_end_at(schedule, now)
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
+        scheduled_start = None
+        schedule_end = None
+    before = opening_policy.get("auto_open_minutes_before", 0)
+    after = opening_policy.get("auto_open_minutes_after", 15)
+    inside_window = (
+        scheduled_start is not None
+        and schedule_end is not None
+        and type(before) is int
+        and type(after) is int
+        and scheduled_start - timedelta(minutes=before)
+        <= now
+        <= scheduled_start + timedelta(minutes=after)
+        and now < schedule_end
+    )
+    new_status = "active" if inside_window else "manual_override"
+    is_override = new_status == "manual_override"
+
     attendance_session = AttendanceSession(
         practicum_schedule_id=schedule.id,
         opened_by_user_id=principal.id,
-        status="active",
+        status=new_status,
         opened_at=now,
         grace_period_minutes=request.grace_period_minutes,
     )
@@ -348,7 +371,8 @@ def open_session(
                 entity_type="attendance_session",
                 entity_id=attendance_session.id,
                 after_state={
-                    "status": "active",
+                    "status": new_status,
+                    "is_override": is_override,
                     "practicum_schedule_id": str(schedule.id),
                     "grace_period_minutes": request.grace_period_minutes,
                     "roster_count": len(roster),
@@ -365,6 +389,59 @@ def open_session(
         ) from exc
     session.refresh(attendance_session)
     return _session_response(session, attendance_session)
+
+
+@router.get(
+    "/opening-preference",
+    response_model=TeacherOpeningPreferenceResponse,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Read the caller's own session opening mode",
+)
+def get_opening_preference(
+    principal: SessionOperator,
+    session: DbSession,
+) -> TeacherOpeningPreferenceResponse:
+    user = session.get(User, principal.id)
+    if user is None:
+        raise ApiProblem(404, "session_not_found", "Sesi presensi tidak ditemukan.")
+    return TeacherOpeningPreferenceResponse(
+        opening_mode=cast(Literal["manual", "automatic"], user.opening_mode),
+        updated_at=as_utc(user.updated_at),
+    )
+
+
+@router.put(
+    "/opening-preference",
+    response_model=TeacherOpeningPreferenceResponse,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Update the caller's own session opening mode",
+)
+def put_opening_preference(
+    request: TeacherOpeningPreference,
+    principal: SessionOperator,
+    session: DbSession,
+) -> TeacherOpeningPreferenceResponse:
+    user = session.get(User, principal.id)
+    if user is None:
+        raise ApiProblem(404, "session_not_found", "Sesi presensi tidak ditemukan.")
+    before_mode = user.opening_mode
+    user.opening_mode = request.opening_mode
+    session.add(
+        AuditLog(
+            actor_user_id=principal.id,
+            action="teacher.opening_mode_updated",
+            entity_type="user",
+            entity_id=user.id,
+            before_state={"opening_mode": before_mode},
+            after_state={"opening_mode": request.opening_mode},
+        )
+    )
+    session.commit()
+    session.refresh(user)
+    return TeacherOpeningPreferenceResponse(
+        opening_mode=user.opening_mode,
+        updated_at=as_utc(user.updated_at),
+    )
 
 
 @router.get(
@@ -407,7 +484,8 @@ def close_session(
     schedule = session.get(PracticumSchedule, attendance_session.practicum_schedule_id)
     if schedule is None or not _teacher_scope_allows(principal, schedule):
         raise ApiProblem(404, "session_not_found", "Sesi presensi tidak ditemukan.")
-    if attendance_session.status == "active":
+    if attendance_session.status in RUNNING_SESSION_STATUSES:
+        before_status = attendance_session.status
         attendance_session.status = "closed"
         attendance_session.closed_at = now
         session.add(
@@ -416,10 +494,54 @@ def close_session(
                 action="attendance_session.closed",
                 entity_type="attendance_session",
                 entity_id=attendance_session.id,
-                before_state={"status": "active"},
+                before_state={"status": before_status},
                 after_state={"status": "closed", "close_reason": "manual"},
             )
         )
         session.commit()
         session.refresh(attendance_session)
     return _session_response(session, attendance_session)
+
+
+@router.get(
+    "/{session_id}/roster",
+    response_model=list[SessionRosterEntry],
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="List session roster with per-student record status",
+)
+def get_session_roster(
+    session_id: UUID,
+    principal: SessionOperator,
+    session: DbSession,
+) -> list[SessionRosterEntry]:
+    close_expired_sessions(session, session_id=session_id)
+    attendance_session = session.get(AttendanceSession, session_id)
+    if attendance_session is None:
+        raise ApiProblem(404, "session_not_found", "Sesi presensi tidak ditemukan.")
+    schedule = session.get(PracticumSchedule, attendance_session.practicum_schedule_id)
+    if schedule is None or not _teacher_scope_allows(principal, schedule):
+        raise ApiProblem(404, "session_not_found", "Sesi presensi tidak ditemukan.")
+    rows = session.execute(
+        select(
+            SessionStudent.student_id,
+            SessionStudent.student_number_snapshot,
+            SessionStudent.full_name_snapshot,
+            AttendanceRecord.status,
+        )
+        .outerjoin(
+            AttendanceRecord,
+            (AttendanceRecord.session_id == SessionStudent.session_id)
+            & (AttendanceRecord.student_id == SessionStudent.student_id),
+        )
+        .where(SessionStudent.session_id == attendance_session.id)
+        .order_by(SessionStudent.student_number_snapshot, SessionStudent.student_id)
+    ).all()
+    return [
+        SessionRosterEntry(
+            student_id=student_id,
+            student_number=student_number,
+            full_name=full_name,
+            record_status=cast(AttendanceStatus | None, record_status),
+        )
+        for student_id, student_number, full_name, record_status in rows
+    ]

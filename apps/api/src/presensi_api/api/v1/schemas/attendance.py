@@ -102,3 +102,21 @@ class AttendanceCorrectionResponse(ApiSchema):
     reason: str
     created_at: AwareDatetime
     decided_at: AwareDatetime | None
+
+
+class ManualMarkRequest(ApiSchema):
+    student_id: UUID
+    status: AttendanceStatus
+    note: str | None = Field(default=None, max_length=500)
+
+    @field_validator("note")
+    @classmethod
+    def strip_and_validate_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
+class ManualMarkResponse(ApiSchema):
+    record: AttendanceRecordResponse

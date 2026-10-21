@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from presensi_ai_service.config import AISettings
+import pytest
+
+from presensi_ai_service.config import AIServiceConfigError, AISettings
 from presensi_ai_service.inference import build_model_runner
 
 
@@ -20,3 +22,13 @@ def test_configured_models_without_thresholds_keep_service_in_degraded_mode(
     )
 
     assert build_model_runner(settings) is None
+
+
+def test_ai_thresholds_must_be_configured_as_a_pair() -> None:
+    with pytest.raises(AIServiceConfigError, match="together"):
+        AISettings(min_top1_similarity=0.7)
+    with pytest.raises(AIServiceConfigError, match="together"):
+        AISettings(min_top1_top2_margin=0.1)
+    paired = AISettings(min_top1_similarity=0.7, min_top1_top2_margin=0.1)
+    assert paired.min_top1_similarity == 0.7
+    assert paired.min_top1_top2_margin == 0.1

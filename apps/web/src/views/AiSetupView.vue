@@ -82,6 +82,11 @@ const selectedDevice = computed(
 const edgeThresholdsConfigured = computed(
   () => edgeForm.value.min_top1_similarity !== null && edgeForm.value.min_top1_top2_margin !== null,
 )
+const centralThresholdsConfigured = computed(
+  () =>
+    centralForm.value.min_top1_similarity !== null &&
+    centralForm.value.min_top1_top2_margin !== null,
+)
 
 function recognitionDefaults(): RecognitionConfiguration {
   return {
@@ -287,6 +292,11 @@ async function saveEnrollment(): Promise<void> {
 }
 
 async function saveCentral(): Promise<void> {
+  const invalid = sanitizeRecognitionForm(centralForm.value)
+  if (invalid) {
+    errorMessage.value = invalid
+    return
+  }
   await saveSettings(async () => {
     await saveCentralRecognitionConfiguration(centralForm.value)
     await refreshReadiness()
@@ -295,6 +305,13 @@ async function saveCentral(): Promise<void> {
 
 async function saveDevice(): Promise<void> {
   if (!selectedDevice.value) return
+  if (selectedDevice.value.deployment_profile === 'AI_EDGE') {
+    const invalid = sanitizeRecognitionForm(edgeForm.value)
+    if (invalid) {
+      errorMessage.value = invalid
+      return
+    }
+  }
   await saveSettings(async () => {
     let saved: DeviceRuntimeConfiguration
     if (selectedDevice.value?.deployment_profile === 'AI_EDGE') {
@@ -324,6 +341,24 @@ async function saveSettings(action: () => Promise<void>, message: string): Promi
 function parseOptionalNumber(event: Event): number | null {
   const value = (event.target as HTMLInputElement).value
   return value === '' ? null : Number(value)
+}
+
+function sanitizeOptionalNumber(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function sanitizeRecognitionForm(form: RecognitionConfiguration): string | null {
+  const top1 = sanitizeOptionalNumber(form.min_top1_similarity)
+  const margin = sanitizeOptionalNumber(form.min_top1_top2_margin)
+  form.min_top1_similarity = top1
+  form.min_top1_top2_margin = margin
+  if ((top1 === null) !== (margin === null)) {
+    return 'Top-1 dan margin harus diisi bersamaan atau dikosongkan keduanya.'
+  }
+  if (top1 !== null && !(form.calibration_reference ?? '').trim()) {
+    return 'Referensi laporan kalibrasi wajib diisi bila threshold diatur.'
+  }
+  return null
 }
 
 function setCentralTop1(event: Event): void {
@@ -876,6 +911,7 @@ onBeforeUnmount(() => {
               min="-1"
               max="1"
               step="any"
+              :required="centralForm.min_top1_top2_margin !== null"
               @input="setCentralTop1"
           /></label>
           <label
@@ -885,6 +921,7 @@ onBeforeUnmount(() => {
               min="0"
               max="2"
               step="any"
+              :required="centralForm.min_top1_similarity !== null"
               @input="setCentralMargin"
           /></label>
           <label
@@ -924,6 +961,7 @@ onBeforeUnmount(() => {
               v-model="centralForm.calibration_reference"
               type="text"
               maxlength="200"
+              :required="centralThresholdsConfigured"
               placeholder="Wajib diisi bila threshold diatur"
           /></label>
           <div class="master-data__form-actions ai-setup-view__form-wide">

@@ -202,6 +202,9 @@ server {
         proxy_pass http://127.0.0.1:8001/metrics;
         proxy_set_header Host $host;
     }
+    # Deny docs even if a future proxy_pass is added; the /metrics allowlist
+    # above keeps its semantics unchanged.
+    location ~ ^/(docs|redoc|openapi\.json) { deny all; }
     location ~ ^/api/v1/recognition/sessions/[0-9a-fA-F-]+/(bursts|cache)$ {
         limit_except POST DELETE { deny all; }
         proxy_pass http://127.0.0.1:8001;

@@ -36,6 +36,12 @@ export type ScheduleTeacher = components['schemas']['ScheduleTeacherResponse']
 export type AttendanceSession = components['schemas']['AttendanceSessionResponse']
 export type SessionOpeningPolicy = components['schemas']['SessionOpeningPolicy']
 export type SessionOpeningPolicyResponse = components['schemas']['SessionOpeningPolicyResponse']
+export type TeacherOpeningPreference = components['schemas']['TeacherOpeningPreference']
+export type TeacherOpeningPreferenceResponse =
+  components['schemas']['TeacherOpeningPreferenceResponse']
+export type SessionRosterEntry = components['schemas']['SessionRosterEntry']
+export type ManualMarkRequest = components['schemas']['ManualMarkRequest']
+export type ManualMarkResponse = components['schemas']['ManualMarkResponse']
 export type StaffAccountCreate = components['schemas']['StaffAccountCreateRequest']
 export type StaffAccountCreated = components['schemas']['StaffAccountCreatedResponse']
 export type AttendanceReportQuery =
@@ -445,11 +451,39 @@ export async function saveSessionOpeningPolicy(
 }
 
 export async function listAttendanceSessions(query: {
-  status?: 'active' | 'closed' | 'cancelled'
+  status?: 'active' | 'manual_override' | 'closed' | 'cancelled'
   limit: number
   offset: number
 }): Promise<Page<AttendanceSession>> {
   const result = await apiClient.GET('/api/v1/sessions', { params: { query } })
+  return unwrap(result)
+}
+
+export async function getOpeningPreference(): Promise<TeacherOpeningPreferenceResponse> {
+  return unwrap(await apiClient.GET('/api/v1/sessions/opening-preference'))
+}
+
+export async function saveOpeningPreference(
+  body: TeacherOpeningPreference,
+): Promise<TeacherOpeningPreferenceResponse> {
+  return unwrap(await apiClient.PUT('/api/v1/sessions/opening-preference', { body }))
+}
+
+export async function getSessionRoster(sessionId: string): Promise<SessionRosterEntry[]> {
+  const result = await apiClient.GET('/api/v1/sessions/{session_id}/roster', {
+    params: { path: { session_id: sessionId } },
+  })
+  return unwrap(result)
+}
+
+export async function markManualAttendance(
+  sessionId: string,
+  body: ManualMarkRequest,
+): Promise<ManualMarkResponse> {
+  const result = await apiClient.POST('/api/v1/attendance/sessions/{session_id}/manual-marks', {
+    params: { path: { session_id: sessionId } },
+    body,
+  })
   return unwrap(result)
 }
 

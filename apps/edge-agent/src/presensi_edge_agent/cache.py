@@ -163,7 +163,8 @@ def parse_session_cache(
     returned_device_id = _uuid(data, "device_id")
     if returned_device_id != device_id:
         raise CacheSchemaError("Cache belongs to a different device.")
-    if _required_string(data, "session_status") != "active":
+    session_status = _required_string(data, "session_status")
+    if session_status not in ("active", "manual_override"):
         raise CacheSchemaError("Cache session is not active.")
     generated_at = _timestamp(data, "generated_at")
     session_ends_at = _timestamp(data, "session_ends_at")
@@ -195,7 +196,7 @@ def parse_session_cache(
     return SessionCacheBundle(
         device_id=returned_device_id,
         session_id=_uuid(data, "session_id"),
-        session_status="active",
+        session_status=session_status,
         generated_at=generated_at,
         session_ends_at=session_ends_at,
         expires_at=expires_at,

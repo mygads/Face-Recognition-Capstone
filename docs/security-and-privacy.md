@@ -23,6 +23,11 @@ All model and event metadata is treated as sensitive student-linked data. No rea
 student or minor face data belongs in Git, tests, CI, screenshots, or benchmark
 fixtures.
 
+No cloud face-recognition SaaS: all recognition stays in `libs/recognition-core`
+on lab PCs (AI_EDGE) or the central AI server (AI_CENTRAL). No biometric image,
+embedding, or candidate payload is sent to any third-party recognition API. Any
+SaaS proposal is a stop-and-ask architecture change per AGENTS.md.
+
 ## Access control and audit
 
 - `ADMIN` and `LABORANT` may use enrollment and view template metadata. `TEACHER`
@@ -95,6 +100,15 @@ logs have separate school-defined retention requirements and are not deleted by
 this job. Record the approved period in the school's retention schedule and
 adjust the environment setting accordingly.
 
+Biometric retention rule: (a) raw images are never stored by default; (b) face
+template ciphertext retention follows the school-approved schedule, and
+revocation/deactivation erases the ciphertext plus key metadata; (c) field-test
+templates use a short approved retention window, then are revoked with cleanup
+counts verified; (d) the recognition-event sweep
+(`PRESENSI_RECOGNITION_EVENT_RETENTION_DAYS`, default 90) redacts linked events
+and deletes unlinked ones — attendance and audit records keep their separate
+school-defined retention and are never deleted by that job.
+
 There are currently no debug image artifacts to expire. If that changes, do not
 store them for production use; require an explicit development-only switch, a
 configured short retention window, automatic cleanup, and a test proving cleanup
@@ -126,7 +140,10 @@ Docker Compose is for development and binds the API to loopback. In production:
    Restrict the AI service `/metrics` route to the trusted operations network;
    it reports aggregate host/process utilization. Keep
    `PRESENSI_AI_BENCHMARK_TIMING_ENABLED=false` except during a controlled
-   benchmark, then disable it and restart the service.
+   benchmark, then disable it and restart the service. Deny `/docs`, `/redoc`,
+   `/openapi.json`, and `/metrics` at the public proxy for all public vhosts;
+   expose AI `/metrics` only to the approved monitoring allowlist on the
+   private network (see the `ai-central-stb.md` snippet).
 6. Keep PostgreSQL private, encrypted at rest, backed up under the same access
    policy, and test encrypted-template key recovery before production.
 

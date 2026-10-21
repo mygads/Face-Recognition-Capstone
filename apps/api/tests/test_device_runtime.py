@@ -550,3 +550,25 @@ def test_event_retention_deletes_unlinked_events_and_redacts_attendance_events(
             "deleted_events": 1,
             "redacted_events": 1,
         }
+
+
+def test_manual_override_session_stays_discoverable_to_devices(
+    runtime_database: tuple[sessionmaker[Session], dict[str, Any]],
+) -> None:
+    factory, _time_data = runtime_database
+    with factory.begin() as session:
+        attendance_session = session.get(AttendanceSession, SESSION_ID)
+        assert attendance_session is not None
+        attendance_session.status = "manual_override"
+
+    sessions = _request("GET", f"/api/v1/devices/{DEVICE_ID}/active-sessions")
+    assert sessions.status_code == 200
+    assert [item["session_id"] for item in sessions.json()] == [str(SESSION_ID)]
+
+    gallery = _request(
+        "GET",
+        f"/api/v1/devices/{DEVICE_ID}/active-session-cache"
+        f"?session_id={SESSION_ID}&model_name={MODEL_NAME}&model_version={MODEL_VERSION}",
+    )
+    assert gallery.status_code == 200, gallery.text
+    assert gallery.json()["roster"][0]["student_id"] == str(STUDENT_ID)

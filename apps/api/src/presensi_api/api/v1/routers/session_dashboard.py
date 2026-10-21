@@ -225,7 +225,8 @@ def _build_snapshot(
     return SessionDashboardSnapshot(
         session_id=attendance_session.id,
         session_status=cast(
-            Literal["active", "closed", "cancelled"], attendance_session.status
+            Literal["active", "manual_override", "closed", "cancelled"],
+            attendance_session.status,
         ),
         generated_at=now,
         summary=SessionAttendanceSummary(

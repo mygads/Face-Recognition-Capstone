@@ -271,6 +271,10 @@ server {
         proxy_set_header Host $host;
     }
 
+    # FastAPI serves /docs and /openapi.json by default; the proxy is the
+    # enforcement point, so deny them here for every public vhost.
+    location ~ ^/(docs|redoc|openapi\.json) { return 404; }
+
     location / {
         try_files $uri $uri/ /index.html;
     }

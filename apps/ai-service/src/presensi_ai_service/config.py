@@ -94,6 +94,10 @@ class AISettings:
                 not math.isfinite(optional_score) or not low <= optional_score <= high
             ):
                 raise AIServiceConfigError(f"{name} is outside its valid range.")
+        if (self.min_top1_similarity is None) != (self.min_top1_top2_margin is None):
+            raise AIServiceConfigError(
+                "Top-1 and margin thresholds must be configured together."
+            )
         if self.liveness_required and not self.liveness_enabled:
             raise AIServiceConfigError("Required liveness must be enabled.")
         if self.liveness_enabled and (

@@ -23,6 +23,7 @@ import {
   type Laboratory,
   type AiReadiness,
 } from '../api/client'
+import { triggerDownload } from '../utils/download'
 
 type DeviceForm = {
   name: string
@@ -226,15 +227,19 @@ function formatError(error: unknown): string {
 
 function formatLastSeen(value: string | null): string {
   if (!value) return 'Belum pernah'
-  return new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(
-    new Date(value),
-  )
+  return new Intl.DateTimeFormat('id-ID', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Asia/Jakarta',
+  }).format(new Date(value))
 }
 
 function formatCredentialExpiry(value: string): string {
-  return new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(
-    new Date(value),
-  )
+  return new Intl.DateTimeFormat('id-ID', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Asia/Jakarta',
+  }).format(new Date(value))
 }
 
 function defaultCoreApiUrl(): string {
@@ -561,12 +566,7 @@ function downloadCredential(): void {
   const file = new Blob([`${issuedCredential.value.token}\n`], {
     type: 'text/plain;charset=utf-8',
   })
-  const url = URL.createObjectURL(file)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = 'device.token'
-  link.click()
-  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  triggerDownload(file, 'device.token')
   credentialCopyMessage.value =
     'File device.token diunduh. Pindahkan ke folder token agent pada komputer perangkat.'
 }
@@ -751,12 +751,7 @@ function downloadSetupBundle(): void {
     const file = new Blob([`${JSON.stringify(bundle, null, 2)}\n`], {
       type: 'application/json;charset=utf-8',
     })
-    const url = URL.createObjectURL(file)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `presensi-device-${device.device_id}-setup.json`
-    link.click()
-    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+    triggerDownload(file, `presensi-device-${device.device_id}-setup.json`)
     bundleMessage.value =
       'Paket setup diunduh. Paket ini memuat secret; pindahkan secara aman ke host kamera dan hapus setelah agent berhasil dipasang.'
   } catch (error) {

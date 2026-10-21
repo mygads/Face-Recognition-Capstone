@@ -795,6 +795,19 @@ def test_api_auth_rejection_is_not_retryable(status_code: int) -> None:
     http.close()
 
 
+def test_cache_accepts_manual_override_as_running_session() -> None:
+    payload = sample_bundle_payload()
+    payload["session_status"] = "manual_override"
+    bundle = parse_session_cache(
+        payload,
+        device_id=DEVICE_ID,
+        model_name=MODEL_NAME,
+        model_version=MODEL_VERSION,
+    )
+    assert bundle.session_status == "manual_override"
+    assert len(bundle.students) == 2
+
+
 def test_cache_parses_memory_only_gallery_and_keeps_unenrolled_roster() -> None:
     bundle = parse_session_cache(
         sample_bundle_payload(),

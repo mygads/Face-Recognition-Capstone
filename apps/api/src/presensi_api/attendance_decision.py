@@ -197,7 +197,7 @@ def decide_recognition_event(
         reason = "device_camera_disabled"
     elif device.laboratory_id != schedule.laboratory_id:
         reason = "device_laboratory_mismatch"
-    elif attendance_session.status != "active":
+    elif attendance_session.status not in ("active", "manual_override"):
         reason = "session_inactive"
     elif not candidate_exists:
         reason = "student_not_found"

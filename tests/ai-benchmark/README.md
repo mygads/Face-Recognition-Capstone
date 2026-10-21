@@ -97,3 +97,16 @@ python -m pytest tests/ai-benchmark -q
 python -m ruff check tests/ai-benchmark
 python -m mypy tests/ai-benchmark
 ```
+
+## Benchmark sign-off
+
+Copy this block into the run report. Reports stay local per the privacy rules
+above.
+
+- Evaluator name/signature + date:
+- Reviewer name/signature + date:
+- Model names/versions + SHA-256:
+- Manifest / run ID:
+- Threshold candidate + FMR/FRR summary:
+- Holdout validation statement: a separate holdout validation is required
+  before any production threshold; this run alone does not clear one.

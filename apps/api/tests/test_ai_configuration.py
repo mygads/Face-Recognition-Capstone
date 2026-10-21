@@ -144,3 +144,27 @@ def test_admin_can_pause_camera_and_action_is_audited(
         )
         assert audit is not None
         assert audit.after_state == {"camera_enabled": False}
+
+
+def test_edge_thresholds_reject_non_finite_numbers(
+    edge_settings_client: TestClient,
+) -> None:
+    # Sent as a string because raw Infinity is not valid JSON; Pydantic
+    # parses "inf" to float inf and must then reject it via allow_inf_nan.
+    response = edge_settings_client.put(
+        f"/api/v1/admin/settings/devices/{DEVICE_ID}/ai-edge",
+        json={
+            "min_face_pixels": 80,
+            "min_laplacian_variance": 45,
+            "min_brightness": 25,
+            "max_brightness": 235,
+            "min_top1_similarity": "inf",
+            "min_top1_top2_margin": 0.1,
+            "minimum_agreeing_frames": 3,
+            "sample_every_n_frames": 5,
+            "best_frame_count": 5,
+            "max_history_frames": 10,
+            "calibration_reference": None,
+        },
+    )
+    assert response.status_code == 422

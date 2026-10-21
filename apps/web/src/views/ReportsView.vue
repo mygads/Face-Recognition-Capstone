@@ -13,6 +13,7 @@ import {
   type AttendanceSession,
   type Schedule,
 } from '../api/client'
+import { triggerDownload } from '../utils/download'
 
 const pageSize = 20
 const filters = reactive({
@@ -128,12 +129,7 @@ async function exportReport(format: 'csv' | 'xlsx'): Promise<void> {
   errorMessage.value = null
   try {
     const { blob, filename } = await downloadAttendanceReport(appliedQuery.value, format)
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = filename
-    anchor.click()
-    URL.revokeObjectURL(url)
+    triggerDownload(blob, filename)
   } catch (error) {
     errorMessage.value = formatError(error)
   } finally {
