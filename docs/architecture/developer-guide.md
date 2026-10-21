@@ -198,8 +198,8 @@ before planning an integration around one.
    `python3 scripts/start-local.py` on Ubuntu. This command applies Alembic
    migrations, seeds roles, bootstraps the local administrator if needed,
    installs web dependencies, and starts Vite.
-3. Sign in with `admin@local.test` / `123456789abcd`, then change the password
-   at first sign-in. Add school records and staff accounts from the UI.
+3. Sign in with `admin@local.test` / `1234abcd`, then change the password
+   (minimum 12 characters) at first sign-in. Add school records and staff accounts from the UI.
 4. Run scripts/check.py and the synthetic scenario scripts/regression.py. These
    checks do not use face images or a webcam.
 5. For manual camera work, use the checksum-pinned model setup, register the

@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 from sqlalchemy import create_engine, event, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -367,6 +368,35 @@ def test_duplicate_student_session_attendance_keeps_second_event_only(
     with factory() as db:
         assert len(db.scalars(select(RecognitionEvent)).all()) == 2
         assert len(db.scalars(select(AttendanceRecord)).all()) == 1
+
+
+def test_concurrent_duplicate_keeps_audit_event_and_reports_clean_duplicate(
+    attendance_database: tuple[sessionmaker[Session], dict[str, UUID]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A UNIQUE violation racing the pre-check must not abort the audit event."""
+    factory, ids = attendance_database
+    real_flush = Session.flush
+
+    def fail_record_flush(self: Session) -> None:
+        if any(isinstance(obj, AttendanceRecord) for obj in self.new):
+            raise IntegrityError(
+                "INSERT INTO attendance_records",
+                {},
+                Exception("uq_attendance_records_session_student"),
+            )
+        real_flush(self)
+
+    monkeypatch.setattr(Session, "flush", fail_record_flush)
+
+    response = post_event(event_body(ids))
+
+    assert response.status_code == 200, response.text
+    assert response.json()["decision"] == "no_attendance"
+    assert response.json()["reason"] == "attendance_already_recorded"
+    with factory() as db:
+        assert db.scalar(select(RecognitionEvent)) is not None
+        assert db.scalar(select(AttendanceRecord)) is None
 
 
 def test_same_event_id_retry_is_idempotent_and_returns_original_decision(

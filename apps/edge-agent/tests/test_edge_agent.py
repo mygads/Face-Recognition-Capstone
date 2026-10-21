@@ -764,6 +764,37 @@ def test_api_5xx_is_retryable_and_does_not_include_response_body() -> None:
     http.close()
 
 
+@pytest.mark.parametrize("status_code", [401, 403])
+def test_api_auth_rejection_is_not_retryable(status_code: int) -> None:
+    http = httpx.Client(
+        base_url="https://api.example.test",
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(status_code, text="credential rejected")
+        ),
+    )
+    client = CoreApiClient(
+        ApiSettings(
+            base_url="https://api.example.test",
+            timeout_seconds=1,
+            heartbeat_interval_seconds=5,
+            cache_refresh_seconds=3,
+            cache_path="/api/v1/devices/{device_id}/active-session-cache",
+            token_file=None,
+        ),
+        DEVICE_ID,
+        lambda: "test-token",
+        client=http,
+    )
+
+    with pytest.raises(ApiCallError) as failure:
+        client.heartbeat()
+
+    assert failure.value.retryable is False
+    assert failure.value.status_code == status_code
+    client.close()
+    http.close()
+
+
 def test_cache_parses_memory_only_gallery_and_keeps_unenrolled_roster() -> None:
     bundle = parse_session_cache(
         sample_bundle_payload(),
@@ -1135,6 +1166,7 @@ def test_recognizer_keeps_all_template_candidates_for_distinct_student_margin() 
             _frame: object,
             _gallery: tuple[GalleryEntry, ...],
             _observation: object,
+            **_: object,
         ) -> TrackDecision:
             return TrackDecision(
                 track_id="test",

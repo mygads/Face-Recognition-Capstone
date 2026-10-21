@@ -40,7 +40,14 @@ Production operation must have a legally cleared liveness detector or documented
 physical/session controls, including for outages and uncertain scores.
 
 An ambiguous margin yields domain state `retry_frontal` and machine status
-`NEED_FRONTAL_RETRY`; it never auto-accepts that observation. The engine returns
+`NEED_FRONTAL_RETRY`; it never auto-accepts that observation. A candidate set
+with only one DISTINCT identity is also non-accepting (`single_identity_gallery`):
+without a runner-up the Top-1/Top-2 margin is undefined, so similarity alone
+can never accept. The pipeline re-queries the matcher with a wider limit when
+truncation hides the runner-up (one student owning several templates under a
+tight `max_candidates`); the temporal engine stays authoritative for the
+accept/reject decision on the wider set. A genuinely single-identity gallery
+stays fail-closed and the teacher falls back to manual attendance. The engine returns
 recognition state only. Attendance remains a Core API/domain decision.
 
 Stage contracts are Python protocols. OpenCV, ONNX Runtime, or other local inference

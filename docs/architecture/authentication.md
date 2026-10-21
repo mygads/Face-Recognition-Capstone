@@ -32,8 +32,10 @@ Enrollment and operator template metadata routes require `ADMIN` or `LABORANT`. 
 
 Local development startup applies migrations, seeds roles, and creates
 admin@local.test on an empty database. Its local-only initial password is
-`123456789abcd`; the account must change it before normal API access. This
-fixed development credential is intentionally limited to `APP_ENV=development`
+`1234abcd` (overridable with `PRESENSI_BOOTSTRAP_PASSWORD` in `.env`); the
+account must change it before normal API access, and the replacement password
+needs at least 12 characters. The bootstrap never resets an existing account.
+This fixed development credential is intentionally limited to `APP_ENV=development`
 and is not called by production deployment. Do not expose a development stack
 before changing it.
 

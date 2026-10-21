@@ -19,7 +19,7 @@ Sistem mendukung dua deployment profile. Keduanya memakai satu Vue SPA, satu Cor
 
 `recognition_events` mencatat keluaran pengenalan. `attendance_records` hanya dibuat setelah Core API memvalidasi session aktif, roster snapshot, device, grace period, dan idempotency. Hasil AI yang ambigu harus menjadi retry/fallback, bukan otomatis menjadi presensi final.
 
-Pembukaan sesi dapat diatur sebagai `manual` (default, guru membuka sesi) atau `automatic` (Core API membuka sesi dari jadwal dalam jendela yang ditetapkan admin, maksimal 15 menit sebelum/sesudah jam mulai). Kedua cara membuat snapshot roster yang sama dan menutup sesi pada jam akhir jadwal. Grace period otomatis dihitung dari jam mulai jadwal; sesi manual mempertahankan grace period sejak guru membuka sesi.
+Pembukaan sesi dapat diatur sebagai `manual` (default, guru membuka sesi) atau `automatic` (Core API membuka sesi dari jadwal dalam jendela yang ditetapkan admin, maksimal 15 menit sebelum/sesudah jam mulai). Kedua cara membuat snapshot roster yang sama dan menutup sesi pada jam akhir jadwal. Grace period otomatis dihitung dari jam mulai jadwal; sesi manual mempertahankan grace period sejak guru membuka sesi. Keputusan tim 2026-10-21 memindahkan mode ke pengaturan per guru (`automatic`/`manual` per guru, default `manual`) plus status `manual_override` untuk sesi yang dibuka paksa guru di luar jendela otomatis — auto-close tetap berlaku. Lihat [ADR-003](../adr/ADR-003-per-teacher-opening-mode-and-manual-override.md) dan [attendance-sessions.md](attendance-sessions.md).
 
 Admin dapat menjeda kamera perangkat dari registry tanpa menonaktifkan registry atau mencabut credential agent. Perangkat menerima desired state saat polling konfigurasi, melepas camera device ketika dijeda, dan Core API menolak recognition event baru ketika kamera sedang dijeda. Perubahan diaudit.
 
@@ -82,7 +82,14 @@ Sumber: [Gentelella getting started](https://gentelella.colorlib.com/docs/gettin
 
 ## Pilihan deployment awal
 
-Desain v2 merekomendasikan pilot AI_EDGE karena saat ini hanya ada dua lab dan latency walk-through menjadi prioritas. AI_CENTRAL tetap menjadi profil yang didukung. Pilihan akhir harus dibandingkan pada hardware nyata melalui latency p50/p95, throughput, resource, biaya, dan kebutuhan operasional; angka asumsi tidak boleh ditulis sebagai hasil benchmark.
+Keputusan tim 2026-10-21: **`AI_EDGE` adalah profil default** — recognition
+berjalan di PC tiap laboratorium. `STB_GATEWAY` + `AI_CENTRAL` tetap profil yang
+didukung penuh (satu recognition-core, satu API/domain yang sama) dan bersifat
+opsional untuk lab tanpa PC yang memadai. Desain v2 merekomendasikan pilot
+AI_EDGE karena saat ini hanya ada dua lab dan latency walk-through menjadi
+prioritas. Pilihan akhir per lab harus dibandingkan pada hardware nyata melalui
+latency p50/p95, throughput, resource, biaya, dan kebutuhan operasional; angka
+asumsi tidak boleh ditulis sebagai hasil benchmark.
 
 ## Development environment
 
@@ -121,6 +128,6 @@ and memory-only session cache lifecycle are documented in [ai-service.md](ai-ser
 
 ## Status implementasi dan pekerjaan tersisa
 
-Skema PostgreSQL didefinisikan lewat SQLAlchemy 2 dan Alembic; migration dan seed role dijalankan eksplisit. API memakai Argon2, short-lived JWT operator, kredensial perangkat terpisah, permission checks, dan scope sumber daya pada handler yang sudah diimplementasikan. Attendance decision, sesi/roster, device gallery, enrollment dengan embedding terenkripsi, dan reporting tersedia. Beberapa operasi account/settings dan attendance listing tetap contract placeholder HTTP 501 setelah autentikasi/otorisasi; teacher correction saat ini hanya membuat permintaan pending dan belum memiliki approval workflow. Detail akses tercatat di [authentication.md](authentication.md) dan [api-contract.md](api-contract.md).
+Skema PostgreSQL didefinisikan lewat SQLAlchemy 2 dan Alembic; migration dan seed role dijalankan eksplisit. API memakai Argon2, short-lived JWT operator, kredensial perangkat terpisah, permission checks, dan scope sumber daya pada handler yang sudah diimplementasikan. Attendance decision, sesi/roster, device gallery, enrollment dengan embedding terenkripsi, dan reporting tersedia. Beberapa operasi account/settings dan attendance listing tetap contract placeholder HTTP 501 setelah autentikasi/otorisasi; teacher correction saat ini hanya membuat permintaan pending dan belum memiliki approval workflow; endpoint tandai-manual-langsung untuk kegagalan deteksi belum ada (rencana di [attendance-decisions.md](attendance-decisions.md)). Detail akses tercatat di [authentication.md](authentication.md) dan [api-contract.md](api-contract.md).
 
 Threshold recognition belum dikalibrasi pada dataset/hardware sekolah. Penggunaan liveness tetap bergantung pada clearance lisensi model, dan akurasi/latency perangkat belum diverifikasi lewat field test fisik. Gallery lokal AI_EDGE berada di memory dan agent memerlukan koneksi baru setelah restart offline; event outbox tetap durable. Lihat [model provenance](../models.md), [field-test protocol](../test-plans/walkthrough-field-test.md), dan [deployment runbooks](../deployment/).

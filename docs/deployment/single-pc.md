@@ -104,7 +104,10 @@ Windows or `python3 scripts/dev.py dev-up` on Ubuntu.
 The task runner copies `.env.example` to `.env` if needed and fills blank local
 database/JWT/encrypted-template secrets, applies migrations, seeds roles, and
 creates a local administrator only when the user table is empty. Sign in as
-`admin@local.test` with `123456789abcd` and change it at first sign-in. This
+`admin@local.test` with `1234abcd` (override via `PRESENSI_BOOTSTRAP_PASSWORD`)
+and change it at first sign-in (new password minimum 12 characters). The
+bootstrap never resets an existing account; if the dev database already has an
+account, sign in with the password set earlier or recreate the dev volume. This
 fixed password is for local development only; do not expose the development
 stack before changing it. The .env file is ignored by Git. Keep
 the local generated keyring with the database volume; losing it makes encrypted

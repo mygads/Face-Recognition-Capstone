@@ -413,3 +413,55 @@ def test_pipeline_sampling_skips_before_preprocess_and_model_work() -> None:
 
     assert result == decision
     assert calls == ["sample", "skip"]
+
+
+def test_truncated_runner_up_triggers_wider_matcher_requery() -> None:
+    calls: list[str] = []
+    other_student = UUID(int=202)
+    face = FaceDetection(box=BoundingBox(0, 0, 30, 30), confidence=0.95)
+    quality = FaceQuality(score=0.9, acceptable=True)
+    decision = TrackDecision(
+        track_id=TEACHER_TRACK,
+        state="collecting",
+        decision=RecognitionDecision(outcome="retry"),
+        observation_count=1,
+    )
+    temporal = FakeTemporalDecisionEngine(calls, decision)
+    embedding = FaceEmbedding((1.0,), "fake-embedder", "test", True)
+    # First query with limit=2 returns two templates of the SAME student,
+    # hiding the runner-up; the wider re-query must surface it.
+    matcher = FakeMatcher(
+        calls,
+        (
+            CandidateMatch(STUDENT_ID, 0.93),
+            CandidateMatch(STUDENT_ID, 0.92),
+            CandidateMatch(other_student, 0.35),
+        ),
+    )
+    pipeline = RecognitionPipeline(
+        preprocessor=FakePreprocessor(calls),
+        detector=FakeFaceDetector(calls, (face,)),
+        quality_assessor=FakeFaceQualityAssessor(calls, quality),
+        aligner=FakeFaceAligner(calls),
+        liveness_config=LivenessConfig(enabled=False, required=False),
+        liveness_model=None,
+        embedder=FakeFaceEmbedder(calls, embedding),
+        matcher=matcher,
+        temporal_decision=temporal,
+    )
+    gallery = (
+        dummy_gallery_entry(STUDENT_ID, embedding),
+        dummy_gallery_entry(STUDENT_ID, embedding),
+        dummy_gallery_entry(other_student, embedding),
+    )
+
+    pipeline.process(
+        any_frame(), gallery, FrameObservation(TEACHER_TRACK, datetime.now(UTC))
+    )
+
+    assert calls.count("match") == 2
+    assert len(temporal.matches) == 3
+    assert {match.student_id for match in temporal.matches} == {
+        STUDENT_ID,
+        other_student,
+    }

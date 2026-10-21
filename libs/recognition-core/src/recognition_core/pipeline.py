@@ -173,6 +173,29 @@ class RecognitionPipeline:
                             )
                         ),
                     )
+                    # The temporal engine needs two DISTINCT identities to
+                    # compute a meaningful Top-1/Top-2 margin. A tight matcher
+                    # limit can truncate the runner-up when one student owns
+                    # several gallery templates, which would otherwise force
+                    # every such frame into a fail-closed retry. Re-query once
+                    # with a wider limit so the runner-up survives; the
+                    # temporal engine stays authoritative for the
+                    # accept/retry decision on the wider candidate set.
+                    if (
+                        len(gallery) > len(matches)
+                        and len({match.student_id for match in matches}) < 2
+                    ):
+                        matches = _timed_stage(
+                            timing_observer,
+                            "match",
+                            lambda: tuple(
+                                self.matcher.match(
+                                    probe,
+                                    gallery,
+                                    limit=len(gallery),
+                                )
+                            ),
+                        )
                 elif liveness.reason_code is None:
                     liveness = LivenessDecision(
                         state=liveness.state,

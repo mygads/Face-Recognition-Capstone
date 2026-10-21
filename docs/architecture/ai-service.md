@@ -4,8 +4,12 @@
 trusted STB/edge agent sends a chronological burst over the private lab LAN. The
 service verifies the device UUID and bearer credential, applies request/rate
 limits, decodes supported media in bounded memory, and invokes the shared
-`libs/recognition-core` pipeline. It returns a track decision and limited
-candidate metadata. The edge agent submits a recognition event to `apps/api`,
+`libs/recognition-core` pipeline. Device authentication is fail-closed: with no
+configured device token the service returns `503 auth_misconfigured` and logs a
+startup warning, instead of trusting any bearer token. Open auth is allowed only
+as an explicit opt-in when gallery validation is delegated to a
+`CoreApiGalleryProvider` (Core API mode), never for local-registry deployments.
+It returns a track decision and limited candidate metadata. The edge agent submits a recognition event to `apps/api`,
 which validates session, device, roster, idempotency, and attendance policy.
 
 ```mermaid

@@ -18,8 +18,10 @@ from presensi_api.api.security.dependencies import get_current_user
 from presensi_api.api.security.passwords import hash_password
 from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
 from presensi_api.auth.bootstrap_admin import (
+    BOOTSTRAP_DEFAULT_PASSWORD,
     BOOTSTRAP_EMAIL,
     bootstrap_development_admin,
+    resolve_bootstrap_password,
 )
 from presensi_api.db.base import Base
 from presensi_api.db.models import AuditLog, AuthSession, Role, User, UserRole
@@ -410,6 +412,33 @@ def test_development_bootstrap_requires_password_change_before_app_access(
         for event in events
     )
     assert "auth.password_changed" in [event.action for event in events]
+
+
+def test_bootstrap_default_password_matches_readme(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PRESENSI_BOOTSTRAP_PASSWORD", raising=False)
+    assert BOOTSTRAP_DEFAULT_PASSWORD == "1234abcd"
+    assert resolve_bootstrap_password() == "1234abcd"
+
+
+def test_bootstrap_password_env_override(
+    api_database: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("PRESENSI_BOOTSTRAP_PASSWORD", "custom-dev-password-1")
+    with api_database.begin() as session:
+        seed_roles(session)
+        assert bootstrap_development_admin(session) == "custom-dev-password-1"
+
+    login_response = request(
+        "POST",
+        "/api/v1/auth/login",
+        form={"username": BOOTSTRAP_EMAIL, "password": "custom-dev-password-1"},
+    )
+    assert login_response.status_code == 200
+    assert login_response.json()["password_change_required"] is True
 
 
 def test_bootstrap_refuses_non_development_environment(

@@ -234,19 +234,23 @@ async function loadActiveTemplates(studentId: string): Promise<void> {
 }
 
 async function revokeSelectedTemplates(): Promise<void> {
-  const firstTemplate = activeTemplates.value[0]
+  const templates = activeTemplates.value
   const student = selectedStudent.value
-  if (!firstTemplate || !student || isRevoking.value) return
+  if (templates.length === 0 || !student || isRevoking.value) return
   isRevoking.value = true
   pageError.value = null
   try {
-    await revokeFaceTemplate(firstTemplate.id)
+    for (const template of templates) {
+      await revokeFaceTemplate(template.id)
+    }
     const updatedRoster = await listClassEnrollmentStatus(selectedClassId.value)
     students.value = updatedRoster
     const updatedStudent = updatedRoster.find((item) => item.id === student.id)
     selectedStudentId.value = updatedStudent?.id ?? ''
     activeTemplates.value = []
-    pageMessage.value = `${student.full_name}: template dicabut. Siswa dapat didaftarkan ulang.`
+    pageMessage.value =
+      `${student.full_name}: ${templates.length} template dicabut. ` +
+      'Siswa dapat didaftarkan ulang.'
   } catch (error) {
     pageError.value = formatError(error)
   } finally {
@@ -523,7 +527,7 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
               :disabled="isLoadingTemplates || isRevoking || activeTemplates.length === 0"
               @click="revokeSelectedTemplates"
             >
-              {{ isRevoking ? 'Mencabut…' : 'Cabut template untuk daftar ulang' }}
+              {{ isRevoking ? 'Mencabut…' : 'Cabut semua template untuk daftar ulang' }}
             </button>
           </div>
           <button

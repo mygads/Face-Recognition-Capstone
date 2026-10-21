@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import cast
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -236,19 +237,35 @@ def decide_recognition_event(
         attendance_status = (
             "present" if as_utc(request.occurred_at) <= grace_cutoff else "late"
         )
-        record = AttendanceRecord(
-            session_id=request.session_id,
-            student_id=request.student_id,
-            recognition_event_id=event.id,
-            recorded_by_user_id=None,
-            status=attendance_status,
-            source="face_recognition",
-        )
-        db.add(record)
-        metadata["attendance_decision"] = {
-            "decision": "attendance_recorded",
-            "status": attendance_status,
-        }
+        record = None
+        try:
+            # Two concurrent deliveries can both pass the pre-check above; the
+            # savepoint keeps the UNIQUE(session_id, student_id) violation from
+            # aborting the audit event insert that must still commit below.
+            with db.begin_nested():
+                record = AttendanceRecord(
+                    session_id=request.session_id,
+                    student_id=request.student_id,
+                    recognition_event_id=event.id,
+                    recorded_by_user_id=None,
+                    status=attendance_status,
+                    source="face_recognition",
+                )
+                db.add(record)
+                db.flush()
+        except IntegrityError:
+            record = None
+            reason = "attendance_already_recorded"
+        if record is not None:
+            metadata["attendance_decision"] = {
+                "decision": "attendance_recorded",
+                "status": attendance_status,
+            }
+        else:
+            metadata["attendance_decision"] = {
+                "decision": "no_attendance",
+                "reason": reason,
+            }
     else:
         metadata["attendance_decision"] = {
             "decision": "no_attendance",

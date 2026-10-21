@@ -131,6 +131,20 @@ def test_top2_margin_compares_distinct_people_not_duplicate_templates() -> None:
     assert result.decision.student_id == PERSON_A
 
 
+def test_single_identity_candidate_set_never_accepts_without_runner_up() -> None:
+    engine = _engine(minimum_agreeing_frames=2, best_frame_count=2)
+    single_identity = (CandidateMatch(PERSON_A, 0.97),)
+
+    result = _decide(engine, 1, single_identity)
+    for frame in range(2, 6):
+        result = _decide(engine, frame, single_identity)
+
+    assert result.state == "retry_frontal"
+    assert result.status == "NEED_FRONTAL_RETRY"
+    assert result.decision.student_id is None
+    assert result.decision.reason_code == "single_identity_gallery"
+
+
 def test_top1_below_configured_threshold_is_rejected() -> None:
     engine = _engine(
         minimum_agreeing_frames=2,

@@ -6,6 +6,23 @@ Teachers can open sessions for their own schedules; ADMIN and LABORANT operators
 open eligible schedules for operations. Session routes require the shared
 SESSION_OPERATE permission.
 
+## Opening modes (global saat ini; per guru direncanakan)
+
+Mode pembukaan sesi saat ini bersifat global dan dipilih admin: `manual`
+(default, guru membuka sesi) atau `automatic` (Core API membuka sesi dari jadwal
+dalam jendela maksimal 15 menit sebelum/sesudah jam mulai, dikonfigurasi lewat
+runtime-configuration scope `attendance-session-policy`). Keputusan tim
+2026-10-21 ([ADR-003](../adr/ADR-003-per-teacher-opening-mode-and-manual-override.md),
+status Accepted, implementasi Belum): tiap guru memiliki pengaturan
+`opening_mode` (`automatic`/`manual`, default `manual`); worker otomatis hanya
+membuka sesi milik guru mode `automatic`. Guru boleh membuka sesi manual kapan
+pun — termasuk di luar jendela otomatis — dan sesi paksa seperti ini berstatus
+**`manual_override`** agar dasbor/audit menunjukkan intervensi guru. Auto-close
+pada jam akhir jadwal berlaku untuk `active` DAN `manual_override`; guru tetap
+bisa menutup manual kapan pun. Implementasi membutuhkan nilai status baru,
+perluasan worker auto-open/auto-close, migrasi Alembic, dan UI pengaturan guru
+(backlog P1-9, P1-10).
+
 Opening a session creates the attendance_sessions row and copies the schedule class's
 active students into session_students in the same transaction. The copied student
 number and name are immutable session-time labels; later roster changes do not alter

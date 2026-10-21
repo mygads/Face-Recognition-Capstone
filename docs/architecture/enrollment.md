@@ -25,9 +25,11 @@ processing. Do not reuse enrollment templates across model versions.
 The API compares new vectors against other students' active vectors for the
 same model/version. Similarity above the configurable warning threshold adds a
 duplicate-lookalike warning for the operator; it never merges students or
-enrollments. The operator must verify identity before proceeding. To re-enroll,
-select the active student, revoke the current enrollment batch, and capture a
-new set. Revocation is audited and does not delete historical rows. Operators
+enrollments. The operator must verify identity before proceeding. To re-enroll, select the active student and revoke enrollment. Revocation removes
+ALL active templates of that student in one action (loop over the loaded batch),
+then confirms the roster status — partial revocation is not possible from this
+screen, so a re-enrollment always starts from a clean state. Capture a new set
+afterwards. Revocation is audited and does not delete historical rows. Operators
 must provision the encryption key ring before accepting enrollments; a missing
 or mismatched key fails closed.
 

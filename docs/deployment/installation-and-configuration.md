@@ -108,7 +108,11 @@ menjalankan Vite. Lewati model dengan `--skip-model-download`; unduh setelahnya
 dengan `--download-models`. File model berada di `models/weights/`, diabaikan Git.
 
 Buka `http://127.0.0.1:5173`. Akun development awal adalah
-`admin@local.test` / `123456789abcd`; ganti password saat login pertama. Jangan
+`admin@local.test` / `1234abcd` (dapat dioverride via
+`PRESENSI_BOOTSTRAP_PASSWORD` di `.env`); ganti password saat login pertama
+(password baru minimal 12 karakter). Bootstrap hanya berjalan saat database
+masih kosong dan tidak me-reset password yang sudah ada — lihat troubleshooting
+login di [README](../../README.md#login-gagal-cek-tiga-hal-ini-dulu). Jangan
 memakai akun ini untuk production. AI Central atau AI Edge tidak akan melakukan
 recognition hanya karena bobot model terpasang: thresholds tetap harus
 terkalibrasi dan dikonfigurasi.

@@ -51,11 +51,29 @@ Satu command startup menyimpan pilihan profile, membuat `.env` lokal jika belum
 ada, menghasilkan secret development, menjalankan migration dan role seed,
 membuat akun admin lokal hanya jika belum ada akun, memasang dependency web bila
 perlu, lalu menjalankan Vite. Buka terminal di root repository. Untuk instalasi lokal, login dengan
-`admin@local.test` / `123456789abcd`; aplikasi wajib mengganti kata sandi pada
-login pertama. Kredensial tetap ini hanya untuk Compose development di mesin
+`admin@local.test` / `1234abcd`; aplikasi wajib mengganti kata sandi pada
+login pertama (kata sandi baru minimal 12 karakter). Kredensial tetap ini hanya untuk Compose development di mesin
 lokal. Jangan expose server sebelum kata sandi diganti dan jangan gunakan
 bootstrap development untuk deployment production. Production tidak membuat
-akun bawaan.
+akun bawaan. Operator dapat mengganti password awal lewat
+`PRESENSI_BOOTSTRAP_PASSWORD` di `.env` (lihat `.env.example`).
+
+#### Login gagal? Cek tiga hal ini dulu
+
+1. **Password salah.** Akun awal development adalah `admin@local.test` /
+   `1234abcd` (bukan `123456789abcd` versi lama). Jika `.env` mengatur
+   `PRESENSI_BOOTSTRAP_PASSWORD`, pakai nilai itu.
+2. **Database sudah berisi akun.** Bootstrap hanya berjalan saat tabel user
+   masih kosong; ia tidak me-reset password yang sudah ada. Jika lupa password
+   admin development, kosongkan volume dev lalu jalankan ulang startup
+   (data dev ikut terhapus):
+   `py -3 scripts/dev.py dev-down` lalu
+   `docker compose down -v`, kemudian `py -3 scripts/start-local.py`.
+   Di Ubuntu ganti `py -3` dengan `python3`.
+3. **Belum ganti password pertama.** Setelah login awal, aplikasi mengarahkan
+   ke halaman buat kata sandi baru (minimal 12 karakter, mis.
+   `sekolah-2026-aman!`). Token login awal dibatasi hanya untuk endpoint
+   ganti password sampai penggantian berhasil, lalu masuk kembali.
 
 Prasyarat Windows: Git, Docker Desktop dengan WSL2, Python 3.11+, dan Node/npm
 sesuai `apps/web/package.json`. Jika Python belum tersedia, jalankan `py install 3.12`, buka ulang PowerShell, lalu gunakan `py -3` (jangan pin `py -3.12` jika
@@ -250,7 +268,7 @@ tersedia. Halaman ini tidak mengunduh model atau memulai ulang service.
 
 | Item | Status repository | Persiapan untuk tes fisik |
 | --- | --- | --- |
-| YuNet + SFace | Adapter tersedia; downloader memprovision file lokal ke direktori ignored dengan SHA-256 terverifikasi. SFace weight masih perlu review provenance sebelum operasi. | Setup lokal dan installer AI_EDGE mengunduh otomatis; AI_CENTRAL production diprovision dari runbook. Catat versi/checksum dan selesaikan review institusi sebelum deployment. |
+| YuNet + SFace | Adapter tersedia; downloader memprovision file lokal ke direktori ignored dengan SHA-256 terverifikasi. **SFace disetujui tim untuk operasional (2026-10-21)**; threshold tetap wajib kalibrasi lokal sebelum jadi kebijakan produksi. | Setup lokal dan installer AI_EDGE mengunduh otomatis; AI_CENTRAL production diprovision dari runbook. Catat versi/checksum dan selesaikan kalibrasi benchmark sebelum deployment. |
 | Threshold Top-1/margin | Tidak ada nilai final default; agent dapat berjalan aman dalam status `waiting_for_calibration`, tetapi tidak mengenali atau mengirim presensi. | Kalibrasi pada data berizin yang mewakili kamera kelas. Prioritaskan false acceptance rendah; laporkan FMR/FNMR. |
 | Webcam/PC lab/STB | Utility kamera dan test mock tersedia; uji lapangan belum dilakukan. | Uji webcam UVC, posisi, pencahayaan, dan OS target; ukur CPU/RAM/suhu STB nyata. |
 | Liveness | Adapter/code path tersedia tetapi contoh nonaktif. Kandidat yang terdokumentasi belum cleared untuk operasi sekolah. | Tinjau lisensi/provenance, uji code path dan threshold sendiri, atau operasikan kontrol fisik/sesi yang disetujui. |
@@ -269,6 +287,13 @@ Mulai dari [panduan sistem dan onboarding developer](docs/architecture/developer
 [ADR-001](docs/adr/ADR-001-shared-recognition-core.md). Panduan menjelaskan
 komponen, alur data, domain ownership, security boundary, serta keputusan
 arsitektur.
+
+Keputusan tim 2026-10-21 (untuk delegasi tugas, baca ini dulu):
+[ADR-003 mode pembukaan per guru + manual override](docs/adr/ADR-003-per-teacher-opening-mode-and-manual-override.md),
+[rencana presensi manual guru](docs/architecture/attendance-decisions.md#presensi-manual-guru-rencana-keputusan-tim-2026-10-21),
+[persetujuan operasional SFace](docs/models.md), dan
+[backlog berstatus + pemilik](docs/backlog.md) — profil default adalah AI_EDGE,
+STB_GATEWAY + AI_CENTRAL opsional.
 
 Stack utama: Vue 3 + Vite + TypeScript; FastAPI + SQLAlchemy 2 + Alembic;
 PostgreSQL 16; recognition package Python; OpenCV/ONNX Runtime untuk adapter
@@ -289,6 +314,11 @@ python3 scripts/regression.py
 
 Regression memakai data sintetis, tanpa webcam atau wajah siswa. Playwright E2E
 terpisah: npm --prefix apps/web run test:e2e.
+
+Baseline hijau 2026-10-21: `scripts/check.py` lolos penuh (ruff, format, mypy
+133 file, **281 pytest passed**); `apps/web`: `vue-tsc --noEmit` + eslint bersih,
+**26 Vitest passed**. Klaim "selesai" hanya sah bila gate ini hijau; angka di
+atas adalah acuan — bila suite bertambah, perbarui backlog P1-8.
 
 ## Runbook dan referensi
 

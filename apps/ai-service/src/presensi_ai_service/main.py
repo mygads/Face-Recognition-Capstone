@@ -128,8 +128,11 @@ class ServiceError(Exception):
 
 
 class DeviceAuthenticator:
-    def __init__(self, tokens: Mapping[UUID, str]) -> None:
+    def __init__(
+        self, tokens: Mapping[UUID, str], *, allow_open_auth: bool = False
+    ) -> None:
         self._tokens = dict(tokens)
+        self._allow_open_auth = allow_open_auth
 
     def authenticate(
         self, device_id_value: str | None, authorization: str | None
@@ -160,7 +163,23 @@ class DeviceAuthenticator:
                     "invalid_device_credentials",
                     "Device authentication failed.",
                 )
-        elif self._tokens or len(token) < 32 or not token.isascii():
+            return device_id
+        if self._tokens or not self._allow_open_auth:
+            # Fail closed: no token is configured for this device, or no
+            # device tokens are configured at all and open auth was not
+            # explicitly allowed. Never silently trust a bearer token.
+            code = (
+                "invalid_device_credentials" if self._tokens else "auth_misconfigured"
+            )
+            status = 401 if self._tokens else 503
+            raise ServiceError(
+                status,
+                code,
+                "Device authentication failed: no device token configured."
+                if self._tokens
+                else "Device authentication is not configured on this AI service.",
+            )
+        if len(token) < 32 or not token.isascii():
             raise ServiceError(
                 401, "invalid_device_credentials", "Device authentication failed."
             )
@@ -466,7 +485,6 @@ def create_app(
         "pending" if sync_client is not None else "disabled"
     )
     app.state.central_config_error_code = None
-    app.state.authenticator = DeviceAuthenticator(configured.device_tokens)
     app.state.rate_limiter = DeviceRateLimiter(
         rate=configured.rate_limit_per_second,
         capacity=configured.rate_limit_burst,
@@ -487,6 +505,18 @@ def create_app(
             timeout_seconds=configured.inference_timeout_seconds,
         )
     app.state.gallery_provider = configured_provider
+    # Open device auth is only legitimate when identity validation is delegated
+    # to the Core API gallery provider. A local-registry deployment without any
+    # configured device token is a misconfiguration and must fail closed.
+    open_auth = isinstance(configured_provider, CoreApiGalleryProvider)
+    if not configured.device_tokens and not open_auth:
+        logger.warning(
+            "AI service has no device tokens configured and gallery validation "
+            "is local; device requests will fail closed with auth_misconfigured."
+        )
+    app.state.authenticator = DeviceAuthenticator(
+        configured.device_tokens, allow_open_auth=open_auth
+    )
     app.state.runner = (
         None
         if sync_client is not None

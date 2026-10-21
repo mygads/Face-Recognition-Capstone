@@ -31,7 +31,27 @@ used, rather than API receipt time, to handle network delay.
 decision and record. Reusing the key with different content returns HTTP 409. A new event
 for an already recorded student is itself retained, with reason
 `attendance_already_recorded`; the unique database constraint remains the final guard
-against duplicate attendance.
+against duplicate attendance. Two concurrent deliveries can both pass the
+pre-check, so the record insert runs inside a savepoint: a `UNIQUE` violation is
+caught, the audit event still commits, and the response reports the clean
+duplicate reason instead of a 500.
+
+## Presensi manual guru (rencana, keputusan tim 2026-10-21)
+
+Hasil recognition yang gagal (wajah tidak terdeteksi, retry berulang, perangkat
+bermasalah) harus bisa ditutup guru secara manual. Kondisi saat ini: guru hanya
+bisa mengajukan *correction request* berstatus pending (belum ada workflow
+approval), dan tidak ada endpoint "tandai hadir langsung". Rencana (backlog
+P1-11): endpoint `POST /attendance/sessions/{id}/manual-marks` dengan
+`SESSION_OPERATE` + kepemilikan jadwal guru, body `{student_id, status
+(present|late|absent|excused), note?}`; menulis `AttendanceRecord`
+`source='manual'`, `recognition_event_id=NULL`, `device_id=NULL`,
+`marked_by=<guru>`; memvalidasi sesi berjalan (`active`/`manual_override`),
+roster snapshot, dan duplikat student+session; mengembalikan record + audit
+`attendance.manual_marked`. UI guru menampilkan tombol tandai manual per siswa
+yang belum tercatat, dengan status validasi/error yang jelas. Rekonsiliasi:
+record manual tidak menimpa record face_recognition yang sudah ada; perubahan
+atas record manual memakai alur koreksi yang sama.
 
 The operator endpoint requires a bearer token with `SESSION_OPERATE`. Teacher
 tokens are limited to sessions for their own schedules; ADMIN and LABORANT can

@@ -4,12 +4,16 @@
 
 For the current codebase, YuNet 2023mar plus SFace 2021dec are the pair already
 supported by the shared recognition-core adapter. YuNet's directory states MIT;
-SFace's directory states Apache-2.0. However, a public OpenCV Zoo issue asks for
+SFace's directory states Apache-2.0. A public OpenCV Zoo issue asks for
 clarification about the exact SFace ONNX weight's training-data provenance and
-whether the directory license fully covers it; the issue is still open. Treat
-SFace as **local development/evaluation only** until the school has reviewed
-that question and approved deployment. The model pair is not calibrated for
-this school and is not an approval to process student biometrics.
+whether the directory license fully covers it; the issue is still open (see
+references below). **Keputusan operasional tim/sekolah 2026-10-21: SFace
+dinyatakan disetujui (aman) untuk dipakai operasional.** Persetujuan ini
+mencakup pemakaian, bukan kalibrasi: threshold operasional TETAP wajib
+dikalibrasi dari benchmark lokal (false match / false non-match) sebelum
+menjadi kebijakan produksi, dan catatan provenance di bawah tetap disimpan
+untuk transparansi audit. The model pair is not an approval to skip that
+calibration or to process student biometrics without consent.
 
 The current adapter targets OpenCV 4. OpenCV Zoo now also lists a newer dynamic
 input YuNet artifact intended for OpenCV 5. Do not replace the current file as a

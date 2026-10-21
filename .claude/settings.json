@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "additionalDirectories": [
+      "C:\\Users\\USER\\.claude\\projects\\c--Yoga-Programming-Face-Recognition-Capstone"
+    ],
+    "allow": [
+      "Edit(/.claude/skills/presensi-local-dev/**)"
+    ]
+  }
+}

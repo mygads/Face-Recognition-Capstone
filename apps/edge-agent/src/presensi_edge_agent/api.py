@@ -92,7 +92,9 @@ class CoreApiClient:
             raise ApiCallError(None, retryable=True) from exc
         if response.status_code >= 400:
             status_code = response.status_code
-            retryable = status_code in {401, 403, 408, 425, 429} or status_code >= 500
+            # 401/403 mean the device credential is rejected: retrying with the
+            # same token loops forever, so surface it for re-enrollment instead.
+            retryable = status_code in {408, 425, 429} or status_code >= 500
             raise ApiCallError(status_code, retryable=retryable)
         return response
 

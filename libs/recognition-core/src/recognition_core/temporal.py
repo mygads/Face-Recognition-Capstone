@@ -199,7 +199,20 @@ class MultiFrameDecisionEngine:
             )
 
         top1_student_id, top1_similarity = ranked[0]
-        top2_similarity = ranked[1][1] if len(ranked) > 1 else -1.0
+        if len(ranked) < 2:
+            # Only one DISTINCT identity competes: the Top-1/Top-2 margin is
+            # undefined (no runner-up to compare against), so never accept on
+            # similarity alone. The pipeline re-queries the matcher with a
+            # wider limit when truncation hides the runner-up; a genuinely
+            # single-identity candidate set stays non-accepting (fail-closed)
+            # and the teacher falls back to manual attendance.
+            return self._reset_with_retry(
+                observation.track_id,
+                state,
+                reason_code="single_identity_gallery",
+                liveness_score=liveness_score,
+            )
+        top2_similarity = ranked[1][1]
         raw_margin = max(0.0, top1_similarity - top2_similarity)
 
         if top1_similarity < self.config.min_top1_similarity:

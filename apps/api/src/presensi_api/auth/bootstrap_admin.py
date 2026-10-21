@@ -12,10 +12,26 @@ from presensi_api.db.session import get_session_factory
 
 BOOTSTRAP_EMAIL = "admin@local.test"
 BOOTSTRAP_NAME = "Administrator Lokal"
-BOOTSTRAP_PASSWORD = "123456789abcd"
+BOOTSTRAP_PASSWORD_ENV_VAR = "PRESENSI_BOOTSTRAP_PASSWORD"
+BOOTSTRAP_DEFAULT_PASSWORD = "1234abcd"
 
 
-def bootstrap_development_admin(session: Session) -> str | None:
+def resolve_bootstrap_password() -> str:
+    """Return the development bootstrap password.
+
+    Operators can override the documented default through
+    ``PRESENSI_BOOTSTRAP_PASSWORD``; a blank value keeps the default so a
+    fresh clone always signs in with the README credential.
+    """
+    configured = os.getenv(BOOTSTRAP_PASSWORD_ENV_VAR)
+    if configured is not None and configured.strip():
+        return configured
+    return BOOTSTRAP_DEFAULT_PASSWORD
+
+
+def bootstrap_development_admin(
+    session: Session, password: str | None = None
+) -> str | None:
     """Create a forced-password-change admin in an empty development database."""
     if os.getenv("APP_ENV", "").casefold() != "development":
         raise RuntimeError(
@@ -28,10 +44,13 @@ def bootstrap_development_admin(session: Session) -> str | None:
     if role is None:
         raise RuntimeError("Roles are not seeded; run the role seed command first.")
 
+    temporary_password = (
+        password if password is not None else resolve_bootstrap_password()
+    )
     user = User(
         email=BOOTSTRAP_EMAIL,
         full_name=BOOTSTRAP_NAME,
-        password_hash=hash_password(BOOTSTRAP_PASSWORD),
+        password_hash=hash_password(temporary_password),
         must_change_password=True,
     )
     session.add(user)
@@ -45,7 +64,7 @@ def bootstrap_development_admin(session: Session) -> str | None:
             after_state={"role": "ADMIN", "must_change_password": True},
         )
     )
-    return BOOTSTRAP_PASSWORD
+    return temporary_password
 
 
 def main() -> int:

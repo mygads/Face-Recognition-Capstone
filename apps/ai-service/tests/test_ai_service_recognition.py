@@ -42,6 +42,7 @@ from recognition_core.testing import (
 DEVICE_ID = UUID("84f5ad7d-d294-4e10-9a3a-4079f19d0925")
 SESSION_ID = UUID("70f7ff5b-3700-4b1c-b99b-d2a731cf2b2e")
 STUDENT_ID = UUID("bf278579-d605-4c65-8e7c-01d2df579815")
+RUNNER_UP_ID = UUID("c1d4e5f6-7890-4abc-def1-234567890abc")
 DEVICE_TOKEN = "test-device-token-that-is-not-a-production-secret"
 MODEL_NAME = "opencv-zoo-sface"
 MODEL_VERSION = "fixture-v1"
@@ -76,7 +77,18 @@ def _gallery(*, now: datetime | None = None) -> SessionGallery:
         expires_at=current + timedelta(minutes=5),
         model_name=MODEL_NAME,
         model_version=MODEL_VERSION,
-        entries=(GalleryEntry(student_id=STUDENT_ID, embedding=embedding),),
+        entries=(
+            GalleryEntry(student_id=STUDENT_ID, embedding=embedding),
+            GalleryEntry(
+                student_id=RUNNER_UP_ID,
+                embedding=FaceEmbedding(
+                    values=(0.0, 1.0),
+                    model_name=MODEL_NAME,
+                    model_version=MODEL_VERSION,
+                    normalized=True,
+                ),
+            ),
+        ),
     )
 
 
@@ -105,7 +117,10 @@ def _pipeline() -> RecognitionPipeline:
         embedder=FakeFaceEmbedder(calls, embedding),
         matcher=FakeMatcher(
             calls,
-            (CandidateMatch(student_id=STUDENT_ID, similarity=0.92),),
+            (
+                CandidateMatch(student_id=STUDENT_ID, similarity=0.92),
+                CandidateMatch(student_id=RUNNER_UP_ID, similarity=0.35),
+            ),
         ),
         temporal_decision=MultiFrameDecisionEngine(
             TemporalDecisionConfig(
@@ -215,7 +230,7 @@ def test_opt_in_benchmark_timings_and_process_metrics_are_available() -> None:
     stage_timings = response.headers["X-Recognition-Stage-Timings-Ms"]
     assert '"detect"' in stage_timings
     assert '"embed"' in stage_timings
-    assert response.headers["X-Recognition-Gallery-Template-Count"] == "1"
+    assert response.headers["X-Recognition-Gallery-Template-Count"] == "2"
     metrics_json = metrics.json()
     assert metrics_json["stage_latency_ms"]["detect"]["sample_count"] == 1
     assert metrics_json["process_cpu_seconds"] >= 0
@@ -298,6 +313,54 @@ def test_corrupt_image_is_rejected_without_echoing_payload() -> None:
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "invalid_image"
     assert base64.b64encode(corrupt).decode("ascii") not in response.text
+
+
+def test_empty_device_tokens_fail_closed_with_auth_misconfigured() -> None:
+    app = _app(settings=_settings(device_tokens={}))
+
+    async def exercise() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            return await client.post(
+                f"/api/v1/recognition/sessions/{SESSION_ID}/bursts",
+                headers=_headers(token="a" * 40),
+                json=_body(count=1),
+            )
+
+    response = asyncio.run(exercise())
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "auth_misconfigured"
+
+
+def test_open_auth_survives_only_when_gallery_validation_is_delegated() -> None:
+    app = _app(
+        settings=_settings(
+            device_tokens={},
+            core_api_base_url="http://core-api.test",
+        )
+    )
+
+    async def exercise() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            return await client.post(
+                f"/api/v1/recognition/sessions/{SESSION_ID}/bursts",
+                headers=_headers(token="b" * 40),
+                json=_body(),
+            )
+
+    response = asyncio.run(exercise())
+
+    # core-api.test is unreachable, so session validation fails AFTER device
+    # auth passes: the request must get past auth (no auth_misconfigured) and
+    # fail at the delegated Core API validation step instead.
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "core_api_unavailable"
 
 
 def test_invalid_device_credentials_are_rejected() -> None:

@@ -87,7 +87,10 @@ so image, face crop, embedding, and credentials cannot enter that queue. A
 separate sync worker handles device heartbeat, cache refresh, and event delivery
 so API outages do not block camera capture. Retryable network/5xx/rate-limit
 responses use exponential backoff; non-retryable event delivery is retained in
-a dead-letter state. Log records are structured and exclude secrets and
+a dead-letter state. HTTP 401/403 are NEVER retried: a rejected credential means
+re-enrollment/rotation is needed, and retrying the same token loops forever.
+Surface auth failures to the operator for credential renewal instead. Log records
+are structured and exclude secrets and
 biometric material.
 
 The API supports device heartbeat and the device-authenticated
