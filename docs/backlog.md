@@ -26,8 +26,9 @@ Legenda status: `Belum` · `Dikerjakan` · `Menunggu verifikasi` · `Selesai`
 | 2026-10-21 | Defect roster ADMIN-only diperbaiki (direktori global + roster kelas; laborant via enrollment-status) |
 | 2026-10-21 | P0-1 fail-closed auth, P0-2 single-identity + re-query, P0-3 FakePipeline + check hijau, P0-4 savepoint race, P1-2 401/403 non-retryable, P1-7 revoke-all |
 | 2026-10-21 | P1-9/P1-10 opening_mode per guru + manual_override + migrasi `f4e5d6c7b8a9`; P1-11 manual-marks + audit; P1-12 parity threshold/NaN/timezone/unduhan |
+| 2026-10-22 | Sistem peringatan dini kehadiran (at-risk watchlist): GET/PUT `/reports/attendance/at-risk[/policy]`, panel DashboardView "Siswa perlu perhatian" (human watchlist, bukan sanksi, tanpa notifikasi), 21 pytest + 8 vitest; temuan review diperbaiki (stored window_days kini menggerakkan listing, late_count query dibatasi le=30, panel tampil tanpa sesi berjalan, cakupan teacher-filter/pagination/sort) |
 | 2026-10-22 | Bootstrap default `1234abcd` + override env + troubleshooting login + tes parity README |
-| 2026-10-21 | Gate: 312 pytest, 32 Vitest, ruff/mypy/vue-tsc/eslint hijau |
+| 2026-10-22 | Gate: 333 pytest, 38 Vitest, ruff/mypy/vue-tsc/eslint/prettier hijau |
 
 Catatan `docs/final-audit.md` (2026-10-02): snapshot 9 area PASS saat itu;
 defect roster ADMIN-only di atas sudah diperbaiki. Command verifikasi lama di

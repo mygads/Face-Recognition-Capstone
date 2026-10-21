@@ -790,7 +790,9 @@ def test_expired_bearer_token_is_rejected(api_database: sessionmaker[Session]) -
             "GET",
             "/api/v1/reports/attendance?starts_on=2026-09-01&ends_on=2026-09-30",
             None,
-            403,
+            # LABORANT holds REPORTS_READ so the attendance watchlist
+            # (including at-risk) is readable for lab staff.
+            200,
         ),
     ],
 )

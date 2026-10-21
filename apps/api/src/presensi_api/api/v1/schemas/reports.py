@@ -96,9 +96,9 @@ class AtRiskPolicyResponse(AtRiskPolicy):
 
 
 class AtRiskQuery(ApiSchema):
-    window_days: int = Field(default=30, ge=1, le=180)
+    window_days: int | None = Field(default=None, ge=1, le=180)
     absence_pct: float | None = Field(default=None, ge=0, le=100)
-    late_count: int | None = Field(default=None, ge=0)
+    late_count: int | None = Field(default=None, ge=0, le=30)
     class_id: UUID | None = None
     laboratory_id: UUID | None = None
     timezone_name: str = Field(default="Asia/Jakarta", min_length=1, max_length=64)

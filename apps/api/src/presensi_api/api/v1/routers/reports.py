@@ -277,10 +277,10 @@ def put_at_risk_policy(
     )
 
 
-def _at_risk_window(query: AtRiskQuery) -> tuple[datetime, datetime]:
-    timezone = ZoneInfo(query.timezone_name)
+def _at_risk_window(window_days: int, timezone_name: str) -> tuple[datetime, datetime]:
+    timezone = ZoneInfo(timezone_name)
     now = datetime.now(UTC)
-    local_start = now.astimezone(timezone) - timedelta(days=query.window_days)
+    local_start = now.astimezone(timezone) - timedelta(days=window_days)
     start = datetime.combine(local_start.date(), time.min, tzinfo=timezone).astimezone(
         UTC
     )
@@ -409,6 +409,11 @@ def list_at_risk_students(
     thresholds so it cannot look like an opaque automated decision.
     """
     revision, policy, _updated_at = at_risk_policy(db)
+    effective_window = (
+        query.window_days
+        if query.window_days is not None
+        else int(cast(int, policy["window_days"]))
+    )
     effective_absence = (
         query.absence_pct
         if query.absence_pct is not None
@@ -419,7 +424,7 @@ def list_at_risk_students(
         if query.late_count is not None
         else int(cast(int, policy["late_count_threshold"]))
     )
-    start, end = _at_risk_window(query)
+    start, end = _at_risk_window(effective_window, query.timezone_name)
     statement = _at_risk_statement(query, principal, start, end)
     buckets = _aggregate_at_risk_rows(list(db.execute(statement).all()))
     flagged: list[AtRiskStudentRow] = []
@@ -456,7 +461,7 @@ def list_at_risk_students(
         pagination=Pagination(
             total=total_flagged, limit=query.limit, offset=query.offset
         ),
-        effective_window_days=query.window_days,
+        effective_window_days=effective_window,
         effective_absence_pct_threshold=effective_absence,
         effective_late_count_threshold=effective_late,
         policy_revision=revision,

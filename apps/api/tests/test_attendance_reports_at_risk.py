@@ -133,18 +133,10 @@ def at_risk_database() -> Generator[dict[str, object], None, None]:
                     full_name="Teacher B",
                     password_hash="test-hash",
                 ),
-                Student(
-                    id=STUDENT_A1_ID, student_number="S-A1", full_name="Siswa A1"
-                ),
-                Student(
-                    id=STUDENT_A2_ID, student_number="S-A2", full_name="Siswa A2"
-                ),
-                Student(
-                    id=STUDENT_A3_ID, student_number="S-A3", full_name="Siswa A3"
-                ),
-                Student(
-                    id=STUDENT_B1_ID, student_number="S-B1", full_name="Siswa B1"
-                ),
+                Student(id=STUDENT_A1_ID, student_number="S-A1", full_name="Siswa A1"),
+                Student(id=STUDENT_A2_ID, student_number="S-A2", full_name="Siswa A2"),
+                Student(id=STUDENT_A3_ID, student_number="S-A3", full_name="Siswa A3"),
+                Student(id=STUDENT_B1_ID, student_number="S-B1", full_name="Siswa B1"),
                 SchoolClass(
                     id=CLASS_A_ID,
                     code="X-A",
@@ -161,6 +153,11 @@ def at_risk_database() -> Generator[dict[str, object], None, None]:
                 ),
                 Laboratory(id=LAB_A_ID, code="LAB-A", name="Lab A"),
                 Laboratory(id=LAB_B_ID, code="LAB-B", name="Lab B"),
+            ]
+        )
+        db.flush()
+        db.add_all(
+            [
                 PracticumSchedule(
                     id=SCHEDULE_A_ID,
                     class_id=CLASS_A_ID,
@@ -189,6 +186,7 @@ def at_risk_database() -> Generator[dict[str, object], None, None]:
                 ),
             ]
         )
+        db.flush()
         a1_open = now - timedelta(days=25)
         a2_open = now - timedelta(days=20)
         a3_open = now - timedelta(days=15)
@@ -266,6 +264,7 @@ def at_risk_database() -> Generator[dict[str, object], None, None]:
             "S-B1",
             "Siswa B1",
         )
+        db.flush()
         mark(
             db,
             UUID("00000000-0000-0000-0000-000000000101"),
@@ -420,7 +419,9 @@ def test_absent_rate_flags_student_with_counts(
     assert row["class_name"] == "Class A"
     a3_closed_at = at_risk_database["a3_closed_at"]
     assert isinstance(a3_closed_at, datetime)
-    assert row["last_absent_at"] == a3_closed_at.isoformat()
+    last_absent_at = row["last_absent_at"]
+    assert isinstance(last_absent_at, str)
+    assert datetime.fromisoformat(last_absent_at) == a3_closed_at
 
 
 def test_repeated_lateness_flags_student(
@@ -444,7 +445,7 @@ def test_excused_records_never_count_as_absent(
     admin = principal(RoleCode.ADMIN, ADMIN_ID)
     response = request(
         "GET",
-        "/api/v1/reports/attendance/at-risk?absence_pct=0&late_count=100",
+        "/api/v1/reports/attendance/at-risk?absence_pct=0&late_count=30",
         admin,
     )
     assert response.status_code == 200, response.text
@@ -522,9 +523,7 @@ def test_invalid_window_rejected_with_envelope(
 ) -> None:
     admin = principal(RoleCode.ADMIN, ADMIN_ID)
     for query in ("window_days=0", "window_days=181"):
-        response = request(
-            "GET", f"/api/v1/reports/attendance/at-risk?{query}", admin
-        )
+        response = request("GET", f"/api/v1/reports/attendance/at-risk?{query}", admin)
         assert response.status_code == 422
         assert response.json()["error"]["code"] == "validation_error"
 
@@ -601,9 +600,7 @@ def test_policy_update_writes_audit_log(
     assert isinstance(factory, sessionmaker)
     with factory() as session:
         audit = session.scalar(
-            select(AuditLog).where(
-                AuditLog.action == "runtime_configuration.published"
-            )
+            select(AuditLog).where(AuditLog.action == "runtime_configuration.published")
         )
         assert audit is not None
         assert audit.actor_user_id == ADMIN_ID
@@ -662,18 +659,105 @@ def test_query_thresholds_override_stored_policy(
         "PUT",
         "/api/v1/reports/attendance/at-risk/policy",
         admin,
-        {"window_days": 30, "absence_pct_threshold": 90.0, "late_count_threshold": 99},
+        {"window_days": 30, "absence_pct_threshold": 90.0, "late_count_threshold": 30},
     )
     assert published.status_code == 200, published.text
     strict = request("GET", "/api/v1/reports/attendance/at-risk", admin)
     assert strict.status_code == 200
     assert str(STUDENT_A1_ID) not in rows_by_student(strict.json())
-    relaxed = request(
-        "GET", "/api/v1/reports/attendance/at-risk?absence_pct=50", admin
-    )
+    relaxed = request("GET", "/api/v1/reports/attendance/at-risk?absence_pct=50", admin)
     assert relaxed.status_code == 200, relaxed.text
     payload = relaxed.json()
     assert payload["effective_absence_pct_threshold"] == 50.0
-    assert payload["effective_late_count_threshold"] == 99
+    assert payload["effective_late_count_threshold"] == 30
     assert payload["policy_revision"] == 1
-    assert payload["items"][0]["student_id"] == str(STUDENT_A1_ID)
+    assert payload["items"][0]["student_id"] == str(STUDENT_B1_ID)
+    assert rows_by_student(payload)[str(STUDENT_A1_ID)]["absence_pct"] == 60.0
+
+
+def test_stored_window_days_drives_default_listing(
+    at_risk_database: dict[str, object],
+) -> None:
+    admin = principal(RoleCode.ADMIN, ADMIN_ID)
+    published = request(
+        "PUT",
+        "/api/v1/reports/attendance/at-risk/policy",
+        admin,
+        {"window_days": 60, "absence_pct_threshold": 20.0, "late_count_threshold": 3},
+    )
+    assert published.status_code == 200, published.text
+    default = request("GET", "/api/v1/reports/attendance/at-risk", admin)
+    assert default.status_code == 200, default.text
+    payload = default.json()
+    assert payload["effective_window_days"] == 60
+    assert payload["policy_revision"] == 1
+    row = rows_by_student(payload)[str(STUDENT_A1_ID)]
+    assert row["total_sessions"] == 6
+    assert row["absent_count"] == 4
+    narrowed = request(
+        "GET", "/api/v1/reports/attendance/at-risk?window_days=30", admin
+    )
+    assert narrowed.status_code == 200, narrowed.text
+    assert narrowed.json()["effective_window_days"] == 30
+    assert rows_by_student(narrowed.json())[str(STUDENT_A1_ID)]["total_sessions"] == 5
+
+
+def test_teacher_scope_survives_class_and_lab_filters(
+    at_risk_database: dict[str, object],
+) -> None:
+    teacher_a = principal(RoleCode.TEACHER, TEACHER_A_ID)
+    for query in (f"class_id={CLASS_B_ID}", f"laboratory_id={LAB_B_ID}"):
+        response = request(
+            "GET", f"/api/v1/reports/attendance/at-risk?{query}", teacher_a
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["items"] == []
+    own = request(
+        "GET",
+        f"/api/v1/reports/attendance/at-risk?class_id={CLASS_A_ID}",
+        teacher_a,
+    )
+    assert own.status_code == 200, own.text
+    assert set(rows_by_student(own.json())) == {
+        str(STUDENT_A1_ID),
+        str(STUDENT_A2_ID),
+    }
+
+
+def test_query_thresholds_capped_like_policy(
+    at_risk_database: dict[str, object],
+) -> None:
+    admin = principal(RoleCode.ADMIN, ADMIN_ID)
+    for query in ("late_count=31", "absence_pct=101"):
+        response = request("GET", f"/api/v1/reports/attendance/at-risk?{query}", admin)
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "validation_error"
+
+
+def test_watchlist_sorted_by_absence_then_paginated(
+    at_risk_database: dict[str, object],
+) -> None:
+    admin = principal(RoleCode.ADMIN, ADMIN_ID)
+    response = request("GET", "/api/v1/reports/attendance/at-risk", admin)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert [item["student_id"] for item in payload["items"]] == [
+        str(STUDENT_B1_ID),
+        str(STUDENT_A1_ID),
+        str(STUDENT_A2_ID),
+    ]
+    assert payload["pagination"]["total"] == 3
+    first_page = request("GET", "/api/v1/reports/attendance/at-risk?limit=2", admin)
+    assert first_page.status_code == 200, first_page.text
+    assert [item["student_id"] for item in first_page.json()["items"]] == [
+        str(STUDENT_B1_ID),
+        str(STUDENT_A1_ID),
+    ]
+    assert first_page.json()["pagination"]["total"] == 3
+    second_page = request(
+        "GET", "/api/v1/reports/attendance/at-risk?limit=2&offset=2", admin
+    )
+    assert second_page.status_code == 200, second_page.text
+    assert [item["student_id"] for item in second_page.json()["items"]] == [
+        str(STUDENT_A2_ID)
+    ]

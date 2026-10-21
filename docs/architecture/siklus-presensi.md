@@ -92,6 +92,33 @@ di summary, halaman, dan ekspor. Default 25 baris, maks 100; indeks B-tree
 UTF-8 BOM, nilai berawalan penanda formula diberi apostrof anti-eksekusi.
 Ekspor hanya label presensi/jadwal — tanpa skor, embedding, image, kredensial.
 
+## Peringatan dini kehadiran (daftar pantauan manusia)
+
+`GET /api/v1/reports/attendance/at-risk` mengagregasi roster
+`session_students` + `attendance_records` dalam jendela hari (batas lokal
+`timezone_name`, default `Asia/Jakarta`) menjadi daftar pantauan per siswa:
+`total_sesi` (sesi status `cancelled` dikecualikan), `absen` (status `absent`
+pada sesi closed, atau tanpa record pada sesi closed), `terlambat`,
+`absence_pct`, `last_absent_at`, dan `reasons` (`tingkat_absen` bila
+`absence_pct >=` ambang, `sering_terlambat` bila `late_count >=` ambang).
+Sesi masih open (`not_recorded`) tidak dihitung absen agar sesi berjalan tidak
+memflag siswanya; `excused` tidak dihitung absen. Ambang efektif = parameter
+query bila dikirim, bila tidak = kebijakan tersimpan; respons selalu
+menggemakan ambang + revisi policy agar dasar flagging transparan.
+
+Ambang dikonfigurasi lewat `GET/PUT /api/v1/reports/attendance/at-risk/policy`
+(reuse tabel `runtime_configuration_versions`, TANPA migrasi baru; perubahan
+PUT diaudit sebagai `runtime_configuration.published`). Nilai awal hanyalah
+titik awal usulan sekolah yang wajib dikalibrasi/ditetapkan pihak sekolah,
+bukan angka final.
+
+Makna: daftar ini murni pantauan manusia, BUKAN sanksi — tidak memblokir
+presensi, tidak ada notifikasi eksternal (email/WA) di tahap ini, dan tindak
+lanjut sepenuhnya manual oleh guru/BK. Akses baca memakai `REPORTS_READ`
+(guru dibatasi jadwal miliknya; admin/laboran semua); ubah policy butuh
+`MANAGE_SETTINGS`. Skema dan UI tidak memuat skor AI, similarity, embedding,
+atau foto.
+
 ## Live dashboard
 
 Guru memuat sesi aktif, snapshot awal

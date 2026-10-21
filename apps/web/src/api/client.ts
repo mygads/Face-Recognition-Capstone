@@ -49,6 +49,12 @@ export type AttendanceReportQuery =
 export type AttendanceReportSummary = components['schemas']['AttendanceReportResponse']
 export type AttendanceReportRow = components['schemas']['AttendanceReportRow']
 export type AttendanceReportPage = components['schemas']['AttendanceReportPage']
+export type AtRiskQuery =
+  operations['list_at_risk_students_api_v1_reports_attendance_at_risk_get']['parameters']['query']
+export type AtRiskStudentRow = components['schemas']['AtRiskStudentRow']
+export type AtRiskPage = components['schemas']['AtRiskPage']
+export type AtRiskPolicy = components['schemas']['AtRiskPolicy']
+export type AtRiskPolicyResponse = components['schemas']['AtRiskPolicyResponse']
 export type SessionDashboardSnapshot = components['schemas']['SessionDashboardSnapshot']
 export type SessionRecentActivity = components['schemas']['SessionRecentActivity']
 export type SessionDashboardDevice = components['schemas']['SessionDashboardDevice']
@@ -499,6 +505,25 @@ export async function listAttendanceReportRows(
 ): Promise<AttendanceReportPage> {
   const result = await apiClient.GET('/api/v1/reports/attendance/records', {
     params: { query },
+  })
+  return unwrap(result)
+}
+
+export async function listAtRiskStudents(query: AtRiskQuery): Promise<AtRiskPage> {
+  const result = await apiClient.GET('/api/v1/reports/attendance/at-risk', {
+    params: { query },
+  })
+  return unwrap(result)
+}
+
+export async function getAtRiskPolicy(): Promise<AtRiskPolicyResponse> {
+  const result = await apiClient.GET('/api/v1/reports/attendance/at-risk/policy')
+  return unwrap(result)
+}
+
+export async function updateAtRiskPolicy(body: AtRiskPolicy): Promise<AtRiskPolicyResponse> {
+  const result = await apiClient.PUT('/api/v1/reports/attendance/at-risk/policy', {
+    body,
   })
   return unwrap(result)
 }

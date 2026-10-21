@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   ApiError,
   getSessionDashboardSnapshot,
+  listAtRiskStudents,
   listAttendanceSessions,
   sessionDashboardWebSocketUrl,
+  type AtRiskPage,
+  type AtRiskStudentRow,
   type AttendanceSession,
   type SessionDashboardSnapshot,
   type SessionRecentActivity,
@@ -24,6 +27,9 @@ const selectedSessionId = ref('')
 const snapshot = ref<SessionDashboardSnapshot | null>(null)
 const isLoading = ref(false)
 const pageError = ref<string | null>(null)
+const atRisk = ref<AtRiskPage | null>(null)
+const atRiskLoading = ref(false)
+const atRiskError = ref<string | null>(null)
 const connectionState = ref<'connecting' | 'live' | 'reconnecting' | 'disconnected'>('disconnected')
 
 let socket: WebSocket | null = null
@@ -149,6 +155,7 @@ async function selectSession(sessionId: string): Promise<void> {
 async function loadDashboard(): Promise<void> {
   isLoading.value = true
   pageError.value = null
+  void loadAtRisk()
   try {
     const [activePage, overridePage] = await Promise.all([
       listAttendanceSessions({ status: 'active', limit: 100, offset: 0 }),
@@ -180,6 +187,35 @@ function connectionLabel(): string {
   if (connectionState.value === 'connecting') return 'Menyambungkan'
   if (connectionState.value === 'reconnecting') return 'Menyambungkan ulang'
   return 'Terputus'
+}
+
+function atRiskReasonLabels(item: AtRiskStudentRow): string {
+  return item.reasons
+    .map((reason) => (reason === 'tingkat_absen' ? 'Tingkat absen tinggi' : 'Sering terlambat'))
+    .join(' · ')
+}
+
+const atRiskSummary = computed(() => {
+  if (!atRisk.value) return ''
+  return (
+    `Jendela ${atRisk.value.effective_window_days} hari` +
+    ` · ambang absen ${atRisk.value.effective_absence_pct_threshold}%` +
+    ` · ambang terlambat ${atRisk.value.effective_late_count_threshold}x`
+  )
+})
+
+async function loadAtRisk(): Promise<void> {
+  // Watchlist dimuat sekali per pemuatan dashboard dan tidak mengganggu
+  // websocket sesi live: kegagalan di sini tidak menghentikan dashboard.
+  atRiskLoading.value = true
+  atRiskError.value = null
+  try {
+    atRisk.value = await listAtRiskStudents({ limit: 25, offset: 0 })
+  } catch (error) {
+    atRiskError.value = formatError(error)
+  } finally {
+    atRiskLoading.value = false
+  }
 }
 
 onMounted(() => {
@@ -361,6 +397,46 @@ onBeforeUnmount(() => {
         </section>
       </div>
     </template>
+
+    <section
+      v-if="!isLoading"
+      class="dashboard-view__panel dashboard-view__at-risk"
+      aria-labelledby="at-risk-heading"
+      data-testid="at-risk-panel"
+    >
+      <div class="dashboard-view__panel-heading">
+        <div>
+          <p class="dashboard-view__eyebrow">Peringatan dini</p>
+          <h2 id="at-risk-heading">Siswa perlu perhatian</h2>
+        </div>
+      </div>
+      <p v-if="atRisk" class="dashboard-view__muted" data-testid="at-risk-thresholds">
+        {{ atRiskSummary }}
+      </p>
+      <p class="dashboard-view__muted">
+        Daftar pantauan ini bukan sanksi dan tidak memblokir presensi. Tindak lanjut dilakukan
+        manual oleh guru/BK; tidak ada notifikasi otomatis.
+      </p>
+      <p v-if="atRiskLoading" class="dashboard-view__muted" aria-live="polite">
+        Memuat daftar pantauan…
+      </p>
+      <p v-else-if="atRiskError" class="dashboard-view__alert" role="alert">
+        {{ atRiskError }}
+      </p>
+      <ul v-else-if="atRisk && atRisk.items.length" class="dashboard-view__at-risk-list">
+        <li v-for="item in atRisk.items" :key="item.student_id" data-testid="at-risk-row">
+          <div class="dashboard-view__activity-copy">
+            <strong>{{ item.full_name }}</strong>
+            <small
+              >{{ item.class_name }} · {{ item.total_sessions }} sesi · absen
+              {{ item.absence_pct }}% · terlambat {{ item.late_count }}x</small
+            >
+          </div>
+          <span class="dashboard-view__at-risk-reasons">{{ atRiskReasonLabels(item) }}</span>
+        </li>
+      </ul>
+      <p v-else class="dashboard-view__muted">Belum ada siswa yang perlu perhatian.</p>
+    </section>
   </section>
 </template>
 
@@ -669,6 +745,35 @@ onBeforeUnmount(() => {
 
 .dashboard-view__activity-list time {
   flex: 0 0 auto;
+}
+
+.dashboard-view__at-risk {
+  margin-top: 0;
+}
+
+.dashboard-view__at-risk-list {
+  display: grid;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dashboard-view__at-risk-list li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border-color-light);
+}
+
+.dashboard-view__at-risk-reasons {
+  flex: 0 0 auto;
+  max-width: 45%;
+  color: #ad6800;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-align: right;
 }
 
 .dashboard-view__muted {
