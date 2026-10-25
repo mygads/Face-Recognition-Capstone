@@ -6,7 +6,9 @@
 > hash, embedding terenkripsi, token) tersimpan sebagai hash/enkripsi dan
 > **tidak dipajang** sebagai data operasional; raw image tidak disimpan.
 > Kelas di luar fokus fitur diulang minimal agar tiap gambar mandiri;
-> definisi penuh lihat diagram fiturnya. ERD lengkap: render
+> definisi penuh lihat diagram fiturnya. `created_at`/`updated_at` teknis
+> dihilangkan kecuali relevan secara domain (expiry, revoke, record, audit).
+> ERD lengkap: render
 > [schema-erd.sql](schema-erd.sql) (18 tabel, tanpa data).
 
 ## 7.1 Akun dan otorisasi (F-01, F-13)
@@ -28,6 +30,7 @@ classDiagram
   class UserRole {
     +UUID user_id
     +UUID role_id
+    +UUID granted_by_user_id
   }
   class AuthSession {
     +UUID id
@@ -43,7 +46,8 @@ classDiagram
 ```
 
 `opening_mode` ∈ {manual, automatic} via CHECK (konsisten 03/F-05:
-worker auto-open vs guru manual).
+worker auto-open vs guru manual). `granted_by_user_id` nullable
+(pemberi role boleh sistem).
 
 ## 7.2 Master siswa, kelas, lab (F-02, F-04)
 
@@ -65,6 +69,7 @@ classDiagram
   class ClassStudent {
     +UUID class_id
     +UUID student_id
+    +DateTime enrolled_at
   }
   class Laboratory {
     +String code
@@ -146,6 +151,7 @@ classDiagram
   class SessionStudent {
     +String student_number_snapshot
     +String full_name_snapshot
+    +DateTime snapshot_taken_at
   }
   class RecognitionEvent {
     +UUID event_uuid
@@ -171,10 +177,13 @@ classDiagram
     +DateTime recorded_at
   }
   class AttendanceCorrection {
+    +UUID attendance_record_id
+    +UUID requested_by_user_id
     +String previous_status
     +String corrected_status
     +String reason
     +String decision_status
+    +String decision_note
     +UUID decided_by_user_id
     +DateTime decided_at
   }
@@ -209,12 +218,19 @@ manual_override, closed, cancelled} (konsisten 05/06).
 ```mermaid
 classDiagram
   class Device {
+    +String name
     +String device_type
     +String deployment_profile
     +bool is_active
+    +String app_version
+    +String model_version
     +String camera_status
     +bool camera_enabled
+    +DateTime last_seen_at
+    +DateTime credential_expires_at
     +int config_applied_revision
+    +String config_apply_status
+    +String config_error_code
   }
   class RuntimeConfigurationVersion {
     +String scope_key
@@ -237,7 +253,9 @@ classDiagram
 
 `device_type` ∈ {edge_pc, camera_gateway} terikat ke
 `deployment_profile` ∈ {AI_EDGE, STB_GATEWAY} via CHECK. Kredensial
-device tersimpan sebagai hash dan tidak dipajang.
+device tersimpan sebagai hash dan tidak dipajang; yang ditampilkan hanya
+`credential_expires_at` operasional. `config_error_code` nullable dan hanya
+terisi bila apply config gagal.
 
 ## 7.6 Laporan dan EWS (F-09, F-10, U-02)
 

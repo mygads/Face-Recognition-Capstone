@@ -58,7 +58,8 @@ flowchart TD
   W --> E
 ```
 
-> Request metadata-only (tanpa capture) ditolak endpoint tersendiri; revoke
+> `POST /enrollments` metadata-only (tanpa capture) ditolak 422
+> `captures_required`; gunakan `POST /enrollments/captures`. Revoke
 > template per batch mencatat jumlah + audit; siswa dinonaktifkan ikut
 > me-revoke template aktifnya.
 
@@ -85,7 +86,8 @@ flowchart TD
   M -- automatic dan dalam jendela --> W[Worker 10 detik auto-open]
   W --> R{Roster kelas kosong?}
   R -- Ya --> SKIP[Lewati: tanpa sesi]
-  R -- Tidak --> T
+  R -- Tidak --> WA[Status active; opened_by null]
+  WA --> D
   M -- manual atau di luar jendela --> O[Guru atau laboran tekan Buka Sesi]
   O --> T[Transaksi: attendance_sessions + snapshot roster aktif]
   T --> G1{Manual-open di dalam jendela?}
@@ -101,9 +103,10 @@ flowchart TD
 ```
 
 > Guru hanya membuka jadwal miliknya (di luar itu 404 `schedule_not_found`);
-> manual-open selalu tersedia sebagai jalur override. Auto-open berstatus
-> `active` dengan `opened_by` null; manual-open di dalam jendela ikut
-> `active`, di luar jendela tercatat `manual_override`. Auto-open melewati
+> manual-open selalu tersedia sebagai jalur override dan tidak digate `mode`
+> policy. Auto-open worker langsung
+> berstatus `active` dengan `opened_by` null; hanya jalur manual yang dinilai
+> masuk/di luar jendela (`active` vs `manual_override`). Auto-open melewati
 > roster kosong (tidak membuat sesi). Tutup hanya bertransisi dari status
 > berjalan (`active`, `manual_override`) ke `closed`; sesi yang sudah
 > `closed` atau `cancelled` dikembalikan apa adanya tanpa perubahan.
@@ -154,10 +157,15 @@ N frame sepakat (`minimum_agreeing_frames`, terkalibrasi) + Top-1 di atas
 threshold + margin Top-1 dan Top-2; galeri satu identitas tidak pernah
 accept (`single_identity_gallery`, fail-closed ke retry); margin terlalu
 kecil menjadi `ambiguous` + `retry_frontal`; Top-1 di bawah threshold
-menjadi `rejected` (`no_match`); liveness spoof menjadi `rejected`,
-inconclusive menjadi retry.
+menjadi `rejected` (`no_match`); bila liveness required, spoof yang lolos
+menjadi `rejected` dan inconclusive menjadi retry; liveness opsional yang
+inconclusive tidak menghentikan embed/match.
 
 Aturan event dan grace: sesi atau device tak dikenal → 404 tanpa event.
+Ingest juga menutup sesi kedaluwarsa sebelum validasi. Jalur device bearer
+melewati cek scope guru (perangkat terikat lab/sesi); cek
+`session_not_accessible` hanya untuk ingest manusia oleh TEACHER non-ADMIN
+di luar jadwalnya.
 Event baru disimpan dulu sebagai bukti audit sebelum putusan (matched
 tanpa kandidat valid disimpan sebagai `error` agar audit tetap utuh).
 Replay memakai fingerprint kanonis: sama → hasil tersimpan
@@ -246,12 +254,12 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  S([Buka panel Siswa perlu perhatian]) --> W[Ambil policy: window 30 hari + absen 20 persen + telat 3x]
+  S([Buka panel Siswa perlu perhatian]) --> W[Ambil policy tersimpan atau default 30 hari + absen 20 persen + telat 3x; override query tervalidasi]
   W --> G[Agregat sesi non-cancelled: total + absen + telat + absence_pct]
   G --> F{absence_pct >= ambang ATAU telat >= ambang?}
   F -- Tidak --> B[Bersih: tidak masuk daftar]
   F -- Ya --> L[Flag + reasons + ambang efektif + revisi policy]
-  L --> H{Tindak lanjut manual guru atau BK}
+  L --> H[Catat tindak lanjut manual guru atau BK]
   H --> E([Catat di luar sistem pada tahap 1])
   B --> E
 ```
@@ -267,8 +275,11 @@ flowchart TD
   subgraph ADM[ADMIN saja]
     A1([Registrasi device + lab + profile]) --> A2[Provision bearer sekali pakai]
     A2 --> A3[Rotate token + overlap singkat]
+    A3 --> E
     A1 --> A4[Update registry atau lab assignment]
+    A4 --> E
     A1 --> A5[Jeda atau aktifkan kamera: matching berhenti, heartbeat jalan]
+    A5 --> E
     A1 --> A6[Nonaktif: revoke kredensial + kamera offline]
   end
   subgraph OPS[LABORANT dan device]
@@ -302,7 +313,7 @@ flowchart TD
   PR -- Ya --> CM{Kamera enabled?}
   CM -- Tidak --> R3[409 device_camera_disabled]
   CM -- Ya --> SA{Masih tanpa sesi aktif?}
-  SA -- Tidak --> R4[409 preview_gallery_session_active: pakai snapshot sesi]
+  SA -- Tidak --> R4[409 preview_gallery_session_active: gunakan snapshot sesi berjalan, bukan preview]
   SA -- Ya --> W{Maks 15 mnt sebelum mulai dan sebelum akhir?}
   W -- Tidak --> R5[404 preview_gallery_unavailable]
   W -- Ya --> G{Template aktif tersedia?}
@@ -336,6 +347,9 @@ flowchart TD
   P --> E([Selesai dan audit])
   C -- Tidak --> E
 ```
+
+> Ganti password berlaku untuk semua pengguna login; password sementara akun
+> baru wajib diganti sebelum dipakai, dan sesi lama ikut di-revoke.
 
 ## 5.14 Ringkasan alur per role (untuk sub-bab "Akses per role")
 

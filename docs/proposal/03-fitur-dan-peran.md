@@ -2,7 +2,7 @@
 
 Sumber: `apps/web/src/router/index.ts` (14 halaman + guard),
 `apps/api/.../api/security/roles.py` (3 role, 13 permission),
-`apps/api/.../api/v1/router.py` (16 router).
+`apps/api/.../api/v1/router.py` (15 router).
 
 ## 3.1 Aktor
 
@@ -35,7 +35,7 @@ Hak akses (13 permission): `manage_master_data`, `manage_accounts`,
 | F-02 | Master siswa/kelas/lab + import CSV/XLSX | `/app/master-data`; preview + commit; file ≤5 MiB, XLSX ≤25 MiB uncompressed, ≤10.000 baris | Jalan |
 | F-03 | Enrollment wajah | `/app/enrollment`; 3–10 capture (@≤3 MB, total ≤15 MB); minimal 3 capture lolos; maks 5 template aktif/siswa; semua capture satu siswa harus memakai model + versi yang sama; peringatan wajah mirip default 0,85; kualitas default: wajah min 80 px, ketajaman 45,0, kecerahan 25–235; revoke per batch | Jalan |
 | F-04 | Jadwal praktikum mingguan + anti-bentrok | `/app/schedules`; 409 `schedule_conflict` bila kelas/lab/guru bertabrakan (termasuk rentang tanggal efektif) | Jalan |
-| F-05 | Buka/tutup sesi + snapshot roster + opening_mode per guru + manual_override | `/app/sessions`; roster per siswa `GET /sessions/{id}/roster`; worker 10 dtk auto-open/auto-close; tutup hanya → `closed`; baca policy butuh `SESSION_OPERATE`, publikasi policy hanya ADMIN (`MANAGE_SETTINGS`) | Jalan |
+| F-05 | Buka/tutup sesi + snapshot roster + opening_mode per guru + manual_override | `/app/sessions`; roster per siswa `GET /sessions/{id}/roster`; worker 10 dtk auto-open/auto-close; tutup hanya → `closed`; baca policy butuh `SESSION_OPERATE`, publikasi policy hanya ADMIN (`MANAGE_SETTINGS`); `mode` di policy hanya default administratif — worker memakai `users.opening_mode` tiap guru dan manual-open tidak digate policy | Jalan |
 | F-06 | Presensi walk-through otomatis | edge-agent/STB → `POST …/recognition-events` (idempoten via event UUID) | Jalan, threshold menunggu kalibrasi hardware |
 | F-07 | Presensi manual + koreksi pending | SessionsView; manual butuh `SESSION_OPERATE`; koreksi butuh `ATTENDANCE_CORRECT`, status **pending saja** (belum ada endpoint putusan) | Jalan |
 | F-08 | Live dashboard sesi | `/app/dashboard`; snapshot + WebSocket per 2 dtk; panel at-risk | Jalan |

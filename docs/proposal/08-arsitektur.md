@@ -90,8 +90,10 @@ Threshold Top-1/margin default KOSONG = service degraded, bukan angka tebak.
 4. Batas API: device 120/mnt, enrollment 10/mnt, body 16 MiB, CORS ketat.
 5. Tanpa data wajah siswa nyata/minor di repo/cloud/CI; fixture = sintetis /
    publik legal / relawan dewasa bersedia.
-6. Retensi: event lama default 90 hari batch 500 — event bertaut record
-   di-redacted (bukan dihapus), event tanpa record dihapus; audit tanpa detail event.
+6. Retensi: `PRESENSI_RECOGNITION_EVENT_RETENTION_DAYS` (default 90 hari,
+   rentang 1–3650) batch 500 berdasar `created_at` — event bertaut record
+   di-redacted (bukan dihapus), event tanpa record dihapus; sweep retensi
+   beraudit dengan aktor sistem null.
 
 ## 8.5 Keputusan arsitektur (ringkas)
 

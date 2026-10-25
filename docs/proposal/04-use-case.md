@@ -276,7 +276,7 @@ flowchart LR
 | UC11 | ADMIN semua; TEACHER miliknya; LABORANT via API tanpa menu UI | — | Tabel agregat + baris + ekspor ≤50.000 | Guru difilter miliknya (include scope); tanpa record: open→not_recorded, closed→absent |
 | UC12 | ADMIN semua; TEACHER miliknya/kelasnya; LABORANT via API tanpa menu UI | Policy ada | Daftar flag + reasons + ambang efektif + revisi policy | Sesi open tak dihitung absen; `excused` ≠ absen |
 | UC13 | ADMIN (publikasi); baca: pemegang `SESSION_OPERATE` | — | Ambang + revisi tersimpan beraudit | Di luar rentang → 422; UC13 include UC16 |
-| UC14 | ADMIN penuh; LABORANT operasi/status | Device terdaftar di lab | Provision/rotate/renew bearer beraudit; heartbeat; pause kamera beraudit (ADMIN, `MANAGE_SETTINGS`) | Token <32 char → 422; device nonaktif → 409; UC14 include UC16 |
+| UC14 | ADMIN penuh; LABORANT operasi/status | Device terdaftar di lab | Provision/rotate/renew bearer beraudit; heartbeat; pause kamera beraudit (ADMIN, `MANAGE_SETTINGS`) | Sync token tak cocok → 401; AI service tanpa device_tokens → 503 `auth_misconfigured`; device nonaktif → 409; UC14 include UC16 |
 | UC15 | ADMIN/LABORANT | ≤15 mnt sebelum mulai | Loopback 127.0.0.1:8765: overlay wajah + nama kandidat, tanpa event/audit | Di luar jendela → ditolak; bila sesi aktif → 409 dan gunakan roster snapshot sesi berjalan |
 | UC16 | Sistem (otomatis), tanpa asosiasi aktor manusia | Aksi perubahan terjadi | Tulis `audit_logs`; write-only, dibaca via DB (tanpa endpoint/UI) | Di-include UC1/UC3/UC4/UC6/UC8/UC9/UC13/UC14 |
 

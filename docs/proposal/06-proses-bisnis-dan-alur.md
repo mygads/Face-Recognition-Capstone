@@ -71,7 +71,9 @@ sequenceDiagram
     API-->>Dev: Gallery + expiry max 300 dtk
     Dev->>API: Tarik managed config berversi + lapor status
   end
-  API->>AI: Health probe /health untuk ai-readiness
+  opt Cek ai-readiness (profil central)
+    API->>AI: Health probe /health
+  end
   alt AI_EDGE: inference lokal di PC lab
     Dev->>AI: Frame kamera via pipeline inti
     AI-->>Dev: Track decision + kandidat (tanpa image dan embedding)
@@ -131,6 +133,8 @@ stateDiagram-v2
 
 Auto-open worker berjalan tiap 10 detik untuk guru bermode `automatic` dan
 melewati roster kosong (tidak ada sesi dibuat bila snapshot roster kosong).
+`mode` di policy hanya default administratif; worker memakai
+`users.opening_mode` tiap guru, dan manual-open tidak digate `mode` policy.
 Manual-open di dalam jendela otomatis → `active`; di luar jendela →
 `manual_override`. Sesi kedua untuk jadwal yang sama selama masih berjalan
 ditolak 409. Tutup sesi hanya menuju `closed`, otomatis di akhir jadwal
@@ -156,10 +160,15 @@ State domain `retry_frontal` diekspos sebagai status mesin
 `accepted` yang boleh mengirim event `matched`; walk-through adalah fast path,
 frontal look adalah fallback.
 
-Reason code yang dilaporkan: `no_face`, `multiple_faces`, quality reason,
-`spoof`, `liveness_inconclusive`, `no_candidate`, `single_identity_gallery`,
-`top1_below_threshold`, `top1_top2_margin_too_small`, `awaiting_consensus`,
-`sampling_skipped`.
+Reason code yang dilaporkan, dikelompokkan sesuai kode:
+deteksi `no_face` / `multiple_faces`; quality
+`face_crop_empty`, `quality_unavailable`, `face_too_small`,
+`frame_blurry`, `lighting_out_of_range` (fallback `quality_rejected`);
+liveness `liveness_disabled`, `liveness_score_missing`,
+`liveness_below_threshold`, `liveness_rejected`,
+`liveness_inconclusive` (+ reason model bila ada); temporal/match
+`no_candidate`, `single_identity_gallery`, `top1_below_threshold`,
+`top1_top2_margin_too_small`, `awaiting_consensus`, `sampling_skipped`.
 
 ## 6.6 Tabel keputusan event → record (untuk Bab "aturan bisnis")
 
