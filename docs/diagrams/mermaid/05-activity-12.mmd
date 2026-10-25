@@ -1,0 +1,25 @@
+%% sumber: docs/proposal/05-activity.md (blok mermaid #12)
+flowchart TD
+  S([Admin terbitkan AI config revision]) --> P[Device poll dan terapkan: pending-applied-error]
+  P --> V{Preview pra-sesi?}
+  V -- Tidak --> E([Selesai])
+  V -- Ya --> H{Browser di localhost atau 127.0.0.1 ke edge-agent 8765?}
+  H -- Tidak --> R1[Tolak: buka dari komputer AI_EDGE]
+  H -- Ya --> PR{Profil AI_EDGE?}
+  PR -- Tidak --> R2[409 preview_gallery_profile_unsupported]
+  PR -- Ya --> CM{Kamera enabled?}
+  CM -- Tidak --> R3[409 device_camera_disabled]
+  CM -- Ya --> SA{Masih tanpa sesi aktif?}
+  SA -- Tidak --> R4[409 preview_gallery_session_active: gunakan snapshot sesi berjalan, bukan preview]
+  SA -- Ya --> W{Maks 15 mnt sebelum mulai dan sebelum akhir?}
+  W -- Tidak --> R5[404 preview_gallery_unavailable]
+  W -- Ya --> G{Template aktif tersedia?}
+  G -- Tidak --> R6[409 preview_gallery_empty]
+  G -- Ya --> L[Overlay wajah + kandidat tanpa event; frame sekitar 15 fps, status 500 ms]
+  L --> E
+  R1 --> E
+  R2 --> E
+  R3 --> E
+  R4 --> E
+  R5 --> E
+  R6 --> E

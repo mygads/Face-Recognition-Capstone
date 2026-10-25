@@ -1,0 +1,35 @@
+%% sumber: docs/proposal/06-proses-bisnis-dan-alur.md (blok mermaid #1)
+flowchart TD
+  subgraph Persiapan
+    A1[Master data + import CSV] --> A2[Jadwal praktikum]
+    A2 --> A3[Enrollment wajah lokal Core API: YuNet + SFace]
+    A3 --> A4[Hanya template terenkripsi + model name-version tersimpan; bytes gambar dibuang]
+    A5[Managed config berversi ditarik device dan AI service] --> A2
+  end
+  subgraph Pelaksanaan
+    B1[Guru buka sesi + snapshot roster] --> B2[Discovery gallery + cache expiry max 300 dtk]
+    B2 --> B3{Profil deployment}
+    B3 -- AI_EDGE --> B4[Pipeline recognition-core lokal di PC lab]
+    B3 -- AI_CENTRAL --> B5[STB kirim burst max 5 JPEG ke AI service]
+    B5 --> B6[Decision + kandidat tanpa image dan embedding]
+    B6 --> B7
+    B4 --> B7[Event idempoten ke Core API]
+    B7 --> B8{Keputusan Core API: otoritas attendance tunggal}
+    B8 -- matched valid --> B9[Record present atau late]
+    B8 -- ambigu --> B10[NEED_FRONTAL_RETRY: fallback frontal look]
+    B8 -- duplikat atau kedaluwarsa --> B11[Event audit saja]
+    B10 --> B4
+    B9 --> B12[Presensi manual bila perlu]
+  end
+  subgraph Observabilitas
+    O1[Heartbeat device + camera status] --> O2[Cache dan gallery expiry]
+    O2 --> O3[Health probe Core ke AI service via ai-readiness]
+  end
+  subgraph Penutupan
+    C1[Auto atau manual close sesi] --> C2[Laporan + ekspor]
+    C2 --> C3[EWS watchlist]
+    C3 --> C4[Tindak lanjut manusia]
+  end
+  A4 --> B1
+  B12 --> C1
+  B11 --> C1

@@ -1,0 +1,35 @@
+%% sumber: docs/proposal/05-activity.md (blok mermaid #6)
+flowchart TD
+  S([Track ACCEPTED kirim matched + kandidat]) --> N1{Sesi dan device dikenal?}
+  N1 -- Tidak --> Z404[404 session_not_found atau device_not_found; tanpa event]
+  N1 -- Ya --> RP{event_id dikenal?}
+  RP -- Fingerprint sama --> OLD[200 hasil tersimpan; replayed true]
+  RP -- Payload beda --> C409[409 event_id_reused; tanpa event baru]
+  RP -- Baru --> SV[Simpan event sebagai bukti audit]
+  SV --> V1{Guru di luar jadwalnya?}
+  V1 -- Ya --> R1[Event reason session_not_accessible]
+  V1 -- Tidak --> V2{Device aktif, kamera on, lab sama?}
+  V2 -- Tidak --> R2[Event reason device_inactive, device_camera_disabled, atau device_laboratory_mismatch]
+  V2 -- Ya --> V3{Sesi berjalan?}
+  V3 -- Tidak --> R3[Event reason session_inactive]
+  V3 -- Ya --> V4{Kandidat di snapshot roster?}
+  V4 -- Tidak --> R4[Event reason student_not_found atau student_not_in_session_roster]
+  V4 -- Ya --> V5{Outcome matched dan liveness lolos?}
+  V5 -- Tidak --> R5[Event reason recognition_not_matched atau liveness_failed]
+  V5 -- Ya --> V6{Sudah ada record sesi dan siswa?}
+  V6 -- Ya --> R6[Event reason attendance_already_recorded]
+  V6 -- Tidak --> GR{occurred_at lewat grace?}
+  GR -- Ya --> RL[Record late]
+  GR -- Tidak --> PR[Record present]
+  RL --> WS[Push WebSocket dashboard]
+  PR --> WS
+  WS --> E([Selesai])
+  R1 --> E
+  R2 --> E
+  R3 --> E
+  R4 --> E
+  R5 --> E
+  R6 --> E
+  OLD --> E
+  C409 --> E
+  Z404 --> E

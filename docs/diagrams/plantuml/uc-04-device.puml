@@ -1,0 +1,27 @@
+@startuml
+' 04-use-case DEVICE + inti recognition — docs/proposal/04-use-case.md §4.5
+left to right direction
+
+actor "DEVICE service" as DEV
+
+rectangle "Sistem Presensi (DEVICE)" as SYS {
+  usecase "UC7\nPresensi walk-through otomatis" as UC7
+  usecase "Discovery gallery sesi" as DG
+  usecase "Pipeline recognition-core" as PI
+  usecase "Simpan recognition event" as SE
+  usecase "Retry frontal look" as RF
+}
+
+DEV -- UC7
+
+UC7 ..> DG : <<include>>
+UC7 ..> PI : <<include>>
+UC7 ..> SE : <<include>>
+RF ..> UC7 : <<extend>>
+
+note bottom of SYS
+  UC7 eksklusif DEVICE (kredensial perangkat).
+  Event recognition selalu disimpan; record
+  hanya lahir bila seluruh validasi lolos.
+end note
+@enduml

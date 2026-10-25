@@ -1,0 +1,25 @@
+@startuml
+' Activity F-09 Laporan dan ekspor — docs/proposal/05-activity.md §5.9
+start
+:Pilih filter tanggal-kelas-lab-sesi;
+:Batasi scope: guru hanya jadwal miliknya;
+:Agregat session_students + records;
+if (Baris tanpa record?) then (sesi open)
+  :Tampilkan not_recorded;
+elseif (sesi closed) then
+  :Tampilkan absent;
+endif
+if (Ekspor?) then (tidak)
+  :Tabel paginasi;
+  stop
+else (ya)
+endif
+if (Lebih dari 50rb baris?) then (ya)
+  :Tolak 413: persempit filter;
+  stop
+else (tidak)
+  :CSV BOM atau XLSX tanpa skor AI + anti formula-injection;
+  :Unduh;
+  stop
+endif
+@enduml

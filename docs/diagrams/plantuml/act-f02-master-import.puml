@@ -1,0 +1,25 @@
+@startuml
+' Activity F-02 Master data + import — docs/proposal/05-activity.md §5.2
+start
+repeat
+  :Admin siapkan CSV atau XLSX;
+  :Unggah file max 5 MiB, XLSX max 25 MiB;
+  if (Ukuran dan baris lolos? max 10rb) then (tidak)
+    :Tolak 413 dengan alasan;
+  else (ya)
+    :Preview: validasi per baris;
+    if (Ada baris invalid?) then (ya)
+      :Tampilkan error per baris 422;
+    else (tidak)
+      :Commit: simpan siswa-kelas-lab;
+    endif
+  endif
+repeat while (Ditolak 413/422? ulangi dari awal) is (ya)
+stop
+
+note right
+  Commit import tidak menulis audit_logs.
+  Validasi + commit hanya mengembalikan
+  ringkasan baris valid/invalid.
+end note
+@enduml

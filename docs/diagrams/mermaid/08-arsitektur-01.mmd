@@ -1,0 +1,25 @@
+%% sumber: docs/proposal/08-arsitektur.md (blok mermaid #1)
+flowchart TB
+  subgraph Lab
+    CAM[(Kamera UVC)]
+    PC[Edge PC AI_EDGE<br/>native agent + recognition-core]
+    STB[STB Gateway<br/>capture + burst tanpa model]
+  end
+  subgraph Server
+    AI[AI Service pusat<br/>recognition-core]
+    API[Core API FastAPI<br/>otoritas attendance tunggal]
+    DB[(PostgreSQL<br/>pgvector opsional)]
+    WEB[Vue 3 SPA<br/>token Gentelella v4]
+  end
+  CAM --> PC
+  CAM --> STB
+  PC -->|event idempoten + outbox SQLite| API
+  STB -->|burst JPEG LAN| AI
+  AI -->|decision| STB
+  STB -->|event idempoten| API
+  PC & STB -->|discovery gallery + heartbeat| API
+  AI -->|tarik managed config via sync token| API
+  API -->|health probe via ai-readiness| AI
+  WEB -->|preview loopback :8765 khusus AI_EDGE| PC
+  API <--> DB
+  WEB --> API

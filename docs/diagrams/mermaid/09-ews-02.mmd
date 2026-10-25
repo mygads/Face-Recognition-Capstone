@@ -1,0 +1,14 @@
+%% sumber: docs/proposal/09-ews.md (blok mermaid #2)
+flowchart TD
+  F([Flag at-risk]) --> N{Ambang hasil kalibrasi sekolah? U-01}
+  N -- Belum --> BA[Berita acara kalibrasi]
+  BA --> N
+  N -- Sudah --> T[Tindak lanjut U-02: pemanggilan-konseling-surat-selesai]
+  T --> G1{Guru tangani?}
+  G1 -- Ya --> S1[Catat stage + note beraudit]
+  G1 -- Tidak --> ES[Eskalasi U-04: wali kelas lalu BK]
+  ES --> S1
+  S1 --> NT{Kirim notifikasi U-03?}
+  NT -- Ya --> IN[In-app; kanal luar hanya bila sekolah opt-in]
+  NT -- Tidak --> DONE([Selesai dicatat])
+  IN --> DONE

@@ -1,0 +1,9 @@
+%% sumber: docs/proposal/05-activity.md (blok mermaid #8)
+flowchart TD
+  S([Buka dashboard]) --> SN[Ambil snapshot sesi + roster + record]
+  SN --> WS[Subscribe WebSocket; refresh tiap 2 detik]
+  WS --> UP{Ada event baru?}
+  UP -- Ya --> SN
+  UP -- Tidak --> WS
+  SN --> AR[Tampilkan panel at-risk: 25 teratas + ambang efektif]
+  AR --> E([Pantau])

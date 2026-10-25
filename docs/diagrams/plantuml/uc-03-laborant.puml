@@ -1,0 +1,54 @@
+@startuml
+' 04-use-case LABORANT — docs/proposal/04-use-case.md §4.4
+left to right direction
+
+actor LABORANT as LAB
+
+rectangle "Sistem Presensi (LABORANT)" as SYS {
+  usecase "UC1\nLogin dan ganti password" as UC1
+  usecase "UC4\nEnrollment wajah" as UC4
+  usecase "UC6\nBuka sesi operasional" as UC6
+  usecase "UC8\nPresensi manual" as UC8
+  usecase "UC10\nPantau dashboard live" as UC10
+  usecase "UC11\nLaporan dan ekspor via API" as UC11
+  usecase "UC12\nLihat daftar at-risk via API" as UC12
+  usecase "UC14\nOperasikan perangkat" as UC14
+  usecase "UC15\nPreview kamera pra-sesi" as UC15
+  usecase "UC16\nAudit tercatat otomatis" as UC16
+  usecase "Quality gate capture" as QG
+  usecase "Revoke batch dulu" as RB
+  usecase "Snapshot roster" as SR
+  usecase "Manual override" as MO
+  usecase "Wajib ganti password" as WP
+  usecase "Terapkan scope akses" as SC
+  usecase "Agregat kehadiran" as AG
+}
+
+LAB -- UC1
+LAB -- UC4
+LAB -- UC6
+LAB -- UC8
+LAB -- UC10
+LAB -- UC11
+LAB -- UC12
+LAB -- UC14
+LAB -- UC15
+
+UC1 ..> UC16 : <<include>>
+WP ..> UC1 : <<extend>>
+UC4 ..> QG : <<include>>
+UC4 ..> UC16 : <<include>>
+RB ..> UC4 : <<extend>>
+UC6 ..> SR : <<include>>
+UC6 ..> UC16 : <<include>>
+MO ..> UC6 : <<extend>>
+UC8 ..> UC16 : <<include>>
+UC11 ..> SC : <<include>>
+UC12 ..> AG : <<include>>
+UC14 ..> UC16 : <<include>>
+
+note bottom of SYS
+  LABORANT: UC11/UC12 via API tanpa menu UI.
+  Tanpa UC2, UC3, UC5, UC9, UC13.
+end note
+@enduml

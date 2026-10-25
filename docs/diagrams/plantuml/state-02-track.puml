@@ -1,0 +1,17 @@
+@startuml
+' State machine track wajah — docs/proposal/06-proses-bisnis-dan-alur.md §6.5
+[*] --> collecting : track baru / reset
+collecting --> collecting : awaiting_consensus / sampling_skipped
+collecting --> retry_frontal : ambigu / margin kecil /\nsingle-identity / quality gagal
+collecting --> rejected : top1_below_threshold / spoof
+retry_frontal --> collecting : frontal look diulang
+rejected --> [*]
+collecting --> accepted : N frame sepakat + threshold lolos
+accepted --> [*] : kirim event matched
+
+note right of retry_frontal
+  Status NEED_FRONTAL_RETRY = arahan frontal look,
+  tidak pernah auto-accept. Hanya state accepted
+  yang boleh mengirim event matched.
+end note
+@enduml

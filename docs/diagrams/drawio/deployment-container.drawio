@@ -1,0 +1,24 @@
+<mxfile><diagram id="D_Deployment Container" name="Deployment Container"><mxGraphModel dx="0" dy="0" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200"><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+<mxCell id="lab" value="Lab" style="rounded=1;html=1;fontSize=14;" vertex="1" parent="1"><mxGeometry x="30" y="30" width="800" height="220" as="geometry"/></mxCell>
+<mxCell id="srv" value="Server" style="rounded=1;html=1;fontSize=14;" vertex="1" parent="1"><mxGeometry x="30" y="290" width="800" height="250" as="geometry"/></mxCell>
+<mxCell id="n_CAM" value="Kamera UVC" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="60" y="90" width="200" height="120" as="geometry"/></mxCell>
+<mxCell id="n_PC" value="PC Edge&#10;AI_EDGE&#10;native agent + recognition-core" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="310" y="90" width="200" height="120" as="geometry"/></mxCell>
+<mxCell id="n_STB" value="STB Gateway&#10;capture + burst tanpa model" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="560" y="90" width="200" height="120" as="geometry"/></mxCell>
+<mxCell id="n_AI" value="AI Service pusat&#10;recognition-core" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="60" y="400" width="200" height="120" as="geometry"/></mxCell>
+<mxCell id="n_API" value="Core API FastAPI&#10;otoritas attendance tunggal" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="280" y="400" width="200" height="120" as="geometry"/></mxCell>
+<mxCell id="n_DB" value="PostgreSQL&#10;pgvector opsional" style="shape=cylinder3;whiteSpace=wrap;html=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="500" y="400" width="200" height="120" as="geometry"/></mxCell>
+<mxCell id="n_WEB" value="Vue 3 SPA&#10;token Gentelella v4" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="720" y="400" width="200" height="120" as="geometry"/></mxCell>
+<mxCell id="d0" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="n_CAM" target="n_PC"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="d1" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="n_CAM" target="n_STB"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="d2" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="n_PC" target="n_API" value="event idempoten + outbox SQLite"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="d3" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="n_STB" target="n_AI" value="burst JPEG LAN"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="d4" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="n_AI" target="n_STB" value="decision"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="d5" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="n_STB" target="n_API" value="event idempoten"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="d6" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="n_PC" target="n_API" value="discovery gallery + heartbeat"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="d7" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="n_STB" target="n_API" value="discovery gallery + heartbeat"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="d8" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="n_AI" target="n_API" value="tarik managed config via sync token"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="d9" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="n_API" target="n_AI" value="health probe via ai-readiness"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="d10" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="n_WEB" target="n_PC" value="preview loopback :8765 khusus AI_EDGE"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="d11" style="endArrow=block;startArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="n_API" target="n_DB"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="d12" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="n_WEB" target="n_API"><mxGeometry relative="1" as="geometry"/></mxCell>
+</root></mxGraphModel></diagram></mxfile>

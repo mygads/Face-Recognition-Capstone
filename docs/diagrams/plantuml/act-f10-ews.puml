@@ -1,0 +1,22 @@
+@startuml
+' Activity F-10 EWS at-risk tahap 1 — docs/proposal/05-activity.md §5.10
+start
+:Buka panel Siswa perlu perhatian;
+:Ambil policy tersimpan atau default\n30 hari + absen 20 persen + telat 3x;\noverride query tervalidasi;
+:Agregat sesi non-cancelled:\ntotal + absen + telat + absence_pct;
+if (absence_pct >= ambang ATAU telat >= ambang?) then (tidak)
+  :Bersih: tidak masuk daftar;
+  stop
+else (ya)
+  :Flag + reasons + ambang efektif + revisi policy;
+endif
+:Catat tindak lanjut manual guru atau BK;
+:Catat di luar sistem pada tahap 1;
+stop
+
+note right
+  cancelled dikecualikan; sesi open tanpa record =
+  not_recorded (bukan absen); excused bukan absen.
+  Urut: absence_pct desc, late desc, nama.
+end note
+@enduml

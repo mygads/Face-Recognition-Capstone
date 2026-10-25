@@ -1,0 +1,9 @@
+%% sumber: docs/proposal/05-activity.md (blok mermaid #4)
+flowchart TD
+  S([Admin atau guru isi jadwal]) --> V{Jadwal valid dan referensi aktif?}
+  V -- Tidak --> R[Tolak 422]
+  R --> S
+  V -- Ya --> B{Bentrok kelas-lab-guru termasuk rentang tanggal?}
+  B -- Ya --> C[Tolak 409 schedule_conflict]
+  C --> S
+  B -- Tidak --> E([Jadwal aktif tersimpan])

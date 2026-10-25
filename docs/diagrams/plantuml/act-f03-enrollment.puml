@@ -1,0 +1,31 @@
+@startuml
+' Activity F-03 Enrollment wajah — docs/proposal/05-activity.md §5.3
+start
+:Operator pilih siswa;
+if (Status template?) then (enrolled)
+  :Revoke SEMUA template aktif batch ini;
+else (not enrolled)
+endif
+repeat
+  :Capture 3 sampai 10 frame max 3 MB;
+repeat while (Tidak lolos quality gate? ulangi capture) is (ya)
+if (Minimal 3 diterima?) then (tidak)
+  :Gagal: ulangi capture;
+  stop
+else (ya)
+endif
+:Simpan maks 5 template AES-256-GCM + model name-version;
+if (Mirip siswa lain di atas 0,85?) then (ya)
+  :Peringatan duplicate: verifikasi manual;
+else (tidak)
+endif
+:Selesai dan audit;
+stop
+
+note right
+  POST /enrollments metadata-only ditolak 422
+  captures_required; gunakan POST /enrollments/captures.
+  Revoke per batch + audit; siswa dinonaktifkan
+  ikut me-revoke template aktifnya.
+end note
+@enduml

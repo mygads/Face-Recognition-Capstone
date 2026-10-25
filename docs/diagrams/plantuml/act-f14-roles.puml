@@ -1,0 +1,22 @@
+@startuml
+' Ringkasan alur per role — docs/proposal/05-activity.md §5.14
+left to right direction
+start
+fork
+  :Guru:\nBuka sesi miliknya (manual selalu,\nauto bila mode automatic);
+  :Pantau live;
+  :Manual bila perlu di sesi berjalan;
+  :Ajukan koreksi: pending tanpa putusan;
+  :Laporan dan EWS kelasnya;
+fork again
+  :Laboran:\nEnrollment wajah;
+  :Operasikan device: heartbeat dan monitor;
+  :Preview pra-sesi AI_EDGE tanpa event;
+  :Buka sesi operasional bila perlu;
+fork again
+  :Admin:\nMaster + akun + jadwal + policy sesi;
+  :Device registry + kredensial + kamera\n+ AI config + policy EWS;
+  :Audit semua perubahan kecuali\njadwal dan commit import;
+end fork
+stop
+@enduml

@@ -1,0 +1,42 @@
+@startuml
+' Class 7.5 Perangkat dan konfigurasi (F-11, F-12) — docs/proposal/07-data-dan-class.md
+class Device {
+  +String name
+  +String device_type
+  +String deployment_profile
+  +bool is_active
+  +String app_version
+  +String model_version
+  +String camera_status
+  +bool camera_enabled
+  +DateTime last_seen_at
+  +DateTime credential_expires_at
+  +int config_applied_revision
+  +String config_apply_status
+  +String config_error_code
+}
+class RuntimeConfigurationVersion {
+  +String scope_key
+  +int revision
+  +JSON settings
+  +UUID actor_user_id
+  +DateTime created_at
+}
+class Laboratory {
+  +String code
+  +String name
+}
+class User {
+  +UUID id
+  +String full_name
+}
+Laboratory "1" -- "*" Device : terpasang
+User "1" -- "0..*" RuntimeConfigurationVersion : menerbitkan (nullable)
+
+note bottom of Device
+  device_type in {edge_pc, camera_gateway} terikat
+  deployment_profile in {AI_EDGE, STB_GATEWAY}.
+  Kredensial sebagai hash (tidak dipajang);
+  config_error_code nullable (terisi bila apply gagal).
+end note
+@enduml

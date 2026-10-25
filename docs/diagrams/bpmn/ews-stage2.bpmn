@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" id="DEF_ews-stage2" targetNamespace="http://presensi/school">
+<process id="P_ews-stage2" name="EWS tahap 2 usulan (09.2)" isExecutable="false">
+<startEvent id="s" name="Mulai"><outgoing>F_s_0</outgoing></startEvent>
+<task id="flag" name="Flag at-risk"><incoming>F_s_0</incoming><outgoing>F_flag_1</outgoing></task>
+<exclusiveGateway id="cal" name="Ambang hasil kalibrasi sekolah?" gatewayDirection="Exclusive"><incoming>F_flag_1</incoming><incoming>F_ba_3</incoming><outgoing>F_cal_2</outgoing><outgoing>F_cal_4</outgoing></exclusiveGateway>
+<task id="ba" name="Berita acara kalibrasi"><incoming>F_cal_2</incoming><outgoing>F_ba_3</outgoing></task>
+<task id="t" name="Tindak lanjut U-02"><incoming>F_cal_4</incoming><outgoing>F_t_5</outgoing></task>
+<exclusiveGateway id="g1" name="Guru tangani?" gatewayDirection="Exclusive"><incoming>F_t_5</incoming><outgoing>F_g1_6</outgoing><outgoing>F_g1_7</outgoing></exclusiveGateway>
+<task id="cat" name="Catat stage + note beraudit"><incoming>F_g1_6</incoming><incoming>F_esc_8</incoming><outgoing>F_cat_9</outgoing></task>
+<task id="esc" name="Eskalasi U-04: wali kelas lalu BK"><incoming>F_g1_7</incoming><outgoing>F_esc_8</outgoing></task>
+<exclusiveGateway id="nt" name="Kirim notifikasi U-03?" gatewayDirection="Exclusive"><incoming>F_cat_9</incoming><outgoing>F_nt_10</outgoing><outgoing>F_nt_12</outgoing></exclusiveGateway>
+<task id="ina" name="In-app; kanal luar hanya bila sekolah opt-in"><incoming>F_nt_10</incoming><outgoing>F_ina_11</outgoing></task>
+<endEvent id="e" name="Selesai dicatat"><incoming>F_ina_11</incoming><incoming>F_nt_12</incoming></endEvent>
+<sequenceFlow id="F_s_0" sourceRef="s" targetRef="flag"></sequenceFlow>
+<sequenceFlow id="F_flag_1" sourceRef="flag" targetRef="cal"></sequenceFlow>
+<sequenceFlow id="F_cal_2" sourceRef="cal" targetRef="ba"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Belum]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_ba_3" sourceRef="ba" targetRef="cal"><conditionExpression xsi:type="tFormalExpression"><![CDATA[ulangi]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_cal_4" sourceRef="cal" targetRef="t"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Sudah]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_t_5" sourceRef="t" targetRef="g1"></sequenceFlow>
+<sequenceFlow id="F_g1_6" sourceRef="g1" targetRef="cat"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_g1_7" sourceRef="g1" targetRef="esc"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_esc_8" sourceRef="esc" targetRef="cat"></sequenceFlow>
+<sequenceFlow id="F_cat_9" sourceRef="cat" targetRef="nt"></sequenceFlow>
+<sequenceFlow id="F_nt_10" sourceRef="nt" targetRef="ina"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_ina_11" sourceRef="ina" targetRef="e"></sequenceFlow>
+<sequenceFlow id="F_nt_12" sourceRef="nt" targetRef="e"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
+</process>
+<bpmndi:BPMNDiagram id="DG_ews-stage2"><bpmndi:BPMNPlane id="PL_ews-stage2" bpmnElement="P_ews-stage2">
+<bpmndi:BPMNShape id="S_s" bpmnElement="s"><dc:Bounds x="30" y="30" width="36" height="36" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_flag" bpmnElement="flag"><dc:Bounds x="240" y="150" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_cal" bpmnElement="cal"><dc:Bounds x="450" y="270" width="60" height="60" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_ba" bpmnElement="ba"><dc:Bounds x="660" y="390" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_t" bpmnElement="t"><dc:Bounds x="660" y="510" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_g1" bpmnElement="g1"><dc:Bounds x="870" y="630" width="60" height="60" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_cat" bpmnElement="cat"><dc:Bounds x="1080" y="750" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_esc" bpmnElement="esc"><dc:Bounds x="1080" y="1230" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_nt" bpmnElement="nt"><dc:Bounds x="1290" y="870" width="60" height="60" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_ina" bpmnElement="ina"><dc:Bounds x="1500" y="990" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_e" bpmnElement="e"><dc:Bounds x="1710" y="1110" width="36" height="36" /></bpmndi:BPMNShape>
+<bpmndi:BPMNEdge id="E_F_s_0" bpmnElement="F_s_0"><di:waypoint xsi:type="dc:Point" x="66" y="48" /><di:waypoint xsi:type="dc:Point" x="240" y="185" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_flag_1" bpmnElement="F_flag_1"><di:waypoint xsi:type="dc:Point" x="380" y="185" /><di:waypoint xsi:type="dc:Point" x="450" y="300" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_cal_2" bpmnElement="F_cal_2"><di:waypoint xsi:type="dc:Point" x="510" y="300" /><di:waypoint xsi:type="dc:Point" x="660" y="425" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_ba_3" bpmnElement="F_ba_3"><di:waypoint xsi:type="dc:Point" x="800" y="425" /><di:waypoint xsi:type="dc:Point" x="850" y="425" /><di:waypoint xsi:type="dc:Point" x="850" y="300" /><di:waypoint xsi:type="dc:Point" x="510" y="300" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_cal_4" bpmnElement="F_cal_4"><di:waypoint xsi:type="dc:Point" x="510" y="300" /><di:waypoint xsi:type="dc:Point" x="660" y="545" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_t_5" bpmnElement="F_t_5"><di:waypoint xsi:type="dc:Point" x="800" y="545" /><di:waypoint xsi:type="dc:Point" x="870" y="660" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_g1_6" bpmnElement="F_g1_6"><di:waypoint xsi:type="dc:Point" x="930" y="660" /><di:waypoint xsi:type="dc:Point" x="1080" y="785" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_g1_7" bpmnElement="F_g1_7"><di:waypoint xsi:type="dc:Point" x="930" y="660" /><di:waypoint xsi:type="dc:Point" x="1080" y="1265" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_esc_8" bpmnElement="F_esc_8"><di:waypoint xsi:type="dc:Point" x="1220" y="1265" /><di:waypoint xsi:type="dc:Point" x="1270" y="1265" /><di:waypoint xsi:type="dc:Point" x="1270" y="785" /><di:waypoint xsi:type="dc:Point" x="1220" y="785" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_cat_9" bpmnElement="F_cat_9"><di:waypoint xsi:type="dc:Point" x="1220" y="785" /><di:waypoint xsi:type="dc:Point" x="1290" y="900" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_nt_10" bpmnElement="F_nt_10"><di:waypoint xsi:type="dc:Point" x="1350" y="900" /><di:waypoint xsi:type="dc:Point" x="1500" y="1025" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_ina_11" bpmnElement="F_ina_11"><di:waypoint xsi:type="dc:Point" x="1640" y="1025" /><di:waypoint xsi:type="dc:Point" x="1710" y="1128" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_nt_12" bpmnElement="F_nt_12"><di:waypoint xsi:type="dc:Point" x="1350" y="900" /><di:waypoint xsi:type="dc:Point" x="1710" y="1128" /></bpmndi:BPMNEdge>
+</bpmndi:BPMNPlane></bpmndi:BPMNDiagram></definitions>

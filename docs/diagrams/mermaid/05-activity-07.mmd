@@ -1,0 +1,20 @@
+%% sumber: docs/proposal/05-activity.md (blok mermaid #7)
+flowchart TD
+  S([Guru pilih siswa + status + catatan]) --> SC{Guru pemilik jadwal?}
+  SC -- Bukan --> NF[404 session_not_found]
+  SC -- Ya --> ST{Sesi berjalan?}
+  ST -- Tidak --> SI[409 session_inactive]
+  ST -- Ya --> SN{Siswa dikenal dan di snapshot?}
+  SN -- Tidak --> NR[404 student_not_found atau student_not_in_session_roster]
+  SN -- Ya --> DP{Record sesi dan siswa sudah ada?}
+  DP -- Ya --> AR[409 attendance_already_recorded; FR tak tertimpa]
+  DP -- Tidak --> SV[Record manual + audit attendance.manual_marked]
+  SV --> K{Ada kesalahan?}
+  K -- Tidak --> E([Selesai])
+  K -- Ya --> P[POST koreksi + alasan wajib]
+  P --> PE[pending + audit; record final tidak berubah]
+  PE --> W([Menunggu kebijakan approval; tanpa endpoint putusan])
+  NF --> E2([Selesai])
+  SI --> E2
+  NR --> E2
+  AR --> E2

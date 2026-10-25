@@ -1,0 +1,20 @@
+%% sumber: docs/proposal/05-activity.md (blok mermaid #5)
+flowchart TD
+  S([Jadwal eligible hari ini]) --> M{Mode guru?}
+  M -- automatic dan dalam jendela --> W[Worker 10 detik auto-open]
+  W --> R{Roster kelas kosong?}
+  R -- Ya --> SKIP[Lewati: tanpa sesi]
+  R -- Tidak --> WA[Status active; opened_by null]
+  WA --> D
+  M -- manual atau di luar jendela --> O[Guru atau laboran tekan Buka Sesi]
+  O --> T[Transaksi: attendance_sessions + snapshot roster aktif]
+  T --> G1{Manual-open di dalam jendela?}
+  G1 -- Ya --> SA[Status active]
+  G1 -- Tidak --> SO[Status manual_override]
+  SA --> D
+  SO --> D([Dashboard live aktif; device tarik gallery])
+  D --> CL{Akhir jadwal atau tutup manual?}
+  CL -- Ya --> CSD[Tutup: hanya berjalan ke closed + closed_at]
+  CSD --> E([Selesai])
+  CL -- Tidak --> D
+  SKIP --> E

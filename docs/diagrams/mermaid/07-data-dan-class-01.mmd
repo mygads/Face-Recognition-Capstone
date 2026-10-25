@@ -1,0 +1,30 @@
+%% sumber: docs/proposal/07-data-dan-class.md (blok mermaid #1)
+classDiagram
+  class User {
+    +UUID id
+    +String email
+    +String full_name
+    +bool is_active
+    +bool must_change_password
+    +String opening_mode
+  }
+  class Role {
+    +String code
+    +String name
+  }
+  class UserRole {
+    +UUID user_id
+    +UUID role_id
+    +UUID granted_by_user_id
+  }
+  class AuthSession {
+    +UUID id
+    +UUID user_id
+    +DateTime created_at
+    +DateTime expires_at
+    +DateTime last_used_at
+    +DateTime revoked_at
+  }
+  User "1" -- "*" UserRole : memiliki
+  Role "1" -- "*" UserRole : dipakai
+  User "1" -- "*" AuthSession : sesi login

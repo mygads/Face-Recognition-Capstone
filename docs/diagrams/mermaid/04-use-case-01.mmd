@@ -1,0 +1,70 @@
+%% sumber: docs/proposal/04-use-case.md (blok mermaid #1)
+flowchart LR
+  ADM([ADMIN])
+  TCH([TEACHER])
+  LAB([LABORANT])
+  DEV([DEVICE service])
+  subgraph SYS[Sistem Presensi]
+    UC1((Login dan ganti password))
+    UC2((Kelola master dan import))
+    UC3((Kelola akun staf))
+    UC4((Enrollment wajah))
+    UC5((Kelola jadwal))
+    UC6((Buka dan tutup sesi))
+    UC7((Presensi walk-through otomatis))
+    UC8((Presensi manual))
+    UC9((Ajukan koreksi))
+    UC10((Pantau dashboard live))
+    UC11((Laporan dan ekspor))
+    UC12((Lihat daftar at-risk))
+    UC13((Atur ambang EWS))
+    UC14((Kelola perangkat dan AI config))
+    UC15((Preview kamera pra-sesi))
+    UC16((Audit tercatat otomatis))
+    PREV((Preview validasi import))
+    QG((Quality gate capture))
+    RB((Revoke batch dulu))
+    CB((Cek bentrok jadwal))
+    SR((Snapshot roster))
+    MO((Manual override))
+    AO((Auto-open worker))
+    DG((Discovery gallery sesi))
+    PI((Pipeline recognition-core))
+    SE((Simpan recognition event))
+    RF((Retry frontal look))
+    WP((Wajib ganti password))
+    AG((Agregat kehadiran))
+    U2((U-02 Tindak lanjut))
+    U3((U-03 Notifikasi internal))
+    U4((U-04 Eskalasi berjenjang))
+    SC((Terapkan scope akses))
+  end
+  ADM --- UC1 & UC2 & UC3 & UC4 & UC5 & UC6 & UC8 & UC9 & UC10 & UC11 & UC12 & UC13 & UC14 & UC15
+  TCH --- UC1 & UC5 & UC6 & UC8 & UC9 & UC10 & UC11 & UC12
+  LAB --- UC1 & UC4 & UC6 & UC8 & UC10 & UC11 & UC12 & UC14 & UC15
+  DEV --- UC7
+  UC1 -. <<include>> .-> UC16
+  WP -. <<extend>> .-> UC1
+  UC2 -. <<include>> .-> PREV
+  UC3 -. <<include>> .-> UC16
+  UC4 -. <<include>> .-> QG
+  UC4 -. <<include>> .-> UC16
+  RB -. <<extend>> .-> UC4
+  UC5 -. <<include>> .-> CB
+  UC6 -. <<include>> .-> SR
+  UC6 -. <<include>> .-> UC16
+  MO -. <<extend>> .-> UC6
+  AO -. <<extend>> .-> UC6
+  UC7 -. <<include>> .-> DG
+  UC7 -. <<include>> .-> PI
+  UC7 -. <<include>> .-> SE
+  RF -. <<extend>> .-> UC7
+  UC8 -. <<include>> .-> UC16
+  UC9 -. <<include>> .-> UC16
+  UC11 -. <<include>> .-> SC
+  UC12 -. <<include>> .-> AG
+  U2 -. <<extend>> .-> UC12
+  U3 -. <<extend>> .-> UC12
+  U4 -. <<extend>> .-> UC12
+  UC13 -. <<include>> .-> UC16
+  UC14 -. <<include>> .-> UC16

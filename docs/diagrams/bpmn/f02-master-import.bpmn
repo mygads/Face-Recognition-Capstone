@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" id="DEF_f02-master-import" targetNamespace="http://presensi/school">
+<process id="P_f02-master-import" name="F-02 Master data + import" isExecutable="false">
+<startEvent id="s" name="Mulai"><outgoing>F_s_0</outgoing></startEvent>
+<task id="prep" name="Admin siapkan CSV atau XLSX"><incoming>F_s_0</incoming><incoming>F_r413_5</incoming><incoming>F_r422_9</incoming><outgoing>F_prep_1</outgoing></task>
+<task id="up" name="Unggah file max 5 MiB, XLSX max 25 MiB"><incoming>F_prep_1</incoming><outgoing>F_up_2</outgoing></task>
+<exclusiveGateway id="size" name="Ukuran dan baris lolos? max 10rb" gatewayDirection="Exclusive"><incoming>F_up_2</incoming><outgoing>F_size_3</outgoing><outgoing>F_size_4</outgoing></exclusiveGateway>
+<task id="r413" name="Tolak 413 dengan alasan"><incoming>F_size_3</incoming><outgoing>F_r413_5</outgoing></task>
+<task id="prev" name="Preview: validasi per baris"><incoming>F_size_4</incoming><outgoing>F_prev_6</outgoing></task>
+<exclusiveGateway id="rows" name="Ada baris invalid?" gatewayDirection="Exclusive"><incoming>F_prev_6</incoming><outgoing>F_rows_7</outgoing><outgoing>F_rows_8</outgoing></exclusiveGateway>
+<task id="r422" name="Tampilkan error per baris 422"><incoming>F_rows_7</incoming><outgoing>F_r422_9</outgoing></task>
+<task id="commit" name="Commit: simpan siswa-kelas-lab"><incoming>F_rows_8</incoming><outgoing>F_commit_10</outgoing></task>
+<endEvent id="e" name="Selesai tanpa audit"><incoming>F_commit_10</incoming></endEvent>
+<sequenceFlow id="F_s_0" sourceRef="s" targetRef="prep"></sequenceFlow>
+<sequenceFlow id="F_prep_1" sourceRef="prep" targetRef="up"></sequenceFlow>
+<sequenceFlow id="F_up_2" sourceRef="up" targetRef="size"></sequenceFlow>
+<sequenceFlow id="F_size_3" sourceRef="size" targetRef="r413"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_size_4" sourceRef="size" targetRef="prev"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_r413_5" sourceRef="r413" targetRef="prep"><conditionExpression xsi:type="tFormalExpression"><![CDATA[ulangi]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_prev_6" sourceRef="prev" targetRef="rows"></sequenceFlow>
+<sequenceFlow id="F_rows_7" sourceRef="rows" targetRef="r422"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_rows_8" sourceRef="rows" targetRef="commit"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_r422_9" sourceRef="r422" targetRef="prep"><conditionExpression xsi:type="tFormalExpression"><![CDATA[ulangi]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_commit_10" sourceRef="commit" targetRef="e"></sequenceFlow>
+</process>
+<bpmndi:BPMNDiagram id="DG_f02-master-import"><bpmndi:BPMNPlane id="PL_f02-master-import" bpmnElement="P_f02-master-import">
+<bpmndi:BPMNShape id="S_s" bpmnElement="s"><dc:Bounds x="30" y="30" width="36" height="36" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_prep" bpmnElement="prep"><dc:Bounds x="240" y="150" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_up" bpmnElement="up"><dc:Bounds x="450" y="270" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_size" bpmnElement="size"><dc:Bounds x="660" y="390" width="60" height="60" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_r413" bpmnElement="r413"><dc:Bounds x="870" y="510" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_prev" bpmnElement="prev"><dc:Bounds x="870" y="630" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_rows" bpmnElement="rows"><dc:Bounds x="1080" y="750" width="60" height="60" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_r422" bpmnElement="r422"><dc:Bounds x="1290" y="870" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_commit" bpmnElement="commit"><dc:Bounds x="1290" y="990" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_e" bpmnElement="e"><dc:Bounds x="1500" y="1110" width="36" height="36" /></bpmndi:BPMNShape>
+<bpmndi:BPMNEdge id="E_F_s_0" bpmnElement="F_s_0"><di:waypoint xsi:type="dc:Point" x="66" y="48" /><di:waypoint xsi:type="dc:Point" x="240" y="185" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_prep_1" bpmnElement="F_prep_1"><di:waypoint xsi:type="dc:Point" x="380" y="185" /><di:waypoint xsi:type="dc:Point" x="450" y="305" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_up_2" bpmnElement="F_up_2"><di:waypoint xsi:type="dc:Point" x="590" y="305" /><di:waypoint xsi:type="dc:Point" x="660" y="420" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_size_3" bpmnElement="F_size_3"><di:waypoint xsi:type="dc:Point" x="720" y="420" /><di:waypoint xsi:type="dc:Point" x="870" y="545" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_size_4" bpmnElement="F_size_4"><di:waypoint xsi:type="dc:Point" x="720" y="420" /><di:waypoint xsi:type="dc:Point" x="870" y="665" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_r413_5" bpmnElement="F_r413_5"><di:waypoint xsi:type="dc:Point" x="1010" y="545" /><di:waypoint xsi:type="dc:Point" x="1060" y="545" /><di:waypoint xsi:type="dc:Point" x="1060" y="185" /><di:waypoint xsi:type="dc:Point" x="380" y="185" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_prev_6" bpmnElement="F_prev_6"><di:waypoint xsi:type="dc:Point" x="1010" y="665" /><di:waypoint xsi:type="dc:Point" x="1080" y="780" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_rows_7" bpmnElement="F_rows_7"><di:waypoint xsi:type="dc:Point" x="1140" y="780" /><di:waypoint xsi:type="dc:Point" x="1290" y="905" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_rows_8" bpmnElement="F_rows_8"><di:waypoint xsi:type="dc:Point" x="1140" y="780" /><di:waypoint xsi:type="dc:Point" x="1290" y="1025" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_r422_9" bpmnElement="F_r422_9"><di:waypoint xsi:type="dc:Point" x="1430" y="905" /><di:waypoint xsi:type="dc:Point" x="1480" y="905" /><di:waypoint xsi:type="dc:Point" x="1480" y="185" /><di:waypoint xsi:type="dc:Point" x="380" y="185" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_commit_10" bpmnElement="F_commit_10"><di:waypoint xsi:type="dc:Point" x="1430" y="1025" /><di:waypoint xsi:type="dc:Point" x="1500" y="1128" /></bpmndi:BPMNEdge>
+</bpmndi:BPMNPlane></bpmndi:BPMNDiagram></definitions>

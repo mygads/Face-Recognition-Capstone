@@ -1,0 +1,13 @@
+%% sumber: docs/proposal/06-proses-bisnis-dan-alur.md (blok mermaid #3)
+sequenceDiagram
+  participant Op as Laboran
+  participant Web as Vue SPA
+  participant API as Core API
+  participant DB as PostgreSQL
+  Op->>Web: Pilih siswa + capture 3-10 frame
+  Web->>API: POST /enrollments/captures (bytes di memori)
+  API->>API: YuNet detect lokal + SFace embed lokal + quality gate + anti multi-wajah
+  API->>API: Cek mirip siswa lain (warning 0,85)
+  API->>DB: Simpan max 5 template terenkripsi + model name-version
+  Note over API: Bytes gambar dibuang setelah request; tanpa kolom image di DB
+  API-->>Web: Status enrolled + audit

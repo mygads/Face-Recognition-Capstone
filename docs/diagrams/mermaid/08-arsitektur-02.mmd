@@ -1,0 +1,13 @@
+%% sumber: docs/proposal/08-arsitektur.md (blok mermaid #2)
+sequenceDiagram
+  participant PC as Edge PC / STB
+  participant API as Core API FastAPI
+  participant AI as AI Service pusat
+  participant WEB as Vue SPA (browser lab)
+  PC->>API: POST device-heartbeat (camera_metrics)
+  PC->>API: GET active-sessions (discovery)
+  PC->>API: GET active-session-cache / preview-gallery
+  PC->>API: GET runtime-configuration + POST status
+  AI->>API: GET /internal/ai-central-configuration (Bearer sync token)
+  API->>AI: GET /health (hanya saat cek ai-readiness, profil central)
+  WEB->>PC: Preview loopback http://127.0.0.1:8765 (khusus AI_EDGE)

@@ -1,0 +1,31 @@
+%% sumber: docs/proposal/04-use-case.md (blok mermaid #3)
+flowchart LR
+  GURU([TEACHER])
+  UC1((Login dan ganti password))
+  UC5((Kelola jadwal miliknya))
+  UC6((Buka dan tutup sesi))
+  UC8((Presensi manual))
+  UC9((Ajukan koreksi))
+  UC10((Pantau dashboard live))
+  UC11((Laporan dan ekspor))
+  UC12((Lihat daftar at-risk))
+  UC16((Audit tercatat otomatis))
+  CB((Cek bentrok jadwal))
+  SR((Snapshot roster))
+  MO((Manual override))
+  AO((Auto-open worker))
+  WP((Wajib ganti password))
+  SC((Terapkan scope akses))
+  AG((Agregat kehadiran))
+  GURU --- UC1 & UC5 & UC6 & UC8 & UC9 & UC10 & UC11 & UC12
+  UC1 -. <<include>> .-> UC16
+  WP -. <<extend>> .-> UC1
+  UC5 -. <<include>> .-> CB
+  UC6 -. <<include>> .-> SR
+  UC6 -. <<include>> .-> UC16
+  MO -. <<extend>> .-> UC6
+  AO -. <<extend>> .-> UC6
+  UC8 -. <<include>> .-> UC16
+  UC9 -. <<include>> .-> UC16
+  UC11 -. <<include>> .-> SC
+  UC12 -. <<include>> .-> AG

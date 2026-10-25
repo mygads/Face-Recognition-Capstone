@@ -1,0 +1,11 @@
+%% sumber: docs/proposal/06-proses-bisnis-dan-alur.md (blok mermaid #4)
+stateDiagram-v2
+  [*] --> eligible : jadwal eligible hari ini
+  eligible --> active : manual-open di dalam jendela / auto-open worker 10 dtk
+  eligible --> manual_override : manual-open di luar jendela
+  active --> closed : akhir jadwal (worker 10 dtk) / tutup manual
+  manual_override --> closed : akhir jadwal (worker 10 dtk) / tutup manual
+  active --> active : sesi kedua jadwal sama ditolak 409
+  manual_override --> manual_override : sesi kedua jadwal sama ditolak 409
+  closed --> [*]
+  note right of closed : cancelled dicadangkan di skema, belum ada endpoint penulisnya

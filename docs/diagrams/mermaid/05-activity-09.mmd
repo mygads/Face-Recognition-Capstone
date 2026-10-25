@@ -1,0 +1,15 @@
+%% sumber: docs/proposal/05-activity.md (blok mermaid #9)
+flowchart TD
+  S([Pilih filter tanggal-kelas-lab-sesi]) --> B[Batasi scope: guru hanya jadwal miliknya]
+  B --> A[Agregat session_students + records]
+  A --> R{Baris tanpa record?}
+  R -- Sesi open --> N[Tampilkan not_recorded]
+  R -- Sesi closed --> AB[Tampilkan absent]
+  N --> X{Ekspor?}
+  AB --> X
+  X -- Tidak --> T[Tabel paginasi]
+  X -- Ya --> C{Lebih dari 50rb baris?}
+  C -- Ya --> E1[Tolak 413: persempit filter]
+  C -- Tidak --> CSV[CSV BOM atau XLSX tanpa skor AI + anti formula-injection]
+  CSV --> E([Unduh])
+  T --> E

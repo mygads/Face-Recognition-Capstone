@@ -1,0 +1,42 @@
+@startuml
+' Activity F-12 AI config + preview — docs/proposal/05-activity.md §5.12
+start
+:Admin terbitkan AI config revision;
+:Device poll dan terapkan: pending-applied-error;
+if (Preview pra-sesi?) then (tidak)
+  stop
+else (ya)
+endif
+if (Browser di localhost/127.0.0.1 ke edge-agent 8765?) then (tidak)
+  :Tolak: buka dari komputer AI_EDGE;
+  stop
+else (ya)
+endif
+if (Profil AI_EDGE?) then (tidak)
+  :409 preview_gallery_profile_unsupported;
+  stop
+else (ya)
+endif
+if (Kamera enabled?) then (tidak)
+  :409 device_camera_disabled;
+  stop
+else (ya)
+endif
+if (Masih tanpa sesi aktif?) then (tidak)
+  :409 preview_gallery_session_active:\ngunakan snapshot sesi berjalan;
+  stop
+else (ya)
+endif
+if (Maks 15 mnt sebelum mulai dan sebelum akhir?) then (tidak)
+  :404 preview_gallery_unavailable;
+  stop
+else (ya)
+endif
+if (Template aktif tersedia?) then (tidak)
+  :409 preview_gallery_empty;
+  stop
+else (ya)
+  :Overlay wajah + kandidat tanpa event;\nframe sekitar 15 fps, status 500 ms;
+  stop
+endif
+@enduml

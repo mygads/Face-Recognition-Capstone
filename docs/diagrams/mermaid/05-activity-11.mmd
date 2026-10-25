@@ -1,0 +1,18 @@
+%% sumber: docs/proposal/05-activity.md (blok mermaid #11)
+flowchart TD
+  subgraph ADM[ADMIN saja]
+    A1([Registrasi device + lab + profile]) --> A2[Provision bearer sekali pakai]
+    A2 --> A3[Rotate token + overlap singkat]
+    A3 --> E
+    A1 --> A4[Update registry atau lab assignment]
+    A4 --> E
+    A1 --> A5[Jeda atau aktifkan kamera: matching berhenti, heartbeat jalan]
+    A5 --> E
+    A1 --> A6[Nonaktif: revoke kredensial + kamera offline]
+  end
+  subgraph OPS[LABORANT dan device]
+    B1([Heartbeat + camera_status + latency + metrik]) --> B2[Discover sesi aktif lab ini]
+    B2 --> B3[Tarik gallery sesi dan kirim recognition-event idempoten]
+    B3 --> B1
+  end
+  A6 --> E([Selesai])

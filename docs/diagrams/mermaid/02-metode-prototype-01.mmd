@@ -1,0 +1,18 @@
+%% sumber: docs/proposal/02-metode-prototype.md (blok mermaid #1)
+flowchart TD
+  P1([1 Dengar kebutuhan dan observasi]) --> P2([2 Bangun prototipe cepat])
+  P2 --> P3([3 Uji coba ke pengguna])
+  P3 --> P4{Uji review: diterima?}
+  P4 -- Ya, tanpa catatan --> P5([5 Implementasi final dan hardening])
+  P4 -- Ya, dengan catatan kecil --> P6([Catat backlog terukur])
+  P6 --> P5
+  P4 -- Tidak --> P7([Revisi prototipe])
+  P7 --> P2
+  P5 --> P8([6 Pengujian sistem dan kalibrasi])
+  P8 --> P9{Uji lolos?}
+  P9 -- Tidak --> P7
+  P9 -- Ya --> P10([7 Deployment dan serah terima])
+  P10 --> P11([8 Evaluasi pasca-pakai])
+  P11 --> P12{Ada kebutuhan baru?}
+  P12 -- Ya, misal EWS tahap 2 --> P1
+  P12 -- Tidak --> DONE([Selesai])

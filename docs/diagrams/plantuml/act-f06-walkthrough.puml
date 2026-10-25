@@ -1,0 +1,64 @@
+@startuml
+' Activity F-06 Walk-through otomatis — docs/proposal/05-activity.md §5.6
+start
+:Track ACCEPTED kirim matched + kandidat;
+if (Sesi dan device dikenal?) then (tidak)
+  :404 session_not_found / device_not_found;\ntanpa event;
+  stop
+else (ya)
+endif
+if (event_id dikenal?) then (fingerprint sama)
+  :200 hasil tersimpan; replayed true;
+  stop
+elseif (payload beda) then
+  :409 event_id_reused; tanpa event baru;
+  stop
+else (baru)
+  :Simpan event sebagai bukti audit;
+endif
+if (Guru di luar jadwalnya?) then (ya)
+  :Event reason session_not_accessible;
+  stop
+else (tidak)
+endif
+if (Device aktif, kamera on, lab sama?) then (tidak)
+  :Event reason device_inactive /\ndevice_camera_disabled /\ndevice_laboratory_mismatch;
+  stop
+else (ya)
+endif
+if (Sesi berjalan?) then (tidak)
+  :Event reason session_inactive;
+  stop
+else (ya)
+endif
+if (Kandidat di snapshot roster?) then (tidak)
+  :Event reason student_not_found /\nstudent_not_in_session_roster;
+  stop
+else (ya)
+endif
+if (Outcome matched dan liveness lolos?) then (tidak)
+  :Event reason recognition_not_matched /\nliveness_failed;
+  stop
+else (ya)
+endif
+if (Sudah ada record sesi dan siswa?) then (ya)
+  :Event reason attendance_already_recorded;
+  stop
+else (tidak)
+endif
+if (occurred_at lewat grace?) then (ya)
+  :Record late;
+else (tidak)
+  :Record present;
+endif
+:Push WebSocket dashboard;
+:Selesai;
+stop
+
+note right
+  Sepuluh reason dievaluasi berurutan. Grace:
+  auto-open dari scheduled_start_at, manual-open
+  dari opened_at. Duplikat konkuren ditahan
+  UNIQUE sesi+siswa lewat savepoint.
+end note
+@enduml

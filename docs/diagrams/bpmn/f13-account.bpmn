@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" id="DEF_f13-account" targetNamespace="http://presensi/school">
+<process id="P_f13-account" name="F-13/F-14 Akun + audit" isExecutable="false">
+<startEvent id="s" name="Mulai"><outgoing>F_s_0</outgoing></startEvent>
+<task id="create" name="Admin buat akun: email unik + role"><incoming>F_s_0</incoming><outgoing>F_create_1</outgoing></task>
+<task id="act" name="Akun aktif; password awal wajib diganti"><incoming>F_create_1</incoming><outgoing>F_act_2</outgoing></task>
+<exclusiveGateway id="chg" name="Ganti password?" gatewayDirection="Exclusive"><incoming>F_act_2</incoming><outgoing>F_chg_3</outgoing><outgoing>F_chg_6</outgoing></exclusiveGateway>
+<task id="new" name="Password baru: sesi lama di-revoke semua"><incoming>F_chg_3</incoming><outgoing>F_new_4</outgoing></task>
+<task id="done" name="Selesai dan audit"><incoming>F_new_4</incoming><outgoing>F_done_5</outgoing></task>
+<endEvent id="e" name="Selesai"><incoming>F_done_5</incoming><incoming>F_chg_6</incoming></endEvent>
+<sequenceFlow id="F_s_0" sourceRef="s" targetRef="create"></sequenceFlow>
+<sequenceFlow id="F_create_1" sourceRef="create" targetRef="act"></sequenceFlow>
+<sequenceFlow id="F_act_2" sourceRef="act" targetRef="chg"></sequenceFlow>
+<sequenceFlow id="F_chg_3" sourceRef="chg" targetRef="new"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_new_4" sourceRef="new" targetRef="done"></sequenceFlow>
+<sequenceFlow id="F_done_5" sourceRef="done" targetRef="e"></sequenceFlow>
+<sequenceFlow id="F_chg_6" sourceRef="chg" targetRef="e"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
+</process>
+<bpmndi:BPMNDiagram id="DG_f13-account"><bpmndi:BPMNPlane id="PL_f13-account" bpmnElement="P_f13-account">
+<bpmndi:BPMNShape id="S_s" bpmnElement="s"><dc:Bounds x="30" y="30" width="36" height="36" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_create" bpmnElement="create"><dc:Bounds x="240" y="150" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_act" bpmnElement="act"><dc:Bounds x="450" y="270" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_chg" bpmnElement="chg"><dc:Bounds x="660" y="390" width="60" height="60" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_new" bpmnElement="new"><dc:Bounds x="870" y="510" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_done" bpmnElement="done"><dc:Bounds x="1080" y="630" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_e" bpmnElement="e"><dc:Bounds x="1290" y="750" width="36" height="36" /></bpmndi:BPMNShape>
+<bpmndi:BPMNEdge id="E_F_s_0" bpmnElement="F_s_0"><di:waypoint xsi:type="dc:Point" x="66" y="48" /><di:waypoint xsi:type="dc:Point" x="240" y="185" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_create_1" bpmnElement="F_create_1"><di:waypoint xsi:type="dc:Point" x="380" y="185" /><di:waypoint xsi:type="dc:Point" x="450" y="305" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_act_2" bpmnElement="F_act_2"><di:waypoint xsi:type="dc:Point" x="590" y="305" /><di:waypoint xsi:type="dc:Point" x="660" y="420" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_chg_3" bpmnElement="F_chg_3"><di:waypoint xsi:type="dc:Point" x="720" y="420" /><di:waypoint xsi:type="dc:Point" x="870" y="545" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_new_4" bpmnElement="F_new_4"><di:waypoint xsi:type="dc:Point" x="1010" y="545" /><di:waypoint xsi:type="dc:Point" x="1080" y="665" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_done_5" bpmnElement="F_done_5"><di:waypoint xsi:type="dc:Point" x="1220" y="665" /><di:waypoint xsi:type="dc:Point" x="1290" y="768" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_chg_6" bpmnElement="F_chg_6"><di:waypoint xsi:type="dc:Point" x="720" y="420" /><di:waypoint xsi:type="dc:Point" x="1290" y="768" /></bpmndi:BPMNEdge>
+</bpmndi:BPMNPlane></bpmndi:BPMNDiagram></definitions>

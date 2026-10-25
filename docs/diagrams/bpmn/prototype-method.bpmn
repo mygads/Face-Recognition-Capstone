@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" id="DEF_prototype-method" targetNamespace="http://presensi/school">
+<process id="P_prototype-method" name="Metode Prototype (02.1)" isExecutable="false">
+<startEvent id="s" name="Mulai"><outgoing>F_s_0</outgoing></startEvent>
+<task id="p1" name="1 Dengar kebutuhan dan observasi"><incoming>F_s_0</incoming><incoming>F_p12_15</incoming><outgoing>F_p1_1</outgoing></task>
+<task id="p2" name="2 Bangun prototipe cepat"><incoming>F_p1_1</incoming><incoming>F_p7_8</incoming><outgoing>F_p2_2</outgoing></task>
+<task id="p3" name="3 Uji coba ke pengguna"><incoming>F_p2_2</incoming><outgoing>F_p3_3</outgoing></task>
+<exclusiveGateway id="p4" name="Uji review: diterima?" gatewayDirection="Exclusive"><incoming>F_p3_3</incoming><outgoing>F_p4_4</outgoing><outgoing>F_p4_5</outgoing><outgoing>F_p4_7</outgoing></exclusiveGateway>
+<task id="p5" name="5 Implementasi final dan hardening"><incoming>F_p4_4</incoming><incoming>F_p6_6</incoming><outgoing>F_p5_9</outgoing></task>
+<task id="p6" name="Catat backlog terukur"><incoming>F_p4_5</incoming><outgoing>F_p6_6</outgoing></task>
+<task id="p7" name="Revisi prototipe"><incoming>F_p4_7</incoming><incoming>F_p9_11</incoming><outgoing>F_p7_8</outgoing></task>
+<task id="p8" name="6 Pengujian sistem dan kalibrasi"><incoming>F_p5_9</incoming><outgoing>F_p8_10</outgoing></task>
+<exclusiveGateway id="p9" name="Uji lolos?" gatewayDirection="Exclusive"><incoming>F_p8_10</incoming><outgoing>F_p9_11</outgoing><outgoing>F_p9_12</outgoing></exclusiveGateway>
+<task id="p10" name="7 Deployment dan serah terima"><incoming>F_p9_12</incoming><outgoing>F_p10_13</outgoing></task>
+<task id="p11" name="8 Evaluasi pasca-pakai"><incoming>F_p10_13</incoming><outgoing>F_p11_14</outgoing></task>
+<exclusiveGateway id="p12" name="Ada kebutuhan baru?" gatewayDirection="Exclusive"><incoming>F_p11_14</incoming><outgoing>F_p12_15</outgoing><outgoing>F_p12_16</outgoing></exclusiveGateway>
+<task id="done" name="Selesai"><incoming>F_p12_16</incoming><outgoing>F_done_17</outgoing></task>
+<endEvent id="e" name="Selesai"><incoming>F_done_17</incoming></endEvent>
+<sequenceFlow id="F_s_0" sourceRef="s" targetRef="p1"></sequenceFlow>
+<sequenceFlow id="F_p1_1" sourceRef="p1" targetRef="p2"></sequenceFlow>
+<sequenceFlow id="F_p2_2" sourceRef="p2" targetRef="p3"></sequenceFlow>
+<sequenceFlow id="F_p3_3" sourceRef="p3" targetRef="p4"></sequenceFlow>
+<sequenceFlow id="F_p4_4" sourceRef="p4" targetRef="p5"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya, tanpa catatan]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_p4_5" sourceRef="p4" targetRef="p6"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya, dengan catatan kecil]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_p6_6" sourceRef="p6" targetRef="p5"></sequenceFlow>
+<sequenceFlow id="F_p4_7" sourceRef="p4" targetRef="p7"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_p7_8" sourceRef="p7" targetRef="p2"><conditionExpression xsi:type="tFormalExpression"><![CDATA[revisi]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_p5_9" sourceRef="p5" targetRef="p8"></sequenceFlow>
+<sequenceFlow id="F_p8_10" sourceRef="p8" targetRef="p9"></sequenceFlow>
+<sequenceFlow id="F_p9_11" sourceRef="p9" targetRef="p7"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_p9_12" sourceRef="p9" targetRef="p10"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_p10_13" sourceRef="p10" targetRef="p11"></sequenceFlow>
+<sequenceFlow id="F_p11_14" sourceRef="p11" targetRef="p12"></sequenceFlow>
+<sequenceFlow id="F_p12_15" sourceRef="p12" targetRef="p1"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya, misal EWS tahap 2]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_p12_16" sourceRef="p12" targetRef="done"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_done_17" sourceRef="done" targetRef="e"></sequenceFlow>
+</process>
+<bpmndi:BPMNDiagram id="DG_prototype-method"><bpmndi:BPMNPlane id="PL_prototype-method" bpmnElement="P_prototype-method">
+<bpmndi:BPMNShape id="S_s" bpmnElement="s"><dc:Bounds x="30" y="30" width="36" height="36" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_p1" bpmnElement="p1"><dc:Bounds x="240" y="150" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_p2" bpmnElement="p2"><dc:Bounds x="450" y="270" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_p3" bpmnElement="p3"><dc:Bounds x="660" y="390" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_p4" bpmnElement="p4"><dc:Bounds x="870" y="510" width="60" height="60" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_p5" bpmnElement="p5"><dc:Bounds x="1080" y="630" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_p6" bpmnElement="p6"><dc:Bounds x="1080" y="1710" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_p7" bpmnElement="p7"><dc:Bounds x="1710" y="990" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_p8" bpmnElement="p8"><dc:Bounds x="1290" y="750" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_p9" bpmnElement="p9"><dc:Bounds x="1500" y="870" width="60" height="60" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_p10" bpmnElement="p10"><dc:Bounds x="1710" y="1110" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_p11" bpmnElement="p11"><dc:Bounds x="1920" y="1230" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_p12" bpmnElement="p12"><dc:Bounds x="2130" y="1350" width="60" height="60" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_done" bpmnElement="done"><dc:Bounds x="2340" y="1470" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_e" bpmnElement="e"><dc:Bounds x="2550" y="1590" width="36" height="36" /></bpmndi:BPMNShape>
+<bpmndi:BPMNEdge id="E_F_s_0" bpmnElement="F_s_0"><di:waypoint xsi:type="dc:Point" x="66" y="48" /><di:waypoint xsi:type="dc:Point" x="240" y="185" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_p1_1" bpmnElement="F_p1_1"><di:waypoint xsi:type="dc:Point" x="380" y="185" /><di:waypoint xsi:type="dc:Point" x="450" y="305" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_p2_2" bpmnElement="F_p2_2"><di:waypoint xsi:type="dc:Point" x="590" y="305" /><di:waypoint xsi:type="dc:Point" x="660" y="425" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_p3_3" bpmnElement="F_p3_3"><di:waypoint xsi:type="dc:Point" x="800" y="425" /><di:waypoint xsi:type="dc:Point" x="870" y="540" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_p4_4" bpmnElement="F_p4_4"><di:waypoint xsi:type="dc:Point" x="930" y="540" /><di:waypoint xsi:type="dc:Point" x="1080" y="665" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_p4_5" bpmnElement="F_p4_5"><di:waypoint xsi:type="dc:Point" x="930" y="540" /><di:waypoint xsi:type="dc:Point" x="1080" y="1745" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_p6_6" bpmnElement="F_p6_6"><di:waypoint xsi:type="dc:Point" x="1220" y="1745" /><di:waypoint xsi:type="dc:Point" x="1270" y="1745" /><di:waypoint xsi:type="dc:Point" x="1270" y="665" /><di:waypoint xsi:type="dc:Point" x="1220" y="665" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_p4_7" bpmnElement="F_p4_7"><di:waypoint xsi:type="dc:Point" x="930" y="540" /><di:waypoint xsi:type="dc:Point" x="1710" y="1025" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_p7_8" bpmnElement="F_p7_8"><di:waypoint xsi:type="dc:Point" x="1850" y="1025" /><di:waypoint xsi:type="dc:Point" x="1900" y="1025" /><di:waypoint xsi:type="dc:Point" x="1900" y="305" /><di:waypoint xsi:type="dc:Point" x="590" y="305" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_p5_9" bpmnElement="F_p5_9"><di:waypoint xsi:type="dc:Point" x="1220" y="665" /><di:waypoint xsi:type="dc:Point" x="1290" y="785" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_p8_10" bpmnElement="F_p8_10"><di:waypoint xsi:type="dc:Point" x="1430" y="785" /><di:waypoint xsi:type="dc:Point" x="1500" y="900" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_p9_11" bpmnElement="F_p9_11"><di:waypoint xsi:type="dc:Point" x="1560" y="900" /><di:waypoint xsi:type="dc:Point" x="1710" y="1025" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_p9_12" bpmnElement="F_p9_12"><di:waypoint xsi:type="dc:Point" x="1560" y="900" /><di:waypoint xsi:type="dc:Point" x="1710" y="1145" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_p10_13" bpmnElement="F_p10_13"><di:waypoint xsi:type="dc:Point" x="1850" y="1145" /><di:waypoint xsi:type="dc:Point" x="1920" y="1265" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_p11_14" bpmnElement="F_p11_14"><di:waypoint xsi:type="dc:Point" x="2060" y="1265" /><di:waypoint xsi:type="dc:Point" x="2130" y="1380" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_p12_15" bpmnElement="F_p12_15"><di:waypoint xsi:type="dc:Point" x="2190" y="1380" /><di:waypoint xsi:type="dc:Point" x="2240" y="1380" /><di:waypoint xsi:type="dc:Point" x="2240" y="185" /><di:waypoint xsi:type="dc:Point" x="380" y="185" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_p12_16" bpmnElement="F_p12_16"><di:waypoint xsi:type="dc:Point" x="2190" y="1380" /><di:waypoint xsi:type="dc:Point" x="2340" y="1505" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_done_17" bpmnElement="F_done_17"><di:waypoint xsi:type="dc:Point" x="2480" y="1505" /><di:waypoint xsi:type="dc:Point" x="2550" y="1608" /></bpmndi:BPMNEdge>
+</bpmndi:BPMNPlane></bpmndi:BPMNDiagram></definitions>

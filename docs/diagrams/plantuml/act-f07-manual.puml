@@ -1,0 +1,38 @@
+@startuml
+' Activity F-07 Presensi manual + koreksi — docs/proposal/05-activity.md §5.7
+start
+:Guru pilih siswa + status + catatan;
+if (Guru pemilik jadwal?) then (bukan)
+  :404 session_not_found;
+  stop
+else (ya)
+endif
+if (Sesi berjalan?) then (tidak)
+  :409 session_inactive;
+  stop
+else (ya)
+endif
+if (Siswa dikenal dan di snapshot?) then (tidak)
+  :404 student_not_found /\nstudent_not_in_session_roster;
+  stop
+else (ya)
+endif
+if (Record sesi dan siswa sudah ada?) then (ya)
+  :409 attendance_already_recorded; FR tak tertimpa;
+  stop
+else (tidak)
+  :Record manual + audit attendance.manual_marked;
+endif
+if (Ada kesalahan?) then (ya)
+  :POST koreksi + alasan wajib;
+  :pending + audit; record final tidak berubah;
+  :Menunggu kebijakan approval; tanpa endpoint putusan;
+else (tidak)
+endif
+stop
+
+note right
+  Koreksi HANYA pending. Tidak ada keputusan
+  approve/reject di sistem berjalan.
+end note
+@enduml

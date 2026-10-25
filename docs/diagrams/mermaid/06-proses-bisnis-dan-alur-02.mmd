@@ -1,0 +1,30 @@
+%% sumber: docs/proposal/06-proses-bisnis-dan-alur.md (blok mermaid #2)
+sequenceDiagram
+  participant Guru
+  participant Web as Vue SPA
+  participant API as Core API FastAPI
+  participant DB as PostgreSQL
+  participant Dev as Edge PC atau STB
+  participant AI as recognition-core atau AI service
+  Guru->>Web: Buka sesi terjadwal
+  Web->>API: POST /sessions (201)
+  API->>DB: INSERT attendance_sessions + snapshot session_students
+  loop Worker 10 dtk dan heartbeat device
+    Dev->>API: Discovery sesi aktif (bearer device)
+    Dev->>API: Tarik gallery sesi (model name-version)
+    API-->>Dev: Gallery + expiry max 300 dtk
+    Dev->>API: Tarik managed config berversi + lapor status
+  end
+  opt Cek ai-readiness (profil central)
+    API->>AI: Health probe /health
+  end
+  alt AI_EDGE: inference lokal di PC lab
+    Dev->>AI: Frame kamera via pipeline inti
+    AI-->>Dev: Track decision + kandidat (tanpa image dan embedding)
+  else AI_CENTRAL: STB gateway tanpa model
+    Dev->>AI: Burst max 5 JPEG + gallery sesi dari Core
+    AI-->>Dev: Burst decision + kandidat (tanpa image dan embedding)
+  end
+  Dev->>API: POST recognition-events + event_id
+  API->>DB: Simpan event; validasi rantai; INSERT record bila lolos
+  API-->>Web: WS update dashboard

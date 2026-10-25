@@ -1,0 +1,42 @@
+%% sumber: docs/proposal/07-data-dan-class.md (blok mermaid #6)
+classDiagram
+  class RuntimeConfigurationVersion {
+    +String scope_key
+    +int revision
+    +JSON settings
+    +DateTime created_at
+  }
+  class AtRiskPolicy {
+    +String scope_key
+    +int revision
+  }
+  class Student {
+    +String student_number
+    +String full_name
+  }
+  class EwsFollowUp {
+    +UUID student_id
+    +UUID session_id
+    +String stage
+    +String note
+    +UUID created_by_user_id
+    +DateTime created_at
+  }
+  class AuditLog {
+    +UUID actor_user_id
+    +String action
+    +String entity_type
+    +UUID entity_id
+    +UUID request_id
+    +JSON before_state
+    +JSON after_state
+    +DateTime created_at
+  }
+  class User {
+    +UUID id
+    +String full_name
+  }
+  RuntimeConfigurationVersion "1" -- "0..1" AtRiskPolicy : scope attendance-at-risk-policy
+  AtRiskPolicy ..> Student : menghitung flag
+  Student "1" -- "0..*" EwsFollowUp : U-02 usulan (belum tabel)
+  User "1" -- "0..*" AuditLog : aktor (nullable)

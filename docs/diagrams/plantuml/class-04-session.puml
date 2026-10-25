@@ -1,0 +1,79 @@
+@startuml
+' Class 7.4 Sesi dan keputusan presensi (F-05, F-06, F-07) — docs/proposal/07-data-dan-class.md
+class AttendanceSession {
+  +UUID id
+  +UUID practicum_schedule_id
+  +UUID opened_by_user_id
+  +String status
+  +DateTime opened_at
+  +DateTime closed_at
+  +int grace_period_minutes
+}
+class SessionStudent {
+  +String student_number_snapshot
+  +String full_name_snapshot
+  +DateTime snapshot_taken_at
+}
+class RecognitionEvent {
+  +UUID event_uuid
+  +UUID session_id
+  +UUID device_id
+  +UUID recognized_student_id
+  +DateTime occurred_at
+  +String outcome
+  +Decimal similarity
+  +Decimal confidence
+  +Decimal margin
+  +String model_name
+  +String model_version
+  +JSON quality_metadata
+}
+class AttendanceRecord {
+  +UUID session_id
+  +UUID student_id
+  +UUID recognition_event_id
+  +UUID recorded_by_user_id
+  +String status
+  +String source
+  +DateTime recorded_at
+}
+class AttendanceCorrection {
+  +UUID attendance_record_id
+  +UUID requested_by_user_id
+  +String previous_status
+  +String corrected_status
+  +String reason
+  +String decision_status
+  +String decision_note
+  +UUID decided_by_user_id
+  +DateTime decided_at
+}
+class Device {
+  +String device_type
+  +String deployment_profile
+}
+class Student {
+  +String student_number
+  +String full_name
+}
+class PracticumSchedule {
+  +UUID id
+}
+AttendanceSession "1" -- "*" SessionStudent : snapshot immutable
+AttendanceSession "1" -- "*" RecognitionEvent : evidence
+AttendanceSession "1" -- "*" AttendanceRecord : keputusan
+PracticumSchedule "1" -- "*" AttendanceSession : diinstansiasi
+Device "1" -- "*" RecognitionEvent : menangkap
+Student "1" -- "0..*" RecognitionEvent : dikenali (nullable)
+SessionStudent "1" -- "0..1" AttendanceRecord : FK roster
+RecognitionEvent "1" -- "0..1" AttendanceRecord : maks 1 record
+AttendanceRecord "1" -- "*" AttendanceCorrection : pending saja
+
+note bottom of AttendanceSession
+  status in {active, manual_override, closed, cancelled}.
+  opened_by_user_id nullable (worker auto-open tanpa guru).
+  recognized_student_id nullable (wajib hanya bila matched).
+  recognition_event_id wajib bila source = face_recognition,
+  NULL bila manual/system. recorded_by_user_id nullable.
+end note
+@enduml

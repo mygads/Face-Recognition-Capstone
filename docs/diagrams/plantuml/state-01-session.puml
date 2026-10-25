@@ -1,0 +1,16 @@
+@startuml
+' State machine sesi — docs/proposal/06-proses-bisnis-dan-alur.md §6.4
+[*] --> eligible : jadwal eligible hari ini
+eligible --> active : manual-open di dalam jendela /\nauto-open worker 10 dtk
+eligible --> manual_override : manual-open di luar jendela
+active --> closed : akhir jadwal (worker 10 dtk) /\ntutup manual
+manual_override --> closed : akhir jadwal (worker 10 dtk) /\ntutup manual
+active --> active : sesi kedua jadwal sama ditolak 409
+manual_override --> manual_override : sesi kedua jadwal sama ditolak 409
+closed --> [*]
+
+note right of closed
+  cancelled dicadangkan di skema,
+  belum ada endpoint penulisnya.
+end note
+@enduml

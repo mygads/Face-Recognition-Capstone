@@ -1,0 +1,13 @@
+%% sumber: docs/proposal/04-use-case.md (blok mermaid #6)
+flowchart LR
+  GURU([TEACHER])
+  UC12((Lihat daftar at-risk))
+  AG((Agregat kehadiran))
+  U2((U-02 Tindak lanjut))
+  U3((U-03 Notifikasi internal))
+  U4((U-04 Eskalasi berjenjang))
+  GURU --- UC12
+  UC12 -. <<include>> .-> AG
+  U2 -. <<extend>> .-> UC12
+  U3 -. <<extend>> .-> UC12
+  U4 -. <<extend>> .-> UC12

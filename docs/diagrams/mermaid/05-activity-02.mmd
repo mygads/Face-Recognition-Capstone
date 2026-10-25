@@ -1,0 +1,12 @@
+%% sumber: docs/proposal/05-activity.md (blok mermaid #2)
+flowchart TD
+  S([Admin siapkan CSV atau XLSX]) --> U[/Unggah file max 5 MiB, XLSX max 25 MiB/]
+  U --> L{Ukuran dan baris lolos? max 10rb}
+  L -- Tidak --> R1[Tolak 413 dengan alasan]
+  R1 --> S
+  L -- Ya --> P[Preview: validasi per baris]
+  P --> V{Ada baris invalid?}
+  V -- Ya --> R2[Tampilkan error per baris 422]
+  R2 --> S
+  V -- Tidak --> C[Commit: simpan siswa-kelas-lab]
+  C --> E([Selesai tanpa audit])

@@ -1,0 +1,13 @@
+%% sumber: docs/proposal/04-use-case.md (blok mermaid #5)
+flowchart LR
+  DEV([DEVICE service])
+  UC7((Presensi walk-through otomatis))
+  DG((Discovery gallery sesi))
+  PI((Pipeline recognition-core))
+  SE((Simpan recognition event))
+  RF((Retry frontal look))
+  DEV --- UC7
+  UC7 -. <<include>> .-> DG
+  UC7 -. <<include>> .-> PI
+  UC7 -. <<include>> .-> SE
+  RF -. <<extend>> .-> UC7

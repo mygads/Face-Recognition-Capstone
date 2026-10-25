@@ -1,0 +1,46 @@
+%% sumber: docs/proposal/07-data-dan-class.md (blok mermaid #2)
+classDiagram
+  class Student {
+    +String student_number
+    +String full_name
+    +bool is_active
+  }
+  class SchoolClass {
+    +String code
+    +String name
+    +int grade
+    +String academic_year
+    +UUID homeroom_teacher_id
+    +bool is_active
+  }
+  class ClassStudent {
+    +UUID class_id
+    +UUID student_id
+    +DateTime enrolled_at
+  }
+  class Laboratory {
+    +String code
+    +String name
+    +String location
+    +bool is_active
+  }
+  class PracticumSchedule {
+    +String subject
+    +int weekday
+    +Time start_time
+    +Time end_time
+    +String timezone_name
+    +Date effective_from
+    +Date effective_through
+    +bool is_active
+  }
+  class User {
+    +UUID id
+    +String full_name
+  }
+  SchoolClass "1" -- "*" ClassStudent : roster
+  Student "1" -- "*" ClassStudent : anggota
+  SchoolClass "1" -- "*" PracticumSchedule : dijadwalkan
+  Laboratory "1" -- "*" PracticumSchedule : dipakai
+  User "1" -- "*" PracticumSchedule : diajar guru
+  User "1" -- "0..*" SchoolClass : wali kelas (nullable)

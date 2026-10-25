@@ -1,0 +1,22 @@
+@startuml
+' Sequence arah tarik, probe, preview, event-vs-record — docs/proposal/08-arsitektur.md §8.7
+autonumber
+participant "Edge PC / STB" as PC
+participant "Core API FastAPI" as API
+participant "AI Service pusat" as AI
+participant "Vue SPA (browser lab)" as WEB
+
+PC -> API : POST device-heartbeat (camera_metrics)
+PC -> API : GET active-sessions (discovery)
+PC -> API : GET active-session-cache / preview-gallery
+PC -> API : GET runtime-configuration + POST status
+AI -> API : GET /internal/ai-central-configuration (Bearer sync token)
+API -> AI : GET /health (hanya saat cek ai-readiness, profil central)
+WEB -> PC : Preview loopback http://127.0.0.1:8765 (khusus AI_EDGE)
+
+note over PC, WEB
+  recognition_events = bukti audit SELALU disimpan.
+  attendance_records HANYA lahir bila 5 syarat lolos.
+  Preview pra-sesi: tanpa event, tanpa record.
+end note
+@enduml

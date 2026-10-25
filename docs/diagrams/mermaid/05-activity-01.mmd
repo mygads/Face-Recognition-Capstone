@@ -1,0 +1,13 @@
+%% sumber: docs/proposal/05-activity.md (blok mermaid #1)
+flowchart TD
+  S([Mulai]) --> I[/Input email dan password/]
+  I --> C{Kredensial valid?}
+  C -- Tidak --> E1[Gagal: pesan umum tanpa bocorkan akun]
+  E1 --> I
+  C -- Ya --> W{Wajib ganti password?}
+  W -- Ya --> P[/Password baru min 12 char/]
+  P --> V{Valid?}
+  V -- Tidak --> P
+  V -- Ya --> T[Terbitkan akses 15 mnt dan sesi cookie 24 jam]
+  W -- Tidak --> T
+  T --> D([Masuk dashboard sesuai role])

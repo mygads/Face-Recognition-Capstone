@@ -1,0 +1,29 @@
+@startuml
+' 04-use-case EWS tahap 1 + usulan tahap 2 — docs/proposal/04-use-case.md §4.6
+left to right direction
+
+actor TEACHER as GURU
+
+rectangle "EWS (Early Warning System)" as SYS {
+  usecase "UC12\nLihat daftar at-risk" as UC12
+  usecase "Agregat kehadiran" as AG
+  usecase "U-02 Tindak lanjut" as U2
+  usecase "U-03 Notifikasi internal" as U3
+  usecase "U-04 Eskalasi berjenjang" as U4
+}
+
+GURU -- UC12
+
+UC12 ..> AG : <<include>>
+U2 ..> UC12 : <<extend>>
+U3 ..> UC12 : <<extend>>
+U4 ..> UC12 : <<extend>>
+
+note bottom of SYS
+  U-02/U-03/U-04 hanya extend usulan Tahap 2.
+  Tahap 1 (UC12 + agregat): human watchlist,
+  tanpa notifikasi, tanpa sanksi.
+  Scope: ADMIN semua, TEACHER miliknya/kelasnya,
+  LABORANT via API tanpa menu UI.
+end note
+@enduml

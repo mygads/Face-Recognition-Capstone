@@ -1,0 +1,11 @@
+%% sumber: docs/proposal/06-proses-bisnis-dan-alur.md (blok mermaid #5)
+stateDiagram-v2
+  [*] --> collecting : track baru / reset
+  collecting --> collecting : awaiting_consensus / sampling_skipped
+  collecting --> retry_frontal : ambigu / margin kecil / single-identity / quality gagal
+  collecting --> rejected : top1_below_threshold / spoof
+  retry_frontal --> collecting : frontal look diulang
+  rejected --> [*]
+  collecting --> accepted : N frame sepakat + threshold lolos
+  accepted --> [*] : kirim event matched
+  note right of retry_frontal : status NEED_FRONTAL_RETRY adalah arahan frontal look, tidak pernah auto-accept

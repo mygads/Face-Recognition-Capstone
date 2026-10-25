@@ -1,0 +1,7 @@
+%% sumber: docs/proposal/05-activity.md (blok mermaid #13)
+flowchart TD
+  S([Admin buat akun: email unik + role]) --> A[Akun aktif; password awal wajib diganti]
+  A --> C{Ganti password?}
+  C -- Ya --> P[Password baru: sesi lama di-revoke semua]
+  P --> E([Selesai dan audit])
+  C -- Tidak --> E

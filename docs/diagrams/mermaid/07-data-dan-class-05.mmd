@@ -1,0 +1,34 @@
+%% sumber: docs/proposal/07-data-dan-class.md (blok mermaid #5)
+classDiagram
+  class Device {
+    +String name
+    +String device_type
+    +String deployment_profile
+    +bool is_active
+    +String app_version
+    +String model_version
+    +String camera_status
+    +bool camera_enabled
+    +DateTime last_seen_at
+    +DateTime credential_expires_at
+    +int config_applied_revision
+    +String config_apply_status
+    +String config_error_code
+  }
+  class RuntimeConfigurationVersion {
+    +String scope_key
+    +int revision
+    +JSON settings
+    +UUID actor_user_id
+    +DateTime created_at
+  }
+  class Laboratory {
+    +String code
+    +String name
+  }
+  class User {
+    +UUID id
+    +String full_name
+  }
+  Laboratory "1" -- "*" Device : terpasang
+  User "1" -- "0..*" RuntimeConfigurationVersion : menerbitkan (nullable)

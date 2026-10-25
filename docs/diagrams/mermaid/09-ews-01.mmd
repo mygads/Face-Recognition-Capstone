@@ -1,0 +1,13 @@
+%% sumber: docs/proposal/09-ews.md (blok mermaid #1)
+flowchart TD
+  S([Buka panel atau API at-risk]) --> P{Policy tersimpan?}
+  P -- Tidak --> D0[Pakai default: 30 hari + 20 persen + 3x]
+  P -- Ya --> P1[Pakai policy revisi terakhir + audit]
+  D0 --> W
+  P1 --> W[Override opsional via query tervalidasi]
+  W --> G[Agregat sesi non-cancelled dalam jendela]
+  G --> R{absence_pct >= ambang ATAU late >= ambang?}
+  R -- Tidak --> B[Tidak masuk daftar]
+  R -- Ya --> F[Flag + reasons + ambang efektif + policy_revision]
+  F --> E([Tindak lanjut manual di luar sistem])
+  B --> E

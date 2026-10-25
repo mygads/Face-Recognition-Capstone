@@ -1,0 +1,20 @@
+@startuml
+' Activity F-01 Login — docs/proposal/05-activity.md §5.1
+start
+repeat
+  :Input email dan password;
+  if (Kredensial valid?) then (tidak)
+    :Gagal: pesan umum tanpa bocorkan akun;
+  else (ya)
+  endif
+repeat while (Masih gagal? ulangi input) is (ya)
+if (Wajib ganti password?) then (ya)
+  repeat
+    :Password baru min 12 char;
+  repeat while (Tidak valid? ulangi) is (ya)
+else (tidak)
+endif
+:Terbitkan akses 15 mnt dan sesi cookie 24 jam;
+:Masuk dashboard sesuai role;
+stop
+@enduml

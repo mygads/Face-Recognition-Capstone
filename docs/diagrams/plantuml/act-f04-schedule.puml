@@ -1,0 +1,21 @@
+@startuml
+' Activity F-04 Jadwal praktikum — docs/proposal/05-activity.md §5.4
+start
+repeat
+  :Admin atau guru isi jadwal;
+  if (Jadwal valid dan referensi aktif?) then (tidak)
+    :Tolak 422;
+  else (ya)
+    if (Bentrok kelas-lab-guru termasuk rentang tanggal?) then (ya)
+      :Tolak 409 schedule_conflict;
+    else (tidak)
+    endif
+  endif
+repeat while (Ditolak? perbaiki dan ulangi) is (ya)
+:Jadwal aktif tersimpan;
+stop
+
+note right
+  Operasi jadwal (CRUD) tidak menulis audit_logs.
+end note
+@enduml

@@ -1,0 +1,37 @@
+@startuml
+' Activity F-05 Buka dan tutup sesi — docs/proposal/05-activity.md §5.5
+start
+:Jadwal eligible hari ini;
+if (Mode guru?) then (automatic dan dalam jendela)
+  :Worker 10 detik auto-open;
+  if (Roster kelas kosong?) then (ya)
+    :Lewati: tanpa sesi;
+    stop
+  else (tidak)
+    :Status active; opened_by null;
+  endif
+else (manual atau di luar jendela)
+  :Guru atau laboran tekan Buka Sesi;
+  :Transaksi: attendance_sessions + snapshot roster aktif;
+  if (Manual-open di dalam jendela?) then (ya)
+    :Status active;
+  else (tidak)
+    :Status manual_override;
+  endif
+endif
+:Dashboard live aktif; device tarik gallery;
+repeat
+  if (Akhir jadwal atau tutup manual?) then (ya)
+    :Tutup: hanya berjalan ke closed + closed_at;
+  else (tidak)
+  endif
+repeat while (Belum tutup? pantau dashboard) is (ya)
+stop
+
+note right
+  Guru hanya membuka jadwal miliknya (di luar itu
+  404 schedule_not_found). Manual-open selalu tersedia
+  dan tidak digate mode policy. Tutup hanya dari
+  status berjalan ke closed.
+end note
+@enduml

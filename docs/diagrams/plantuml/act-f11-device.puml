@@ -1,0 +1,31 @@
+@startuml
+' Activity F-11 Perangkat — docs/proposal/05-activity.md §5.11
+start
+:Registrasi device + lab + profile;
+fork
+  :Provision bearer sekali pakai;
+  :Rotate token + overlap singkat;
+fork again
+  :Update registry atau lab assignment;
+fork again
+  :Jeda atau aktifkan kamera:\nmatching berhenti, heartbeat jalan;
+fork again
+  :Nonaktif: revoke kredensial + kamera offline;
+end fork
+stop
+
+note right
+  ADMIN saja (MANAGE_MASTER_DATA untuk registry/
+  kredensial; MANAGE_SETTINGS untuk kamera).
+  Heartbeat/discovery/gallery memakai DEVICE_OPERATE.
+  409: device_inactive, deployment_profile_mismatch,
+  device_camera_disabled.
+end note
+
+note left
+  Jalur operasi kontinu (LABORANT + device):
+  Heartbeat + camera_status + metrik
+  -> Discover sesi aktif lab ini
+  -> Tarik gallery + kirim recognition-event.
+end note
+@enduml

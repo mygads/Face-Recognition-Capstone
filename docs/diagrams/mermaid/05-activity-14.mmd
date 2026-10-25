@@ -1,0 +1,17 @@
+%% sumber: docs/proposal/05-activity.md (blok mermaid #14)
+flowchart LR
+  subgraph Guru
+    G1[Buka sesi miliknya: manual selalu, auto bila mode automatic] --> G2[Pantau live]
+    G2 --> G3[Manual bila perlu di sesi berjalan]
+    G3 --> G4[Ajukan koreksi: pending tanpa putusan]
+    G4 --> G5[Laporan dan EWS kelasnya]
+  end
+  subgraph Laboran
+    L1[Enrollment wajah] --> L2[Operasikan device: heartbeat dan monitor]
+    L2 --> L3[Preview pra-sesi AI_EDGE tanpa event]
+    L3 --> L4[Buka sesi operasional bila perlu]
+  end
+  subgraph Admin
+    A1[Master + akun + jadwal + policy sesi] --> A2[Device registry + kredensial + kamera + AI config + policy EWS]
+    A2 --> A3[Audit semua perubahan kecuali jadwal dan commit import]
+  end

@@ -1,0 +1,33 @@
+%% sumber: docs/proposal/04-use-case.md (blok mermaid #4)
+flowchart LR
+  LAB([LABORANT])
+  UC1((Login dan ganti password))
+  UC4((Enrollment wajah))
+  UC6((Buka sesi operasional))
+  UC8((Presensi manual))
+  UC10((Pantau dashboard live))
+  UC11((Laporan dan ekspor via API))
+  UC12((Lihat daftar at-risk via API))
+  UC14((Operasikan perangkat))
+  UC15((Preview kamera pra-sesi))
+  UC16((Audit tercatat otomatis))
+  QG((Quality gate capture))
+  RB((Revoke batch dulu))
+  SR((Snapshot roster))
+  MO((Manual override))
+  WP((Wajib ganti password))
+  SC((Terapkan scope akses))
+  AG((Agregat kehadiran))
+  LAB --- UC1 & UC4 & UC6 & UC8 & UC10 & UC11 & UC12 & UC14 & UC15
+  UC1 -. <<include>> .-> UC16
+  WP -. <<extend>> .-> UC1
+  UC4 -. <<include>> .-> QG
+  UC4 -. <<include>> .-> UC16
+  RB -. <<extend>> .-> UC4
+  UC6 -. <<include>> .-> SR
+  UC6 -. <<include>> .-> UC16
+  MO -. <<extend>> .-> UC6
+  UC8 -. <<include>> .-> UC16
+  UC11 -. <<include>> .-> SC
+  UC12 -. <<include>> .-> AG
+  UC14 -. <<include>> .-> UC16

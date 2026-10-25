@@ -1,0 +1,10 @@
+%% sumber: docs/proposal/05-activity.md (blok mermaid #10)
+flowchart TD
+  S([Buka panel Siswa perlu perhatian]) --> W[Ambil policy tersimpan atau default 30 hari + absen 20 persen + telat 3x; override query tervalidasi]
+  W --> G[Agregat sesi non-cancelled: total + absen + telat + absence_pct]
+  G --> F{absence_pct >= ambang ATAU telat >= ambang?}
+  F -- Tidak --> B[Bersih: tidak masuk daftar]
+  F -- Ya --> L[Flag + reasons + ambang efektif + revisi policy]
+  L --> H[Catat tindak lanjut manual guru atau BK]
+  H --> E([Catat di luar sistem pada tahap 1])
+  B --> E

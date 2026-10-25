@@ -1,0 +1,21 @@
+@startuml
+' Sequence enrollment — docs/proposal/06-proses-bisnis-dan-alur.md §6.3
+autonumber
+actor Laboran as Op
+participant "Vue SPA" as Web
+participant "Core API" as API
+database "PostgreSQL" as DB
+
+Op -> Web : Pilih siswa + capture 3-10 frame
+Web -> API : POST /enrollments/captures (bytes di memori)
+API -> API : YuNet detect lokal + SFace embed lokal\n+ quality gate + anti multi-wajah
+API -> API : Cek mirip siswa lain (warning 0,85)
+API -> DB : Simpan max 5 template terenkripsi + model name-version
+
+note over API
+  Bytes gambar dibuang setelah request;
+  tanpa kolom image di DB.
+end note
+
+API --> Web : Status enrolled + audit
+@enduml

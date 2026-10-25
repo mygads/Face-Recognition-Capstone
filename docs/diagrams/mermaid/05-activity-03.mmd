@@ -1,0 +1,15 @@
+%% sumber: docs/proposal/05-activity.md (blok mermaid #3)
+flowchart TD
+  S([Operator pilih siswa]) --> K{Status template?}
+  K -- enrolled --> R[Revoke SEMUA template aktif batch ini]
+  R --> C
+  K -- not enrolled --> C[/Capture 3 sampai 10 frame max 3 MB/]
+  C --> Q{Lolos quality gate?}
+  Q -- Tidak --> C
+  Q -- Ya --> N{Minimal 3 diterima?}
+  N -- Tidak --> F([Gagal: ulangi capture])
+  N -- Ya --> M[Simpan maks 5 template AES-256-GCM + model name-version]
+  M --> D{Mirip siswa lain di atas 0,85?}
+  D -- Ya --> W[Peringatan duplicate: verifikasi manual]
+  D -- Tidak --> E([Selesai dan audit])
+  W --> E

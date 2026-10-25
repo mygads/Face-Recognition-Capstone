@@ -1,0 +1,47 @@
+%% sumber: docs/proposal/04-use-case.md (blok mermaid #2)
+flowchart LR
+  ADM([ADMIN])
+  UC1((Login dan ganti password))
+  UC2((Kelola master dan import))
+  UC3((Kelola akun staf))
+  UC4((Enrollment wajah))
+  UC5((Kelola jadwal))
+  UC6((Buka dan tutup sesi))
+  UC8((Presensi manual))
+  UC9((Ajukan koreksi))
+  UC10((Pantau dashboard live))
+  UC11((Laporan dan ekspor))
+  UC12((Lihat daftar at-risk))
+  UC13((Atur ambang EWS))
+  UC14((Kelola perangkat dan AI config))
+  UC15((Preview kamera pra-sesi))
+  UC16((Audit tercatat otomatis))
+  PREV((Preview validasi import))
+  QG((Quality gate capture))
+  RB((Revoke batch dulu))
+  CB((Cek bentrok jadwal))
+  SR((Snapshot roster))
+  MO((Manual override))
+  AO((Auto-open worker))
+  WP((Wajib ganti password))
+  SC((Terapkan scope akses))
+  AG((Agregat kehadiran))
+  ADM --- UC1 & UC2 & UC3 & UC4 & UC5 & UC6 & UC8 & UC9 & UC10 & UC11 & UC12 & UC13 & UC14 & UC15
+  UC1 -. <<include>> .-> UC16
+  WP -. <<extend>> .-> UC1
+  UC2 -. <<include>> .-> PREV
+  UC3 -. <<include>> .-> UC16
+  UC4 -. <<include>> .-> QG
+  UC4 -. <<include>> .-> UC16
+  RB -. <<extend>> .-> UC4
+  UC5 -. <<include>> .-> CB
+  UC6 -. <<include>> .-> SR
+  UC6 -. <<include>> .-> UC16
+  MO -. <<extend>> .-> UC6
+  AO -. <<extend>> .-> UC6
+  UC8 -. <<include>> .-> UC16
+  UC9 -. <<include>> .-> UC16
+  UC11 -. <<include>> .-> SC
+  UC12 -. <<include>> .-> AG
+  UC13 -. <<include>> .-> UC16
+  UC14 -. <<include>> .-> UC16

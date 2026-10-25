@@ -1,0 +1,16 @@
+@startuml
+' Activity F-08 Live dashboard — docs/proposal/05-activity.md §5.8
+start
+:Buka dashboard;
+:Ambil snapshot sesi + roster + record;
+:Tampilkan panel at-risk: 25 teratas + ambang efektif;
+:Subscribe WebSocket; refresh tiap 2 detik;
+repeat
+  if (Ada event baru?) then (ya)
+    :Ambil snapshot sesi + roster + record;
+    :Tampilkan panel at-risk: 25 teratas + ambang efektif;
+  else (tidak)
+  endif
+repeat while (Dashboard dibuka? pantau terus) is (ya)
+stop
+@enduml

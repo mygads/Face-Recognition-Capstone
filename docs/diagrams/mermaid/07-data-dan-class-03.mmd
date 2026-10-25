@@ -1,0 +1,24 @@
+%% sumber: docs/proposal/07-data-dan-class.md (blok mermaid #3)
+classDiagram
+  class FaceTemplate {
+    +UUID student_id
+    +UUID enrollment_batch_id
+    +int embedding_dimension
+    +String model_name
+    +String model_version
+    +JSON quality_metadata
+    +UUID created_by_user_id
+    +DateTime revoked_at
+    +UUID revoked_by_user_id
+    +revoke()
+  }
+  class Student {
+    +String student_number
+    +String full_name
+  }
+  class User {
+    +UUID id
+    +String full_name
+  }
+  Student "1" -- "*" FaceTemplate : maks 5 aktif
+  User "1" -- "0..*" FaceTemplate : dibuat/mencabut (nullable)

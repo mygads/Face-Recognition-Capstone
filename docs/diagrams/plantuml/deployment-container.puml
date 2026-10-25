@@ -1,0 +1,35 @@
+@startuml
+' Container + dua profil deployment — docs/proposal/08-arsitektur.md §8.1-8.2
+node "Lab" {
+  component "Kamera UVC" as CAM
+  component "PC Edge\nAI_EDGE\nnative agent + recognition-core" as PC
+  component "STB Gateway\ncapture + burst tanpa model" as STB
+}
+node "Server" {
+  component "AI Service pusat\nrecognition-core" as AI
+  component "Core API FastAPI\notoritas attendance tunggal" as API
+  database "PostgreSQL\npgvector opsional" as DB
+  component "Vue 3 SPA\ntoken Gentelella v4" as WEB
+}
+
+CAM --> PC
+CAM --> STB
+PC --> API : event idempoten + outbox SQLite
+STB --> AI : burst JPEG LAN
+AI --> STB : decision
+STB --> API : event idempoten
+PC --> API : discovery gallery + heartbeat
+STB --> API : discovery gallery + heartbeat
+AI --> API : tarik managed config via sync token
+API --> AI : health probe via ai-readiness
+WEB --> PC : preview loopback :8765 khusus AI_EDGE
+API <--> DB
+WEB --> API
+
+note bottom of API
+  AI_EDGE (default): inference lokal di PC lab.
+  AI_CENTRAL (opsional): STB capture + burst max 5
+  JPEG, inference di AI service pusat.
+  Satu recognition-core untuk kedua profil (ADR-001).
+end note
+@enduml

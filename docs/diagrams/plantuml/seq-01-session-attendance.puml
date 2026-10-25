@@ -1,0 +1,44 @@
+@startuml
+' Sequence sesi → presensi — docs/proposal/06-proses-bisnis-dan-alur.md §6.2
+autonumber
+actor Guru
+participant "Vue SPA" as Web
+participant "Core API FastAPI" as API
+database "PostgreSQL" as DB
+participant "Edge PC atau STB" as Dev
+participant "recognition-core atau AI service" as AI
+
+Guru -> Web : Buka sesi terjadwal
+Web -> API : POST /sessions (201)
+API -> DB : INSERT attendance_sessions + snapshot session_students
+
+loop Worker 10 dtk dan heartbeat device
+  Dev -> API : Discovery sesi aktif (bearer device)
+  Dev -> API : Tarik gallery sesi (model name-version)
+  API --> Dev : Gallery + expiry max 300 dtk
+  Dev -> API : Tarik managed config berversi + lapor status
+end
+
+opt Cek ai-readiness (profil central)
+  API -> AI : Health probe /health
+end
+
+alt AI_EDGE: inference lokal di PC lab
+  Dev -> AI : Frame kamera via pipeline inti
+  AI --> Dev : Track decision + kandidat (tanpa image dan embedding)
+else AI_CENTRAL: STB gateway tanpa model
+  Dev -> AI : Burst max 5 JPEG + gallery sesi dari Core
+  AI --> Dev : Burst decision + kandidat (tanpa image dan embedding)
+end
+
+Dev -> API : POST recognition-events + event_id
+API -> DB : Simpan event; validasi rantai; INSERT record bila lolos
+API --> Web : WS update dashboard
+
+note over API, DB
+  Rantai validasi record: device aktif + kamera enabled
+  + lab sama, sesi active/manual_override, kandidat di
+  snapshot roster, outcome matched + liveness lolos,
+  belum ada record student+sesi.
+end note
+@enduml

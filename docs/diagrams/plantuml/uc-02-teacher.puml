@@ -1,0 +1,51 @@
+@startuml
+' 04-use-case TEACHER — docs/proposal/04-use-case.md §4.3
+left to right direction
+
+actor TEACHER as GURU
+
+rectangle "Sistem Presensi (TEACHER)" as SYS {
+  usecase "UC1\nLogin dan ganti password" as UC1
+  usecase "UC5\nKelola jadwal miliknya" as UC5
+  usecase "UC6\nBuka dan tutup sesi" as UC6
+  usecase "UC8\nPresensi manual" as UC8
+  usecase "UC9\nAjukan koreksi" as UC9
+  usecase "UC10\nPantau dashboard live" as UC10
+  usecase "UC11\nLaporan dan ekspor" as UC11
+  usecase "UC12\nLihat daftar at-risk" as UC12
+  usecase "UC16\nAudit tercatat otomatis" as UC16
+  usecase "Cek bentrok jadwal" as CB
+  usecase "Snapshot roster" as SR
+  usecase "Manual override" as MO
+  usecase "Auto-open worker" as AO
+  usecase "Wajib ganti password" as WP
+  usecase "Terapkan scope akses" as SC
+  usecase "Agregat kehadiran" as AG
+}
+
+GURU -- UC1
+GURU -- UC5
+GURU -- UC6
+GURU -- UC8
+GURU -- UC9
+GURU -- UC10
+GURU -- UC11
+GURU -- UC12
+
+UC1 ..> UC16 : <<include>>
+WP ..> UC1 : <<extend>>
+UC5 ..> CB : <<include>>
+UC6 ..> SR : <<include>>
+UC6 ..> UC16 : <<include>>
+MO ..> UC6 : <<extend>>
+AO ..> UC6 : <<extend>>
+UC8 ..> UC16 : <<include>>
+UC9 ..> UC16 : <<include>>
+UC11 ..> SC : <<include>>
+UC12 ..> AG : <<include>>
+
+note bottom of SYS
+  TEACHER tidak punya UC4, UC14, UC15.
+  UC8/UC9 dibatasi jadwal miliknya (di luar scope = 404).
+end note
+@enduml
