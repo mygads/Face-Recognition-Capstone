@@ -1,6 +1,7 @@
 # ADR-003: Mode pembukaan sesi per guru, manual override, dan auto-close selalu
 
-- **Status:** Accepted (keputusan tim 2026-10-21); implementasi: Belum.
+- **Status:** Accepted (keputusan tim 2026-10-21); implementasi: Selesai
+  (migrasi `f4e5d6c7b8a9`, 2026-10-21 — backlog P1-9/P1-10).
 - **Konteks:** ADR-002 menetapkan mode pembukaan sesi global (`manual`/`automatic`)
   yang dipilih admin. Kebutuhan operasional sekolah menghendaki kontrol per guru:
   tiap guru memilih sesi mereka dibuka otomatis mengikuti jadwal atau dibuka manual

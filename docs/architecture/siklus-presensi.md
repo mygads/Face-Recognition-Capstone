@@ -17,7 +17,7 @@ Mode pembukaan per guru (`opening_mode`: `automatic`/`manual`, default
 Guru boleh membuka sesi kapan pun, termasuk di luar jendela otomatis — sesi
 paksa ini berstatus **`manual_override`** agar dashboard/audit menunjukkan
 intervensi guru. Auto-close pada jam akhir jadwal berlaku untuk `active` DAN
-`manual_override` (worker lifespan tiap 30 detik, `closed_at` = jam akhir lokal
+`manual_override` (worker lifespan tiap 10 detik, `closed_at` = jam akhir lokal
 jadwal); guru tetap bisa close manual kapan pun. LABORANT scope global karena
 belum ada tabel lab-to-laborant.
 
@@ -52,9 +52,10 @@ membuat record hanya bila 5 syarat lolos:
 Core API tidak memilih threshold similarity; konfigurasi recognition harus
 menghasilkan outcome `matched` dari kebijakan terkalibrasi.
 
-Batas grace: `opened_at + grace_period_minutes`, memakai **capture time**
-(bukan waktu terima API) agar delay jaringan adil. Tepat/pada batas = `present`,
-lewat = `late`.
+Batas grace: sesi auto-open (dibuka worker, `opened_by_user_id` NULL) dihitung dari
+**jam mulai jadwal**; sesi yang dibuka manual dihitung dari **`opened_at`**.
+Keduanya memakai **capture time** (bukan waktu terima API) agar delay jaringan
+adil. Tepat/pada batas = `present`, lewat = `late`.
 
 `event_id` adalah idempotency key: replay payload sama → keputusan/record asli;
 key sama isi beda → 409. Event baru untuk siswa yang sudah tercatat tetap
