@@ -6,7 +6,7 @@
 <task id="poll" name="Device poll dan terapkan: pending-applied-error"><incoming>F_pub_1</incoming><outgoing>F_poll_2</outgoing></task>
 <exclusiveGateway id="pv" name="Preview pra-sesi?" gatewayDirection="Exclusive"><incoming>F_poll_2</incoming><outgoing>F_pv_3</outgoing><outgoing>F_pv_4</outgoing></exclusiveGateway>
 <endEvent id="e0" name="Selesai"><incoming>F_pv_3</incoming></endEvent>
-<exclusiveGateway id="host" name="Browser di localhost/127.0.0.1 ke edge-agent 8765?" gatewayDirection="Exclusive"><incoming>F_pv_4</incoming><outgoing>F_host_5</outgoing><outgoing>F_host_7</outgoing></exclusiveGateway>
+<exclusiveGateway id="host" name="Browser di localhost atau 127.0.0.1 ke edge-agent 8765?" gatewayDirection="Exclusive"><incoming>F_pv_4</incoming><outgoing>F_host_5</outgoing><outgoing>F_host_7</outgoing></exclusiveGateway>
 <task id="r1" name="Tolak: buka dari komputer AI_EDGE"><incoming>F_host_5</incoming><outgoing>F_r1_6</outgoing></task>
 <endEvent id="e1" name="Selesai"><incoming>F_r1_6</incoming></endEvent>
 <exclusiveGateway id="prof" name="Profil AI_EDGE?" gatewayDirection="Exclusive"><incoming>F_host_7</incoming><outgoing>F_prof_8</outgoing><outgoing>F_prof_10</outgoing></exclusiveGateway>
@@ -16,7 +16,7 @@
 <task id="r3" name="409 device_camera_disabled"><incoming>F_cam_11</incoming><outgoing>F_r3_12</outgoing></task>
 <endEvent id="e3" name="Selesai"><incoming>F_r3_12</incoming></endEvent>
 <exclusiveGateway id="sess" name="Masih tanpa sesi aktif?" gatewayDirection="Exclusive"><incoming>F_cam_13</incoming><outgoing>F_sess_14</outgoing><outgoing>F_sess_16</outgoing></exclusiveGateway>
-<task id="r4" name="409 preview_gallery_session_active"><incoming>F_sess_14</incoming><outgoing>F_r4_15</outgoing></task>
+<task id="r4" name="409 preview_gallery_session_active: gunakan snapshot sesi berjalan, bukan preview"><incoming>F_sess_14</incoming><outgoing>F_r4_15</outgoing></task>
 <endEvent id="e4" name="Selesai"><incoming>F_r4_15</incoming></endEvent>
 <exclusiveGateway id="win" name="Maks 15 mnt sebelum mulai dan sebelum akhir?" gatewayDirection="Exclusive"><incoming>F_sess_16</incoming><outgoing>F_win_17</outgoing><outgoing>F_win_19</outgoing></exclusiveGateway>
 <task id="r5" name="404 preview_gallery_unavailable"><incoming>F_win_17</incoming><outgoing>F_r5_18</outgoing></task>
@@ -24,7 +24,7 @@
 <exclusiveGateway id="tpl" name="Template aktif tersedia?" gatewayDirection="Exclusive"><incoming>F_win_19</incoming><outgoing>F_tpl_20</outgoing><outgoing>F_tpl_22</outgoing></exclusiveGateway>
 <task id="r6" name="409 preview_gallery_empty"><incoming>F_tpl_20</incoming><outgoing>F_r6_21</outgoing></task>
 <endEvent id="e6" name="Selesai"><incoming>F_r6_21</incoming></endEvent>
-<task id="ov" name="Overlay wajah + kandidat tanpa event"><incoming>F_tpl_22</incoming><outgoing>F_ov_23</outgoing></task>
+<task id="ov" name="Overlay wajah + kandidat tanpa event; frame sekitar 15 fps, status 500 ms"><incoming>F_tpl_22</incoming><outgoing>F_ov_23</outgoing></task>
 <endEvent id="e7" name="Selesai"><incoming>F_ov_23</incoming></endEvent>
 <sequenceFlow id="F_s_0" sourceRef="s" targetRef="pub"></sequenceFlow>
 <sequenceFlow id="F_pub_1" sourceRef="pub" targetRef="poll"></sequenceFlow>

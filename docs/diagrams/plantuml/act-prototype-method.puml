@@ -1,29 +1,41 @@
 @startuml
 ' Metode Prototype — docs/proposal/02-metode-prototype.md §2.1
 start
-:Dengar kebutuhan dan observasi (1);
 repeat
-  :Bangun prototipe cepat (2);
-  :Uji coba ke pengguna (3);
-  if (Review: diterima?) then (tidak)
-  else (ya, tanpa/with catatan kecil)
-    :Catat backlog terukur bila ada;
-    :Implementasi final dan hardening (5);
-    :Pengujian sistem dan kalibrasi (6);
-    if (Uji lolos?) then (tidak)
-    else (ya)
-    endif
+  :1 Dengar kebutuhan dan observasi;
+  repeat
+    repeat
+      :2 Bangun prototipe cepat;
+      :3 Uji coba ke pengguna;
+      if (Uji review: diterima?) then (Ya, tanpa catatan)
+      elseif (Ya, dengan catatan kecil)
+        :Catat backlog terukur;
+      elseif (Tidak)
+        :Revisi prototipe;
+      endif
+    repeat while (Uji review: diterima?) is (Tidak)
+  :5 Implementasi final dan hardening;
+  :6 Pengujian sistem dan kalibrasi;
+  if (Uji lolos?) then (Tidak)
+    :Revisi prototipe;
+  else (Ya)
   endif
-repeat while (Ditolak review / gagal uji?\nrevisi lalu ulangi siklus) is (ya)
-:Deployment dan serah terima (7);
-:Evaluasi pasca-pakai (8);
-:Kebutuhan baru? bila ya (misal EWS tahap 2)\nputar siklus baru tanpa merombak arsitektur;
+repeat while (Uji lolos?) is (Tidak)
+:7 Deployment dan serah terima;
+:8 Evaluasi pasca-pakai;
+if (Ada kebutuhan baru?) then (Ya, misal EWS tahap 2)
+else (Tidak)
+endif
+repeat while (Ada kebutuhan baru?) is (Ya, misal EWS tahap 2)
+:Selesai;
 stop
 
 note right
-  P4 Tidak -> P7 -> P2 = review menolak.
-  P8/P9 Tidak -> P7 = uji coba kembali (re-test).
-  Kebutuhan baru memutar siklus tanpa
-  merombak arsitektur yang diterima.
+  P4 Tidak -> P7 -> P2 = review menolak,
+  kembali ke mockup.
+  P9 Tidak -> P7 = uji coba kembali (re-test),
+  gagal uji -> revisi -> uji ulang.
+  P12 Ya -> P1 = kebutuhan baru memutar
+  siklus baru.
 end note
 @enduml

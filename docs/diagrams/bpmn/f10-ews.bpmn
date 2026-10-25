@@ -3,25 +3,22 @@
 <process id="P_f10-ews" name="F-10 EWS at-risk tahap 1" isExecutable="false">
 <startEvent id="s" name="Mulai"><outgoing>F_s_0</outgoing></startEvent>
 <task id="panel" name="Buka panel Siswa perlu perhatian"><incoming>F_s_0</incoming><outgoing>F_panel_1</outgoing></task>
-<task id="pol" name="Ambil policy tersimpan atau default 30 hari + 20% + 3x; override query tervalidasi"><incoming>F_panel_1</incoming><outgoing>F_pol_2</outgoing></task>
+<task id="pol" name="Ambil policy tersimpan atau default 30 hari + absen 20 persen + telat 3x; override query tervalidasi"><incoming>F_panel_1</incoming><outgoing>F_pol_2</outgoing></task>
 <task id="aggr" name="Agregat sesi non-cancelled: total + absen + telat + absence_pct"><incoming>F_pol_2</incoming><outgoing>F_aggr_3</outgoing></task>
 <exclusiveGateway id="thr" name="absence_pct &gt;= ambang ATAU telat &gt;= ambang?" gatewayDirection="Exclusive"><incoming>F_aggr_3</incoming><outgoing>F_thr_4</outgoing><outgoing>F_thr_6</outgoing></exclusiveGateway>
 <task id="clean" name="Bersih: tidak masuk daftar"><incoming>F_thr_4</incoming><outgoing>F_clean_5</outgoing></task>
-<endEvent id="e1" name="Selesai"><incoming>F_clean_5</incoming></endEvent>
 <task id="flag" name="Flag + reasons + ambang efektif + revisi policy"><incoming>F_thr_6</incoming><outgoing>F_flag_7</outgoing></task>
 <task id="fol" name="Catat tindak lanjut manual guru atau BK"><incoming>F_flag_7</incoming><outgoing>F_fol_8</outgoing></task>
-<task id="out" name="Catat di luar sistem pada tahap 1"><incoming>F_fol_8</incoming><outgoing>F_out_9</outgoing></task>
-<endEvent id="e2" name="Selesai"><incoming>F_out_9</incoming></endEvent>
+<endEvent id="out" name="Catat di luar sistem pada tahap 1"><incoming>F_clean_5</incoming><incoming>F_fol_8</incoming></endEvent>
 <sequenceFlow id="F_s_0" sourceRef="s" targetRef="panel"></sequenceFlow>
 <sequenceFlow id="F_panel_1" sourceRef="panel" targetRef="pol"></sequenceFlow>
 <sequenceFlow id="F_pol_2" sourceRef="pol" targetRef="aggr"></sequenceFlow>
 <sequenceFlow id="F_aggr_3" sourceRef="aggr" targetRef="thr"></sequenceFlow>
 <sequenceFlow id="F_thr_4" sourceRef="thr" targetRef="clean"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
-<sequenceFlow id="F_clean_5" sourceRef="clean" targetRef="e1"></sequenceFlow>
+<sequenceFlow id="F_clean_5" sourceRef="clean" targetRef="out"></sequenceFlow>
 <sequenceFlow id="F_thr_6" sourceRef="thr" targetRef="flag"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>
 <sequenceFlow id="F_flag_7" sourceRef="flag" targetRef="fol"></sequenceFlow>
 <sequenceFlow id="F_fol_8" sourceRef="fol" targetRef="out"></sequenceFlow>
-<sequenceFlow id="F_out_9" sourceRef="out" targetRef="e2"></sequenceFlow>
 </process>
 <bpmndi:BPMNDiagram id="DG_f10-ews"><bpmndi:BPMNPlane id="PL_f10-ews" bpmnElement="P_f10-ews">
 <bpmndi:BPMNShape id="S_s" bpmnElement="s"><dc:Bounds x="30" y="30" width="36" height="36" /></bpmndi:BPMNShape>
@@ -30,11 +27,9 @@
 <bpmndi:BPMNShape id="S_aggr" bpmnElement="aggr"><dc:Bounds x="660" y="390" width="140" height="70" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_thr" bpmnElement="thr"><dc:Bounds x="870" y="510" width="60" height="60" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_clean" bpmnElement="clean"><dc:Bounds x="1080" y="630" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_e1" bpmnElement="e1"><dc:Bounds x="1290" y="750" width="36" height="36" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_flag" bpmnElement="flag"><dc:Bounds x="1080" y="870" width="140" height="70" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_fol" bpmnElement="fol"><dc:Bounds x="1290" y="990" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_out" bpmnElement="out"><dc:Bounds x="1500" y="1110" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_e2" bpmnElement="e2"><dc:Bounds x="1710" y="1230" width="36" height="36" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_out" bpmnElement="out"><dc:Bounds x="1290" y="750" width="36" height="36" /></bpmndi:BPMNShape>
 <bpmndi:BPMNEdge id="E_F_s_0" bpmnElement="F_s_0"><di:waypoint xsi:type="dc:Point" x="66" y="48" /><di:waypoint xsi:type="dc:Point" x="240" y="185" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_panel_1" bpmnElement="F_panel_1"><di:waypoint xsi:type="dc:Point" x="380" y="185" /><di:waypoint xsi:type="dc:Point" x="450" y="305" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_pol_2" bpmnElement="F_pol_2"><di:waypoint xsi:type="dc:Point" x="590" y="305" /><di:waypoint xsi:type="dc:Point" x="660" y="425" /></bpmndi:BPMNEdge>
@@ -43,6 +38,5 @@
 <bpmndi:BPMNEdge id="E_F_clean_5" bpmnElement="F_clean_5"><di:waypoint xsi:type="dc:Point" x="1220" y="665" /><di:waypoint xsi:type="dc:Point" x="1290" y="768" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_thr_6" bpmnElement="F_thr_6"><di:waypoint xsi:type="dc:Point" x="930" y="540" /><di:waypoint xsi:type="dc:Point" x="1080" y="905" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_flag_7" bpmnElement="F_flag_7"><di:waypoint xsi:type="dc:Point" x="1220" y="905" /><di:waypoint xsi:type="dc:Point" x="1290" y="1025" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_fol_8" bpmnElement="F_fol_8"><di:waypoint xsi:type="dc:Point" x="1430" y="1025" /><di:waypoint xsi:type="dc:Point" x="1500" y="1145" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_out_9" bpmnElement="F_out_9"><di:waypoint xsi:type="dc:Point" x="1640" y="1145" /><di:waypoint xsi:type="dc:Point" x="1710" y="1248" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_fol_8" bpmnElement="F_fol_8"><di:waypoint xsi:type="dc:Point" x="1430" y="1025" /><di:waypoint xsi:type="dc:Point" x="1480" y="1025" /><di:waypoint xsi:type="dc:Point" x="1480" y="768" /><di:waypoint xsi:type="dc:Point" x="1326" y="768" /></bpmndi:BPMNEdge>
 </bpmndi:BPMNPlane></bpmndi:BPMNDiagram></definitions>

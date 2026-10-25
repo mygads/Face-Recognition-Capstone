@@ -171,11 +171,11 @@ tanpa kandidat valid disimpan sebagai `error` agar audit tetap utuh).
 Replay memakai fingerprint kanonis: sama → hasil tersimpan
 (`replayed: true`); `event_id` sama dengan payload berbeda → 409
 `event_id_reused` tanpa event baru. Sepuluh reason resmi, dievaluasi
-berurutan: `device_inactive`, `device_camera_disabled`,
-`device_laboratory_mismatch`, `session_inactive`, `student_not_found`,
-`student_not_in_session_roster`, `session_not_accessible`,
-`recognition_not_matched`, `liveness_failed`,
-`attendance_already_recorded`. Grace memakai capture time (`occurred_at`):
+berurutan: `session_not_accessible`, `device_inactive`,
+`device_camera_disabled`, `device_laboratory_mismatch`,
+`session_inactive`, `student_not_found`,
+`student_not_in_session_roster`, `recognition_not_matched`,
+`liveness_failed`, `attendance_already_recorded`. Grace memakai capture time (`occurred_at`):
 sesi auto-open → `scheduled_start_at + grace`; sesi manual-open →
 `opened_at + grace`; tepat atau di batas = present. Duplikat konkuren
 ditahan UNIQUE sesi dan siswa lewat savepoint: event audit tetap

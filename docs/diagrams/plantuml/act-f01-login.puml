@@ -3,16 +3,16 @@
 start
 repeat
   :Input email dan password;
-  if (Kredensial valid?) then (tidak)
+  if (Kredensial valid?) then (Tidak)
     :Gagal: pesan umum tanpa bocorkan akun;
-  else (ya)
+  else (Ya)
   endif
-repeat while (Masih gagal? ulangi input) is (ya)
-if (Wajib ganti password?) then (ya)
+repeat while (Kredensial valid?) is (Tidak)
+if (Wajib ganti password?) then (Ya)
   repeat
     :Password baru min 12 char;
-  repeat while (Tidak valid? ulangi) is (ya)
-else (tidak)
+  repeat while (Valid?) is (Tidak)
+else (Tidak)
 endif
 :Terbitkan akses 15 mnt dan sesi cookie 24 jam;
 :Masuk dashboard sesuai role;

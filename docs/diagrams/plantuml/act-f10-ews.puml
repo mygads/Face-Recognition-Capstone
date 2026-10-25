@@ -4,13 +4,12 @@ start
 :Buka panel Siswa perlu perhatian;
 :Ambil policy tersimpan atau default\n30 hari + absen 20 persen + telat 3x;\noverride query tervalidasi;
 :Agregat sesi non-cancelled:\ntotal + absen + telat + absence_pct;
-if (absence_pct >= ambang ATAU telat >= ambang?) then (tidak)
+if (absence_pct >= ambang ATAU telat >= ambang?) then (Tidak)
   :Bersih: tidak masuk daftar;
-  stop
-else (ya)
+else (Ya)
   :Flag + reasons + ambang efektif + revisi policy;
+  :Catat tindak lanjut manual guru atau BK;
 endif
-:Catat tindak lanjut manual guru atau BK;
 :Catat di luar sistem pada tahap 1;
 stop
 

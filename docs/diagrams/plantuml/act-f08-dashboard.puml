@@ -6,11 +6,12 @@ start
 :Tampilkan panel at-risk: 25 teratas + ambang efektif;
 :Subscribe WebSocket; refresh tiap 2 detik;
 repeat
-  if (Ada event baru?) then (ya)
+  if (Ada event baru?) then (Ya)
     :Ambil snapshot sesi + roster + record;
     :Tampilkan panel at-risk: 25 teratas + ambang efektif;
-  else (tidak)
+  else (Tidak)
   endif
-repeat while (Dashboard dibuka? pantau terus) is (ya)
+repeat while (Dashboard dibuka? pantau terus) is (Ya)
+:Pantau;
 stop
 @enduml

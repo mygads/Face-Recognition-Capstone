@@ -24,7 +24,7 @@
 <sequenceFlow id="F_p4_5" sourceRef="p4" targetRef="p6"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya, dengan catatan kecil]]></conditionExpression></sequenceFlow>
 <sequenceFlow id="F_p6_6" sourceRef="p6" targetRef="p5"></sequenceFlow>
 <sequenceFlow id="F_p4_7" sourceRef="p4" targetRef="p7"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
-<sequenceFlow id="F_p7_8" sourceRef="p7" targetRef="p2"><conditionExpression xsi:type="tFormalExpression"><![CDATA[revisi]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_p7_8" sourceRef="p7" targetRef="p2"></sequenceFlow>
 <sequenceFlow id="F_p5_9" sourceRef="p5" targetRef="p8"></sequenceFlow>
 <sequenceFlow id="F_p8_10" sourceRef="p8" targetRef="p9"></sequenceFlow>
 <sequenceFlow id="F_p9_11" sourceRef="p9" targetRef="p7"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>

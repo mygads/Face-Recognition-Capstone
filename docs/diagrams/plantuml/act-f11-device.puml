@@ -1,5 +1,6 @@
 @startuml
 ' Activity F-11 Perangkat — docs/proposal/05-activity.md §5.11
+|ADMIN|
 start
 :Registrasi device + lab + profile;
 fork
@@ -12,6 +13,14 @@ fork again
 fork again
   :Nonaktif: revoke kredensial + kamera offline;
 end fork
+|OPS Laboran + device|
+repeat
+  :Heartbeat + camera_status + latency + metrik;
+  :Discover sesi aktif lab ini;
+  :Tarik gallery sesi dan kirim recognition-event idempoten;
+repeat while (Device aktif dan sesi berjalan?) is (ya)
+|ADMIN|
+:Selesai;
 stop
 
 note right
@@ -23,7 +32,8 @@ note right
 end note
 
 note left
-  Jalur operasi kontinu (LABORANT + device):
+  Jalur operasi kontinu (LABORANT + device) berjalan
+  paralel selama sesi aktif, tidak menunggu ADM selesai:
   Heartbeat + camera_status + metrik
   -> Discover sesi aktif lab ini
   -> Tarik gallery + kirim recognition-event.

@@ -1,0 +1,44 @@
+@startuml
+' Alur end-to-end — docs/proposal/06-proses-bisnis-dan-alur.md §6.1
+|Persiapan|
+start
+:Master data + import CSV;
+:Managed config berversi ditarik\ndevice dan AI service;
+:Jadwal praktikum;
+:Enrollment wajah lokal Core API:\nYuNet + SFace;
+:Hanya template terenkripsi + model name-version\ntersimpan; bytes gambar dibuang;
+|Pelaksanaan|
+:Guru buka sesi + snapshot roster;
+:Discovery gallery + cache expiry max 300 dtk;
+if (Profil deployment?) then (AI_EDGE)
+  :Pipeline recognition-core lokal di PC lab;
+else (AI_CENTRAL)
+  :STB kirim burst max 5 JPEG ke AI service;
+  :Decision + kandidat tanpa image dan embedding;
+endif
+:Event idempoten ke Core API;
+if (Keputusan Core API: otoritas attendance tunggal?) then (matched valid)
+  :Record present atau late;
+  :Presensi manual bila perlu;
+elseif (ambigu)
+  :NEED_FRONTAL_RETRY: fallback frontal look;
+else (duplikat atau kedaluwarsa)
+  :Event audit saja;
+endif
+|Observabilitas|
+:Heartbeat device + camera status;
+:Cache dan gallery expiry;
+:Health probe Core ke AI service via ai-readiness;
+|Penutupan|
+:Auto atau manual close sesi;
+:Laporan + ekspor;
+:EWS watchlist;
+:Tindak lanjut manusia;
+stop
+
+note right of |Pelaksanaan|
+  B10->B4: fallback mengulang sampling/inference.
+  B11/B12->C1: selesai pelaksanaan, lanjut penutupan.
+  Observabilitas berjalan paralel selama sesi aktif.
+end note
+@enduml

@@ -1,0 +1,23 @@
+@startuml
+' EWS tahap 2 usulan — docs/proposal/09-ews.md §9.2
+start
+:Flag at-risk;
+repeat
+  if (Ambang hasil kalibrasi sekolah? U-01) then (Belum)
+    :Berita acara kalibrasi;
+  else (Sudah)
+  endif
+repeat while (Ambang hasil kalibrasi sekolah? U-01) is (Belum)
+:Tindak lanjut U-02: pemanggilan-konseling-surat-selesai;
+if (Guru tangani?) then (Ya)
+else (Tidak)
+  :Eskalasi U-04: wali kelas lalu BK;
+endif
+:Catat stage + note beraudit;
+if (Kirim notifikasi U-03?) then (Ya)
+  :In-app; kanal luar hanya bila sekolah opt-in;
+else (Tidak)
+endif
+:Selesai dicatat;
+stop
+@enduml

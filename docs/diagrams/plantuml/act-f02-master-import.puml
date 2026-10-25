@@ -4,17 +4,18 @@ start
 repeat
   :Admin siapkan CSV atau XLSX;
   :Unggah file max 5 MiB, XLSX max 25 MiB;
-  if (Ukuran dan baris lolos? max 10rb) then (tidak)
+  if (Ukuran dan baris lolos? max 10rb) then (Tidak)
     :Tolak 413 dengan alasan;
-  else (ya)
+  else (Ya)
     :Preview: validasi per baris;
-    if (Ada baris invalid?) then (ya)
+    if (Ada baris invalid?) then (Ya)
       :Tampilkan error per baris 422;
-    else (tidak)
+    else (Tidak)
       :Commit: simpan siswa-kelas-lab;
     endif
   endif
-repeat while (Ditolak 413/422? ulangi dari awal) is (ya)
+repeat while (Ditolak 413/422? ulangi dari awal) is (Ya)
+:Selesai tanpa audit;
 stop
 
 note right

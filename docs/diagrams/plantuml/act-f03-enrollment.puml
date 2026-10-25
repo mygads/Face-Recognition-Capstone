@@ -8,16 +8,16 @@ else (not enrolled)
 endif
 repeat
   :Capture 3 sampai 10 frame max 3 MB;
-repeat while (Tidak lolos quality gate? ulangi capture) is (ya)
-if (Minimal 3 diterima?) then (tidak)
+repeat while (Lolos quality gate?) is (Tidak)
+if (Minimal 3 diterima?) then (Tidak)
   :Gagal: ulangi capture;
   stop
-else (ya)
+else (Ya)
 endif
 :Simpan maks 5 template AES-256-GCM + model name-version;
-if (Mirip siswa lain di atas 0,85?) then (ya)
+if (Mirip siswa lain di atas 0,85?) then (Ya)
   :Peringatan duplicate: verifikasi manual;
-else (tidak)
+else (Tidak)
 endif
 :Selesai dan audit;
 stop

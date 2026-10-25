@@ -5,30 +5,31 @@ Seluruh diagram proposal dalam 5 format siap-import. Sumber kebenaran teks:
 
 | Format | Folder | Jumlah | Dibuka dengan |
 |---|---|---|---|
-| PlantUML | [plantuml/](plantuml/) | 33 `.puml` | Visual Paradigm, Draw.io (plugin PlantUML), plantuml.jar |
+| PlantUML | [plantuml/](plantuml/) | 36 `.puml` | Visual Paradigm, Draw.io (plugin PlantUML), plantuml.jar |
 | Mermaid | [mermaid/](mermaid/) | 36 `.mmd` | Draw.io → Arrange → Insert → Mermaid (paste isi file) |
-| BPMN 2.0 | [bpmn/](bpmn/) | 17 `.bpmn` | Visual Paradigm (Import XML), Draw.io (Open) |
+| BPMN 2.0 | [bpmn/](bpmn/) | 18 `.bpmn` | Visual Paradigm (Import XML), Draw.io (Open) |
 | XMI 2.5 | [xmi/](xmi/) | 1 `presensi-uml.xmi` | Visual Paradigm (Import XMI): aktor + 33 use case + asosiasi + include/extend + 20 class + atribut + relasi |
-| Draw.io | [drawio/](drawio/) | 25 `.drawio` | Draw.io (Open) |
+| Draw.io | [drawio/](drawio/) | 26 `.drawio` | Draw.io (Open) |
 | SQL DDL (ERD) | `../proposal/schema-erd.sql` | 18 `CREATE TABLE` | Draw.io → Arrange → Insert → SQL (paste DDL) |
 
 Generator (jangan edit hasil generate manual — ubah `.puml`/proposal lalu regenerate):
 
 ```bash
 py docs/diagrams/_gen/extract_mermaid.py  # .mmd dari blok mermaid proposal
-py docs/diagrams/_gen/gen_flows.py        # .bpmn + flow-*.drawio (F-01–F-13, end-to-end, EWS tahap 2)
+py docs/diagrams/_gen/gen_flows.py        # .bpmn + flow-*.drawio (18 alur: F-01–F-14, end-to-end, prototype-method, EWS tahap 1+2)
 py docs/diagrams/_gen/gen_struct.py       # uc/class/container .drawio + .xmi (parse .puml)
 ```
 
 ## Isi per folder
 
-- `plantuml/`: `uc-00` overall + `uc-01..05` per role · `act-f01..f13` + `f14-roles` + `prototype` ·
+- `plantuml/`: `uc-00` overall + `uc-01..05` per role · `act-f01..f13` + `f14-roles` + `prototype-method` +
+  `act-e2e-business` (§6.1) + `act-ews-stage1` (§9.1) + `act-ews-stage2` (§9.2) ·
   `class-01..06` · `seq-01..03` · `state-01..02` · `deployment-container`.
 - `mermaid/`: salinan 1-per-1 semua blok mermaid proposal, nama `\<file proposal>-\<nn>.mmd`.
 - `bpmn/`: F-01–F-13, `f14-roles` (§5.14), `prototype-method` (§2.1),
-  `e2e-business` (§6.1, memakai lane), `ews-stage2` (§9.2 usulan).
-- `drawio/`: `flow-*` (17 alur), `uc-overall`, `class-01..06`, `deployment-container`.
-- `xmi/`: satu model UML (4 aktor, 33 use case, 32 asosiasi aktor, 18 include, 6 extend, 20 class unik gabungan, 26 relasi class).
+  `e2e-business` (§6.1, memakai lane), `ews-stage1` (§9.1) + `ews-stage2` (§9.2 usulan).
+- `drawio/`: `flow-*` (18 alur), `uc-overall`, `class-01..06`, `deployment-container`.
+- `xmi/`: satu model UML (4 aktor, 33 use case, 32 asosiasi aktor, 17 include, 8 extend, 1 dependency, 20 class unik gabungan, 25 relasi class).
 
 ## Catatan import
 

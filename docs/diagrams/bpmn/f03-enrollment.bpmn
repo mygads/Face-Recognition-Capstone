@@ -7,13 +7,12 @@
 <task id="rev" name="Revoke SEMUA template aktif batch ini"><incoming>F_tpl_2</incoming><outgoing>F_rev_4</outgoing></task>
 <task id="cap" name="Capture 3 sampai 10 frame max 3 MB"><incoming>F_tpl_3</incoming><incoming>F_rev_4</incoming><incoming>F_q_6</incoming><outgoing>F_cap_5</outgoing></task>
 <exclusiveGateway id="q" name="Lolos quality gate?" gatewayDirection="Exclusive"><incoming>F_cap_5</incoming><outgoing>F_q_6</outgoing><outgoing>F_q_7</outgoing></exclusiveGateway>
-<exclusiveGateway id="min3" name="Minimal 3 diterima?" gatewayDirection="Exclusive"><incoming>F_q_7</incoming><outgoing>F_min3_8</outgoing><outgoing>F_min3_10</outgoing></exclusiveGateway>
-<task id="f" name="Gagal: ulangi capture"><incoming>F_min3_8</incoming><outgoing>F_f_9</outgoing></task>
-<endEvent id="ef" name="Gagal"><incoming>F_f_9</incoming></endEvent>
-<task id="save" name="Simpan maks 5 template AES-256-GCM + model name-version"><incoming>F_min3_10</incoming><outgoing>F_save_11</outgoing></task>
-<exclusiveGateway id="dup" name="Mirip siswa lain di atas 0,85?" gatewayDirection="Exclusive"><incoming>F_save_11</incoming><outgoing>F_dup_12</outgoing><outgoing>F_dup_13</outgoing></exclusiveGateway>
-<task id="warn" name="Peringatan duplicate: verifikasi manual"><incoming>F_dup_12</incoming><outgoing>F_warn_14</outgoing></task>
-<endEvent id="e" name="Selesai dan audit"><incoming>F_dup_13</incoming><incoming>F_warn_14</incoming></endEvent>
+<exclusiveGateway id="min3" name="Minimal 3 diterima?" gatewayDirection="Exclusive"><incoming>F_q_7</incoming><outgoing>F_min3_8</outgoing><outgoing>F_min3_9</outgoing></exclusiveGateway>
+<endEvent id="f" name="Gagal: ulangi capture"><incoming>F_min3_8</incoming></endEvent>
+<task id="save" name="Simpan maks 5 template AES-256-GCM + model name-version"><incoming>F_min3_9</incoming><outgoing>F_save_10</outgoing></task>
+<exclusiveGateway id="dup" name="Mirip siswa lain di atas 0,85?" gatewayDirection="Exclusive"><incoming>F_save_10</incoming><outgoing>F_dup_11</outgoing><outgoing>F_dup_12</outgoing></exclusiveGateway>
+<task id="warn" name="Peringatan duplicate: verifikasi manual"><incoming>F_dup_11</incoming><outgoing>F_warn_13</outgoing></task>
+<endEvent id="e" name="Selesai dan audit"><incoming>F_dup_12</incoming><incoming>F_warn_13</incoming></endEvent>
 <sequenceFlow id="F_s_0" sourceRef="s" targetRef="pick"></sequenceFlow>
 <sequenceFlow id="F_pick_1" sourceRef="pick" targetRef="tpl"></sequenceFlow>
 <sequenceFlow id="F_tpl_2" sourceRef="tpl" targetRef="rev"><conditionExpression xsi:type="tFormalExpression"><![CDATA[enrolled]]></conditionExpression></sequenceFlow>
@@ -23,12 +22,11 @@
 <sequenceFlow id="F_q_6" sourceRef="q" targetRef="cap"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
 <sequenceFlow id="F_q_7" sourceRef="q" targetRef="min3"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>
 <sequenceFlow id="F_min3_8" sourceRef="min3" targetRef="f"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
-<sequenceFlow id="F_f_9" sourceRef="f" targetRef="ef"></sequenceFlow>
-<sequenceFlow id="F_min3_10" sourceRef="min3" targetRef="save"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>
-<sequenceFlow id="F_save_11" sourceRef="save" targetRef="dup"></sequenceFlow>
-<sequenceFlow id="F_dup_12" sourceRef="dup" targetRef="warn"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>
-<sequenceFlow id="F_dup_13" sourceRef="dup" targetRef="e"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
-<sequenceFlow id="F_warn_14" sourceRef="warn" targetRef="e"></sequenceFlow>
+<sequenceFlow id="F_min3_9" sourceRef="min3" targetRef="save"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_save_10" sourceRef="save" targetRef="dup"></sequenceFlow>
+<sequenceFlow id="F_dup_11" sourceRef="dup" targetRef="warn"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_dup_12" sourceRef="dup" targetRef="e"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_warn_13" sourceRef="warn" targetRef="e"></sequenceFlow>
 </process>
 <bpmndi:BPMNDiagram id="DG_f03-enrollment"><bpmndi:BPMNPlane id="PL_f03-enrollment" bpmnElement="P_f03-enrollment">
 <bpmndi:BPMNShape id="S_s" bpmnElement="s"><dc:Bounds x="30" y="30" width="36" height="36" /></bpmndi:BPMNShape>
@@ -38,12 +36,11 @@
 <bpmndi:BPMNShape id="S_cap" bpmnElement="cap"><dc:Bounds x="870" y="510" width="140" height="70" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_q" bpmnElement="q"><dc:Bounds x="1080" y="630" width="60" height="60" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_min3" bpmnElement="min3"><dc:Bounds x="1290" y="750" width="60" height="60" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_f" bpmnElement="f"><dc:Bounds x="1500" y="870" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_ef" bpmnElement="ef"><dc:Bounds x="1710" y="990" width="36" height="36" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_save" bpmnElement="save"><dc:Bounds x="1500" y="1110" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_dup" bpmnElement="dup"><dc:Bounds x="1710" y="1230" width="60" height="60" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_warn" bpmnElement="warn"><dc:Bounds x="1920" y="1350" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_e" bpmnElement="e"><dc:Bounds x="2130" y="1470" width="36" height="36" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_f" bpmnElement="f"><dc:Bounds x="1500" y="870" width="36" height="36" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_save" bpmnElement="save"><dc:Bounds x="1500" y="990" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_dup" bpmnElement="dup"><dc:Bounds x="1710" y="1110" width="60" height="60" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_warn" bpmnElement="warn"><dc:Bounds x="1920" y="1230" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_e" bpmnElement="e"><dc:Bounds x="2130" y="1350" width="36" height="36" /></bpmndi:BPMNShape>
 <bpmndi:BPMNEdge id="E_F_s_0" bpmnElement="F_s_0"><di:waypoint xsi:type="dc:Point" x="66" y="48" /><di:waypoint xsi:type="dc:Point" x="240" y="185" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_pick_1" bpmnElement="F_pick_1"><di:waypoint xsi:type="dc:Point" x="380" y="185" /><di:waypoint xsi:type="dc:Point" x="450" y="300" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_tpl_2" bpmnElement="F_tpl_2"><di:waypoint xsi:type="dc:Point" x="510" y="300" /><di:waypoint xsi:type="dc:Point" x="660" y="425" /></bpmndi:BPMNEdge>
@@ -52,11 +49,10 @@
 <bpmndi:BPMNEdge id="E_F_cap_5" bpmnElement="F_cap_5"><di:waypoint xsi:type="dc:Point" x="1010" y="545" /><di:waypoint xsi:type="dc:Point" x="1080" y="660" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_q_6" bpmnElement="F_q_6"><di:waypoint xsi:type="dc:Point" x="1140" y="660" /><di:waypoint xsi:type="dc:Point" x="1190" y="660" /><di:waypoint xsi:type="dc:Point" x="1190" y="545" /><di:waypoint xsi:type="dc:Point" x="1010" y="545" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_q_7" bpmnElement="F_q_7"><di:waypoint xsi:type="dc:Point" x="1140" y="660" /><di:waypoint xsi:type="dc:Point" x="1290" y="780" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_min3_8" bpmnElement="F_min3_8"><di:waypoint xsi:type="dc:Point" x="1350" y="780" /><di:waypoint xsi:type="dc:Point" x="1500" y="905" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_f_9" bpmnElement="F_f_9"><di:waypoint xsi:type="dc:Point" x="1640" y="905" /><di:waypoint xsi:type="dc:Point" x="1710" y="1008" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_min3_10" bpmnElement="F_min3_10"><di:waypoint xsi:type="dc:Point" x="1350" y="780" /><di:waypoint xsi:type="dc:Point" x="1500" y="1145" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_save_11" bpmnElement="F_save_11"><di:waypoint xsi:type="dc:Point" x="1640" y="1145" /><di:waypoint xsi:type="dc:Point" x="1710" y="1260" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_dup_12" bpmnElement="F_dup_12"><di:waypoint xsi:type="dc:Point" x="1770" y="1260" /><di:waypoint xsi:type="dc:Point" x="1920" y="1385" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_dup_13" bpmnElement="F_dup_13"><di:waypoint xsi:type="dc:Point" x="1770" y="1260" /><di:waypoint xsi:type="dc:Point" x="2130" y="1488" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_warn_14" bpmnElement="F_warn_14"><di:waypoint xsi:type="dc:Point" x="2060" y="1385" /><di:waypoint xsi:type="dc:Point" x="2130" y="1488" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_min3_8" bpmnElement="F_min3_8"><di:waypoint xsi:type="dc:Point" x="1350" y="780" /><di:waypoint xsi:type="dc:Point" x="1500" y="888" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_min3_9" bpmnElement="F_min3_9"><di:waypoint xsi:type="dc:Point" x="1350" y="780" /><di:waypoint xsi:type="dc:Point" x="1500" y="1025" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_save_10" bpmnElement="F_save_10"><di:waypoint xsi:type="dc:Point" x="1640" y="1025" /><di:waypoint xsi:type="dc:Point" x="1710" y="1140" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_dup_11" bpmnElement="F_dup_11"><di:waypoint xsi:type="dc:Point" x="1770" y="1140" /><di:waypoint xsi:type="dc:Point" x="1920" y="1265" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_dup_12" bpmnElement="F_dup_12"><di:waypoint xsi:type="dc:Point" x="1770" y="1140" /><di:waypoint xsi:type="dc:Point" x="2130" y="1368" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_warn_13" bpmnElement="F_warn_13"><di:waypoint xsi:type="dc:Point" x="2060" y="1265" /><di:waypoint xsi:type="dc:Point" x="2130" y="1368" /></bpmndi:BPMNEdge>
 </bpmndi:BPMNPlane></bpmndi:BPMNDiagram></definitions>

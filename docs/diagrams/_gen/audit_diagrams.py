@@ -198,8 +198,9 @@ def main():
     for el in doc.getElementsByTagName("packagedElement"):
         cnt[el.getAttribute("xmi:type")] = \
             cnt.get(el.getAttribute("xmi:type"), 0) + 1
-    exp = {"uml:Actor": 4, "uml:UseCase": 33, "uml:Association": 32 + 26,
-           "uml:Include": 17, "uml:Extend": 8, "uml:Class": 20}
+    exp = {"uml:Actor": 4, "uml:UseCase": 33, "uml:Association": 32 + 25,
+           "uml:Dependency": 1, "uml:Include": 17, "uml:Extend": 8,
+           "uml:Class": 20}
     for k, v in exp.items():
         if cnt.get(k, 0) != v:
             err("xmi %s = %d, harap %d" % (k, cnt.get(k, 0), v))
@@ -255,6 +256,98 @@ def main():
                 if el.getAttribute("xmi:type") == "uml:Class")
     if x_cls != set(all_cls):
         err("class xmi vs puml beda: %s" % (x_cls ^ set(all_cls)))
+
+    # ---- 7. plantuml block balance ----
+    for p in pumls:
+        o = {"if": 0, "endif": 0, "repeat": 0, "repeatwhile": 0, "fork": 0,
+             "forkagain": 0, "endfork": 0, "act": 0, "deact": 0, "note": 0,
+             "endnote": 0, "other": []}
+        for raw in open(p, encoding="utf-8"):
+            ln = raw.strip()
+            if re.match(r"^if(\s|$)", ln):
+                o["if"] += 1
+            elif re.match(r"^endif(\s|$)", ln):
+                o["endif"] += 1
+            elif ln.startswith("repeat while"):
+                o["repeatwhile"] += 1
+            elif re.match(r"^repeat(\s|$)", ln):
+                o["repeat"] += 1
+            elif re.match(r"^end fork(\s|$)", ln):
+                o["endfork"] += 1
+            elif re.match(r"^fork again(\s|$)", ln):
+                o["forkagain"] += 1
+            elif re.match(r"^fork(\s|$)", ln):
+                o["fork"] += 1
+            elif re.match(r"^end note(\s|$)", ln):
+                o["endnote"] += 1
+            elif re.match(r"^note(\s|$)", ln) and ":" not in ln:
+                o["note"] += 1
+            elif re.match(r"^activate(\s|$)", ln):
+                o["act"] += 1
+            elif re.match(r"^deactivate(\s|$)", ln):
+                o["deact"] += 1
+            elif re.match(r"^(loop|alt|opt|group|box|split|end box|"
+                          r"end split|end)(\s|$)", ln):
+                o["other"].append(ln[:28])
+        nm = os.path.basename(p)
+        for a, b in (("if", "endif"), ("repeat", "repeatwhile"),
+                     ("fork", "endfork"), ("act", "deact"), ("note", "endnote")):
+            if o[a] != o[b]:
+                err("%s: %s=%d %s=%d" % (nm, a, o[a], b, o[b]))
+        if o["fork"] and o["forkagain"] < 1:
+            err("%s: fork tanpa cabang 'fork again'" % nm)
+        if o["other"]:
+            print("  info %s blok lain: %s" % (nm, o["other"]))
+
+    # ---- 8. mermaid: direktif + keseimbangan kurung ----
+    KNOWN = ("flowchart", "graph", "sequenceDiagram", "stateDiagram",
+             "stateDiagram-v2", "classDiagram", "erDiagram")
+    for f in sorted(glob.glob(os.path.join(D, "mermaid", "*.mmd"))):
+        nm = os.path.basename(f)
+        text = open(f, encoding="utf-8").read()
+        lines = [l for l in text.splitlines()
+                 if l.strip() and not l.strip().startswith("%%")]
+        if not lines or lines[0].split()[0] not in KNOWN:
+            err("%s: direktif diagram tak dikenal" % nm)
+        body = re.sub(r'"[^"]*"', "", text)
+        body = re.sub(r"%%.*", "", body)
+        for a, b in (("(", ")"), ("[", "]"), ("{", "}")):
+            if body.count(a) != body.count(b):
+                err("%s: '%s'=%d vs '%s'=%d" % (nm, a, body.count(a),
+                                                b, body.count(b)))
+
+    # ---- 9. id use-case mermaid §4 vs puml ----
+    TOK = re.compile(r"\b(UC\d+|PREV|QG|RB|CB|SR|MO|AO|DG|PI|SE|RF|WP|AG|"
+                     r"U[234]|SC|ADM|TCH|LAB|DEV)\b")
+    mu = set()
+    for f in glob.glob(os.path.join(D, "mermaid", "04-use-case-*.mmd")):
+        mu.update(TOK.findall(open(f, encoding="utf-8").read()))
+    mu -= {"ADM", "TCH", "LAB", "DEV"}
+    if mu != ucs:
+        err("uc mermaid §4 vs puml beda: %s" % (mu ^ ucs))
+
+    # ---- 10. xmi spot check ----
+    ops = [el.getAttribute("name") for el in
+           xdoc.getElementsByTagName("ownedOperation")]
+    if "revoke" not in ops:
+        err("xmi: operasi revoke() hilang")
+    if not xdoc.getElementsByTagName("upperValue"):
+        err("xmi: tanpa info multiplisitas")
+    anames = set(el.getAttribute("name") for el in
+                 xdoc.getElementsByTagName("packagedElement")
+                 if el.getAttribute("xmi:type") == "uml:Actor")
+    if anames != {"ADMIN", "TEACHER", "LABORANT", "DEVICE service"}:
+        err("xmi aktor: %s" % anames)
+
+    # ---- 11. setiap .puml menunjuk file proposal yang ada ----
+    for p in pumls:
+        head = "".join(open(p, encoding="utf-8").readlines()[:4])
+        m = re.search(r"docs/proposal/([\w\-]+\.md)", head)
+        if not m:
+            err("%s: tanpa referensi proposal" % os.path.basename(p))
+        elif not os.path.exists(os.path.join(src, m.group(1))):
+            err("%s: referensi proposal hilang %s" % (os.path.basename(p),
+                                                      m.group(1)))
 
     if issues:
         print("\nTEMUAN (%d):" % len(issues))

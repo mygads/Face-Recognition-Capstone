@@ -10,13 +10,11 @@
 <task id="ab" name="Tampilkan absent"><incoming>F_rows_5</incoming><outgoing>F_ab_7</outgoing></task>
 <exclusiveGateway id="x" name="Ekspor?" gatewayDirection="Exclusive"><incoming>F_nr_6</incoming><incoming>F_ab_7</incoming><outgoing>F_x_8</outgoing><outgoing>F_x_10</outgoing></exclusiveGateway>
 <task id="tbl" name="Tabel paginasi"><incoming>F_x_8</incoming><outgoing>F_tbl_9</outgoing></task>
-<endEvent id="e1" name="Selesai"><incoming>F_tbl_9</incoming></endEvent>
 <exclusiveGateway id="big" name="Lebih dari 50rb baris?" gatewayDirection="Exclusive"><incoming>F_x_10</incoming><outgoing>F_big_11</outgoing><outgoing>F_big_13</outgoing></exclusiveGateway>
 <task id="e413" name="Tolak 413: persempit filter"><incoming>F_big_11</incoming><outgoing>F_e413_12</outgoing></task>
 <endEvent id="e2" name="Selesai"><incoming>F_e413_12</incoming></endEvent>
 <task id="csv" name="CSV BOM atau XLSX tanpa skor AI + anti formula-injection"><incoming>F_big_13</incoming><outgoing>F_csv_14</outgoing></task>
-<task id="dl" name="Unduh"><incoming>F_csv_14</incoming><outgoing>F_dl_15</outgoing></task>
-<endEvent id="e3" name="Selesai"><incoming>F_dl_15</incoming></endEvent>
+<endEvent id="e" name="Unduh"><incoming>F_tbl_9</incoming><incoming>F_csv_14</incoming></endEvent>
 <sequenceFlow id="F_s_0" sourceRef="s" targetRef="filt"></sequenceFlow>
 <sequenceFlow id="F_filt_1" sourceRef="filt" targetRef="scope"></sequenceFlow>
 <sequenceFlow id="F_scope_2" sourceRef="scope" targetRef="aggr"></sequenceFlow>
@@ -26,13 +24,12 @@
 <sequenceFlow id="F_nr_6" sourceRef="nr" targetRef="x"></sequenceFlow>
 <sequenceFlow id="F_ab_7" sourceRef="ab" targetRef="x"></sequenceFlow>
 <sequenceFlow id="F_x_8" sourceRef="x" targetRef="tbl"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
-<sequenceFlow id="F_tbl_9" sourceRef="tbl" targetRef="e1"></sequenceFlow>
+<sequenceFlow id="F_tbl_9" sourceRef="tbl" targetRef="e"></sequenceFlow>
 <sequenceFlow id="F_x_10" sourceRef="x" targetRef="big"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>
 <sequenceFlow id="F_big_11" sourceRef="big" targetRef="e413"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>
 <sequenceFlow id="F_e413_12" sourceRef="e413" targetRef="e2"></sequenceFlow>
 <sequenceFlow id="F_big_13" sourceRef="big" targetRef="csv"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
-<sequenceFlow id="F_csv_14" sourceRef="csv" targetRef="dl"></sequenceFlow>
-<sequenceFlow id="F_dl_15" sourceRef="dl" targetRef="e3"></sequenceFlow>
+<sequenceFlow id="F_csv_14" sourceRef="csv" targetRef="e"></sequenceFlow>
 </process>
 <bpmndi:BPMNDiagram id="DG_f09-reports"><bpmndi:BPMNPlane id="PL_f09-reports" bpmnElement="P_f09-reports">
 <bpmndi:BPMNShape id="S_s" bpmnElement="s"><dc:Bounds x="30" y="30" width="36" height="36" /></bpmndi:BPMNShape>
@@ -41,30 +38,27 @@
 <bpmndi:BPMNShape id="S_aggr" bpmnElement="aggr"><dc:Bounds x="660" y="390" width="140" height="70" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_rows" bpmnElement="rows"><dc:Bounds x="870" y="510" width="60" height="60" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_nr" bpmnElement="nr"><dc:Bounds x="1080" y="630" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_ab" bpmnElement="ab"><dc:Bounds x="1080" y="1830" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_ab" bpmnElement="ab"><dc:Bounds x="1080" y="1590" width="140" height="70" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_x" bpmnElement="x"><dc:Bounds x="1290" y="750" width="60" height="60" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_tbl" bpmnElement="tbl"><dc:Bounds x="1500" y="870" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_e1" bpmnElement="e1"><dc:Bounds x="1710" y="990" width="36" height="36" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_big" bpmnElement="big"><dc:Bounds x="1500" y="1110" width="60" height="60" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_e413" bpmnElement="e413"><dc:Bounds x="1710" y="1230" width="140" height="70" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_e2" bpmnElement="e2"><dc:Bounds x="1920" y="1350" width="36" height="36" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_csv" bpmnElement="csv"><dc:Bounds x="1710" y="1470" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_dl" bpmnElement="dl"><dc:Bounds x="1920" y="1590" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_e3" bpmnElement="e3"><dc:Bounds x="2130" y="1710" width="36" height="36" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_e" bpmnElement="e"><dc:Bounds x="1710" y="990" width="36" height="36" /></bpmndi:BPMNShape>
 <bpmndi:BPMNEdge id="E_F_s_0" bpmnElement="F_s_0"><di:waypoint xsi:type="dc:Point" x="66" y="48" /><di:waypoint xsi:type="dc:Point" x="240" y="185" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_filt_1" bpmnElement="F_filt_1"><di:waypoint xsi:type="dc:Point" x="380" y="185" /><di:waypoint xsi:type="dc:Point" x="450" y="305" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_scope_2" bpmnElement="F_scope_2"><di:waypoint xsi:type="dc:Point" x="590" y="305" /><di:waypoint xsi:type="dc:Point" x="660" y="425" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_aggr_3" bpmnElement="F_aggr_3"><di:waypoint xsi:type="dc:Point" x="800" y="425" /><di:waypoint xsi:type="dc:Point" x="870" y="540" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_rows_4" bpmnElement="F_rows_4"><di:waypoint xsi:type="dc:Point" x="930" y="540" /><di:waypoint xsi:type="dc:Point" x="1080" y="665" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_rows_5" bpmnElement="F_rows_5"><di:waypoint xsi:type="dc:Point" x="930" y="540" /><di:waypoint xsi:type="dc:Point" x="1080" y="1865" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_rows_5" bpmnElement="F_rows_5"><di:waypoint xsi:type="dc:Point" x="930" y="540" /><di:waypoint xsi:type="dc:Point" x="1080" y="1625" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_nr_6" bpmnElement="F_nr_6"><di:waypoint xsi:type="dc:Point" x="1220" y="665" /><di:waypoint xsi:type="dc:Point" x="1290" y="780" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_ab_7" bpmnElement="F_ab_7"><di:waypoint xsi:type="dc:Point" x="1220" y="1865" /><di:waypoint xsi:type="dc:Point" x="1290" y="780" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_ab_7" bpmnElement="F_ab_7"><di:waypoint xsi:type="dc:Point" x="1220" y="1625" /><di:waypoint xsi:type="dc:Point" x="1290" y="780" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_x_8" bpmnElement="F_x_8"><di:waypoint xsi:type="dc:Point" x="1350" y="780" /><di:waypoint xsi:type="dc:Point" x="1500" y="905" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_tbl_9" bpmnElement="F_tbl_9"><di:waypoint xsi:type="dc:Point" x="1640" y="905" /><di:waypoint xsi:type="dc:Point" x="1710" y="1008" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_x_10" bpmnElement="F_x_10"><di:waypoint xsi:type="dc:Point" x="1350" y="780" /><di:waypoint xsi:type="dc:Point" x="1500" y="1140" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_big_11" bpmnElement="F_big_11"><di:waypoint xsi:type="dc:Point" x="1560" y="1140" /><di:waypoint xsi:type="dc:Point" x="1710" y="1265" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_e413_12" bpmnElement="F_e413_12"><di:waypoint xsi:type="dc:Point" x="1850" y="1265" /><di:waypoint xsi:type="dc:Point" x="1920" y="1368" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_big_13" bpmnElement="F_big_13"><di:waypoint xsi:type="dc:Point" x="1560" y="1140" /><di:waypoint xsi:type="dc:Point" x="1710" y="1505" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_csv_14" bpmnElement="F_csv_14"><di:waypoint xsi:type="dc:Point" x="1850" y="1505" /><di:waypoint xsi:type="dc:Point" x="1920" y="1625" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_dl_15" bpmnElement="F_dl_15"><di:waypoint xsi:type="dc:Point" x="2060" y="1625" /><di:waypoint xsi:type="dc:Point" x="2130" y="1728" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_csv_14" bpmnElement="F_csv_14"><di:waypoint xsi:type="dc:Point" x="1850" y="1505" /><di:waypoint xsi:type="dc:Point" x="1900" y="1505" /><di:waypoint xsi:type="dc:Point" x="1900" y="1008" /><di:waypoint xsi:type="dc:Point" x="1746" y="1008" /></bpmndi:BPMNEdge>
 </bpmndi:BPMNPlane></bpmndi:BPMNDiagram></definitions>

@@ -16,11 +16,11 @@
 <sequenceFlow id="F_up_2" sourceRef="up" targetRef="size"></sequenceFlow>
 <sequenceFlow id="F_size_3" sourceRef="size" targetRef="r413"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
 <sequenceFlow id="F_size_4" sourceRef="size" targetRef="prev"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>
-<sequenceFlow id="F_r413_5" sourceRef="r413" targetRef="prep"><conditionExpression xsi:type="tFormalExpression"><![CDATA[ulangi]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_r413_5" sourceRef="r413" targetRef="prep"></sequenceFlow>
 <sequenceFlow id="F_prev_6" sourceRef="prev" targetRef="rows"></sequenceFlow>
 <sequenceFlow id="F_rows_7" sourceRef="rows" targetRef="r422"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>
 <sequenceFlow id="F_rows_8" sourceRef="rows" targetRef="commit"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
-<sequenceFlow id="F_r422_9" sourceRef="r422" targetRef="prep"><conditionExpression xsi:type="tFormalExpression"><![CDATA[ulangi]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_r422_9" sourceRef="r422" targetRef="prep"></sequenceFlow>
 <sequenceFlow id="F_commit_10" sourceRef="commit" targetRef="e"></sequenceFlow>
 </process>
 <bpmndi:BPMNDiagram id="DG_f02-master-import"><bpmndi:BPMNPlane id="PL_f02-master-import" bpmnElement="P_f02-master-import">

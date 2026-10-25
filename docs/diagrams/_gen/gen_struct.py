@@ -42,7 +42,18 @@ def parse_uc(lines):
             continue
         m = re.match(r'usecase\s+"([^"]+)"\s+as\s+(\w+)$', ln)
         if m:
-            ucs[m.group(2)] = m.group(1).replace("\\n", " ")
+            raw = m.group(1).replace("\\n", " ")
+            uid = m.group(2)
+            # Normalisasi: label puml UC1..UC16 sudah mengandung ID
+            # ("UC1 Login ...") -> simpan bare desc agar prefix ID
+            # ditambahkan tepat satu kali saat emit drawio/XMI.
+            if raw == uid:
+                bare = ""
+            elif raw.startswith(uid + " "):
+                bare = raw[len(uid) + 1:]
+            else:
+                bare = raw
+            ucs[uid] = bare
             continue
         m = re.match(r'(\w+)\s*--\s*(\w+)$', ln)
         if m:
@@ -142,7 +153,8 @@ def drawio_uc(actors, ucs, assoc, inc, ext):
         L.append('<mxCell id="%s" value="%s" style="%s" vertex="1" parent="1">'
                  '<mxGeometry x="%d" y="%d" width="180" height="75" '
                  'as="geometry"/></mxCell>'
-                 % (ids[uid], nl(uid + " " + ucs[uid]), UC_STYLE,
+                 % (ids[uid], nl(uid + " " + ucs[uid]) if ucs[uid] else nl(uid),
+                    UC_STYLE,
                     220 + col * 210, 40 + row * 120))
     e = 0
     for a, b in assoc:
@@ -238,7 +250,7 @@ def drawio_deploy(elems, edges, cmap):
 
 # ---------- XMI 2.5 ----------
 VIS = {"+": "public", "-": "private", "#": "protected", "~": "package"}
-MEM_RE = re.compile(r'^([+#\-~])(\S+)\s+(\w+)(\(\))?$')
+MEM_RE = re.compile(r'^([+#\-~])(?:(\S+)\s+)?(\w+)(\(\))?$')
 
 
 def mult_tags(m):
@@ -281,8 +293,9 @@ def gen_xmi(actors, ucs, assoc, inc, ext, all_classes, class_assocs):
         L.append('<packagedElement xmi:type="uml:Actor" xmi:id="A_%s" name="%s"/>'
                  % (aid, esc(alab)))
     for uid, ulab in ucs.items():
-        L.append('<packagedElement xmi:type="uml:UseCase" xmi:id="U_%s" name="%s %s"/>'
-                 % (uid, uid, esc(ulab)))
+        disp = (uid + " " + ulab) if ulab else uid
+        L.append('<packagedElement xmi:type="uml:UseCase" xmi:id="U_%s" name="%s"/>'
+                 % (uid, esc(disp)))
     for i, (a, b) in enumerate(assoc):
         at = ("A_" + a) if a in actors else ("U_" + a)
         bt = ("A_" + b) if b in actors else ("U_" + b)
@@ -313,19 +326,30 @@ def gen_xmi(actors, ucs, assoc, inc, ext, all_classes, class_assocs):
                 key = m.group(3)
                 if key not in seen:
                     seen.add(key)
-                    L.append('<ownedAttribute xmi:id="C_%s_a%d" name="%s" '
-                             'visibility="%s"><type xmi:type="uml:PrimitiveType" '
-                             'href="http://www.omg.org/spec/UML/20131001/PrimitiveTypes.xmi#%s"/>'
-                             '</ownedAttribute>'
-                             % (cn, j, key, VIS[m.group(1)], m.group(2)))
+                    if m.group(2):
+                        L.append('<ownedAttribute xmi:id="C_%s_a%d" name="%s" '
+                                 'visibility="%s"><type xmi:type="uml:PrimitiveType" '
+                                 'href="http://www.omg.org/spec/UML/20131001/PrimitiveTypes.xmi#%s"/>'
+                                 '</ownedAttribute>'
+                                 % (cn, j, key, VIS[m.group(1)], m.group(2)))
+                    else:
+                        L.append('<ownedAttribute xmi:id="C_%s_a%d" name="%s" '
+                                 'visibility="%s"/>'
+                                 % (cn, j, key, VIS[m.group(1)]))
             elif mem not in seen:
                 seen.add(mem)
                 L.append('<ownedAttribute xmi:id="C_%s_a%d" name="%s"/>'
                          % (cn, j, esc(mem)))
         L.append('</packagedElement>')
-    for i, (a, ma, b, mb, lab, _d) in enumerate(class_assocs):
-        L.append(xmi_assoc("CA%d" % i, lab or ("%s_%s" % (a, b)),
-                           "C_" + a, "", "", "C_" + b, ma, mb))
+    for i, (a, ma, b, mb, lab, dashed) in enumerate(class_assocs):
+        if dashed:
+            L.append('<packagedElement xmi:type="uml:Dependency" xmi:id="CD%d" '
+                     'name="%s"><client xmi:idref="C_%s"/>'
+                     '<supplier xmi:idref="C_%s"/></packagedElement>'
+                     % (i, esc(lab or (a + "_uses_" + b)), a, b))
+        else:
+            L.append(xmi_assoc("CA%d" % i, lab or ("%s_%s" % (a, b)),
+                               "C_" + a, "", "", "C_" + b, ma, mb))
     L.append('</uml:Model></xmi:XMI>')
     return "\n".join(L) + "\n"
 

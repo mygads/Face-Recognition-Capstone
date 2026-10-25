@@ -22,7 +22,7 @@
 <mxCell id="e5" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="v4" target="v6" value="Ya, dengan catatan kecil"><mxGeometry relative="1" as="geometry"/></mxCell>
 <mxCell id="e6" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="v6" target="v5"><mxGeometry relative="1" as="geometry"/></mxCell>
 <mxCell id="e7" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="v4" target="v7" value="Tidak"><mxGeometry relative="1" as="geometry"/></mxCell>
-<mxCell id="e8" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="v7" target="v2" value="revisi"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e8" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="v7" target="v2"><mxGeometry relative="1" as="geometry"/></mxCell>
 <mxCell id="e9" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="v5" target="v8"><mxGeometry relative="1" as="geometry"/></mxCell>
 <mxCell id="e10" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="v8" target="v9"><mxGeometry relative="1" as="geometry"/></mxCell>
 <mxCell id="e11" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="v9" target="v7" value="Tidak"><mxGeometry relative="1" as="geometry"/></mxCell>

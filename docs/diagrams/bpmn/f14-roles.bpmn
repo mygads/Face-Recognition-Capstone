@@ -2,47 +2,71 @@
 <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" id="DEF_f14-roles" targetNamespace="http://presensi/school">
 <process id="P_f14-roles" name="F-14 Ringkasan alur per role (05.14)" isExecutable="false">
 <startEvent id="s" name="Mulai"><outgoing>F_s_0</outgoing></startEvent>
-<parallelGateway id="fork" name="Fork"><incoming>F_s_0</incoming><outgoing>F_fork_1</outgoing><outgoing>F_fork_4</outgoing><outgoing>F_fork_7</outgoing></parallelGateway>
-<task id="g1" name="Guru: buka sesi miliknya + pantau live"><incoming>F_fork_1</incoming><outgoing>F_g1_2</outgoing></task>
-<task id="g2" name="Guru: manual + koreksi pending + laporan dan EWS kelasnya"><incoming>F_g1_2</incoming><outgoing>F_g2_3</outgoing></task>
-<task id="l1" name="Laboran: enrollment wajah + operasikan device"><incoming>F_fork_4</incoming><outgoing>F_l1_5</outgoing></task>
-<task id="l2" name="Laboran: preview pra-sesi AI_EDGE + buka sesi operasional bila perlu"><incoming>F_l1_5</incoming><outgoing>F_l2_6</outgoing></task>
-<task id="a1" name="Admin: master + akun + jadwal + policy sesi"><incoming>F_fork_7</incoming><outgoing>F_a1_8</outgoing></task>
-<task id="a2" name="Admin: device registry + kredensial + kamera + AI config + policy EWS + audit"><incoming>F_a1_8</incoming><outgoing>F_a2_9</outgoing></task>
-<parallelGateway id="join" name="Join"><incoming>F_g2_3</incoming><incoming>F_l2_6</incoming><incoming>F_a2_9</incoming><outgoing>F_join_10</outgoing></parallelGateway>
-<endEvent id="e" name="Selesai"><incoming>F_join_10</incoming></endEvent>
+<parallelGateway id="fork" name="Fork"><incoming>F_s_0</incoming><outgoing>F_fork_1</outgoing><outgoing>F_fork_7</outgoing><outgoing>F_fork_12</outgoing></parallelGateway>
+<task id="g1" name="Buka sesi miliknya: manual selalu, auto bila mode automatic"><incoming>F_fork_1</incoming><outgoing>F_g1_2</outgoing></task>
+<task id="g2" name="Pantau live"><incoming>F_g1_2</incoming><outgoing>F_g2_3</outgoing></task>
+<task id="g3" name="Manual bila perlu di sesi berjalan"><incoming>F_g2_3</incoming><outgoing>F_g3_4</outgoing></task>
+<task id="g4" name="Ajukan koreksi: pending tanpa putusan"><incoming>F_g3_4</incoming><outgoing>F_g4_5</outgoing></task>
+<task id="g5" name="Laporan dan EWS kelasnya"><incoming>F_g4_5</incoming><outgoing>F_g5_6</outgoing></task>
+<task id="l1" name="Enrollment wajah"><incoming>F_fork_7</incoming><outgoing>F_l1_8</outgoing></task>
+<task id="l2" name="Operasikan device: heartbeat dan monitor"><incoming>F_l1_8</incoming><outgoing>F_l2_9</outgoing></task>
+<task id="l3" name="Preview pra-sesi AI_EDGE tanpa event"><incoming>F_l2_9</incoming><outgoing>F_l3_10</outgoing></task>
+<task id="l4" name="Buka sesi operasional bila perlu"><incoming>F_l3_10</incoming><outgoing>F_l4_11</outgoing></task>
+<task id="a1" name="Master + akun + jadwal + policy sesi"><incoming>F_fork_12</incoming><outgoing>F_a1_13</outgoing></task>
+<task id="a2" name="Device registry + kredensial + kamera + AI config + policy EWS"><incoming>F_a1_13</incoming><outgoing>F_a2_14</outgoing></task>
+<task id="a3" name="Audit semua perubahan kecuali jadwal dan commit import"><incoming>F_a2_14</incoming><outgoing>F_a3_15</outgoing></task>
+<parallelGateway id="join" name="Join"><incoming>F_g5_6</incoming><incoming>F_l4_11</incoming><incoming>F_a3_15</incoming><outgoing>F_join_16</outgoing></parallelGateway>
+<endEvent id="e" name="Selesai"><incoming>F_join_16</incoming></endEvent>
 <sequenceFlow id="F_s_0" sourceRef="s" targetRef="fork"></sequenceFlow>
 <sequenceFlow id="F_fork_1" sourceRef="fork" targetRef="g1"></sequenceFlow>
 <sequenceFlow id="F_g1_2" sourceRef="g1" targetRef="g2"></sequenceFlow>
-<sequenceFlow id="F_g2_3" sourceRef="g2" targetRef="join"></sequenceFlow>
-<sequenceFlow id="F_fork_4" sourceRef="fork" targetRef="l1"></sequenceFlow>
-<sequenceFlow id="F_l1_5" sourceRef="l1" targetRef="l2"></sequenceFlow>
-<sequenceFlow id="F_l2_6" sourceRef="l2" targetRef="join"></sequenceFlow>
-<sequenceFlow id="F_fork_7" sourceRef="fork" targetRef="a1"></sequenceFlow>
-<sequenceFlow id="F_a1_8" sourceRef="a1" targetRef="a2"></sequenceFlow>
-<sequenceFlow id="F_a2_9" sourceRef="a2" targetRef="join"></sequenceFlow>
-<sequenceFlow id="F_join_10" sourceRef="join" targetRef="e"></sequenceFlow>
+<sequenceFlow id="F_g2_3" sourceRef="g2" targetRef="g3"></sequenceFlow>
+<sequenceFlow id="F_g3_4" sourceRef="g3" targetRef="g4"></sequenceFlow>
+<sequenceFlow id="F_g4_5" sourceRef="g4" targetRef="g5"></sequenceFlow>
+<sequenceFlow id="F_g5_6" sourceRef="g5" targetRef="join"></sequenceFlow>
+<sequenceFlow id="F_fork_7" sourceRef="fork" targetRef="l1"></sequenceFlow>
+<sequenceFlow id="F_l1_8" sourceRef="l1" targetRef="l2"></sequenceFlow>
+<sequenceFlow id="F_l2_9" sourceRef="l2" targetRef="l3"></sequenceFlow>
+<sequenceFlow id="F_l3_10" sourceRef="l3" targetRef="l4"></sequenceFlow>
+<sequenceFlow id="F_l4_11" sourceRef="l4" targetRef="join"></sequenceFlow>
+<sequenceFlow id="F_fork_12" sourceRef="fork" targetRef="a1"></sequenceFlow>
+<sequenceFlow id="F_a1_13" sourceRef="a1" targetRef="a2"></sequenceFlow>
+<sequenceFlow id="F_a2_14" sourceRef="a2" targetRef="a3"></sequenceFlow>
+<sequenceFlow id="F_a3_15" sourceRef="a3" targetRef="join"></sequenceFlow>
+<sequenceFlow id="F_join_16" sourceRef="join" targetRef="e"></sequenceFlow>
 </process>
 <bpmndi:BPMNDiagram id="DG_f14-roles"><bpmndi:BPMNPlane id="PL_f14-roles" bpmnElement="P_f14-roles">
 <bpmndi:BPMNShape id="S_s" bpmnElement="s"><dc:Bounds x="30" y="30" width="36" height="36" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_fork" bpmnElement="fork"><dc:Bounds x="240" y="150" width="60" height="60" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_g1" bpmnElement="g1"><dc:Bounds x="450" y="270" width="140" height="70" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_g2" bpmnElement="g2"><dc:Bounds x="660" y="390" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_l1" bpmnElement="l1"><dc:Bounds x="450" y="750" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_l2" bpmnElement="l2"><dc:Bounds x="660" y="870" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_a1" bpmnElement="a1"><dc:Bounds x="450" y="990" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_a2" bpmnElement="a2"><dc:Bounds x="660" y="1110" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_join" bpmnElement="join"><dc:Bounds x="870" y="510" width="60" height="60" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_e" bpmnElement="e"><dc:Bounds x="1080" y="630" width="36" height="36" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_g3" bpmnElement="g3"><dc:Bounds x="870" y="510" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_g4" bpmnElement="g4"><dc:Bounds x="1080" y="630" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_g5" bpmnElement="g5"><dc:Bounds x="1290" y="750" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_l1" bpmnElement="l1"><dc:Bounds x="450" y="1110" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_l2" bpmnElement="l2"><dc:Bounds x="660" y="1230" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_l3" bpmnElement="l3"><dc:Bounds x="870" y="1350" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_l4" bpmnElement="l4"><dc:Bounds x="1080" y="1470" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_a1" bpmnElement="a1"><dc:Bounds x="450" y="1590" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_a2" bpmnElement="a2"><dc:Bounds x="660" y="1710" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_a3" bpmnElement="a3"><dc:Bounds x="870" y="1830" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_join" bpmnElement="join"><dc:Bounds x="1500" y="870" width="60" height="60" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_e" bpmnElement="e"><dc:Bounds x="1710" y="990" width="36" height="36" /></bpmndi:BPMNShape>
 <bpmndi:BPMNEdge id="E_F_s_0" bpmnElement="F_s_0"><di:waypoint xsi:type="dc:Point" x="66" y="48" /><di:waypoint xsi:type="dc:Point" x="240" y="180" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_fork_1" bpmnElement="F_fork_1"><di:waypoint xsi:type="dc:Point" x="300" y="180" /><di:waypoint xsi:type="dc:Point" x="450" y="305" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_g1_2" bpmnElement="F_g1_2"><di:waypoint xsi:type="dc:Point" x="590" y="305" /><di:waypoint xsi:type="dc:Point" x="660" y="425" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_g2_3" bpmnElement="F_g2_3"><di:waypoint xsi:type="dc:Point" x="800" y="425" /><di:waypoint xsi:type="dc:Point" x="870" y="540" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_fork_4" bpmnElement="F_fork_4"><di:waypoint xsi:type="dc:Point" x="300" y="180" /><di:waypoint xsi:type="dc:Point" x="450" y="785" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_l1_5" bpmnElement="F_l1_5"><di:waypoint xsi:type="dc:Point" x="590" y="785" /><di:waypoint xsi:type="dc:Point" x="660" y="905" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_l2_6" bpmnElement="F_l2_6"><di:waypoint xsi:type="dc:Point" x="800" y="905" /><di:waypoint xsi:type="dc:Point" x="870" y="540" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_fork_7" bpmnElement="F_fork_7"><di:waypoint xsi:type="dc:Point" x="300" y="180" /><di:waypoint xsi:type="dc:Point" x="450" y="1025" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_a1_8" bpmnElement="F_a1_8"><di:waypoint xsi:type="dc:Point" x="590" y="1025" /><di:waypoint xsi:type="dc:Point" x="660" y="1145" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_a2_9" bpmnElement="F_a2_9"><di:waypoint xsi:type="dc:Point" x="800" y="1145" /><di:waypoint xsi:type="dc:Point" x="870" y="540" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_join_10" bpmnElement="F_join_10"><di:waypoint xsi:type="dc:Point" x="930" y="540" /><di:waypoint xsi:type="dc:Point" x="1080" y="648" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_g2_3" bpmnElement="F_g2_3"><di:waypoint xsi:type="dc:Point" x="800" y="425" /><di:waypoint xsi:type="dc:Point" x="870" y="545" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_g3_4" bpmnElement="F_g3_4"><di:waypoint xsi:type="dc:Point" x="1010" y="545" /><di:waypoint xsi:type="dc:Point" x="1080" y="665" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_g4_5" bpmnElement="F_g4_5"><di:waypoint xsi:type="dc:Point" x="1220" y="665" /><di:waypoint xsi:type="dc:Point" x="1290" y="785" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_g5_6" bpmnElement="F_g5_6"><di:waypoint xsi:type="dc:Point" x="1430" y="785" /><di:waypoint xsi:type="dc:Point" x="1500" y="900" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_fork_7" bpmnElement="F_fork_7"><di:waypoint xsi:type="dc:Point" x="300" y="180" /><di:waypoint xsi:type="dc:Point" x="450" y="1145" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_l1_8" bpmnElement="F_l1_8"><di:waypoint xsi:type="dc:Point" x="590" y="1145" /><di:waypoint xsi:type="dc:Point" x="660" y="1265" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_l2_9" bpmnElement="F_l2_9"><di:waypoint xsi:type="dc:Point" x="800" y="1265" /><di:waypoint xsi:type="dc:Point" x="870" y="1385" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_l3_10" bpmnElement="F_l3_10"><di:waypoint xsi:type="dc:Point" x="1010" y="1385" /><di:waypoint xsi:type="dc:Point" x="1080" y="1505" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_l4_11" bpmnElement="F_l4_11"><di:waypoint xsi:type="dc:Point" x="1220" y="1505" /><di:waypoint xsi:type="dc:Point" x="1500" y="900" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_fork_12" bpmnElement="F_fork_12"><di:waypoint xsi:type="dc:Point" x="300" y="180" /><di:waypoint xsi:type="dc:Point" x="450" y="1625" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_a1_13" bpmnElement="F_a1_13"><di:waypoint xsi:type="dc:Point" x="590" y="1625" /><di:waypoint xsi:type="dc:Point" x="660" y="1745" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_a2_14" bpmnElement="F_a2_14"><di:waypoint xsi:type="dc:Point" x="800" y="1745" /><di:waypoint xsi:type="dc:Point" x="870" y="1865" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_a3_15" bpmnElement="F_a3_15"><di:waypoint xsi:type="dc:Point" x="1010" y="1865" /><di:waypoint xsi:type="dc:Point" x="1500" y="900" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_join_16" bpmnElement="F_join_16"><di:waypoint xsi:type="dc:Point" x="1560" y="900" /><di:waypoint xsi:type="dc:Point" x="1710" y="1008" /></bpmndi:BPMNEdge>
 </bpmndi:BPMNPlane></bpmndi:BPMNDiagram></definitions>

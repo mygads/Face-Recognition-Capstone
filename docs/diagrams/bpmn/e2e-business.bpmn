@@ -39,8 +39,8 @@
 <startEvent id="s" name="Mulai"><outgoing>F_s_0</outgoing><outgoing>F_s_1</outgoing><outgoing>F_s_2</outgoing></startEvent>
 <task id="a1" name="Master data + import CSV"><incoming>F_s_0</incoming><outgoing>F_a1_3</outgoing></task>
 <task id="a2" name="Jadwal praktikum"><incoming>F_a1_3</incoming><incoming>F_a5_6</incoming><outgoing>F_a2_4</outgoing></task>
-<task id="a3" name="Enrollment wajah lokal Core API"><incoming>F_a2_4</incoming><outgoing>F_a3_5</outgoing></task>
-<task id="a4" name="Template terenkripsi + model name-version; bytes dibuang"><incoming>F_a3_5</incoming><outgoing>F_a4_7</outgoing></task>
+<task id="a3" name="Enrollment wajah lokal Core API: YuNet + SFace"><incoming>F_a2_4</incoming><outgoing>F_a3_5</outgoing></task>
+<task id="a4" name="Hanya template terenkripsi + model name-version tersimpan; bytes gambar dibuang"><incoming>F_a3_5</incoming><outgoing>F_a4_7</outgoing></task>
 <task id="a5" name="Managed config berversi ditarik device dan AI service"><incoming>F_s_2</incoming><outgoing>F_a5_6</outgoing></task>
 <task id="b1" name="Guru buka sesi + snapshot roster"><incoming>F_a4_7</incoming><outgoing>F_b1_8</outgoing></task>
 <task id="b2" name="Discovery gallery + cache expiry max 300 dtk"><incoming>F_b1_8</incoming><outgoing>F_b2_9</outgoing></task>
@@ -49,14 +49,14 @@
 <task id="b5" name="STB kirim burst max 5 JPEG ke AI service"><incoming>F_b3_11</incoming><outgoing>F_b5_12</outgoing></task>
 <task id="b6" name="Decision + kandidat tanpa image dan embedding"><incoming>F_b5_12</incoming><outgoing>F_b6_13</outgoing></task>
 <task id="b7" name="Event idempoten ke Core API"><incoming>F_b6_13</incoming><incoming>F_b4_14</incoming><outgoing>F_b7_15</outgoing></task>
-<exclusiveGateway id="b8" name="Keputusan Core API" gatewayDirection="Exclusive"><incoming>F_b7_15</incoming><outgoing>F_b8_16</outgoing><outgoing>F_b8_17</outgoing><outgoing>F_b8_18</outgoing></exclusiveGateway>
+<exclusiveGateway id="b8" name="Keputusan Core API: otoritas attendance tunggal" gatewayDirection="Exclusive"><incoming>F_b7_15</incoming><outgoing>F_b8_16</outgoing><outgoing>F_b8_17</outgoing><outgoing>F_b8_18</outgoing></exclusiveGateway>
 <task id="b9" name="Record present atau late"><incoming>F_b8_16</incoming><outgoing>F_b9_20</outgoing></task>
 <task id="b10" name="NEED_FRONTAL_RETRY: fallback frontal look"><incoming>F_b8_17</incoming><outgoing>F_b10_19</outgoing></task>
 <task id="b11" name="Event audit saja"><incoming>F_b8_18</incoming><outgoing>F_b11_21</outgoing></task>
 <task id="b12" name="Presensi manual bila perlu"><incoming>F_b9_20</incoming><outgoing>F_b12_22</outgoing></task>
 <task id="o1" name="Heartbeat device + camera status"><incoming>F_s_1</incoming><outgoing>F_o1_23</outgoing></task>
 <task id="o2" name="Cache dan gallery expiry"><incoming>F_o1_23</incoming><outgoing>F_o2_24</outgoing></task>
-<task id="o3" name="Health probe Core ke AI via ai-readiness"><incoming>F_o2_24</incoming><outgoing>F_o3_25</outgoing></task>
+<task id="o3" name="Health probe Core ke AI service via ai-readiness"><incoming>F_o2_24</incoming><outgoing>F_o3_25</outgoing></task>
 <task id="c1" name="Auto atau manual close sesi"><incoming>F_b11_21</incoming><incoming>F_b12_22</incoming><outgoing>F_c1_26</outgoing></task>
 <task id="c2" name="Laporan + ekspor"><incoming>F_c1_26</incoming><outgoing>F_c2_27</outgoing></task>
 <task id="c3" name="EWS watchlist"><incoming>F_c2_27</incoming><outgoing>F_c3_28</outgoing></task>
@@ -80,8 +80,8 @@
 <sequenceFlow id="F_b7_15" sourceRef="b7" targetRef="b8"></sequenceFlow>
 <sequenceFlow id="F_b8_16" sourceRef="b8" targetRef="b9"><conditionExpression xsi:type="tFormalExpression"><![CDATA[matched valid]]></conditionExpression></sequenceFlow>
 <sequenceFlow id="F_b8_17" sourceRef="b8" targetRef="b10"><conditionExpression xsi:type="tFormalExpression"><![CDATA[ambigu]]></conditionExpression></sequenceFlow>
-<sequenceFlow id="F_b8_18" sourceRef="b8" targetRef="b11"><conditionExpression xsi:type="tFormalExpression"><![CDATA[duplikat/kedaluwarsa]]></conditionExpression></sequenceFlow>
-<sequenceFlow id="F_b10_19" sourceRef="b10" targetRef="b4"><conditionExpression xsi:type="tFormalExpression"><![CDATA[fallback]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_b8_18" sourceRef="b8" targetRef="b11"><conditionExpression xsi:type="tFormalExpression"><![CDATA[duplikat atau kedaluwarsa]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_b10_19" sourceRef="b10" targetRef="b4"></sequenceFlow>
 <sequenceFlow id="F_b9_20" sourceRef="b9" targetRef="b12"></sequenceFlow>
 <sequenceFlow id="F_b11_21" sourceRef="b11" targetRef="c1"></sequenceFlow>
 <sequenceFlow id="F_b12_22" sourceRef="b12" targetRef="c1"></sequenceFlow>

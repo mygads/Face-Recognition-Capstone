@@ -4,20 +4,20 @@ start
 :Pilih filter tanggal-kelas-lab-sesi;
 :Batasi scope: guru hanya jadwal miliknya;
 :Agregat session_students + records;
-if (Baris tanpa record?) then (sesi open)
+if (Baris tanpa record?) then (Sesi open)
   :Tampilkan not_recorded;
-elseif (sesi closed) then
+elseif (Sesi closed)
   :Tampilkan absent;
 endif
-if (Ekspor?) then (tidak)
+if (Ekspor?) then (Tidak)
   :Tabel paginasi;
   stop
-else (ya)
+else (Ya)
 endif
-if (Lebih dari 50rb baris?) then (ya)
+if (Lebih dari 50rb baris?) then (Ya)
   :Tolak 413: persempit filter;
   stop
-else (tidak)
+else (Tidak)
   :CSV BOM atau XLSX tanpa skor AI + anti formula-injection;
   :Unduh;
   stop

@@ -1,66 +1,66 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" id="DEF_f11-device" targetNamespace="http://presensi/school">
 <process id="P_f11-device" name="F-11 Perangkat" isExecutable="false">
-<startEvent id="s" name="Mulai"><outgoing>F_s_0</outgoing></startEvent>
-<task id="reg" name="Registrasi device + lab + profile"><incoming>F_s_0</incoming><outgoing>F_reg_1</outgoing></task>
-<parallelGateway id="fork" name="Fork"><incoming>F_reg_1</incoming><outgoing>F_fork_2</outgoing><outgoing>F_fork_5</outgoing><outgoing>F_fork_7</outgoing><outgoing>F_fork_9</outgoing></parallelGateway>
-<task id="t1a" name="Provision bearer sekali pakai"><incoming>F_fork_2</incoming><outgoing>F_t1a_3</outgoing></task>
-<task id="t1b" name="Rotate token + overlap singkat"><incoming>F_t1a_3</incoming><outgoing>F_t1b_4</outgoing></task>
-<task id="t2" name="Update registry atau lab assignment"><incoming>F_fork_5</incoming><outgoing>F_t2_6</outgoing></task>
-<task id="t3" name="Jeda atau aktifkan kamera: matching berhenti, heartbeat jalan"><incoming>F_fork_7</incoming><outgoing>F_t3_8</outgoing></task>
-<task id="t4" name="Nonaktif: revoke kredensial + kamera offline"><incoming>F_fork_9</incoming><outgoing>F_t4_10</outgoing></task>
-<parallelGateway id="join" name="Join"><incoming>F_t1b_4</incoming><incoming>F_t2_6</incoming><incoming>F_t3_8</incoming><incoming>F_t4_10</incoming><outgoing>F_join_11</outgoing></parallelGateway>
-<endEvent id="e" name="Selesai"><incoming>F_join_11</incoming></endEvent>
-<startEvent id="s2" name="Operasi kontinu"><outgoing>F_s2_12</outgoing></startEvent>
-<task id="hb" name="Heartbeat + camera_status + latency + metrik"><incoming>F_s2_12</incoming><incoming>F_gal_15</incoming><outgoing>F_hb_13</outgoing></task>
-<task id="disc" name="Discover sesi aktif lab ini"><incoming>F_hb_13</incoming><outgoing>F_disc_14</outgoing></task>
-<task id="gal" name="Tarik gallery sesi dan kirim recognition-event idempoten"><incoming>F_disc_14</incoming><outgoing>F_gal_15</outgoing></task>
-<sequenceFlow id="F_s_0" sourceRef="s" targetRef="reg"></sequenceFlow>
-<sequenceFlow id="F_reg_1" sourceRef="reg" targetRef="fork"></sequenceFlow>
-<sequenceFlow id="F_fork_2" sourceRef="fork" targetRef="t1a"></sequenceFlow>
-<sequenceFlow id="F_t1a_3" sourceRef="t1a" targetRef="t1b"></sequenceFlow>
-<sequenceFlow id="F_t1b_4" sourceRef="t1b" targetRef="join"></sequenceFlow>
-<sequenceFlow id="F_fork_5" sourceRef="fork" targetRef="t2"></sequenceFlow>
-<sequenceFlow id="F_t2_6" sourceRef="t2" targetRef="join"></sequenceFlow>
-<sequenceFlow id="F_fork_7" sourceRef="fork" targetRef="t3"></sequenceFlow>
-<sequenceFlow id="F_t3_8" sourceRef="t3" targetRef="join"></sequenceFlow>
-<sequenceFlow id="F_fork_9" sourceRef="fork" targetRef="t4"></sequenceFlow>
-<sequenceFlow id="F_t4_10" sourceRef="t4" targetRef="join"></sequenceFlow>
-<sequenceFlow id="F_join_11" sourceRef="join" targetRef="e"></sequenceFlow>
-<sequenceFlow id="F_s2_12" sourceRef="s2" targetRef="hb"></sequenceFlow>
-<sequenceFlow id="F_hb_13" sourceRef="hb" targetRef="disc"></sequenceFlow>
-<sequenceFlow id="F_disc_14" sourceRef="disc" targetRef="gal"></sequenceFlow>
-<sequenceFlow id="F_gal_15" sourceRef="gal" targetRef="hb"><conditionExpression xsi:type="tFormalExpression"><![CDATA[lanjutkan]]></conditionExpression></sequenceFlow>
+<laneSet id="LS_f11-device">
+<lane id="L_f11-device_0" name="ADMIN saja">
+<flowNodeRef>a1</flowNodeRef>
+<flowNodeRef>a2</flowNodeRef>
+<flowNodeRef>a3</flowNodeRef>
+<flowNodeRef>a4</flowNodeRef>
+<flowNodeRef>a5</flowNodeRef>
+<flowNodeRef>a6</flowNodeRef>
+<flowNodeRef>e</flowNodeRef>
+</lane>
+<lane id="L_f11-device_1" name="LABORANT dan device">
+<flowNodeRef>b1</flowNodeRef>
+<flowNodeRef>b2</flowNodeRef>
+<flowNodeRef>b3</flowNodeRef>
+</lane>
+</laneSet>
+<startEvent id="a1" name="Registrasi device + lab + profile"><outgoing>F_a1_0</outgoing><outgoing>F_a1_3</outgoing><outgoing>F_a1_5</outgoing><outgoing>F_a1_7</outgoing></startEvent>
+<task id="a2" name="Provision bearer sekali pakai"><incoming>F_a1_0</incoming><outgoing>F_a2_1</outgoing></task>
+<task id="a3" name="Rotate token + overlap singkat"><incoming>F_a2_1</incoming><outgoing>F_a3_2</outgoing></task>
+<task id="a4" name="Update registry atau lab assignment"><incoming>F_a1_3</incoming><outgoing>F_a4_4</outgoing></task>
+<task id="a5" name="Jeda atau aktifkan kamera: matching berhenti, heartbeat jalan"><incoming>F_a1_5</incoming><outgoing>F_a5_6</outgoing></task>
+<task id="a6" name="Nonaktif: revoke kredensial + kamera offline"><incoming>F_a1_7</incoming><outgoing>F_a6_8</outgoing></task>
+<endEvent id="e" name="Selesai"><incoming>F_a3_2</incoming><incoming>F_a4_4</incoming><incoming>F_a5_6</incoming><incoming>F_a6_8</incoming></endEvent>
+<task id="b1" name="Heartbeat + camera_status + latency + metrik"><incoming>F_b3_11</incoming><outgoing>F_b1_9</outgoing></task>
+<task id="b2" name="Discover sesi aktif lab ini"><incoming>F_b1_9</incoming><outgoing>F_b2_10</outgoing></task>
+<task id="b3" name="Tarik gallery sesi dan kirim recognition-event idempoten"><incoming>F_b2_10</incoming><outgoing>F_b3_11</outgoing></task>
+<sequenceFlow id="F_a1_0" sourceRef="a1" targetRef="a2"></sequenceFlow>
+<sequenceFlow id="F_a2_1" sourceRef="a2" targetRef="a3"></sequenceFlow>
+<sequenceFlow id="F_a3_2" sourceRef="a3" targetRef="e"></sequenceFlow>
+<sequenceFlow id="F_a1_3" sourceRef="a1" targetRef="a4"></sequenceFlow>
+<sequenceFlow id="F_a4_4" sourceRef="a4" targetRef="e"></sequenceFlow>
+<sequenceFlow id="F_a1_5" sourceRef="a1" targetRef="a5"></sequenceFlow>
+<sequenceFlow id="F_a5_6" sourceRef="a5" targetRef="e"></sequenceFlow>
+<sequenceFlow id="F_a1_7" sourceRef="a1" targetRef="a6"></sequenceFlow>
+<sequenceFlow id="F_a6_8" sourceRef="a6" targetRef="e"></sequenceFlow>
+<sequenceFlow id="F_b1_9" sourceRef="b1" targetRef="b2"></sequenceFlow>
+<sequenceFlow id="F_b2_10" sourceRef="b2" targetRef="b3"></sequenceFlow>
+<sequenceFlow id="F_b3_11" sourceRef="b3" targetRef="b1"></sequenceFlow>
 </process>
 <bpmndi:BPMNDiagram id="DG_f11-device"><bpmndi:BPMNPlane id="PL_f11-device" bpmnElement="P_f11-device">
-<bpmndi:BPMNShape id="S_s" bpmnElement="s"><dc:Bounds x="30" y="30" width="36" height="36" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_reg" bpmnElement="reg"><dc:Bounds x="240" y="150" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_fork" bpmnElement="fork"><dc:Bounds x="450" y="270" width="60" height="60" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_t1a" bpmnElement="t1a"><dc:Bounds x="660" y="390" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_t1b" bpmnElement="t1b"><dc:Bounds x="870" y="510" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_t2" bpmnElement="t2"><dc:Bounds x="660" y="870" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_t3" bpmnElement="t3"><dc:Bounds x="660" y="990" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_t4" bpmnElement="t4"><dc:Bounds x="660" y="1110" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_join" bpmnElement="join"><dc:Bounds x="1080" y="630" width="60" height="60" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_e" bpmnElement="e"><dc:Bounds x="1290" y="750" width="36" height="36" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_s2" bpmnElement="s2"><dc:Bounds x="1500" y="1230" width="36" height="36" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_hb" bpmnElement="hb"><dc:Bounds x="1710" y="1350" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_disc" bpmnElement="disc"><dc:Bounds x="1920" y="1470" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_gal" bpmnElement="gal"><dc:Bounds x="2130" y="1590" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNEdge id="E_F_s_0" bpmnElement="F_s_0"><di:waypoint xsi:type="dc:Point" x="66" y="48" /><di:waypoint xsi:type="dc:Point" x="240" y="185" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_reg_1" bpmnElement="F_reg_1"><di:waypoint xsi:type="dc:Point" x="380" y="185" /><di:waypoint xsi:type="dc:Point" x="450" y="300" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_fork_2" bpmnElement="F_fork_2"><di:waypoint xsi:type="dc:Point" x="510" y="300" /><di:waypoint xsi:type="dc:Point" x="660" y="425" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_t1a_3" bpmnElement="F_t1a_3"><di:waypoint xsi:type="dc:Point" x="800" y="425" /><di:waypoint xsi:type="dc:Point" x="870" y="545" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_t1b_4" bpmnElement="F_t1b_4"><di:waypoint xsi:type="dc:Point" x="1010" y="545" /><di:waypoint xsi:type="dc:Point" x="1080" y="660" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_fork_5" bpmnElement="F_fork_5"><di:waypoint xsi:type="dc:Point" x="510" y="300" /><di:waypoint xsi:type="dc:Point" x="660" y="905" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_t2_6" bpmnElement="F_t2_6"><di:waypoint xsi:type="dc:Point" x="800" y="905" /><di:waypoint xsi:type="dc:Point" x="1080" y="660" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_fork_7" bpmnElement="F_fork_7"><di:waypoint xsi:type="dc:Point" x="510" y="300" /><di:waypoint xsi:type="dc:Point" x="660" y="1025" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_t3_8" bpmnElement="F_t3_8"><di:waypoint xsi:type="dc:Point" x="800" y="1025" /><di:waypoint xsi:type="dc:Point" x="1080" y="660" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_fork_9" bpmnElement="F_fork_9"><di:waypoint xsi:type="dc:Point" x="510" y="300" /><di:waypoint xsi:type="dc:Point" x="660" y="1145" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_t4_10" bpmnElement="F_t4_10"><di:waypoint xsi:type="dc:Point" x="800" y="1145" /><di:waypoint xsi:type="dc:Point" x="1080" y="660" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_join_11" bpmnElement="F_join_11"><di:waypoint xsi:type="dc:Point" x="1140" y="660" /><di:waypoint xsi:type="dc:Point" x="1290" y="768" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_s2_12" bpmnElement="F_s2_12"><di:waypoint xsi:type="dc:Point" x="1536" y="1248" /><di:waypoint xsi:type="dc:Point" x="1710" y="1385" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_hb_13" bpmnElement="F_hb_13"><di:waypoint xsi:type="dc:Point" x="1850" y="1385" /><di:waypoint xsi:type="dc:Point" x="1920" y="1505" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_disc_14" bpmnElement="F_disc_14"><di:waypoint xsi:type="dc:Point" x="2060" y="1505" /><di:waypoint xsi:type="dc:Point" x="2130" y="1625" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_gal_15" bpmnElement="F_gal_15"><di:waypoint xsi:type="dc:Point" x="2270" y="1625" /><di:waypoint xsi:type="dc:Point" x="2320" y="1625" /><di:waypoint xsi:type="dc:Point" x="2320" y="1385" /><di:waypoint xsi:type="dc:Point" x="1850" y="1385" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNShape id="S_a1" bpmnElement="a1"><dc:Bounds x="30" y="50" width="36" height="36" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_a2" bpmnElement="a2"><dc:Bounds x="240" y="170" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_a3" bpmnElement="a3"><dc:Bounds x="450" y="290" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_a4" bpmnElement="a4"><dc:Bounds x="240" y="530" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_a5" bpmnElement="a5"><dc:Bounds x="240" y="650" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_a6" bpmnElement="a6"><dc:Bounds x="240" y="770" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_e" bpmnElement="e"><dc:Bounds x="660" y="410" width="36" height="36" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_b1" bpmnElement="b1"><dc:Bounds x="870" y="940" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_b2" bpmnElement="b2"><dc:Bounds x="1080" y="1060" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_b3" bpmnElement="b3"><dc:Bounds x="1290" y="1180" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNEdge id="E_F_a1_0" bpmnElement="F_a1_0"><di:waypoint xsi:type="dc:Point" x="66" y="68" /><di:waypoint xsi:type="dc:Point" x="240" y="205" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_a2_1" bpmnElement="F_a2_1"><di:waypoint xsi:type="dc:Point" x="380" y="205" /><di:waypoint xsi:type="dc:Point" x="450" y="325" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_a3_2" bpmnElement="F_a3_2"><di:waypoint xsi:type="dc:Point" x="590" y="325" /><di:waypoint xsi:type="dc:Point" x="660" y="428" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_a1_3" bpmnElement="F_a1_3"><di:waypoint xsi:type="dc:Point" x="66" y="68" /><di:waypoint xsi:type="dc:Point" x="240" y="565" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_a4_4" bpmnElement="F_a4_4"><di:waypoint xsi:type="dc:Point" x="380" y="565" /><di:waypoint xsi:type="dc:Point" x="660" y="428" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_a1_5" bpmnElement="F_a1_5"><di:waypoint xsi:type="dc:Point" x="66" y="68" /><di:waypoint xsi:type="dc:Point" x="240" y="685" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_a5_6" bpmnElement="F_a5_6"><di:waypoint xsi:type="dc:Point" x="380" y="685" /><di:waypoint xsi:type="dc:Point" x="660" y="428" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_a1_7" bpmnElement="F_a1_7"><di:waypoint xsi:type="dc:Point" x="66" y="68" /><di:waypoint xsi:type="dc:Point" x="240" y="805" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_a6_8" bpmnElement="F_a6_8"><di:waypoint xsi:type="dc:Point" x="380" y="805" /><di:waypoint xsi:type="dc:Point" x="660" y="428" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_b1_9" bpmnElement="F_b1_9"><di:waypoint xsi:type="dc:Point" x="1010" y="975" /><di:waypoint xsi:type="dc:Point" x="1080" y="1095" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_b2_10" bpmnElement="F_b2_10"><di:waypoint xsi:type="dc:Point" x="1220" y="1095" /><di:waypoint xsi:type="dc:Point" x="1290" y="1215" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_b3_11" bpmnElement="F_b3_11"><di:waypoint xsi:type="dc:Point" x="1430" y="1215" /><di:waypoint xsi:type="dc:Point" x="1480" y="1215" /><di:waypoint xsi:type="dc:Point" x="1480" y="975" /><di:waypoint xsi:type="dc:Point" x="1010" y="975" /></bpmndi:BPMNEdge>
 </bpmndi:BPMNPlane></bpmndi:BPMNDiagram></definitions>

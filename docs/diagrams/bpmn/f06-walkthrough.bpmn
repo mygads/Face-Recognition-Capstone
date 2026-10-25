@@ -4,7 +4,7 @@
 <startEvent id="s" name="Mulai"><outgoing>F_s_0</outgoing></startEvent>
 <task id="send" name="Track ACCEPTED kirim matched + kandidat"><incoming>F_s_0</incoming><outgoing>F_send_1</outgoing></task>
 <exclusiveGateway id="known" name="Sesi dan device dikenal?" gatewayDirection="Exclusive"><incoming>F_send_1</incoming><outgoing>F_known_2</outgoing><outgoing>F_known_4</outgoing></exclusiveGateway>
-<task id="e404" name="404 session_not_found / device_not_found; tanpa event"><incoming>F_known_2</incoming><outgoing>F_e404_3</outgoing></task>
+<task id="e404" name="404 session_not_found atau device_not_found; tanpa event"><incoming>F_known_2</incoming><outgoing>F_e404_3</outgoing></task>
 <endEvent id="en404" name="Selesai"><incoming>F_e404_3</incoming></endEvent>
 <exclusiveGateway id="rp" name="event_id dikenal?" gatewayDirection="Exclusive"><incoming>F_known_4</incoming><outgoing>F_rp_5</outgoing><outgoing>F_rp_7</outgoing><outgoing>F_rp_9</outgoing></exclusiveGateway>
 <task id="old" name="200 hasil tersimpan; replayed true"><incoming>F_rp_5</incoming><outgoing>F_old_6</outgoing></task>
@@ -16,16 +16,16 @@
 <task id="r1" name="Event reason session_not_accessible"><incoming>F_v1_11</incoming><outgoing>F_r1_12</outgoing></task>
 <endEvent id="er1" name="Selesai"><incoming>F_r1_12</incoming></endEvent>
 <exclusiveGateway id="v2" name="Device aktif, kamera on, lab sama?" gatewayDirection="Exclusive"><incoming>F_v1_13</incoming><outgoing>F_v2_14</outgoing><outgoing>F_v2_16</outgoing></exclusiveGateway>
-<task id="r2" name="Event reason device_inactive / device_camera_disabled / device_laboratory_mismatch"><incoming>F_v2_14</incoming><outgoing>F_r2_15</outgoing></task>
+<task id="r2" name="Event reason device_inactive, device_camera_disabled, atau device_laboratory_mismatch"><incoming>F_v2_14</incoming><outgoing>F_r2_15</outgoing></task>
 <endEvent id="er2" name="Selesai"><incoming>F_r2_15</incoming></endEvent>
 <exclusiveGateway id="v3" name="Sesi berjalan?" gatewayDirection="Exclusive"><incoming>F_v2_16</incoming><outgoing>F_v3_17</outgoing><outgoing>F_v3_19</outgoing></exclusiveGateway>
 <task id="r3" name="Event reason session_inactive"><incoming>F_v3_17</incoming><outgoing>F_r3_18</outgoing></task>
 <endEvent id="er3" name="Selesai"><incoming>F_r3_18</incoming></endEvent>
 <exclusiveGateway id="v4" name="Kandidat di snapshot roster?" gatewayDirection="Exclusive"><incoming>F_v3_19</incoming><outgoing>F_v4_20</outgoing><outgoing>F_v4_22</outgoing></exclusiveGateway>
-<task id="r4" name="Event reason student_not_found / student_not_in_session_roster"><incoming>F_v4_20</incoming><outgoing>F_r4_21</outgoing></task>
+<task id="r4" name="Event reason student_not_found atau student_not_in_session_roster"><incoming>F_v4_20</incoming><outgoing>F_r4_21</outgoing></task>
 <endEvent id="er4" name="Selesai"><incoming>F_r4_21</incoming></endEvent>
 <exclusiveGateway id="v5" name="Outcome matched dan liveness lolos?" gatewayDirection="Exclusive"><incoming>F_v4_22</incoming><outgoing>F_v5_23</outgoing><outgoing>F_v5_25</outgoing></exclusiveGateway>
-<task id="r5" name="Event reason recognition_not_matched / liveness_failed"><incoming>F_v5_23</incoming><outgoing>F_r5_24</outgoing></task>
+<task id="r5" name="Event reason recognition_not_matched atau liveness_failed"><incoming>F_v5_23</incoming><outgoing>F_r5_24</outgoing></task>
 <endEvent id="er5" name="Selesai"><incoming>F_r5_24</incoming></endEvent>
 <exclusiveGateway id="v6" name="Sudah ada record sesi dan siswa?" gatewayDirection="Exclusive"><incoming>F_v5_25</incoming><outgoing>F_v6_26</outgoing><outgoing>F_v6_28</outgoing></exclusiveGateway>
 <task id="r6" name="Event reason attendance_already_recorded"><incoming>F_v6_26</incoming><outgoing>F_r6_27</outgoing></task>

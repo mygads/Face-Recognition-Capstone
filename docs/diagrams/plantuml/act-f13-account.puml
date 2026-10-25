@@ -1,13 +1,13 @@
 @startuml
-' Activity F-13/F-14 Akun + audit — docs/proposal/05-activity.md §5.13
+' Activity F-13 Akun dan audit — docs/proposal/05-activity.md §5.13
 start
 :Admin buat akun: email unik + role;
 :Akun aktif; password awal wajib diganti;
-if (Ganti password?) then (ya)
+if (Ganti password?) then (Ya)
   :Password baru: sesi lama di-revoke semua;
-  :Selesai dan audit;
-else (tidak)
+else (Tidak)
 endif
+:Selesai dan audit;
 stop
 
 note right

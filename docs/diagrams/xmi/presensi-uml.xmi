@@ -5,22 +5,22 @@
 <packagedElement xmi:type="uml:Actor" xmi:id="A_TCH" name="TEACHER"/>
 <packagedElement xmi:type="uml:Actor" xmi:id="A_LAB" name="LABORANT"/>
 <packagedElement xmi:type="uml:Actor" xmi:id="A_DEV" name="DEVICE service"/>
-<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC1" name="UC1 UC1 Login dan ganti password"/>
-<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC2" name="UC2 UC2 Kelola master dan import"/>
-<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC3" name="UC3 UC3 Kelola akun staf"/>
-<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC4" name="UC4 UC4 Enrollment wajah"/>
-<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC5" name="UC5 UC5 Kelola jadwal"/>
-<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC6" name="UC6 UC6 Buka dan tutup sesi"/>
-<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC7" name="UC7 UC7 Presensi walk-through otomatis"/>
-<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC8" name="UC8 UC8 Presensi manual"/>
-<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC9" name="UC9 UC9 Ajukan koreksi"/>
-<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC10" name="UC10 UC10 Pantau dashboard live"/>
-<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC11" name="UC11 UC11 Laporan dan ekspor"/>
-<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC12" name="UC12 UC12 Lihat daftar at-risk"/>
-<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC13" name="UC13 UC13 Atur ambang EWS"/>
-<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC14" name="UC14 UC14 Kelola perangkat dan AI config"/>
-<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC15" name="UC15 UC15 Preview kamera pra-sesi"/>
-<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC16" name="UC16 UC16 Audit tercatat otomatis"/>
+<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC1" name="UC1 Login dan ganti password"/>
+<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC2" name="UC2 Kelola master dan import"/>
+<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC3" name="UC3 Kelola akun staf"/>
+<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC4" name="UC4 Enrollment wajah"/>
+<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC5" name="UC5 Kelola jadwal"/>
+<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC6" name="UC6 Buka dan tutup sesi"/>
+<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC7" name="UC7 Presensi walk-through otomatis"/>
+<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC8" name="UC8 Presensi manual"/>
+<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC9" name="UC9 Ajukan koreksi"/>
+<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC10" name="UC10 Pantau dashboard live"/>
+<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC11" name="UC11 Laporan dan ekspor"/>
+<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC12" name="UC12 Lihat daftar at-risk"/>
+<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC13" name="UC13 Atur ambang EWS"/>
+<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC14" name="UC14 Kelola perangkat dan AI config"/>
+<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC15" name="UC15 Preview kamera pra-sesi"/>
+<packagedElement xmi:type="uml:UseCase" xmi:id="U_UC16" name="UC16 Audit tercatat otomatis"/>
 <packagedElement xmi:type="uml:UseCase" xmi:id="U_PREV" name="PREV Preview validasi import"/>
 <packagedElement xmi:type="uml:UseCase" xmi:id="U_QG" name="QG Quality gate capture"/>
 <packagedElement xmi:type="uml:UseCase" xmi:id="U_RB" name="RB Revoke batch dulu"/>
@@ -165,7 +165,7 @@
 <ownedAttribute xmi:id="C_FaceTemplate_a6" name="created_by_user_id" visibility="public"><type xmi:type="uml:PrimitiveType" href="http://www.omg.org/spec/UML/20131001/PrimitiveTypes.xmi#UUID"/></ownedAttribute>
 <ownedAttribute xmi:id="C_FaceTemplate_a7" name="revoked_at" visibility="public"><type xmi:type="uml:PrimitiveType" href="http://www.omg.org/spec/UML/20131001/PrimitiveTypes.xmi#DateTime"/></ownedAttribute>
 <ownedAttribute xmi:id="C_FaceTemplate_a8" name="revoked_by_user_id" visibility="public"><type xmi:type="uml:PrimitiveType" href="http://www.omg.org/spec/UML/20131001/PrimitiveTypes.xmi#UUID"/></ownedAttribute>
-<ownedAttribute xmi:id="C_FaceTemplate_a9" name="+revoke()"/>
+<ownedOperation xmi:id="C_FaceTemplate_o9" name="revoke"/>
 </packagedElement>
 <packagedElement xmi:type="uml:Class" xmi:id="C_AttendanceSession" name="AttendanceSession">
 <ownedAttribute xmi:id="C_AttendanceSession_a0" name="id" visibility="public"><type xmi:type="uml:PrimitiveType" href="http://www.omg.org/spec/UML/20131001/PrimitiveTypes.xmi#UUID"/></ownedAttribute>
@@ -282,7 +282,7 @@
 <packagedElement xmi:type="uml:Association" xmi:id="CA20" name="terpasang"><memberEnd xmi:idref="CA20_A"/><memberEnd xmi:idref="CA20_B"/><ownedEnd xmi:id="CA20_A" name="" type="C_Laboratory" association="CA20"><lowerValue xmi:type="uml:LiteralInteger" xmi:id="CA20A_L" value="1"/><upperValue xmi:type="uml:LiteralInteger" xmi:id="CA20A_U" value="1"/></ownedEnd><ownedEnd xmi:id="CA20_B" name="" type="C_Device" association="CA20"><lowerValue xmi:type="uml:LiteralInteger" xmi:id="CA20B_L" value="0"/><upperValue xmi:type="uml:LiteralUnlimitedNatural" xmi:id="CA20B_U" value="*"/></ownedEnd></packagedElement>
 <packagedElement xmi:type="uml:Association" xmi:id="CA21" name="menerbitkan (nullable)"><memberEnd xmi:idref="CA21_A"/><memberEnd xmi:idref="CA21_B"/><ownedEnd xmi:id="CA21_A" name="" type="C_User" association="CA21"><lowerValue xmi:type="uml:LiteralInteger" xmi:id="CA21A_L" value="1"/><upperValue xmi:type="uml:LiteralInteger" xmi:id="CA21A_U" value="1"/></ownedEnd><ownedEnd xmi:id="CA21_B" name="" type="C_RuntimeConfigurationVersion" association="CA21"><lowerValue xmi:type="uml:LiteralInteger" xmi:id="CA21B_L" value="0"/><upperValue xmi:type="uml:LiteralUnlimitedNatural" xmi:id="CA21B_U" value="*"/></ownedEnd></packagedElement>
 <packagedElement xmi:type="uml:Association" xmi:id="CA22" name="scope attendance-at-risk-policy"><memberEnd xmi:idref="CA22_A"/><memberEnd xmi:idref="CA22_B"/><ownedEnd xmi:id="CA22_A" name="" type="C_RuntimeConfigurationVersion" association="CA22"><lowerValue xmi:type="uml:LiteralInteger" xmi:id="CA22A_L" value="1"/><upperValue xmi:type="uml:LiteralInteger" xmi:id="CA22A_U" value="1"/></ownedEnd><ownedEnd xmi:id="CA22_B" name="" type="C_AtRiskPolicy" association="CA22"><lowerValue xmi:type="uml:LiteralInteger" xmi:id="CA22B_L" value="0"/><upperValue xmi:type="uml:LiteralInteger" xmi:id="CA22B_U" value="1"/></ownedEnd></packagedElement>
-<packagedElement xmi:type="uml:Association" xmi:id="CA23" name="menghitung flag"><memberEnd xmi:idref="CA23_A"/><memberEnd xmi:idref="CA23_B"/><ownedEnd xmi:id="CA23_A" name="" type="C_AtRiskPolicy" association="CA23"></ownedEnd><ownedEnd xmi:id="CA23_B" name="" type="C_Student" association="CA23"></ownedEnd></packagedElement>
+<packagedElement xmi:type="uml:Dependency" xmi:id="CD23" name="menghitung flag"><client xmi:idref="C_AtRiskPolicy"/><supplier xmi:idref="C_Student"/></packagedElement>
 <packagedElement xmi:type="uml:Association" xmi:id="CA24" name="U-02 usulan (belum tabel)"><memberEnd xmi:idref="CA24_A"/><memberEnd xmi:idref="CA24_B"/><ownedEnd xmi:id="CA24_A" name="" type="C_Student" association="CA24"><lowerValue xmi:type="uml:LiteralInteger" xmi:id="CA24A_L" value="1"/><upperValue xmi:type="uml:LiteralInteger" xmi:id="CA24A_U" value="1"/></ownedEnd><ownedEnd xmi:id="CA24_B" name="" type="C_EwsFollowUp" association="CA24"><lowerValue xmi:type="uml:LiteralInteger" xmi:id="CA24B_L" value="0"/><upperValue xmi:type="uml:LiteralUnlimitedNatural" xmi:id="CA24B_U" value="*"/></ownedEnd></packagedElement>
 <packagedElement xmi:type="uml:Association" xmi:id="CA25" name="aktor (nullable)"><memberEnd xmi:idref="CA25_A"/><memberEnd xmi:idref="CA25_B"/><ownedEnd xmi:id="CA25_A" name="" type="C_User" association="CA25"><lowerValue xmi:type="uml:LiteralInteger" xmi:id="CA25A_L" value="1"/><upperValue xmi:type="uml:LiteralInteger" xmi:id="CA25A_U" value="1"/></ownedEnd><ownedEnd xmi:id="CA25_B" name="" type="C_AuditLog" association="CA25"><lowerValue xmi:type="uml:LiteralInteger" xmi:id="CA25B_L" value="0"/><upperValue xmi:type="uml:LiteralUnlimitedNatural" xmi:id="CA25B_U" value="*"/></ownedEnd></packagedElement>
 </uml:Model></xmi:XMI>

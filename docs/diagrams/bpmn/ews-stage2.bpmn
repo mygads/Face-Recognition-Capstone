@@ -3,9 +3,9 @@
 <process id="P_ews-stage2" name="EWS tahap 2 usulan (09.2)" isExecutable="false">
 <startEvent id="s" name="Mulai"><outgoing>F_s_0</outgoing></startEvent>
 <task id="flag" name="Flag at-risk"><incoming>F_s_0</incoming><outgoing>F_flag_1</outgoing></task>
-<exclusiveGateway id="cal" name="Ambang hasil kalibrasi sekolah?" gatewayDirection="Exclusive"><incoming>F_flag_1</incoming><incoming>F_ba_3</incoming><outgoing>F_cal_2</outgoing><outgoing>F_cal_4</outgoing></exclusiveGateway>
+<exclusiveGateway id="cal" name="Ambang hasil kalibrasi sekolah? U-01" gatewayDirection="Exclusive"><incoming>F_flag_1</incoming><incoming>F_ba_3</incoming><outgoing>F_cal_2</outgoing><outgoing>F_cal_4</outgoing></exclusiveGateway>
 <task id="ba" name="Berita acara kalibrasi"><incoming>F_cal_2</incoming><outgoing>F_ba_3</outgoing></task>
-<task id="t" name="Tindak lanjut U-02"><incoming>F_cal_4</incoming><outgoing>F_t_5</outgoing></task>
+<task id="t" name="Tindak lanjut U-02: pemanggilan-konseling-surat-selesai"><incoming>F_cal_4</incoming><outgoing>F_t_5</outgoing></task>
 <exclusiveGateway id="g1" name="Guru tangani?" gatewayDirection="Exclusive"><incoming>F_t_5</incoming><outgoing>F_g1_6</outgoing><outgoing>F_g1_7</outgoing></exclusiveGateway>
 <task id="cat" name="Catat stage + note beraudit"><incoming>F_g1_6</incoming><incoming>F_esc_8</incoming><outgoing>F_cat_9</outgoing></task>
 <task id="esc" name="Eskalasi U-04: wali kelas lalu BK"><incoming>F_g1_7</incoming><outgoing>F_esc_8</outgoing></task>
@@ -15,7 +15,7 @@
 <sequenceFlow id="F_s_0" sourceRef="s" targetRef="flag"></sequenceFlow>
 <sequenceFlow id="F_flag_1" sourceRef="flag" targetRef="cal"></sequenceFlow>
 <sequenceFlow id="F_cal_2" sourceRef="cal" targetRef="ba"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Belum]]></conditionExpression></sequenceFlow>
-<sequenceFlow id="F_ba_3" sourceRef="ba" targetRef="cal"><conditionExpression xsi:type="tFormalExpression"><![CDATA[ulangi]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_ba_3" sourceRef="ba" targetRef="cal"></sequenceFlow>
 <sequenceFlow id="F_cal_4" sourceRef="cal" targetRef="t"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Sudah]]></conditionExpression></sequenceFlow>
 <sequenceFlow id="F_t_5" sourceRef="t" targetRef="g1"></sequenceFlow>
 <sequenceFlow id="F_g1_6" sourceRef="g1" targetRef="cat"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>

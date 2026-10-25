@@ -14,10 +14,10 @@
 <mxCell id="e2" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="v2" target="v3"><mxGeometry relative="1" as="geometry"/></mxCell>
 <mxCell id="e3" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="v3" target="v4" value="Tidak"><mxGeometry relative="1" as="geometry"/></mxCell>
 <mxCell id="e4" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="v3" target="v5" value="Ya"><mxGeometry relative="1" as="geometry"/></mxCell>
-<mxCell id="e5" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="v4" target="v1" value="ulangi"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e5" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="v4" target="v1"><mxGeometry relative="1" as="geometry"/></mxCell>
 <mxCell id="e6" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="v5" target="v6"><mxGeometry relative="1" as="geometry"/></mxCell>
 <mxCell id="e7" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="v6" target="v7" value="Ya"><mxGeometry relative="1" as="geometry"/></mxCell>
 <mxCell id="e8" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="v6" target="v8" value="Tidak"><mxGeometry relative="1" as="geometry"/></mxCell>
-<mxCell id="e9" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="v7" target="v1" value="ulangi"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e9" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="v7" target="v1"><mxGeometry relative="1" as="geometry"/></mxCell>
 <mxCell id="e10" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1" source="v8" target="v9"><mxGeometry relative="1" as="geometry"/></mxCell>
 </root></mxGraphModel></diagram></mxfile>

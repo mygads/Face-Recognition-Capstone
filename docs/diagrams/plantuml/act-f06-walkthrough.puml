@@ -2,53 +2,53 @@
 ' Activity F-06 Walk-through otomatis — docs/proposal/05-activity.md §5.6
 start
 :Track ACCEPTED kirim matched + kandidat;
-if (Sesi dan device dikenal?) then (tidak)
-  :404 session_not_found / device_not_found;\ntanpa event;
+if (Sesi dan device dikenal?) then (Tidak)
+  :404 session_not_found atau device_not_found; tanpa event;
   stop
-else (ya)
+else (Ya)
 endif
-if (event_id dikenal?) then (fingerprint sama)
+if (event_id dikenal?) then (Fingerprint sama)
   :200 hasil tersimpan; replayed true;
   stop
-elseif (payload beda) then
+elseif (Payload beda)
   :409 event_id_reused; tanpa event baru;
   stop
-else (baru)
+else (Baru)
   :Simpan event sebagai bukti audit;
 endif
-if (Guru di luar jadwalnya?) then (ya)
+if (Guru di luar jadwalnya?) then (Ya)
   :Event reason session_not_accessible;
   stop
-else (tidak)
+else (Tidak)
 endif
-if (Device aktif, kamera on, lab sama?) then (tidak)
-  :Event reason device_inactive /\ndevice_camera_disabled /\ndevice_laboratory_mismatch;
+if (Device aktif, kamera on, lab sama?) then (Tidak)
+  :Event reason device_inactive, device_camera_disabled, atau device_laboratory_mismatch;
   stop
-else (ya)
+else (Ya)
 endif
-if (Sesi berjalan?) then (tidak)
+if (Sesi berjalan?) then (Tidak)
   :Event reason session_inactive;
   stop
-else (ya)
+else (Ya)
 endif
-if (Kandidat di snapshot roster?) then (tidak)
-  :Event reason student_not_found /\nstudent_not_in_session_roster;
+if (Kandidat di snapshot roster?) then (Tidak)
+  :Event reason student_not_found atau student_not_in_session_roster;
   stop
-else (ya)
+else (Ya)
 endif
-if (Outcome matched dan liveness lolos?) then (tidak)
-  :Event reason recognition_not_matched /\nliveness_failed;
+if (Outcome matched dan liveness lolos?) then (Tidak)
+  :Event reason recognition_not_matched atau liveness_failed;
   stop
-else (ya)
+else (Ya)
 endif
-if (Sudah ada record sesi dan siswa?) then (ya)
+if (Sudah ada record sesi dan siswa?) then (Ya)
   :Event reason attendance_already_recorded;
   stop
-else (tidak)
+else (Tidak)
 endif
-if (occurred_at lewat grace?) then (ya)
+if (occurred_at lewat grace?) then (Ya)
   :Record late;
-else (tidak)
+else (Tidak)
   :Record present;
 endif
 :Push WebSocket dashboard;

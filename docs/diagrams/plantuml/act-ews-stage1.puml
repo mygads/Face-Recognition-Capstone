@@ -1,0 +1,19 @@
+@startuml
+' EWS at-risk tahap 1 — docs/proposal/09-ews.md §9.1
+start
+:Buka panel atau API at-risk;
+if (Policy tersimpan?) then (Tidak)
+  :Pakai default: 30 hari + 20 persen + 3x;
+else (Ya)
+  :Pakai policy revisi terakhir + audit;
+endif
+:Override opsional via query tervalidasi;
+:Agregat sesi non-cancelled dalam jendela;
+if (absence_pct >= ambang ATAU late >= ambang?) then (Ya)
+  :Flag + reasons + ambang efektif + policy_revision;
+else (Tidak)
+  :Tidak masuk daftar;
+endif
+:Tindak lanjut manual di luar sistem;
+stop
+@enduml

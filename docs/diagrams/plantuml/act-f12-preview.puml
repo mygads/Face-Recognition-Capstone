@@ -3,40 +3,48 @@
 start
 :Admin terbitkan AI config revision;
 :Device poll dan terapkan: pending-applied-error;
-if (Preview pra-sesi?) then (tidak)
+if (Preview pra-sesi?) then (Tidak)
+  :Selesai;
   stop
-else (ya)
+else (Ya)
 endif
-if (Browser di localhost/127.0.0.1 ke edge-agent 8765?) then (tidak)
+if (Browser di localhost atau 127.0.0.1 ke edge-agent 8765?) then (Tidak)
   :Tolak: buka dari komputer AI_EDGE;
+  :Selesai;
   stop
-else (ya)
+else (Ya)
 endif
-if (Profil AI_EDGE?) then (tidak)
+if (Profil AI_EDGE?) then (Tidak)
   :409 preview_gallery_profile_unsupported;
+  :Selesai;
   stop
-else (ya)
+else (Ya)
 endif
-if (Kamera enabled?) then (tidak)
+if (Kamera enabled?) then (Tidak)
   :409 device_camera_disabled;
+  :Selesai;
   stop
-else (ya)
+else (Ya)
 endif
-if (Masih tanpa sesi aktif?) then (tidak)
-  :409 preview_gallery_session_active:\ngunakan snapshot sesi berjalan;
+if (Masih tanpa sesi aktif?) then (Tidak)
+  :409 preview_gallery_session_active:\ngunakan snapshot sesi berjalan, bukan preview;
+  :Selesai;
   stop
-else (ya)
+else (Ya)
 endif
-if (Maks 15 mnt sebelum mulai dan sebelum akhir?) then (tidak)
+if (Maks 15 mnt sebelum mulai dan sebelum akhir?) then (Tidak)
   :404 preview_gallery_unavailable;
+  :Selesai;
   stop
-else (ya)
+else (Ya)
 endif
-if (Template aktif tersedia?) then (tidak)
+if (Template aktif tersedia?) then (Tidak)
   :409 preview_gallery_empty;
+  :Selesai;
   stop
-else (ya)
+else (Ya)
   :Overlay wajah + kandidat tanpa event;\nframe sekitar 15 fps, status 500 ms;
+  :Selesai;
   stop
 endif
 @enduml

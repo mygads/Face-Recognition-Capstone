@@ -9,20 +9,18 @@
 <task id="new" name="Password baru min 12 char"><incoming>F_chg_5</incoming><incoming>F_valid_8</incoming><outgoing>F_new_7</outgoing></task>
 <exclusiveGateway id="valid" name="Valid?" gatewayDirection="Exclusive"><incoming>F_new_7</incoming><outgoing>F_valid_8</outgoing><outgoing>F_valid_9</outgoing></exclusiveGateway>
 <task id="issue" name="Terbitkan akses 15 mnt dan sesi cookie 24 jam"><incoming>F_chg_6</incoming><incoming>F_valid_9</incoming><outgoing>F_issue_10</outgoing></task>
-<task id="dash" name="Masuk dashboard sesuai role"><incoming>F_issue_10</incoming><outgoing>F_dash_11</outgoing></task>
-<endEvent id="e" name="Selesai"><incoming>F_dash_11</incoming></endEvent>
+<endEvent id="dash" name="Masuk dashboard sesuai role"><incoming>F_issue_10</incoming></endEvent>
 <sequenceFlow id="F_s_0" sourceRef="s" targetRef="input"></sequenceFlow>
 <sequenceFlow id="F_input_1" sourceRef="input" targetRef="cred"></sequenceFlow>
 <sequenceFlow id="F_cred_2" sourceRef="cred" targetRef="fail"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
 <sequenceFlow id="F_cred_3" sourceRef="cred" targetRef="chg"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>
-<sequenceFlow id="F_fail_4" sourceRef="fail" targetRef="input"><conditionExpression xsi:type="tFormalExpression"><![CDATA[ulangi]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_fail_4" sourceRef="fail" targetRef="input"></sequenceFlow>
 <sequenceFlow id="F_chg_5" sourceRef="chg" targetRef="new"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>
 <sequenceFlow id="F_chg_6" sourceRef="chg" targetRef="issue"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
 <sequenceFlow id="F_new_7" sourceRef="new" targetRef="valid"></sequenceFlow>
 <sequenceFlow id="F_valid_8" sourceRef="valid" targetRef="new"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
 <sequenceFlow id="F_valid_9" sourceRef="valid" targetRef="issue"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>
 <sequenceFlow id="F_issue_10" sourceRef="issue" targetRef="dash"></sequenceFlow>
-<sequenceFlow id="F_dash_11" sourceRef="dash" targetRef="e"></sequenceFlow>
 </process>
 <bpmndi:BPMNDiagram id="DG_f01-login"><bpmndi:BPMNPlane id="PL_f01-login" bpmnElement="P_f01-login">
 <bpmndi:BPMNShape id="S_s" bpmnElement="s"><dc:Bounds x="30" y="30" width="36" height="36" /></bpmndi:BPMNShape>
@@ -33,8 +31,7 @@
 <bpmndi:BPMNShape id="S_new" bpmnElement="new"><dc:Bounds x="870" y="630" width="140" height="70" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_valid" bpmnElement="valid"><dc:Bounds x="1080" y="750" width="60" height="60" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_issue" bpmnElement="issue"><dc:Bounds x="1290" y="870" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_dash" bpmnElement="dash"><dc:Bounds x="1500" y="990" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_e" bpmnElement="e"><dc:Bounds x="1710" y="1110" width="36" height="36" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_dash" bpmnElement="dash"><dc:Bounds x="1500" y="990" width="36" height="36" /></bpmndi:BPMNShape>
 <bpmndi:BPMNEdge id="E_F_s_0" bpmnElement="F_s_0"><di:waypoint xsi:type="dc:Point" x="66" y="48" /><di:waypoint xsi:type="dc:Point" x="240" y="185" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_input_1" bpmnElement="F_input_1"><di:waypoint xsi:type="dc:Point" x="380" y="185" /><di:waypoint xsi:type="dc:Point" x="450" y="300" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_cred_2" bpmnElement="F_cred_2"><di:waypoint xsi:type="dc:Point" x="510" y="300" /><di:waypoint xsi:type="dc:Point" x="660" y="425" /></bpmndi:BPMNEdge>
@@ -45,6 +42,5 @@
 <bpmndi:BPMNEdge id="E_F_new_7" bpmnElement="F_new_7"><di:waypoint xsi:type="dc:Point" x="1010" y="665" /><di:waypoint xsi:type="dc:Point" x="1080" y="780" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_valid_8" bpmnElement="F_valid_8"><di:waypoint xsi:type="dc:Point" x="1140" y="780" /><di:waypoint xsi:type="dc:Point" x="1190" y="780" /><di:waypoint xsi:type="dc:Point" x="1190" y="665" /><di:waypoint xsi:type="dc:Point" x="1010" y="665" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_valid_9" bpmnElement="F_valid_9"><di:waypoint xsi:type="dc:Point" x="1140" y="780" /><di:waypoint xsi:type="dc:Point" x="1290" y="905" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_issue_10" bpmnElement="F_issue_10"><di:waypoint xsi:type="dc:Point" x="1430" y="905" /><di:waypoint xsi:type="dc:Point" x="1500" y="1025" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_dash_11" bpmnElement="F_dash_11"><di:waypoint xsi:type="dc:Point" x="1640" y="1025" /><di:waypoint xsi:type="dc:Point" x="1710" y="1128" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_issue_10" bpmnElement="F_issue_10"><di:waypoint xsi:type="dc:Point" x="1430" y="905" /><di:waypoint xsi:type="dc:Point" x="1500" y="1008" /></bpmndi:BPMNEdge>
 </bpmndi:BPMNPlane></bpmndi:BPMNDiagram></definitions>
