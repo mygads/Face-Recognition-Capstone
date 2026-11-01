@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import PageHeader from '../components/PageHeader.vue'
 import {
   ApiError,
   createStaffAccount,
+  listAccounts,
+  type Account,
   type StaffAccountCreate,
   type StaffAccountCreated,
 } from '../api/client'
@@ -17,6 +19,28 @@ const createdAccount = ref<StaffAccountCreated | null>(null)
 const isSaving = ref(false)
 const errorMessage = ref<string | null>(null)
 const copyMessage = ref<string | null>(null)
+const accounts = ref<Account[]>([])
+const accountsTotal = ref(0)
+const isLoadingAccounts = ref(false)
+const accountsError = ref<string | null>(null)
+
+async function loadAccounts(): Promise<void> {
+  isLoadingAccounts.value = true
+  accountsError.value = null
+  try {
+    const page = await listAccounts({ limit: 100, offset: 0 })
+    accounts.value = page.items
+    accountsTotal.value = page.pagination.total
+  } catch (error) {
+    accountsError.value = formatError(error)
+  } finally {
+    isLoadingAccounts.value = false
+  }
+}
+
+onMounted(() => {
+  void loadAccounts()
+})
 
 function formatError(error: unknown): string {
   if (error instanceof ApiError) {
@@ -38,6 +62,7 @@ async function submitForm(): Promise<void> {
       role: form.value.role,
     })
     form.value = { full_name: '', email: '', role: form.value.role }
+    void loadAccounts()
   } catch (error) {
     errorMessage.value = formatError(error)
   } finally {
@@ -108,6 +133,48 @@ async function copyTemporaryPassword(): Promise<void> {
       <p v-if="copyMessage" class="accounts-view__copy-message" role="status">
         {{ copyMessage }}
       </p>
+    </section>
+
+    <section class="master-data__panel">
+      <div class="master-data__panel-heading">
+        <div>
+          <p class="master-data__eyebrow">Akun internal · {{ accountsTotal }} terdaftar</p>
+          <h2>Akun staf terdaftar</h2>
+        </div>
+        <button
+          class="button button--secondary"
+          type="button"
+          :disabled="isLoadingAccounts"
+          @click="loadAccounts"
+        >
+          {{ isLoadingAccounts ? 'Memuat…' : 'Muat ulang' }}
+        </button>
+      </div>
+      <p v-if="accountsError" class="master-data__alert" role="alert">{{ accountsError }}</p>
+      <p v-else-if="isLoadingAccounts" class="accounts-view__hint">Memuat daftar akun…</p>
+      <p
+        v-else-if="accounts.length && accounts.length < accountsTotal"
+        class="accounts-view__hint"
+        role="status"
+      >
+        Menampilkan {{ accounts.length }} dari {{ accountsTotal }} akun (100 terbaru). Gunakan
+        filter/paginasi API untuk sisanya.
+      </p>
+      <ul v-else-if="accounts.length" class="accounts-view__list" data-testid="account-list">
+        <li v-for="account in accounts" :key="account.id" class="accounts-view__row">
+          <div>
+            <strong>{{ account.full_name }}</strong>
+            <small>{{ account.email }}</small>
+          </div>
+          <span
+            class="accounts-view__status"
+            :class="account.is_active ? 'accounts-view__status--active' : ''"
+          >
+            {{ account.is_active ? 'Aktif' : 'Nonaktif' }}
+          </span>
+        </li>
+      </ul>
+      <p v-else class="accounts-view__hint">Belum ada akun staf terdaftar.</p>
     </section>
 
     <section class="master-data__panel">

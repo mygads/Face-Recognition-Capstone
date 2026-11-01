@@ -84,7 +84,9 @@ SaaS proposal is a stop-and-ask architecture change per AGENTS.md.
 ## Retention and deletion
 
 `PRESENSI_RECOGNITION_EVENT_RETENTION_DAYS` defaults to 90 days and accepts 1 to
-3,650 days. Schedule this command to run daily, after database migrations:
+3,650 days. The API runs the sweep automatically at startup and then every
+`PRESENSI_RETENTION_SWEEP_HOURS` (default 24; `0` disables the schedule but keeps
+the manual command below):
 
 ```sh
 docker compose run --rm api python -m presensi_api.retention

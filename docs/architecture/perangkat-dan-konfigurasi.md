@@ -24,7 +24,11 @@ registry), app/model version, status kamera (`unknown/online/offline/error`),
 agregat `p50_ms/p95_ms` — tanpa image/embedding/frame. Heartbeat memperbarui
 kredensial expiring bila agent memakai `token_file` terlindungi; verifier lama
 overlap 24 jam untuk replace file aman-crash. Discovery sesi aktif + fetch
-gallery roster/model cocok memakai kredensial yang sama. Reassignment lab
+gallery roster/model cocok memakai kredensial yang sama.
+Gallery aktif memakai refresh kondisional (`known_generated_at` → `304` tanpa
+re-parse); preview off-session tanpa versi server sehingga agent memakai ulang
+cache valid lokal agar tidak full-download tiap poll. Ketidakcocokan pin sesi
+gateway vs discovery tercatat `gateway_session_pinned_mismatch`. Reassignment lab
 menulis `device.laboratory_assigned` (aktor + UUID lama/baru); assign ke lab
 yang sama tidak menambah audit duplikat. Route admin manual
 `POST /devices/{id}/heartbeat` tersedia untuk update kesehatan manual.

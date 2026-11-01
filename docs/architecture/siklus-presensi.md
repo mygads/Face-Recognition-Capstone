@@ -132,7 +132,10 @@ Protokol WS: tanpa kredensial di URL; frame JSON pertama
 `{"type":"authenticate","access_token":"<short-lived>"}`. Frame pertama wajib
 tiba dalam 5 detik. Tutup: `4401` (auth invalid), `4403` (forbidden),
 `4404` (sesi tak terakses). Scope = scope operasi sesi. Server recek
-akses/kedaluwarsa token selama streaming.
+akses/kedaluwarsa token selama streaming. Klien: `4401` → stop + redirect
+login (tanpa reconnect storm); `4403`/`4404` → error final tanpa retry;
+tutup lain → reconnect backoff eksponensial + jitter (anti-thundering-herd),
+reset tiap pesan live/ganti sesi.
 
 Polling snapshot default tiap 2 detik (`SESSION_DASHBOARD_POLL_SECONDS`,
 clamp 0,25–30). Online window device

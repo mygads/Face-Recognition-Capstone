@@ -9,6 +9,8 @@ from uuid import UUID
 
 from presensi_edge_agent.config import EdgeConfig
 from recognition_core.domain import (
+    BoundingBox,
+    FaceDetection,
     FrameObservation,
     GalleryEntry,
     TrackDecision,
@@ -44,6 +46,22 @@ def build_pipeline(config: EdgeConfig) -> RecognitionPipeline:
     assert config.models.sface_path is not None
     assert config.recognition.min_top1_similarity is not None
     assert config.recognition.min_top1_top2_margin is not None
+    detector: Any = YuNetFaceDetector(
+        config.models.yunet_path,
+        YuNetConfig(
+            score_threshold=config.recognition.yunet_score_threshold,
+            nms_threshold=config.recognition.yunet_nms_threshold,
+        ),
+    )
+    if config.recognition.detection_max_width > 0:
+        # Weak lab PCs: detect on a downscaled copy (~9x fewer pixels at
+        # 640px vs 1920px) and map boxes back. Quality, alignment, and
+        # embeddings still run on the full-resolution frame, so the
+        # acceptance path is unchanged apart from detector recall, which
+        # must be confirmed by the local calibration report.
+        detector = DownscalingDetector(
+            detector, max_width=config.recognition.detection_max_width
+        )
     sface = SFaceModel(config.models.sface_path, model_version=config.models.version)
     liveness_config = LivenessConfig(
         enabled=config.liveness.enabled,
@@ -60,7 +78,7 @@ def build_pipeline(config: EdgeConfig) -> RecognitionPipeline:
         )
     return RecognitionPipeline(
         preprocessor=IdentityPreprocessor(),
-        detector=YuNetFaceDetector(config.models.yunet_path, YuNetConfig()),
+        detector=detector,
         quality_assessor=OpenCVFaceQualityAssessor(
             min_face_pixels=config.quality.min_face_pixels,
             min_laplacian_variance=config.quality.min_laplacian_variance,
@@ -86,12 +104,79 @@ def build_pipeline(config: EdgeConfig) -> RecognitionPipeline:
     )
 
 
+class DownscalingDetector:
+    """Run detection on a downscaled copy and map boxes to full resolution.
+
+    YuNet cost scales with input pixels, so capping detector width is the
+    cheapest lever for weak CPUs. Only the detector sees the small copy;
+    quality assessment, alignment, and embeddings keep the original frame.
+    """
+
+    def __init__(self, inner: Any, *, max_width: int) -> None:
+        if max_width < 320:
+            raise ValueError("max_width must be at least 320 pixels.")
+        self._inner = inner
+        self._max_width = max_width
+        self._cv2: Any | None = None
+
+    def _resizer(self) -> Any:
+        if self._cv2 is None:
+            import importlib
+
+            self._cv2 = importlib.import_module("cv2")
+        return self._cv2
+
+    def detect(self, frame: ImageFrame) -> tuple[FaceDetection, ...]:
+        shape = getattr(frame, "shape", None)
+        if shape is None or len(shape) < 2:
+            return tuple(self._inner.detect(frame))
+        height, width = int(shape[0]), int(shape[1])
+        if width <= self._max_width or width < 1 or height < 1:
+            return tuple(self._inner.detect(frame))
+        scale = self._max_width / width
+        small_height = max(1, round(height * scale))
+        cv2 = self._resizer()
+        small = cv2.resize(
+            frame, (self._max_width, small_height), interpolation=cv2.INTER_AREA
+        )
+        detections = self._inner.detect(small)
+        upscale = width / self._max_width
+        rescaled: list[FaceDetection] = []
+        for detection in detections:
+            box = detection.box
+            rescaled.append(
+                FaceDetection(
+                    box=BoundingBox(
+                        min(max(0.0, box.x * upscale), float(width)),
+                        min(max(0.0, box.y * upscale), float(height)),
+                        max(1e-6, box.width * upscale),
+                        max(1e-6, box.height * upscale),
+                    ),
+                    confidence=detection.confidence,
+                    landmarks=tuple(
+                        (x * upscale, y * upscale) for x, y in detection.landmarks
+                    ),
+                )
+            )
+        return tuple(rescaled)
+
+
 class LocalRecognizer:
     """Run the shared recognition-core pipeline for one UVC camera stream."""
 
-    def __init__(self, pipeline: RecognitionPipeline | None, device_id: UUID) -> None:
+    def __init__(
+        self,
+        pipeline: RecognitionPipeline | None,
+        device_id: UUID,
+        *,
+        diagnostic_only: bool = False,
+    ) -> None:
         self.pipeline = pipeline
         self.track_id = f"camera-{device_id}"
+        # Diagnostic recognizers drive preview/calibration display only and
+        # must never feed the attendance-event outbox. The service submit
+        # path enforces this via require_attendance_recognizer().
+        self.diagnostic_only = diagnostic_only
         self._pipeline_lock = threading.RLock()
         self._timing_observer: Callable[[str, float], None] | None = None
 

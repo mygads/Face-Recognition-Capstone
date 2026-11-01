@@ -1179,6 +1179,50 @@ a:focus-visible {
   margin-top: var(--space-3);
 }
 
+.accounts-view__list {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.accounts-view__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+}
+
+.accounts-view__row strong {
+  display: block;
+  font-size: 0.85rem;
+}
+
+.accounts-view__row small {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+}
+
+.accounts-view__status {
+  flex-shrink: 0;
+  padding: 2px 10px;
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: var(--bg-muted, #f1f1f1);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.accounts-view__status--active {
+  color: var(--success-contrast, #14532d);
+  background: var(--success-muted, #dcfce7);
+}
+
 .master-data__preview-table-wrap {
   max-height: 360px;
 }
@@ -3073,4 +3117,68 @@ a:focus-visible {
   .camera-preview-view:fullscreen .camera-preview-view__frame-stage {
     max-height: 58vh;
   }
+}
+
+.session-view__roster-overview {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-color-light);
+}
+
+.session-view__roster-overview h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.session-view__roster-toolbar {
+  display: grid;
+  gap: 10px;
+}
+
+.session-view__roster-search {
+  display: grid;
+  gap: 6px;
+  max-width: 320px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.session-view__roster-search input {
+  padding: 9px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+.session-view__roster-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.session-view__filter-chip {
+  padding: 6px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.session-view__filter-chip:hover {
+  border-color: var(--primary);
+  color: var(--text);
+}
+
+.session-view__filter-chip--active {
+  border-color: var(--primary);
+  background: var(--primary-lt, color-mix(in srgb, var(--primary) 12%, var(--bg-surface)));
+  color: var(--primary-dk, var(--primary));
 }

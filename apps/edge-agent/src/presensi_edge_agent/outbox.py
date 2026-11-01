@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -147,6 +148,15 @@ class EventOutbox:
             raise ValueError("limit must be positive.")
         timestamp = (now or datetime.now(UTC)).astimezone(UTC).isoformat()
         with self._lock:
+            head = self._db.execute(
+                "SELECT next_attempt_at FROM edge_event_outbox "
+                "WHERE status = 'pending' ORDER BY queue_seq LIMIT 1"
+            ).fetchone()
+            if head is None or str(head["next_attempt_at"]) > timestamp:
+                # Head-of-line backoff (or an empty queue): return without
+                # parsing any payloads. FIFO order is still preserved because
+                # later events are never skipped ahead of the head event.
+                return []
             rows = self._db.execute(
                 "SELECT event_id, payload_json, attempts, next_attempt_at "
                 "FROM edge_event_outbox WHERE status = 'pending' "
@@ -193,7 +203,10 @@ class EventOutbox:
             if row is None:
                 return
             attempts = int(row["attempts"]) + 1
-            delay = min(float(2 ** min(attempts - 1, 30)), max_delay_seconds)
+            base_delay = min(float(2 ** min(attempts - 1, 30)), max_delay_seconds)
+            # Full-jitter guard: devices sharing an outage must not retry in
+            # lockstep and thundering-herd the API when it recovers.
+            delay = min(base_delay * random.uniform(0.8, 1.2), max_delay_seconds)
             next_attempt = (datetime.now(UTC) + timedelta(seconds=delay)).isoformat()
             self._db.execute(
                 "UPDATE edge_event_outbox SET attempts = ?, next_attempt_at = ?, "

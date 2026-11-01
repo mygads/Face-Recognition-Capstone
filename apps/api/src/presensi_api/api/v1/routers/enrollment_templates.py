@@ -170,7 +170,7 @@ async def submit_enrollment_captures(
     total_bytes = 0
     for capture in captures:
         suffix = os.path.splitext(capture.filename or "")[1].lower()
-        content_type = (capture.content_type or "").lower()
+        content_type = (capture.content_type or "").split(";", 1)[0].strip().lower()
         if suffix not in ALLOWED_IMAGE_TYPES or (
             ALLOWED_IMAGE_TYPES[suffix] != content_type
         ):

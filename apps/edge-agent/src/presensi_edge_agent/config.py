@@ -65,6 +65,14 @@ class RecognitionSettings:
     best_frame_count: int
     max_history_frames: int
     track_ttl_seconds: float
+    # Calibrated YuNet detector operating point. Defaults preserve the legacy
+    # detector behavior; production values must come from the local benchmark.
+    yunet_score_threshold: float = 0.9
+    yunet_nms_threshold: float = 0.3
+    # Optional detector input cap (pixels of frame width) for weak lab PCs.
+    # 0 disables downscaling. When set, detection runs on a downscaled copy
+    # and boxes are mapped back; quality/align/embed still use the full frame.
+    detection_max_width: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,6 +265,21 @@ _ENVIRONMENT_OVERRIDES: dict[
         "recognition",
         "min_top1_top2_margin",
         float,
+    ),
+    "PRESENSI_EDGE_YUNET_SCORE_THRESHOLD": (
+        "recognition",
+        "yunet_score_threshold",
+        float,
+    ),
+    "PRESENSI_EDGE_YUNET_NMS_THRESHOLD": (
+        "recognition",
+        "yunet_nms_threshold",
+        float,
+    ),
+    "PRESENSI_EDGE_DETECTION_MAX_WIDTH": (
+        "recognition",
+        "detection_max_width",
+        int,
     ),
     "PRESENSI_EDGE_LOG_LEVEL": ("runtime", "log_level", str),
 }
@@ -603,7 +626,31 @@ def load_config(
     history_frames = _integer(
         recognition_raw, "max_history_frames", max(10, best_frames)
     )
+    yunet_score_threshold = _optional_float(
+        recognition_raw.get("yunet_score_threshold"),
+        "recognition.yunet_score_threshold",
+    )
+    if yunet_score_threshold is None:
+        yunet_score_threshold = 0.9
+    if not 0 <= yunet_score_threshold <= 1:
+        raise EdgeConfigError("recognition.yunet_score_threshold must be in [0, 1].")
+    yunet_nms_threshold = _optional_float(
+        recognition_raw.get("yunet_nms_threshold"),
+        "recognition.yunet_nms_threshold",
+    )
+    if yunet_nms_threshold is None:
+        yunet_nms_threshold = 0.3
+    if not 0 <= yunet_nms_threshold <= 1:
+        raise EdgeConfigError("recognition.yunet_nms_threshold must be in [0, 1].")
+    detection_max_width = _integer(recognition_raw, "detection_max_width", 0, minimum=0)
+    if detection_max_width != 0 and not 320 <= detection_max_width <= 1920:
+        raise EdgeConfigError(
+            "recognition.detection_max_width must be 0 or within [320, 1920]."
+        )
     recognition = RecognitionSettings(
+        yunet_score_threshold=yunet_score_threshold,
+        yunet_nms_threshold=yunet_nms_threshold,
+        detection_max_width=detection_max_width,
         min_top1_similarity=_optional_float(
             recognition_raw.get("min_top1_similarity"),
             "recognition.min_top1_similarity",

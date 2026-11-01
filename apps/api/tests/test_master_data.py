@@ -326,3 +326,42 @@ def test_device_delete_revokes_credentials_and_preserves_audited_history(
     archived_devices = request("GET", "/api/v1/devices?is_active=false")
     assert active_devices.json()["pagination"]["total"] == 0
     assert archived_devices.json()["pagination"]["total"] == 1
+
+
+def test_student_search_treats_percent_and_underscore_literally(
+    api_database: "sessionmaker[Session]",
+) -> None:
+    first = request(
+        "POST",
+        "/api/v1/students",
+        {"student_number": "100%", "full_name": "Percent Student"},
+    )
+    assert first.status_code == 201
+    second = request(
+        "POST",
+        "/api/v1/students",
+        {"student_number": "100A", "full_name": "Hundred A Student"},
+    )
+    assert second.status_code == 201
+
+    page = request("GET", "/api/v1/students?search=100%25")
+    assert page.status_code == 200
+    numbers = [item["student_number"] for item in page.json()["items"]]
+    assert numbers == ["100%"]
+
+    third = request(
+        "POST",
+        "/api/v1/students",
+        {"student_number": "A_1", "full_name": "Underscore Student"},
+    )
+    assert third.status_code == 201
+    fourth = request(
+        "POST",
+        "/api/v1/students",
+        {"student_number": "AX1", "full_name": "Ex Student"},
+    )
+    assert fourth.status_code == 201
+
+    underscore = request("GET", "/api/v1/students?search=A_1")
+    assert underscore.status_code == 200
+    assert [item["student_number"] for item in underscore.json()["items"]] == ["A_1"]

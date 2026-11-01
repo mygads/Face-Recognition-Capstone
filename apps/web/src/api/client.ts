@@ -44,6 +44,7 @@ export type ManualMarkRequest = components['schemas']['ManualMarkRequest']
 export type ManualMarkResponse = components['schemas']['ManualMarkResponse']
 export type StaffAccountCreate = components['schemas']['StaffAccountCreateRequest']
 export type StaffAccountCreated = components['schemas']['StaffAccountCreatedResponse']
+export type Account = components['schemas']['AccountResponse']
 export type AttendanceReportQuery =
   operations['get_attendance_report_api_v1_reports_attendance_get']['parameters']['query']
 export type AttendanceReportSummary = components['schemas']['AttendanceReportResponse']
@@ -247,6 +248,14 @@ export async function changePassword(body: PasswordChangeRequest): Promise<Passw
 
 export async function createStaffAccount(body: StaffAccountCreate): Promise<StaffAccountCreated> {
   const result = await apiClient.POST('/api/v1/accounts', { body })
+  return unwrap(result)
+}
+
+export async function listAccounts(query: {
+  limit: number
+  offset: number
+}): Promise<Page<Account>> {
+  const result = await apiClient.GET('/api/v1/accounts', { params: { query } })
   return unwrap(result)
 }
 

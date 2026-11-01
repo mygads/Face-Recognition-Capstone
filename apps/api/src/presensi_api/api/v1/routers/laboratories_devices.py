@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from presensi_api.api.errors import OPENAPI_ERROR_RESPONSES, ApiProblem
 from presensi_api.api.security.dependencies import require_permissions
 from presensi_api.api.security.roles import AuthenticatedUser, Permission
+from presensi_api.api.v1.routers.device_runtime import apply_heartbeat_request
 from presensi_api.api.v1.schemas.common import PageResponse, Pagination
 from presensi_api.api.v1.schemas.laboratories import (
     DeviceCameraControlRequest,
@@ -27,6 +28,7 @@ from presensi_api.api.v1.schemas.laboratories import (
     LaboratoryUpdateRequest,
 )
 from presensi_api.db.models import AuditLog, Device, Laboratory
+from presensi_api.db.search import like_contains
 from presensi_api.db.session import get_db_session
 from presensi_api.device_health import device_health_status, heartbeat_timeout_seconds
 
@@ -80,6 +82,13 @@ def _device_response(
             if device.camera_metrics is not None
             else None
         ),
+        pending_events=device.pending_events,
+        dead_letter_events=device.dead_letter_events,
+        queue_updated_at=(
+            _timestamp(device.queue_updated_at)
+            if device.queue_updated_at is not None
+            else None
+        ),
         config_applied_revision=device.config_applied_revision,
         config_apply_status=cast(
             Literal["not_configured", "pending", "applied", "error"],
@@ -129,9 +138,12 @@ def list_laboratories(
     count_query = select(func.count()).select_from(Laboratory)
     filters = []
     if search and search.strip():
-        pattern = f"%{search.strip()}%"
+        pattern = like_contains(search)
         filters.append(
-            or_(Laboratory.code.ilike(pattern), Laboratory.name.ilike(pattern))
+            or_(
+                Laboratory.code.ilike(pattern, escape="\\"),
+                Laboratory.name.ilike(pattern, escape="\\"),
+            )
         )
     if is_active is not None:
         filters.append(Laboratory.is_active.is_(is_active))
@@ -229,13 +241,13 @@ def list_devices(
     now = datetime.now(UTC)
     cutoff = now - timedelta(seconds=heartbeat_timeout_seconds())
     if search and search.strip():
-        pattern = f"%{search.strip()}%"
+        pattern = like_contains(search)
         filters.append(
             or_(
-                Device.name.ilike(pattern),
-                Device.id.cast(String).ilike(pattern),
-                Laboratory.code.ilike(pattern),
-                Laboratory.name.ilike(pattern),
+                Device.name.ilike(pattern, escape="\\"),
+                Device.id.cast(String).ilike(pattern, escape="\\"),
+                Laboratory.code.ilike(pattern, escape="\\"),
+                Laboratory.name.ilike(pattern, escape="\\"),
             )
         )
     if laboratory_id is not None:
@@ -515,13 +527,6 @@ def device_heartbeat(
     now = datetime.now(UTC)
     device.last_seen_at = now
     if request is not None:
-        for key in ("app_version", "model_version", "camera_status"):
-            value = getattr(request, key)
-            if value is not None:
-                setattr(device, key, value)
-        if request.latency_summary is not None:
-            device.latency_summary = request.latency_summary.model_dump(
-                exclude_unset=True
-            )
+        apply_heartbeat_request(device, request, now=now)
     session.commit()
     return DeviceHeartbeatResponse(device_id=device.id, last_seen_at=now)

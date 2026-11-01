@@ -226,3 +226,19 @@ def test_import_requires_explicit_existing_column_mappings(
     )
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "invalid_column_mapping"
+
+
+def test_blank_identifiers_are_required_but_not_flagged_as_duplicates(
+    api_database: "sessionmaker[Session]",
+) -> None:
+    add_class(api_database)
+    content = ("NIS,Nama,Kelas\n,First Blank,XI-A\n,Second Blank,XI-A\n").encode()
+    preview = upload_request("/api/v1/students/import/preview", content)
+    assert preview.status_code == 200
+    body = preview.json()
+    assert body["total_rows"] == 2
+    assert body["valid_rows"] == 0
+    row_errors = {row["row_number"]: row["errors"] for row in body["rows"]}
+    for row_number in (2, 3):
+        assert "NIS/NISN wajib diisi." in row_errors[row_number]
+        assert not any("duplikat" in message for message in row_errors[row_number])

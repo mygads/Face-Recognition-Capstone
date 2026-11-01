@@ -4,6 +4,7 @@ Cara pakai:  py _gen/extract_mermaid.py
 Hasil:        docs/diagrams/mermaid/<nama-file>-<nn>.mmd
 Import:       Draw.io > Arrange > Insert > Mermaid (paste isi file).
 """
+
 import os
 import re
 

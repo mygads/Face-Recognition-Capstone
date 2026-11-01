@@ -37,6 +37,8 @@ class EnrollmentQualityConfiguration(ApiSchema):
 class RecognitionConfiguration(FaceQualityConfiguration):
     min_top1_similarity: float | None = Field(default=None, ge=-1, le=1)
     min_top1_top2_margin: float | None = Field(default=None, ge=0, le=2)
+    yunet_score_threshold: float = Field(default=0.9, ge=0, le=1)
+    yunet_nms_threshold: float = Field(default=0.3, ge=0, le=1)
     minimum_agreeing_frames: int = Field(ge=1, le=10)
     sample_every_n_frames: int = Field(ge=1, le=60)
     best_frame_count: int = Field(ge=1, le=20)

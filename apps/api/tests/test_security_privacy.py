@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from presensi_api.http_security import (
     RequestBodySizeLimitMiddleware,
     SecurityConfigurationError,
+    SecurityHeadersMiddleware,
     add_restrictive_cors,
     configure_multipart_memory_only,
     parse_cors_allowed_origins,
@@ -103,3 +104,19 @@ def test_oversized_request_body_is_rejected_without_echoing_body() -> None:
     assert response.status_code == 413
     assert secret_frame_marker.decode() not in response.text
     assert response.json()["error"]["code"] == "file_too_large"
+
+
+def test_api_responses_carry_minimal_hardening_headers() -> None:
+    app = FastAPI()
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    @app.get("/health")
+    def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    client = TestClient(app)
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["Referrer-Policy"] == "no-referrer"
+    assert response.headers["X-Frame-Options"] == "DENY"

@@ -236,3 +236,30 @@ def test_protected_endpoint_requires_bearer_authentication() -> None:
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
     assert response.json()["error"]["code"] == "unauthorized"
+
+
+def test_openapi_documents_device_queue_status_in_heartbeat() -> None:
+    document = app.openapi()
+    heartbeat_path = "/api/v1/devices/{device_id}/device-heartbeat"
+    heartbeat = document["paths"][heartbeat_path]["post"]
+    body_schema = heartbeat["requestBody"]["content"]["application/json"]["schema"]
+    refs = [
+        option.get("$ref")
+        for option in body_schema.get("anyOf", [body_schema])
+        if isinstance(option, dict)
+    ]
+    assert "#/components/schemas/DeviceHeartbeatRequest" in refs
+    heartbeat_schema = document["components"]["schemas"]["DeviceHeartbeatRequest"]
+    queue_prop = heartbeat_schema["properties"]["queue_status"]
+    queue_options = queue_prop.get("anyOf", [queue_prop])
+    assert any(
+        isinstance(option, dict)
+        and option.get("$ref") == "#/components/schemas/DeviceQueueStatus"
+        for option in queue_options
+    )
+    queue_schema = document["components"]["schemas"]["DeviceQueueStatus"]["properties"]
+    assert set(queue_schema) == {"pending_events", "dead_letter_events"}
+    device_schema = document["components"]["schemas"]["DeviceResponse"]["properties"]
+    assert {"pending_events", "dead_letter_events", "queue_updated_at"} <= set(
+        device_schema
+    )

@@ -41,6 +41,11 @@ class AISettings:
     min_laplacian_variance: float = 45.0
     min_brightness: float = 25.0
     max_brightness: float = 235.0
+    # YuNet detector operating point. Defaults preserve the previously
+    # hardcoded behavior; production values must be confirmed by the local
+    # calibration report and published via managed configuration.
+    yunet_score_threshold: float = 0.9
+    yunet_nms_threshold: float = 0.3
     liveness_enabled: bool = False
     liveness_required: bool = False
     liveness_min_score: float | None = None
@@ -89,6 +94,8 @@ class AISettings:
             ("min_top1_similarity", self.min_top1_similarity, -1.0, 1.0),
             ("min_top1_top2_margin", self.min_top1_top2_margin, 0.0, 2.0),
             ("liveness_min_score", self.liveness_min_score, 0.0, 1.0),
+            ("yunet_score_threshold", self.yunet_score_threshold, 0.0, 1.0),
+            ("yunet_nms_threshold", self.yunet_nms_threshold, 0.0, 1.0),
         ):
             if optional_score is not None and (
                 not math.isfinite(optional_score) or not low <= optional_score <= high
@@ -228,6 +235,12 @@ class AISettings:
             ),
             min_brightness=float_with_default("PRESENSI_AI_MIN_BRIGHTNESS", 25.0),
             max_brightness=float_with_default("PRESENSI_AI_MAX_BRIGHTNESS", 235.0),
+            yunet_score_threshold=float_with_default(
+                "PRESENSI_AI_YUNET_SCORE_THRESHOLD", 0.9
+            ),
+            yunet_nms_threshold=float_with_default(
+                "PRESENSI_AI_YUNET_NMS_THRESHOLD", 0.3
+            ),
             liveness_enabled=bool_setting("PRESENSI_AI_LIVENESS_ENABLED"),
             liveness_required=bool_setting("PRESENSI_AI_LIVENESS_REQUIRED"),
             liveness_min_score=float_setting("PRESENSI_AI_LIVENESS_MIN_SCORE"),

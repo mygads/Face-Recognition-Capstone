@@ -24,6 +24,8 @@ import {
   type AiReadiness,
 } from '../api/client'
 import { triggerDownload } from '../utils/download'
+import { formatDateTimeLocal } from '../utils/dateFormat'
+import { createRefreshEpoch } from '../utils/refresh'
 
 type DeviceForm = {
   name: string
@@ -227,19 +229,11 @@ function formatError(error: unknown): string {
 
 function formatLastSeen(value: string | null): string {
   if (!value) return 'Belum pernah'
-  return new Intl.DateTimeFormat('id-ID', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: 'Asia/Jakarta',
-  }).format(new Date(value))
+  return formatDateTimeLocal(value)
 }
 
 function formatCredentialExpiry(value: string): string {
-  return new Intl.DateTimeFormat('id-ID', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: 'Asia/Jakarta',
-  }).format(new Date(value))
+  return formatDateTimeLocal(value)
 }
 
 function defaultCoreApiUrl(): string {
@@ -340,7 +334,10 @@ async function confirmCameraToggle(): Promise<void> {
   }
 }
 
+const loadDevicesEpoch = createRefreshEpoch()
+
 async function loadDevices(): Promise<void> {
+  const epoch = loadDevicesEpoch.next()
   isLoading.value = true
   errorMessage.value = null
   try {
@@ -356,6 +353,7 @@ async function loadDevices(): Promise<void> {
       is_active: includeInactive.value ? undefined : true,
       health_status: statusFilter.value === 'all' ? undefined : statusFilter.value,
     })
+    if (!loadDevicesEpoch.isCurrent(epoch)) return
     devices.value = result.items
     total.value = result.pagination.total
     if (activeProfile.value === 'AI_EDGE') {
@@ -370,9 +368,9 @@ async function loadDevices(): Promise<void> {
       edgeDeviceCount.value = 0
     }
   } catch (error) {
-    errorMessage.value = formatError(error)
+    if (loadDevicesEpoch.isCurrent(epoch)) errorMessage.value = formatError(error)
   } finally {
-    isLoading.value = false
+    if (loadDevicesEpoch.isCurrent(epoch)) isLoading.value = false
   }
 }
 

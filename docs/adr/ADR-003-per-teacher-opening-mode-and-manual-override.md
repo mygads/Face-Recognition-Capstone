@@ -49,3 +49,18 @@
   buntu operasional.
 - Keputusan ini tidak mengubah aturan fail-closed lain: matching tetap dibatasi
   roster snapshot, ambiguitas tetap retry, duplikat tetap ditolak.
+
+## Pengecualian automatic-mode dan roster kosong (klarifikasi P1-6, 2026-10-31)
+
+- Nilai global `mode` pada policy hanya dibaca untuk kompatibilitas mundur dan
+  **diabaikan**; yang otoritatif adalah `users.opening_mode` per guru. Ini
+  pengecualian yang disengaja dari ADR-002 agar satu sekolah bisa mencampur
+  guru otomatis dan manual tanpa mengubah kebijakan global.
+- Bila policy tidak valid (rentang jendela/grace di luar batas), worker
+  auto-open mengembalikan 0 dan **tidak membuka sesi apa pun** (fail-closed)
+  alih-alih memakai nilai default diam-diam.
+- Roster kosong diperlakukan berbeda sesuai jalur: auto-open **melewatkan**
+  jadwal tanpa siswa aktif (tidak membuat sesi hantu); manual open **menolak**
+  dengan `422 empty_class_roster` dan tidak membuat sesi. Alasannya: operator
+  manusia perlu sinyal eksplisit bahwa kelas belum siap, sedangkan worker
+  tidak boleh berisik pada kondisi transien (mis. import roster belum jalan).

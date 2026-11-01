@@ -188,6 +188,8 @@ def central_configuration_from_environment() -> dict[str, object]:
         ),
         "min_brightness": _float_env("PRESENSI_AI_MIN_BRIGHTNESS", 25.0),
         "max_brightness": _float_env("PRESENSI_AI_MAX_BRIGHTNESS", 235.0),
+        "yunet_score_threshold": _float_env("PRESENSI_AI_YUNET_SCORE_THRESHOLD", 0.9),
+        "yunet_nms_threshold": _float_env("PRESENSI_AI_YUNET_NMS_THRESHOLD", 0.3),
         "calibration_reference": None,
     }
 

@@ -253,6 +253,9 @@ class Device(UUIDPrimaryKey, TimestampMixin, Base):
     )
     latency_summary: Mapped[dict[str, object] | None] = mapped_column(JSON_OBJECT)
     camera_metrics: Mapped[dict[str, object] | None] = mapped_column(JSON_OBJECT)
+    pending_events: Mapped[int | None] = mapped_column(Integer)
+    dead_letter_events: Mapped[int | None] = mapped_column(Integer)
+    queue_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     credential_hash: Mapped[str | None] = mapped_column(String(64))
     credential_expires_at: Mapped[datetime | None] = mapped_column(

@@ -87,7 +87,7 @@ export const routes: RouteRecordRaw[] = [
         component: AccountsView,
         meta: {
           title: 'Kelola akun staf',
-          description: 'Buat akun guru dan laboran untuk menggunakan sistem.',
+          description: 'Lihat daftar dan buat akun guru serta laboran.',
           requiredRoles: ['ADMIN'],
           pageHeaderInView: true,
         },
@@ -182,6 +182,21 @@ export const routes: RouteRecordRaw[] = [
   },
 ]
 
+/** Post-login redirect targets must stay inside this app.
+
+Accepts only absolute in-app paths: a single leading slash, never a
+protocol-relative (`//host`) or backslash-escaped (`/\\`) target that a
+browser would resolve outside this origin.
+*/
+export function isSafeRedirectPath(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.startsWith('/') &&
+    !value.startsWith('//') &&
+    !value.startsWith('/\\')
+  )
+}
+
 export function createAppRouter(history: RouterHistory = createWebHistory()): Router {
   return createRouter({ history, routes })
 }
@@ -213,9 +228,7 @@ export function installAuthGuard(router: Router, pinia: Pinia): void {
     if (to.name === 'login' && hasSession) {
       if (auth.passwordChangeRequired) return { name: 'change-password' }
       const requestedRoute = to.query.redirect
-      return typeof requestedRoute === 'string' && requestedRoute.startsWith('/')
-        ? requestedRoute
-        : { name: 'dashboard' }
+      return isSafeRedirectPath(requestedRoute) ? requestedRoute : { name: 'dashboard' }
     }
     return true
   })

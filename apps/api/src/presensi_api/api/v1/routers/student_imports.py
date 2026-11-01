@@ -242,7 +242,8 @@ def _validate_rows(
             errors.append("NIS/NISN maksimal 32 karakter.")
         elif student_number.casefold() in identifiers:
             errors.append("NIS/NISN duplikat di dalam file.")
-        identifiers.add(student_number.casefold())
+        if student_number:
+            identifiers.add(student_number.casefold())
         if not full_name:
             errors.append("Nama siswa wajib diisi.")
         elif len(full_name) > 200:
@@ -419,15 +420,25 @@ async def commit_student_import(
         )
 
     try:
-        for row in validated.rows:
-            student = Student(
+        # Bulk insert in two round trips instead of one flush per row: with up
+        # to MAX_ROWS rows, per-row flushes would cost tens of thousands of
+        # database round trips for a single school import.
+        students = [
+            Student(
                 student_number=row.preview.student_number,
                 full_name=row.preview.full_name,
             )
-            session.add(student)
-            session.flush()
+            for row in validated.rows
+        ]
+        session.add_all(students)
+        session.flush()
+        memberships = []
+        for row, student in zip(validated.rows, students, strict=True):
             assert row.class_id is not None
-            session.add(ClassStudent(class_id=row.class_id, student_id=student.id))
+            memberships.append(
+                ClassStudent(class_id=row.class_id, student_id=student.id)
+            )
+        session.add_all(memberships)
         session.commit()
     except IntegrityError as exc:
         session.rollback()

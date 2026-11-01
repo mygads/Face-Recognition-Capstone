@@ -13,6 +13,7 @@ import {
   type SessionRecentActivity,
 } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { formatTimeOfDay } from '../utils/dateFormat'
 import { useRouter } from 'vue-router'
 
 type DashboardMessage = {
@@ -36,18 +37,27 @@ let socket: WebSocket | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined
 let connectionEpoch = 0
 let mounted = false
+let reconnectAttempts = 0
+
+function reconnectDelayMs(): number {
+  const capped = Math.min(reconnectAttempts, 4)
+  return Math.min(30000, 1500 * 2 ** capped) + Math.floor(Math.random() * 500)
+}
 
 function formatError(error: unknown): string {
   if (error instanceof ApiError) return error.message
   return 'Ringkasan belum dapat dimuat. Periksa koneksi lalu coba lagi.'
 }
 
-function formatTime(value: string): string {
-  return new Intl.DateTimeFormat('id-ID', {
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: 'Asia/Jakarta',
-  }).format(new Date(value))
+function selectedSessionTimezone(): string {
+  return (
+    sessions.value.find((item) => item.id === selectedSessionId.value)?.timezone_name ??
+    'Asia/Jakarta'
+  )
+}
+
+function formatTime(value: string, timezone?: string): string {
+  return formatTimeOfDay(value, timezone ?? selectedSessionTimezone())
 }
 
 function activityTitle(activity: SessionRecentActivity): string {
@@ -112,23 +122,46 @@ function connect(sessionId: string): void {
       snapshot.value = message.data
       connectionState.value = 'live'
       pageError.value = null
+      reconnectAttempts = 0
     } catch {
       pageError.value = 'Pembaruan dashboard tidak dapat dibaca.'
     }
   }
 
   currentSocket.onerror = () => currentSocket.close()
-  currentSocket.onclose = () => {
+  currentSocket.onclose = (event?: { code?: number }) => {
     if (epoch !== connectionEpoch || !mounted || selectedSessionId.value !== sessionId) return
     socket = null
+    const code = typeof event?.code === 'number' ? event.code : 0
+    if (code === 4401) {
+      // Token kedaluwarsa/ditolak: hentikan reconnect storm, arahkan login.
+      connectionState.value = 'disconnected'
+      clearReconnectTimer()
+      reconnectAttempts = 0
+      void router.replace({ name: 'login' })
+      return
+    }
+    if (code === 4403 || code === 4404) {
+      // Izin dicabut / sesi hilang: tampilkan error final, jangan reconnect.
+      connectionState.value = 'disconnected'
+      clearReconnectTimer()
+      reconnectAttempts = 0
+      pageError.value = code === 4403 ? 'Akses dashboard ditolak.' : 'Sesi tidak ditemukan.'
+      return
+    }
+    // Backoff eksponensial + jitter: hindari 50 lab reconnect serentak.
     connectionState.value = 'reconnecting'
     clearReconnectTimer()
-    reconnectTimer = setTimeout(() => connect(sessionId), 1500)
+    reconnectTimer = setTimeout(() => {
+      reconnectAttempts += 1
+      connect(sessionId)
+    }, reconnectDelayMs())
   }
 }
 
 async function selectSession(sessionId: string): Promise<void> {
   closeSocket()
+  reconnectAttempts = 0
   selectedSessionId.value = sessionId
   snapshot.value = null
   pageError.value = null
@@ -193,6 +226,26 @@ function atRiskReasonLabels(item: AtRiskStudentRow): string {
   return item.reasons
     .map((reason) => (reason === 'tingkat_absen' ? 'Tingkat absen tinggi' : 'Sering terlambat'))
     .join(' · ')
+}
+
+const attendanceRate = computed(() => {
+  const summary = snapshot.value?.summary
+  if (!summary || summary.total_roster <= 0) return 0
+  const attended = summary.present + summary.late
+  return Math.min(100, Math.round((attended / summary.total_roster) * 100))
+})
+
+const rateDashOffset = computed(() => {
+  const circumference = 2 * Math.PI * 26
+  return circumference - (circumference * attendanceRate.value) / 100
+})
+
+const lastUpdatedLabel = computed(() =>
+  snapshot.value ? formatTime(snapshot.value.generated_at) : '',
+)
+
+function riskLevel(item: AtRiskStudentRow): 'high' | 'medium' {
+  return item.absence_pct >= 50 ? 'high' : 'medium'
 }
 
 const atRiskSummary = computed(() => {
@@ -265,8 +318,8 @@ onBeforeUnmount(() => {
     </section>
 
     <template v-else-if="snapshot">
-      <div class="dashboard-view__session-heading">
-        <div>
+      <div class="dashboard-view__hero">
+        <div class="dashboard-view__hero-main">
           <p class="dashboard-view__eyebrow">
             {{
               snapshot.session_status === 'active'
@@ -277,23 +330,59 @@ onBeforeUnmount(() => {
             }}
           </p>
           <h2>{{ sessions.find((item) => item.id === selectedSessionId)?.subject }}</h2>
-          <p>
+          <p class="dashboard-view__hero-meta">
             {{ sessions.find((item) => item.id === selectedSessionId)?.class_name }}
             · {{ sessions.find((item) => item.id === selectedSessionId)?.laboratory_name }}
+            · dibuka
+            {{
+              formatTime(
+                sessions.find((item) => item.id === selectedSessionId)?.opened_at ??
+                  snapshot.generated_at,
+              )
+            }}
+          </p>
+          <p class="dashboard-view__hero-updated">
+            Diperbarui {{ lastUpdatedLabel }} · grace
+            {{ sessions.find((item) => item.id === selectedSessionId)?.grace_period_minutes ?? 15 }}
+            menit
           </p>
         </div>
-        <span
-          class="dashboard-view__connection"
-          :class="'dashboard-view__connection--' + connectionState"
-          role="status"
-          data-testid="realtime-status"
-        >
-          <span aria-hidden="true" />{{ connectionLabel() }}
-        </span>
+        <div class="dashboard-view__hero-side">
+          <div
+            class="dashboard-view__rate"
+            role="img"
+            :aria-label="`Tingkat kehadiran ${attendanceRate} persen`"
+            data-testid="attendance-rate"
+          >
+            <svg viewBox="0 0 64 64" aria-hidden="true">
+              <circle class="dashboard-view__rate-track" cx="32" cy="32" r="26" />
+              <circle
+                class="dashboard-view__rate-fill"
+                cx="32"
+                cy="32"
+                r="26"
+                :stroke-dashoffset="rateDashOffset"
+              />
+            </svg>
+            <div class="dashboard-view__rate-copy">
+              <strong>{{ attendanceRate }}%</strong>
+              <small>hadir</small>
+            </div>
+          </div>
+          <span
+            class="dashboard-view__connection"
+            :class="'dashboard-view__connection--' + connectionState"
+            role="status"
+            data-testid="realtime-status"
+          >
+            <span aria-hidden="true" />{{ connectionLabel() }}
+          </span>
+        </div>
       </div>
 
       <section class="dashboard-view__metrics" aria-label="Ringkasan kehadiran">
         <article class="dashboard-view__metric" data-testid="metric-roster">
+          <span class="dashboard-view__metric-icon" aria-hidden="true">◈</span>
           <span>Total roster</span>
           <strong>{{ snapshot.summary.total_roster }}</strong>
           <small>Siswa terdaftar di sesi</small>
@@ -302,6 +391,7 @@ onBeforeUnmount(() => {
           class="dashboard-view__metric dashboard-view__metric--present"
           data-testid="metric-present"
         >
+          <span class="dashboard-view__metric-icon" aria-hidden="true">●</span>
           <span>Hadir</span>
           <strong>{{ snapshot.summary.present }}</strong>
           <small>Presensi tepat waktu</small>
@@ -310,17 +400,37 @@ onBeforeUnmount(() => {
           class="dashboard-view__metric dashboard-view__metric--late"
           data-testid="metric-late"
         >
+          <span class="dashboard-view__metric-icon" aria-hidden="true">◐</span>
           <span>Terlambat</span>
           <strong>{{ snapshot.summary.late }}</strong>
           <small>Di luar grace period</small>
         </article>
         <article
+          class="dashboard-view__metric dashboard-view__metric--excused"
+          data-testid="metric-excused"
+        >
+          <span class="dashboard-view__metric-icon" aria-hidden="true">✎</span>
+          <span>Izin</span>
+          <strong>{{ snapshot.summary.excused }}</strong>
+          <small>Presensi izin tercatat</small>
+        </article>
+        <article
+          class="dashboard-view__metric dashboard-view__metric--absent"
+          data-testid="metric-absent"
+        >
+          <span class="dashboard-view__metric-icon" aria-hidden="true">✕</span>
+          <span>Absen</span>
+          <strong>{{ snapshot.summary.absent }}</strong>
+          <small>Tanpa keterangan</small>
+        </article>
+        <article
           class="dashboard-view__metric dashboard-view__metric--pending"
           data-testid="metric-not-present"
         >
+          <span class="dashboard-view__metric-icon" aria-hidden="true">○</span>
           <span>Belum hadir</span>
           <strong>{{ snapshot.summary.not_present }}</strong>
-          <small>Belum ada presensi hadir</small>
+          <small>Belum ada presensi tercatat</small>
         </article>
       </section>
 
@@ -348,6 +458,16 @@ onBeforeUnmount(() => {
                     ? 'Terakhir terhubung ' + formatTime(device.last_seen_at)
                     : 'Belum pernah terhubung'
                 }}</small>
+                <small
+                  v-if="(device.pending_events ?? 0) > 0 || (device.dead_letter_events ?? 0) > 0"
+                  class="dashboard-view__device-queue"
+                  data-testid="device-queue-backlog"
+                >
+                  Antrean {{ device.pending_events ?? 0 }} tertunda
+                  <template v-if="(device.dead_letter_events ?? 0) > 0">
+                    · {{ device.dead_letter_events }} gagal kirim
+                  </template>
+                </small>
               </div>
               <span
                 class="dashboard-view__device-status"
@@ -432,7 +552,11 @@ onBeforeUnmount(() => {
               {{ item.absence_pct }}% · terlambat {{ item.late_count }}x</small
             >
           </div>
-          <span class="dashboard-view__at-risk-reasons">{{ atRiskReasonLabels(item) }}</span>
+          <span
+            class="dashboard-view__at-risk-reasons"
+            :class="`dashboard-view__at-risk-reasons--${riskLevel(item)}`"
+            >{{ atRiskReasonLabels(item) }}</span
+          >
         </li>
       </ul>
       <p v-else class="dashboard-view__muted">Belum ada siswa yang perlu perhatian.</p>
@@ -448,7 +572,7 @@ onBeforeUnmount(() => {
 }
 
 .dashboard-view__toolbar,
-.dashboard-view__session-heading,
+.dashboard-view__hero,
 .dashboard-view__panel-heading {
   display: flex;
   align-items: center;
@@ -507,7 +631,6 @@ onBeforeUnmount(() => {
 }
 
 .dashboard-view__empty h2,
-.dashboard-view__session-heading h2,
 .dashboard-view__panel-heading h2 {
   margin: 0;
   color: var(--text);
@@ -515,8 +638,8 @@ onBeforeUnmount(() => {
   font-weight: 650;
 }
 
-.dashboard-view__empty p,
-.dashboard-view__session-heading p:last-child {
+.dashboard-view__hero-meta,
+.dashboard-view__empty p {
   margin: 7px 0 0;
   color: var(--text-muted);
   font-size: 0.82rem;
@@ -544,8 +667,143 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
 }
 
-.dashboard-view__session-heading {
-  min-height: 46px;
+.dashboard-view__hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 22px;
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(420px 160px at 12% 0%, var(--primary-lt) 0%, transparent 70%), var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.dashboard-view__hero-main {
+  min-width: 0;
+}
+
+.dashboard-view__hero-main h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.dashboard-view__hero-meta {
+  margin: 7px 0 0;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.dashboard-view__hero-updated {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.dashboard-view__hero-side {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 16px;
+}
+
+.dashboard-view__rate {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  flex: 0 0 auto;
+}
+
+.dashboard-view__rate svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.dashboard-view__rate-track,
+.dashboard-view__rate-fill {
+  fill: none;
+  stroke-width: 7;
+  stroke-linecap: round;
+}
+
+.dashboard-view__rate-track {
+  stroke: var(--border-color-light);
+}
+
+.dashboard-view__rate-fill {
+  stroke: var(--primary);
+  stroke-dasharray: 163.4;
+  transition: stroke-dashoffset 0.6s ease;
+}
+
+.dashboard-view__rate-copy {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  line-height: 1.05;
+}
+
+.dashboard-view__rate-copy strong {
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 750;
+}
+
+.dashboard-view__rate-copy small {
+  color: var(--text-muted);
+  font-size: 0.6rem;
+  font-weight: 600;
+}
+
+.dashboard-view__metric-icon {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--primary-dk);
+  background: var(--primary-lt);
+  font-size: 0.8rem;
+}
+
+.dashboard-view__metric--present .dashboard-view__metric-icon {
+  color: #157347;
+  background: rgba(21, 115, 71, 0.12);
+}
+
+.dashboard-view__metric--late .dashboard-view__metric-icon {
+  color: #ad6800;
+  background: rgba(173, 104, 0, 0.12);
+}
+
+.dashboard-view__metric--pending .dashboard-view__metric-icon {
+  color: var(--primary-dk);
+}
+
+.dashboard-view__metric--excused .dashboard-view__metric-icon {
+  color: #0c6e9b;
+  background: rgba(12, 110, 155, 0.12);
+}
+
+.dashboard-view__metric--absent .dashboard-view__metric-icon {
+  color: #b42318;
+  background: rgba(180, 35, 24, 0.1);
+}
+
+.dashboard-view__at-risk-reasons--high {
+  color: #b42318;
+}
+
+.dashboard-view__at-risk-reasons--medium {
+  color: #ad6800;
 }
 
 .dashboard-view__connection {
@@ -585,7 +843,7 @@ onBeforeUnmount(() => {
 
 .dashboard-view__metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 14px;
 }
 
@@ -624,6 +882,14 @@ onBeforeUnmount(() => {
 
 .dashboard-view__metric--pending strong {
   color: var(--primary-dk);
+}
+
+.dashboard-view__metric--excused strong {
+  color: #0c6e9b;
+}
+
+.dashboard-view__metric--absent strong {
+  color: #b42318;
 }
 
 .dashboard-view__columns {
@@ -703,6 +969,11 @@ onBeforeUnmount(() => {
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.dashboard-view__device-queue {
+  color: var(--orange, #c27816);
+  font-weight: 700;
 }
 
 .dashboard-view__device-copy small,
@@ -798,7 +1069,7 @@ onBeforeUnmount(() => {
   }
 
   .dashboard-view__toolbar,
-  .dashboard-view__session-heading {
+  .dashboard-view__hero {
     align-items: stretch;
   }
 

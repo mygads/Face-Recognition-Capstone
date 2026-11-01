@@ -197,8 +197,17 @@ def list_openable_schedules(
     )
     if RoleCode.TEACHER in principal.roles and RoleCode.ADMIN not in principal.roles:
         query = query.where(PracticumSchedule.teacher_user_id == principal.id)
+    running_schedule_ids = set(
+        session.scalars(
+            select(AttendanceSession.practicum_schedule_id).where(
+                AttendanceSession.status.in_(RUNNING_SESSION_STATUSES)
+            )
+        ).all()
+    )
     result = []
     for schedule in session.scalars(query).all():
+        if schedule.id in running_schedule_ids:
+            continue
         try:
             allowed, _ = session_can_open_today(schedule, now)
         except (ZoneInfoNotFoundError, ValueError, TypeError):
@@ -342,18 +351,25 @@ def open_session(
         opened_at=now,
         grace_period_minutes=request.grace_period_minutes,
     )
+    roster = session.execute(
+        select(Student.id, Student.student_number, Student.full_name)
+        .join(ClassStudent, ClassStudent.student_id == Student.id)
+        .where(
+            ClassStudent.class_id == schedule.class_id,
+            Student.is_active.is_(True),
+        )
+        .order_by(Student.student_number, Student.id)
+    ).all()
+    if not roster:
+        raise ApiProblem(
+            422,
+            "empty_class_roster",
+            "Kelas pada jadwal ini belum memiliki siswa aktif "
+            "sehingga sesi tidak dapat dibuka.",
+        )
     try:
         session.add(attendance_session)
         session.flush()
-        roster = session.execute(
-            select(Student.id, Student.student_number, Student.full_name)
-            .join(ClassStudent, ClassStudent.student_id == Student.id)
-            .where(
-                ClassStudent.class_id == schedule.class_id,
-                Student.is_active.is_(True),
-            )
-            .order_by(Student.student_number, Student.id)
-        ).all()
         for student_id, student_number, full_name in roster:
             session.add(
                 SessionStudent(

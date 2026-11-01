@@ -79,6 +79,43 @@ def configure_multipart_memory_only(max_request_bytes: int) -> None:
     MultiPartParser.spool_max_size = max_request_bytes
 
 
+class SecurityHeadersMiddleware:
+    """Attach minimal hardening headers to every API response.
+
+    The API only serves JSON (no HTML), and the production Nginx vhost serves
+    the Vue bundle same-origin with the API proxied under ``/api/``; these
+    headers are safe for both the browser dashboard and device clients, which
+    ignore unknown headers.
+    """
+
+    HARDENING_HEADERS = (
+        ("X-Content-Type-Options", "nosniff"),
+        ("Referrer-Policy", "no-referrer"),
+        ("X-Frame-Options", "DENY"),
+    )
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def hardened_send(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = dict(message.get("headers", []))
+                for name, value in self.HARDENING_HEADERS:
+                    if name.lower().encode("latin-1") not in headers:
+                        headers[name.lower().encode("latin-1")] = value.encode(
+                            "latin-1"
+                        )
+                message = {**message, "headers": list(headers.items())}
+            await send(message)
+
+        await self.app(scope, receive, hardened_send)
+
+
 class RequestBodyTooLarge(Exception):
     """Internal signal used to stop parsing an oversized request body."""
 

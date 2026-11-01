@@ -4,7 +4,7 @@ import { createMemoryHistory } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, getCurrentAccount, refreshOperatorSession } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { createAppRouter, installAuthGuard } from './index'
+import { createAppRouter, installAuthGuard, isSafeRedirectPath } from './index'
 
 vi.mock('../api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/client')>()
@@ -149,5 +149,42 @@ describe('route authorization', () => {
     expect(refreshOperatorSession).toHaveBeenCalledOnce()
     expect(router.currentRoute.value.name).toBe('ai-setup')
     expect(useAuthStore(pinia).hasActiveSession()).toBe(true)
+  })
+})
+describe('post-login redirect safety', () => {
+  it('rejects protocol-relative and backslash-escaped targets', () => {
+    expect(isSafeRedirectPath('//evil.example.com')).toBe(false)
+    expect(isSafeRedirectPath('//evil.example.com/app/dashboard')).toBe(false)
+    expect(isSafeRedirectPath('/\\evil.example.com')).toBe(false)
+    expect(isSafeRedirectPath('https://evil.example.com')).toBe(false)
+    expect(isSafeRedirectPath('')).toBe(false)
+    expect(isSafeRedirectPath(undefined)).toBe(false)
+  })
+
+  it('accepts ordinary in-app paths', () => {
+    expect(isSafeRedirectPath('/app/dashboard')).toBe(true)
+    expect(isSafeRedirectPath('/')).toBe(true)
+  })
+
+  it('sends an authenticated user with a malicious redirect to the dashboard', async () => {
+    const pinia = createPinia()
+    const auth = useAuthStore(pinia)
+    auth.$patch({
+      accessToken: 'unit-fixture-access-token',
+      expiresAt: Date.now() + 60_000,
+      account: {
+        id: '9c6c68d0-9b70-4c80-a9bd-15c2a55ecb27',
+        email: 'admin@example.test',
+        full_name: 'Test Admin',
+        roles: ['ADMIN'],
+        must_change_password: false,
+      },
+    })
+    const router = createAppRouter(createMemoryHistory())
+    installAuthGuard(router, pinia)
+
+    await router.push('/auth/login?redirect=//evil.example.com/app/dashboard')
+
+    expect(router.currentRoute.value.name).toBe('dashboard')
   })
 })

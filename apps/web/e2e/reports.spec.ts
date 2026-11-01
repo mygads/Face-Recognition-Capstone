@@ -114,7 +114,7 @@ test('teacher can filter attendance and download a CSV report', async ({ page })
         session_id: sessionId,
         session_status: 'active',
         generated_at: '2026-09-15T02:20:00Z',
-        summary: { total_roster: 1, present: 1, late: 0, not_present: 0 },
+        summary: { total_roster: 1, present: 1, late: 0, excused: 0, absent: 0, not_present: 0 },
         devices: [],
         recent_activity: [],
       },

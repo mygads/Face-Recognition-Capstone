@@ -136,6 +136,7 @@ class StbGatewayService:
                 )
             )
             api.set_camera_metrics_provider(self.camera_metrics.snapshot)
+            api.set_queue_status_provider(self._queue_status_snapshot)
         self.ai = ai
         self.outbox = outbox
         self.processor = processor
@@ -144,6 +145,13 @@ class StbGatewayService:
         self._camera_open = False
         self._last_burst_at = 0.0
         self._last_periodic_at = 0.0
+
+    def _queue_status_snapshot(self) -> dict[str, object]:
+        pending, dead_letter = self.outbox.counts()
+        return {
+            "pending_events": pending,
+            "dead_letter_events": dead_letter,
+        }
 
     def status(self) -> dict[str, object]:
         pending, dead_letter = self.outbox.counts()
@@ -359,6 +367,13 @@ class StbGatewayService:
             self.session_id = None
             self._active_session_end = None
             self._active_session_expires_at = None
+            log_event(
+                logger,
+                logging.WARNING,
+                "gateway_session_pinned_mismatch",
+                configured_session_id=str(configured_id),
+                discovered_session_id=str(candidate_id),
+            )
             return
         self.session_id = candidate_id
         self._active_session_end = session_end
@@ -377,6 +392,8 @@ class StbGatewayService:
     def _capture_burst(
         self, first_frame: object, first_assessment: FrameAssessment
     ) -> list[BurstFrame]:
+        if self.stop_event.is_set():
+            return []
         captured: list[BurstFrame] = []
         frame = first_frame
         assessment = first_assessment
@@ -389,6 +406,8 @@ class StbGatewayService:
                     captured.append(BurstFrame(encoded, datetime.now(UTC)))
             if index + 1 < self.config.gateway.burst_frame_count:
                 self.stop_event.wait(self.config.gateway.burst_frame_interval_seconds)
+                if self.stop_event.is_set():
+                    break
                 ok, next_frame = self.camera.read()
                 if not ok or next_frame is None:
                     break
@@ -404,14 +423,30 @@ class StbGatewayService:
     def _submit_burst(self, frames: list[BurstFrame]) -> None:
         if self.session_id is None:
             return
+        if self.stop_event.is_set():
+            # Shutting down: the outbox is about to close, so dropping this
+            # burst avoids an enqueue-then-lose on a closed SQLite handle.
+            return
         # A burst is one short track: a later person at the same camera must
         # not inherit temporal evidence from the previous candidate.
         track_id = f"camera-{self.config.camera.index}-{uuid4()}"
-        decision = self.ai.recognize_burst(
-            session_id=self.session_id,
-            track_id=track_id,
-            frames=frames,
-        )
+        try:
+            decision = self.ai.recognize_burst(
+                session_id=self.session_id,
+                track_id=track_id,
+                frames=frames,
+            )
+        except ValueError as exc:
+            # Malformed burst data (clock skew between captures, oversized
+            # frame) is a data problem, not a camera failure: skip this burst
+            # without triggering the capture reconnect cycle below.
+            log_event(
+                logger,
+                logging.WARNING,
+                "central_ai_burst_skipped",
+                exception_type=type(exc).__name__,
+            )
+            return
         payload = _event_payload(
             decision,
             device_id=self.device_id,
@@ -435,76 +470,86 @@ class StbGatewayService:
         next_discovery = 0.0
         next_configuration_refresh = 0.0
         while not self.stop_event.is_set():
-            now = time.monotonic()
-            if self._session_discovery_supported and now >= next_discovery:
-                try:
-                    self._refresh_active_session()
-                    if self.session_id is not None:
-                        log_event(
-                            logger,
-                            logging.DEBUG,
-                            "active_session_discovered",
-                            session_id=str(self.session_id),
-                        )
-                    else:
-                        log_event(logger, logging.DEBUG, "no_unique_active_session")
-                except ApiCallError as exc:
-                    log_event(
-                        logger,
-                        logging.WARNING,
-                        "active_session_discovery_failed",
-                        status_code=exc.status_code,
-                        retryable=exc.retryable,
-                    )
-                next_discovery = now + self.config.api.cache_refresh_seconds
-            if now >= next_heartbeat:
-                try:
-                    self.api.heartbeat()
-                    log_event(logger, logging.DEBUG, "device_heartbeat_sent")
-                except ApiCallError as exc:
-                    log_event(
-                        logger,
-                        logging.WARNING,
-                        "device_heartbeat_failed",
-                        status_code=exc.status_code,
-                        retryable=exc.retryable,
-                    )
-                next_heartbeat = now + self.config.api.heartbeat_interval_seconds
-            if now >= next_configuration_refresh:
-                self._sync_managed_configuration()
-                next_configuration_refresh = now + max(
-                    15.0, self.config.api.heartbeat_interval_seconds
-                )
-            for queued_event in self.outbox.due(limit=50):
-                try:
-                    self.api.submit_recognition_event(queued_event.payload)
-                except ApiCallError as exc:
-                    if exc.retryable:
-                        self.outbox.retry(
-                            queued_event.event_id,
-                            max_delay_seconds=self.config.runtime.max_retry_seconds,
-                            status_code=exc.status_code,
-                        )
+            try:
+                now = time.monotonic()
+                if self._session_discovery_supported and now >= next_discovery:
+                    try:
+                        self._refresh_active_session()
+                        if self.session_id is not None:
+                            log_event(
+                                logger,
+                                logging.DEBUG,
+                                "active_session_discovered",
+                                session_id=str(self.session_id),
+                            )
+                        else:
+                            log_event(logger, logging.DEBUG, "no_unique_active_session")
+                    except ApiCallError as exc:
                         log_event(
                             logger,
                             logging.WARNING,
-                            "recognition_event_delivery_retry",
+                            "active_session_discovery_failed",
                             status_code=exc.status_code,
-                            attempt=queued_event.attempts + 1,
+                            retryable=exc.retryable,
                         )
-                        break
-                    self.outbox.dead_letter(
-                        queued_event.event_id, status_code=exc.status_code
+                    next_discovery = now + self.config.api.cache_refresh_seconds
+                if now >= next_heartbeat:
+                    try:
+                        self.api.heartbeat()
+                        log_event(logger, logging.DEBUG, "device_heartbeat_sent")
+                    except ApiCallError as exc:
+                        log_event(
+                            logger,
+                            logging.WARNING,
+                            "device_heartbeat_failed",
+                            status_code=exc.status_code,
+                            retryable=exc.retryable,
+                        )
+                    next_heartbeat = now + self.config.api.heartbeat_interval_seconds
+                if now >= next_configuration_refresh:
+                    self._sync_managed_configuration()
+                    next_configuration_refresh = now + max(
+                        15.0, self.config.api.heartbeat_interval_seconds
                     )
-                    log_event(
-                        logger,
-                        logging.ERROR,
-                        "recognition_event_dead_lettered",
-                        status_code=exc.status_code,
-                    )
-                else:
-                    self.outbox.acknowledge(queued_event.event_id)
-                    log_event(logger, logging.INFO, "recognition_event_delivered")
+                for queued_event in self.outbox.due(limit=50):
+                    try:
+                        self.api.submit_recognition_event(queued_event.payload)
+                    except ApiCallError as exc:
+                        if exc.retryable:
+                            self.outbox.retry(
+                                queued_event.event_id,
+                                max_delay_seconds=self.config.runtime.max_retry_seconds,
+                                status_code=exc.status_code,
+                            )
+                            log_event(
+                                logger,
+                                logging.WARNING,
+                                "recognition_event_delivery_retry",
+                                status_code=exc.status_code,
+                                attempt=queued_event.attempts + 1,
+                            )
+                            break
+                        self.outbox.dead_letter(
+                            queued_event.event_id, status_code=exc.status_code
+                        )
+                        log_event(
+                            logger,
+                            logging.ERROR,
+                            "recognition_event_dead_lettered",
+                            status_code=exc.status_code,
+                        )
+                    else:
+                        self.outbox.acknowledge(queued_event.event_id)
+                        log_event(logger, logging.INFO, "recognition_event_delivered")
+            except Exception as exc:
+                # Mirror EdgeService: never let one bad poll kill heartbeats,
+                # discovery, retries, or config sync for the whole process.
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "gateway_sync_cycle_failed",
+                    exception_type=type(exc).__name__,
+                )
             self.stop_event.wait(1.0)
 
     def _sync_managed_configuration(self) -> None:
@@ -592,8 +637,12 @@ def _event_payload(
         "confidence": round(decision.confidence, 6)
         if decision.confidence is not None
         else None,
-        "margin": round(decision.margin, 6)
-        if decision.margin is not None and decision.margin <= 1.0
+        # Central AI validates margin in [0, 2] (raw cosine gap) while the
+        # Core API stores margin in [0, 1]. Clamp instead of dropping so a
+        # very confident burst keeps its signal and still satisfies the DB
+        # CHECK constraint + Pydantic le=1.
+        "margin": round(min(1.0, max(0.0, decision.margin)), 6)
+        if decision.margin is not None
         else None,
         "liveness_passed": (
             True
@@ -610,7 +659,7 @@ def _event_payload(
         if decision.liveness_score is not None
         else None,
         "occurred_at": occurred_at.isoformat(),
-        "model_name": "opencv-zoo-sface",
+        "model_name": decision.model_name,
         "model_version": decision.model_version,
     }
 

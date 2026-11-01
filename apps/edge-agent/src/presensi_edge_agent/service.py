@@ -9,7 +9,11 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
-from presensi_edge_agent.api import ApiCallError, CoreApiClient
+from presensi_edge_agent.api import (
+    ApiCallError,
+    CoreApiClient,
+    GalleryNotModified,
+)
 from presensi_edge_agent.cache import (
     ActiveSessionCache,
     CacheSchemaError,
@@ -34,6 +38,7 @@ from presensi_edge_agent.managed_config import (
 from presensi_edge_agent.outbox import EventOutbox, OutboxFullError
 from presensi_edge_agent.performance import EdgePerformanceMonitor
 from recognition_core.domain import GalleryEntry, TrackDecision
+from recognition_core.opencv_models import SFaceModel
 
 logger = logging.getLogger("presensi_edge_agent")
 
@@ -58,6 +63,14 @@ class FrameRecognizer(Protocol):
 
 
 CacheFetch = Callable[[], dict[str, object]]
+
+
+def require_attendance_recognizer(recognizer: object) -> None:
+    """Fail closed if a diagnostic-only recognizer reaches the event submit path."""
+    if getattr(recognizer, "diagnostic_only", False):
+        raise RuntimeError(
+            "Diagnostic recognizers must never enqueue attendance events."
+        )
 
 
 class EdgeService:
@@ -90,6 +103,8 @@ class EdgeService:
                 )
             )
             api.set_camera_metrics_provider(self.camera_metrics.snapshot)
+            api.set_queue_status_provider(self._queue_status_snapshot)
+            api.set_gallery_version_provider(self._gallery_version_hint)
         self.outbox = outbox
         self.recognizer = recognizer
         self.performance = EdgePerformanceMonitor.from_environment()
@@ -124,6 +139,19 @@ class EdgeService:
             if config.mode == "AI_EDGE" and config.preview.enabled
             else None
         )
+
+    def _queue_status_snapshot(self) -> dict[str, object]:
+        pending, dead_letter = self.outbox.counts()
+        return {
+            "pending_events": pending,
+            "dead_letter_events": dead_letter,
+        }
+
+    def _gallery_version_hint(self) -> str | None:
+        current = self.cache.current()
+        if current is None:
+            return None
+        return current.generated_at.isoformat()
 
     def status(self) -> dict[str, object]:
         bundle = self.cache.current()
@@ -610,12 +638,13 @@ class EdgeService:
             device_id=self.device_id,
             session_id=bundle.session_id,
             occurred_at=captured_at,
-            model_name="opencv-zoo-sface",
+            model_name=SFaceModel.model_name,
             model_version=self.config.models.version,
             liveness_required=self.config.liveness.required,
             liveness_enabled=self.config.liveness.enabled,
             min_live_score=self.config.liveness.min_live_score,
         )
+        require_attendance_recognizer(self.recognizer)
         try:
             self.outbox.enqueue(payload)
         except OutboxFullError:
@@ -743,7 +772,9 @@ class EdgeService:
             max_history_frames=1,
         )
         diagnostic_config = replace(self.config, recognition=diagnostic_recognition)
-        return LocalRecognizer(build_pipeline(diagnostic_config), self.device_id)
+        return LocalRecognizer(
+            build_pipeline(diagnostic_config), self.device_id, diagnostic_only=True
+        )
 
     def _process_calibration_frame(self, frame: object) -> None:
         preview = self.preview
@@ -814,7 +845,9 @@ class EdgeService:
             min_top1_top2_margin=0.0,
         )
         diagnostic_config = replace(self.config, recognition=diagnostic_recognition)
-        return LocalRecognizer(build_pipeline(diagnostic_config), self.device_id)
+        return LocalRecognizer(
+            build_pipeline(diagnostic_config), self.device_id, diagnostic_only=True
+        )
 
     def _sync_worker(self) -> None:
         next_heartbeat = 0.0
@@ -951,11 +984,21 @@ class EdgeService:
 
     def _refresh_cache(self) -> bool:
         try:
-            payload = self.cache_fetch()
+            try:
+                payload = self.cache_fetch()
+            except GalleryNotModified:
+                # The server confirmed our cached version is current: skip
+                # re-parsing and keep serving inference from the cache.
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    "session_cache_not_modified",
+                )
+                return True
             bundle = parse_session_cache(
                 payload,
                 device_id=self.device_id,
-                model_name="opencv-zoo-sface",
+                model_name=SFaceModel.model_name,
                 model_version=self.config.models.version,
                 max_offline_seconds=self.config.api.cache_max_offline_seconds,
             )
@@ -1004,6 +1047,11 @@ class EdgeService:
         return True
 
     def _refresh_preview_gallery(self) -> bool:
+        # Preview gallery has no conditional 304 path and generated_at is
+        # now() per request: refetching every cache poll wastes bandwidth and
+        # CPU. Reuse the cached bundle while it is still valid.
+        if self.preview_cache.current() is not None:
+            return True
         fetch = getattr(self.api, "fetch_preview_gallery", None)
         if not callable(fetch):
             self.preview_cache.clear()
@@ -1013,7 +1061,7 @@ class EdgeService:
             bundle = parse_preview_gallery(
                 payload,
                 device_id=self.device_id,
-                model_name="opencv-zoo-sface",
+                model_name=SFaceModel.model_name,
                 model_version=self.config.models.version,
                 max_offline_seconds=self.config.api.cache_max_offline_seconds,
             )

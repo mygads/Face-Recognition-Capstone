@@ -153,6 +153,17 @@ versi teramati (tanpa path/ID/token/embedding); catat digest image central
 terpisah. Tes no-hardware: `python -m pytest tests/deployment-benchmark
 apps/ai-service/tests libs/recognition-core/tests -q`.
 
+## Keterbatasan jam-batas suite
+
+Fixture API mengasumsikan satu hari lokal Asia/Jakarta selama satu run: sesi
+dibuka "N menit lalu" dengan jadwal 00:00–23:59:59 hari yang sama. Run yang
+melewati tengah malam lokal (00:00–00:30 WIB, yaitu 17:00–17:30 UTC)
+dapat menutup sesi fixture via `close_expired_sessions` sehingga sebagian
+tes `apps/api/tests` gagal (`session_inactive`). Ini flake pra-ada pada
+fixture, bukan regresi domain — jadwalkan CI di luar jendela tersebut atau
+rerun. Jangan "memperbaiki" dengan menggeser `opened_at` fixture: status
+present/late/grace pada tes terkait justru bergantung pada offset itu.
+
 ## Privasi pengujian
 
 Tanpa data anak di CI; tanpa foto siswa/minor di repo/fixture/laporan. Semua

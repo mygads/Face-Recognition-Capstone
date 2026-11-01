@@ -76,14 +76,17 @@ def close_expired_sessions(
     )
     if session_id is not None:
         query = query.where(AttendanceSession.id == session_id)
-    active_sessions = session.scalars(query).all()
+    # Fetch the schedule in the same round trip: this sweep runs on every
+    # recognition event and worker tick, so per-session lazy loads (N+1)
+    # would multiply database traffic under classroom concurrency.
+    rows = session.execute(
+        query.join(
+            PracticumSchedule,
+            PracticumSchedule.id == AttendanceSession.practicum_schedule_id,
+        ).add_columns(PracticumSchedule)
+    ).all()
     closed_count = 0
-    for attendance_session in active_sessions:
-        schedule = session.get(
-            PracticumSchedule, attendance_session.practicum_schedule_id
-        )
-        if schedule is None:
-            continue
+    for attendance_session, schedule in rows:
         try:
             session_end = scheduled_end_at(schedule, attendance_session.opened_at)
         except (ZoneInfoNotFoundError, ValueError, TypeError):

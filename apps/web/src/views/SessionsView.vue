@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { formatDateTime } from '../utils/dateFormat'
 import { useAuthStore } from '../stores/auth'
 import {
   ApiError,
@@ -92,11 +93,7 @@ function displayTime(value: string): string {
 }
 
 function displayDateTime(value: string, timezone: string): string {
-  return new Intl.DateTimeFormat('id-ID', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: timezone,
-  }).format(new Date(value))
+  return formatDateTime(value, timezone)
 }
 
 function sessionStatusLabel(status: AttendanceSession['status']): string {
@@ -127,6 +124,71 @@ function draftFor(studentId: string): {
 }
 
 const unmarkedRoster = computed(() => roster.value.filter((entry) => entry.record_status === null))
+
+type RosterStatusFilter = 'all' | 'unmarked' | 'present' | 'late' | 'absent' | 'excused'
+const rosterSearch = ref('')
+const rosterStatusFilter = ref<RosterStatusFilter>('all')
+
+const rosterStatusFilters: { value: RosterStatusFilter; label: string }[] = [
+  { value: 'all', label: 'Semua' },
+  { value: 'unmarked', label: 'Belum tercatat' },
+  { value: 'present', label: 'Hadir' },
+  { value: 'late', label: 'Terlambat' },
+  { value: 'absent', label: 'Absen' },
+  { value: 'excused', label: 'Izin' },
+]
+
+const rosterStatusCounts = computed<Record<RosterStatusFilter, number>>(() => {
+  const counts: Record<RosterStatusFilter, number> = {
+    all: roster.value.length,
+    unmarked: 0,
+    present: 0,
+    late: 0,
+    absent: 0,
+    excused: 0,
+  }
+  for (const entry of roster.value) {
+    if (entry.record_status === null || entry.record_status === undefined) {
+      counts.unmarked += 1
+    } else {
+      counts[entry.record_status] += 1
+    }
+  }
+  return counts
+})
+
+const filteredRoster = computed(() => {
+  const query = rosterSearch.value.trim().toLowerCase()
+  return roster.value.filter((entry) => {
+    if (rosterStatusFilter.value === 'unmarked') {
+      if (entry.record_status !== null && entry.record_status !== undefined) return false
+    } else if (
+      rosterStatusFilter.value !== 'all' &&
+      entry.record_status !== rosterStatusFilter.value
+    ) {
+      return false
+    }
+    if (!query) return true
+    return (
+      entry.full_name.toLowerCase().includes(query) ||
+      entry.student_number.toLowerCase().includes(query)
+    )
+  })
+})
+
+function rosterStatusLabel(status: SessionRosterEntry['record_status']): string {
+  if (status === 'present') return 'Hadir'
+  if (status === 'late') return 'Terlambat'
+  if (status === 'absent') return 'Absen'
+  if (status === 'excused') return 'Izin'
+  return 'Belum tercatat'
+}
+
+function rosterStatusClass(status: SessionRosterEntry['record_status']): string {
+  if (status === 'present') return 'status-badge--active'
+  if (status === 'late' || status === 'excused') return 'status-badge--warning'
+  return 'status-badge--inactive'
+}
 
 async function reload(): Promise<void> {
   isLoading.value = true
@@ -254,6 +316,8 @@ async function loadRoster(sessionId: string): Promise<void> {
   rosterError.value = null
   try {
     roster.value = await getSessionRoster(sessionId)
+    rosterSearch.value = ''
+    rosterStatusFilter.value = 'all'
   } catch (error) {
     roster.value = []
     rosterError.value = formatError(error)
@@ -572,6 +636,67 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
           <dd>{{ selected.teacher_name }}</dd>
         </div>
       </dl>
+      <div class="session-view__roster-overview">
+        <h3>Roster sesi</h3>
+        <p class="session-view__hint">
+          Semua peserta snapshot beserta status presensi terakhir, termasuk yang tercatat otomatis
+          oleh face recognition.
+        </p>
+        <div class="session-view__roster-toolbar">
+          <label class="session-view__roster-search">
+            Cari siswa
+            <input
+              v-model="rosterSearch"
+              type="search"
+              placeholder="Nama atau NIS…"
+              data-testid="roster-search"
+              :disabled="isRosterLoading"
+            />
+          </label>
+          <div class="session-view__roster-filters" role="group" aria-label="Filter status roster">
+            <button
+              v-for="option in rosterStatusFilters"
+              :key="option.value"
+              class="session-view__filter-chip"
+              :class="{ 'session-view__filter-chip--active': rosterStatusFilter === option.value }"
+              type="button"
+              :data-testid="'roster-filter-' + option.value"
+              :aria-pressed="rosterStatusFilter === option.value"
+              @click="rosterStatusFilter = option.value"
+            >
+              {{ option.label }} ({{ rosterStatusCounts[option.value] }})
+            </button>
+          </div>
+        </div>
+        <p v-if="isRosterLoading" class="master-data__muted">Memuat roster…</p>
+        <p v-else-if="rosterError" class="master-data__alert" role="alert">{{ rosterError }}</p>
+        <p v-else-if="filteredRoster.length === 0" class="master-data__muted">
+          Tidak ada siswa yang cocok dengan pencarian atau filter.
+        </p>
+        <div v-else class="master-data__table-wrap">
+          <table class="master-data__table session-view__table" data-testid="roster-table">
+            <thead>
+              <tr>
+                <th scope="col">Siswa</th>
+                <th scope="col">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="entry in filteredRoster" :key="entry.student_id" data-testid="roster-row">
+                <td data-label="Siswa">
+                  {{ entry.full_name }}
+                  <small>{{ entry.student_number }}</small>
+                </td>
+                <td data-label="Status">
+                  <span class="status-badge" :class="rosterStatusClass(entry.record_status)">{{
+                    rosterStatusLabel(entry.record_status)
+                  }}</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
       <div class="session-view__manual-marks">
         <h3>Tandai kehadiran manual</h3>
         <p class="session-view__hint">

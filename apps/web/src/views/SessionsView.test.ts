@@ -165,3 +165,63 @@ describe('sessions view', () => {
     expect(wrapper.text()).toContain('sudah tercatat')
   })
 })
+
+describe('session roster overview', () => {
+  const rosterEntries = [
+    {
+      student_id: 'student-1',
+      student_number: 'S-001',
+      full_name: 'Siswa Satu',
+      record_status: 'present',
+    },
+    {
+      student_id: 'student-2',
+      student_number: 'S-002',
+      full_name: 'Siswa Dua',
+      record_status: null,
+    },
+    {
+      student_id: 'student-3',
+      student_number: 'S-003',
+      full_name: 'Siswi Tiga',
+      record_status: 'late',
+    },
+  ]
+
+  async function openDetail() {
+    api.getAttendanceSessionStatus.mockResolvedValue(overrideSession)
+    api.getSessionRoster.mockResolvedValue(rosterEntries)
+    const wrapper = mount(SessionsView, { global: { plugins: [teacherPinia()] } })
+    await flushPromises()
+    await wrapper.get('button.button--text').trigger('click')
+    await flushPromises()
+    return wrapper
+  }
+
+  it('lists every roster entry with its attendance status', async () => {
+    const wrapper = await openDetail()
+    const rows = wrapper.findAll('[data-testid="roster-row"]')
+    expect(rows).toHaveLength(3)
+    expect(wrapper.text()).toContain('Semua (3)')
+    expect(wrapper.text()).toContain('Belum tercatat (1)')
+    expect(wrapper.text()).toContain('Hadir')
+    expect(wrapper.text()).toContain('Terlambat')
+  })
+
+  it('filters the roster by search text and status chips', async () => {
+    const wrapper = await openDetail()
+    await wrapper.get('[data-testid="roster-search"]').setValue('dua')
+    expect(wrapper.findAll('[data-testid="roster-row"]')).toHaveLength(1)
+    expect(wrapper.text()).toContain('Siswa Dua')
+
+    await wrapper.get('[data-testid="roster-search"]').setValue('')
+    await wrapper.get('[data-testid="roster-filter-unmarked"]').trigger('click')
+    const rows = wrapper.findAll('[data-testid="roster-row"]')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text()).toContain('Siswa Dua')
+
+    await wrapper.get('[data-testid="roster-filter-present"]').trigger('click')
+    expect(wrapper.findAll('[data-testid="roster-row"]')).toHaveLength(1)
+    expect(wrapper.text()).toContain('Siswa Satu')
+  })
+})

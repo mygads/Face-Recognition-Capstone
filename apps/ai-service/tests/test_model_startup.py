@@ -32,3 +32,13 @@ def test_ai_thresholds_must_be_configured_as_a_pair() -> None:
     paired = AISettings(min_top1_similarity=0.7, min_top1_top2_margin=0.1)
     assert paired.min_top1_similarity == 0.7
     assert paired.min_top1_top2_margin == 0.1
+
+
+def test_yunet_operating_point_is_calibrated_config_with_sane_defaults() -> None:
+    defaults = AISettings()
+    assert defaults.yunet_score_threshold == 0.9
+    assert defaults.yunet_nms_threshold == 0.3
+    with pytest.raises(AIServiceConfigError, match="yunet_score_threshold"):
+        AISettings(yunet_score_threshold=1.5)
+    with pytest.raises(AIServiceConfigError, match="yunet_nms_threshold"):
+        AISettings(yunet_nms_threshold=-0.1)

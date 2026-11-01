@@ -91,24 +91,59 @@ class MultiFrameDecisionEngine:
     considered.
     """
 
+    #: Fail-closed bound on live track states. A dropped track restarts at
+    #: "collecting" and must rebuild consensus, so eviction can never
+    #: auto-accept a stranger.
+    MAX_TRACK_STATES = 4096
+
     def __init__(self, config: TemporalDecisionConfig) -> None:
         self.config = config
         self._tracks: dict[str, _TrackState] = {}
+        self._last_sweep_at: datetime | None = None
 
-    def _state_for(self, observation: FrameObservation) -> _TrackState | None:
+    def _sweep_expired(self, now: datetime) -> None:
+        """Evict stale tracks, amortized to at most twice per TTL.
+
+        The previous implementation scanned the whole track table on every
+        frame observation. On a central server that fans many labs through
+        one shared engine, that scan is O(tracks) per frame; since expiry
+        only needs to happen before a stale id could be reused (TTL
+        granularity), running it at TTL/2 cadence is equivalent and far
+        cheaper. A hard cap bounds memory even if observations stop flowing.
+        """
+        last = self._last_sweep_at
+        if (
+            last is not None
+            and (now - last).total_seconds() <= self.config.track_ttl_seconds / 2
+        ):
+            return
+        self._last_sweep_at = now
         expired_track_ids = [
             track_id
             for track_id, track in self._tracks.items()
             if track.last_observed_at is not None
-            and (observation.captured_at - track.last_observed_at).total_seconds()
+            and (now - track.last_observed_at).total_seconds()
             > self.config.track_ttl_seconds
         ]
         for track_id in expired_track_ids:
             self._tracks.pop(track_id, None)
 
+    def _state_for(self, observation: FrameObservation) -> _TrackState | None:
+        self._sweep_expired(observation.captured_at)
+
         state = self._tracks.get(observation.track_id)
         if state is None or state.last_observed_at is None:
-            return self._tracks.setdefault(observation.track_id, _TrackState())
+            state = self._tracks.setdefault(observation.track_id, _TrackState())
+            # The sweep above is cadenced, so the table bound is enforced
+            # here at the only growth point instead. The fresh key sorts
+            # last in insertion order, so oldest-first eviction can never
+            # drop the track being observed.
+            while len(self._tracks) > self.MAX_TRACK_STATES:
+                oldest = next(iter(self._tracks))
+                if oldest == observation.track_id:
+                    break
+                self._tracks.pop(oldest, None)
+            return state
 
         elapsed = (observation.captured_at - state.last_observed_at).total_seconds()
         if elapsed > self.config.track_ttl_seconds:

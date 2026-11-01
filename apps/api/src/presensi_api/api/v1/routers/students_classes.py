@@ -35,6 +35,7 @@ from presensi_api.db.models import (
     Student,
     User,
 )
+from presensi_api.db.search import like_contains
 from presensi_api.db.session import get_db_session
 
 router = APIRouter(tags=["students", "classes"])
@@ -110,9 +111,12 @@ def list_students(
     count_query = select(func.count()).select_from(Student)
     filters = []
     if search and search.strip():
-        pattern = f"%{search.strip()}%"
+        pattern = like_contains(search)
         filters.append(
-            or_(Student.student_number.ilike(pattern), Student.full_name.ilike(pattern))
+            or_(
+                Student.student_number.ilike(pattern, escape="\\"),
+                Student.full_name.ilike(pattern, escape="\\"),
+            )
         )
     if is_active is not None:
         filters.append(Student.is_active.is_(is_active))
@@ -302,9 +306,12 @@ def list_classes(
     count_query = select(func.count()).select_from(SchoolClass)
     filters = []
     if search and search.strip():
-        pattern = f"%{search.strip()}%"
+        pattern = like_contains(search)
         filters.append(
-            or_(SchoolClass.code.ilike(pattern), SchoolClass.name.ilike(pattern))
+            or_(
+                SchoolClass.code.ilike(pattern, escape="\\"),
+                SchoolClass.name.ilike(pattern, escape="\\"),
+            )
         )
     if is_active is not None:
         filters.append(SchoolClass.is_active.is_(is_active))

@@ -62,6 +62,9 @@ class _CalibrationAggregate:
             self.identity_match_count += 1
 
 
+_PREVIEW_SESSION_TTL_SECONDS = 300.0
+
+
 class LocalCameraPreview:
     """Loopback-only, operator-authorized view of the agent's existing camera feed."""
 
@@ -482,6 +485,11 @@ class LocalCameraPreview:
                         if expiry > now
                     }
                     expiry = preview._sessions.get(supplied)
+                    if supplied and expiry is not None:
+                        # Sliding window: an actively watched preview keeps
+                        # working past the initial TTL without forcing the
+                        # operator through another authenticate round-trip.
+                        preview._sessions[supplied] = now + _PREVIEW_SESSION_TTL_SECONDS
                 return bool(supplied) and expiry is not None
 
             def do_OPTIONS(self) -> None:
@@ -568,10 +576,15 @@ class LocalCameraPreview:
                     return
                 preview_token = secrets.token_urlsafe(32)
                 with preview._lock:
-                    preview._sessions[preview_token] = time.monotonic() + 300
+                    preview._sessions[preview_token] = (
+                        time.monotonic() + _PREVIEW_SESSION_TTL_SECONDS
+                    )
                 self._send_json(
                     201,
-                    {"preview_token": preview_token, "expires_in_seconds": 300},
+                    {
+                        "preview_token": preview_token,
+                        "expires_in_seconds": int(_PREVIEW_SESSION_TTL_SECONDS),
+                    },
                     origin,
                 )
 

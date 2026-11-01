@@ -184,6 +184,9 @@ async function startEnrollment(): Promise<void> {
     }
 
     capturePhase.value = 'processing'
+    // Frames are secured as Blobs: release the camera while the operator
+    // reviews the result, instead of streaming through the confirm step.
+    stopCamera()
     const submittedStudentId = selectedStudent.value.id
     captureResult.value = await submitEnrollmentCaptures(submittedStudentId, captures)
     if (currentFlow !== flowVersion) return

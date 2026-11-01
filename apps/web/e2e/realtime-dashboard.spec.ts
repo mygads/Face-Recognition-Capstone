@@ -42,6 +42,8 @@ function sessionSnapshot(present: number, late: number, isOnline: boolean) {
       total_roster: 3,
       present,
       late,
+      excused: 0,
+      absent: 0,
       not_present: 3 - present - late,
     },
     devices: [

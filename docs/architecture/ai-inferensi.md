@@ -45,7 +45,11 @@ persist vector. Cosine [-1, 1]; confidence/quality [0, 1]; margin ternormalisasi
 [0, 1]. Fake stages deterministik di `recognition_core.testing` hanya untuk
 unit test framework-free; adapter produksi dilarang import fake tersebut.
 Matcher cosine tanpa threshold default; kebijakan temporal/bisnis memakai
-threshold hasil evaluasi lokal.
+threshold hasil evaluasi lokal. Margin ternormalisasi [0, 1] di core; parser
+burst central menerima [0, 2] (raw gap) dan gateway meng-clamp ke [0, 1] agar
+lolos CHECK DB tanpa membuang sinyal — bukan drop ke null. `RecognitionRunner`
+mengingat maksimal 1024 track id per sesi (evict tertua) sebagai bookkeeping
+reset; engine temporal tetap evict via TTL.
 
 ## ai-service (AI_CENTRAL)
 

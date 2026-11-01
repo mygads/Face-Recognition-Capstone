@@ -65,6 +65,8 @@ class SessionAttendanceSummary(ApiSchema):
     total_roster: int = Field(ge=0)
     present: int = Field(ge=0)
     late: int = Field(ge=0)
+    excused: int = Field(ge=0)
+    absent: int = Field(ge=0)
     not_present: int = Field(ge=0)
 
 
@@ -75,6 +77,8 @@ class SessionDashboardDevice(ApiSchema):
     is_online: bool
     health_status: Literal["online", "offline", "warning"]
     camera_status: Literal["unknown", "online", "offline", "error", "disabled"]
+    pending_events: int | None = None
+    dead_letter_events: int | None = None
     last_seen_at: AwareDatetime | None
 
 

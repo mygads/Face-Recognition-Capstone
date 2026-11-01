@@ -31,6 +31,7 @@ class CentralDecision:
     margin: float | None
     reason_code: str | None
     liveness_score: float | None
+    model_name: str
     model_version: str
 
 
@@ -114,7 +115,10 @@ class CentralAIClient:
             raise ApiCallError(None, retryable=True) from exc
         if response.status_code >= 400:
             status_code = response.status_code
-            retryable = status_code in {401, 403, 408, 425, 429} or status_code >= 500
+            # 401/403 mean the device credential is rejected: retrying with the
+            # same token loops forever, so surface it for re-enrollment instead.
+            # Keep the same contract as CoreApiClient for the Core API path.
+            retryable = status_code in {408, 425, 429} or status_code >= 500
             raise ApiCallError(status_code, retryable=retryable)
         try:
             payload = response.json()
@@ -136,6 +140,7 @@ def _parse_decision(
         raise ValueError("Central AI response session does not match the request.")
     track_id = value["track_id"]
     outcome = value["outcome"]
+    model_name = value.get("model_name")
     model_version = value["model_version"]
     candidate = value.get("candidate")
     if not isinstance(track_id, str) or not track_id:
@@ -144,6 +149,12 @@ def _parse_decision(
         raise ValueError("Central AI response track does not match the request.")
     if outcome not in {"matched", "ambiguous", "no_match", "error"}:
         raise ValueError("Central AI response contains an unknown outcome.")
+    if (
+        not isinstance(model_name, str)
+        or not model_name.strip()
+        or len(model_name) > 80
+    ):
+        raise ValueError("Central AI response is missing the model name.")
     if (
         not isinstance(model_version, str)
         or not model_version.strip()
@@ -175,6 +186,7 @@ def _parse_decision(
         liveness_score=_optional_bounded(
             value.get("liveness_score"), "liveness_score", upper=1.0
         ),
+        model_name=model_name,
         model_version=model_version,
     )
 

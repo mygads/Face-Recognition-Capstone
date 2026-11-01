@@ -10,15 +10,15 @@ from presensi_api.api.errors import OPENAPI_ERROR_RESPONSES, ApiProblem
 from presensi_api.api.security.dependencies import require_permissions
 from presensi_api.api.security.passwords import hash_password
 from presensi_api.api.security.roles import AuthenticatedUser, Permission
-from presensi_api.api.v1.routers._placeholder import feature_not_implemented
 from presensi_api.api.v1.schemas.auth import (
     AccountResponse,
     StaffAccountCreatedResponse,
     StaffAccountCreateRequest,
 )
-from presensi_api.api.v1.schemas.common import PageResponse
+from presensi_api.api.v1.schemas.common import PageResponse, Pagination
 from presensi_api.db.models import AuditLog, Role, User, UserRole
 from presensi_api.db.session import get_db_session
+from presensi_api.session_lifecycle import as_utc
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
@@ -28,14 +28,34 @@ router = APIRouter(prefix="/accounts", tags=["accounts"])
     response_model=PageResponse[AccountResponse],
     responses=OPENAPI_ERROR_RESPONSES,
     summary="List user accounts",
-    description="Contract placeholder; currently returns 501.",
+    description="List staff and administrator accounts for account management.",
     dependencies=[Depends(require_permissions(Permission.MANAGE_ACCOUNTS))],
 )
 def list_accounts(
+    session: Annotated[Session, Depends(get_db_session)],
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> PageResponse[AccountResponse]:
-    feature_not_implemented("account management")
+    total = session.scalar(select(func.count()).select_from(User)) or 0
+    users = session.scalars(
+        select(User)
+        .order_by(User.email.asc(), User.id.asc())
+        .limit(limit)
+        .offset(offset)
+    ).all()
+    return PageResponse(
+        items=[
+            AccountResponse(
+                id=user.id,
+                email=user.email,
+                full_name=user.full_name,
+                is_active=user.is_active,
+                created_at=as_utc(user.created_at),
+            )
+            for user in users
+        ],
+        pagination=Pagination(total=total, limit=limit, offset=offset),
+    )
 
 
 @router.post(

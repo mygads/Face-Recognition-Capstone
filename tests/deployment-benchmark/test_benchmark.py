@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +12,22 @@ from uuid import UUID
 import httpx
 
 BENCHMARK = Path(__file__).with_name("benchmark.py")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SRC_DIRS = (
+    "apps/api/src",
+    "apps/ai-service/src",
+    "apps/edge-agent/src",
+    "libs/recognition-core/src",
+)
+
+
+def _subprocess_env() -> dict[str, str]:
+    """Run the benchmark CLI without depending on ambient PYTHONPATH."""
+    pythonpath = os.pathsep.join(str(REPO_ROOT / src) for src in SRC_DIRS)
+    existing = os.environ.get("PYTHONPATH")
+    if existing:
+        pythonpath = f"{pythonpath}{os.pathsep}{existing}"
+    return {**os.environ, "PYTHONPATH": pythonpath}
 
 
 def _load_benchmark_module() -> Any:
@@ -40,6 +57,7 @@ def test_missing_hardware_writes_pending_csv_json_and_markdown(
         capture_output=True,
         text=True,
         timeout=30,
+        env=_subprocess_env(),
     )
 
     assert result.returncode == 0, result.stderr

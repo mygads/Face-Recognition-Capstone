@@ -7,13 +7,14 @@ import secrets
 from collections.abc import Generator
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
+from time import sleep as _sleep
 from typing import Any, cast
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -37,6 +38,7 @@ from presensi_api.db.models import (
     User,
 )
 from presensi_api.db.session import get_db_session
+from presensi_api.device_health import device_health_status
 from presensi_api.main import app
 from presensi_api.retention import apply_recognition_event_retention
 
@@ -230,6 +232,79 @@ def test_device_discovery_and_gallery_are_scoped_and_decrypted_on_demand(
         f"/api/v1/devices/{OTHER_DEVICE_ID}/active-sessions",
     )
     assert wrong_device.status_code == 403
+
+
+def test_session_gallery_version_is_stable_until_content_changes(
+    runtime_database: tuple[sessionmaker[Session], dict[str, Any]],
+) -> None:
+    """generated_at must not advance on every poll: edge agents skip gallery
+    rebuilds while the version is unchanged."""
+    factory, _ids = runtime_database
+
+    def fetch_version() -> str:
+        gallery = _request(
+            "GET",
+            f"/api/v1/devices/{DEVICE_ID}/active-session-cache"
+            f"?session_id={SESSION_ID}&model_name={MODEL_NAME}"
+            f"&model_version={MODEL_VERSION}",
+        )
+        assert gallery.status_code == 200, gallery.text
+        return str(gallery.json()["generated_at"])
+
+    first = fetch_version()
+    assert fetch_version() == first
+
+    # SQLite timestamps resolve to whole seconds, so cross a second boundary
+    # before mutating to observe the version advance deterministically.
+    _sleep(1.1)
+    with factory.begin() as session:
+        session.execute(
+            update(AttendanceSession)
+            .where(AttendanceSession.id == SESSION_ID)
+            .values(grace_period_minutes=20)
+        )
+    assert fetch_version() > first
+
+
+def test_session_gallery_supports_conditional_refresh_with_304(
+    runtime_database: tuple[sessionmaker[Session], dict[str, Any]],
+) -> None:
+    """Polling with the cached version returns 304 without roster work."""
+    factory, _ids = runtime_database
+
+    def fetch(
+        known: str | None = None,
+    ) -> httpx.Response:
+        params = (
+            f"?session_id={SESSION_ID}&model_name={MODEL_NAME}"
+            f"&model_version={MODEL_VERSION}"
+        )
+        if known is not None:
+            from urllib.parse import quote
+
+            params += f"&known_generated_at={quote(known, safe='')}"
+        return _request(
+            "GET", f"/api/v1/devices/{DEVICE_ID}/active-session-cache{params}"
+        )
+
+    first = fetch()
+    assert first.status_code == 200, first.text
+    version = first.json()["generated_at"]
+
+    not_modified = fetch(version)
+    assert not_modified.status_code == 304
+    assert not_modified.content == b""
+
+    _sleep(1.1)
+    with factory.begin() as session:
+        session.execute(
+            update(AttendanceSession)
+            .where(AttendanceSession.id == SESSION_ID)
+            .values(grace_period_minutes=25)
+        )
+    changed = fetch(version)
+    assert changed.status_code == 200
+    assert changed.json()["generated_at"] > version
 
 
 def test_preview_gallery_is_lab_and_schedule_scoped_without_an_active_session(
@@ -572,3 +647,99 @@ def test_manual_override_session_stays_discoverable_to_devices(
     )
     assert gallery.status_code == 200, gallery.text
     assert gallery.json()["roster"][0]["student_id"] == str(STUDENT_ID)
+
+
+def test_credential_renewal_with_previous_token_is_coded_unauthorized(
+    runtime_database: tuple[sessionmaker[Session], dict[str, Any]],
+) -> None:
+    first = _request("POST", f"/api/v1/devices/{DEVICE_ID}/credentials/renew")
+    assert first.status_code == 200, first.text
+    retry_with_previous = _request(
+        "POST", f"/api/v1/devices/{DEVICE_ID}/credentials/renew", token=TOKEN
+    )
+    assert retry_with_previous.status_code == 401
+    assert (
+        retry_with_previous.json()["error"]["code"]
+        == "device_credential_rotation_requires_current"
+    )
+
+
+def test_device_heartbeat_persists_edge_queue_backlog(
+    runtime_database: tuple[sessionmaker[Session], dict[str, Any]],
+) -> None:
+    factory, _time_data = runtime_database
+    response = _request(
+        "POST",
+        f"/api/v1/devices/{DEVICE_ID}/device-heartbeat",
+        json_body={
+            "camera_status": "online",
+            "queue_status": {"pending_events": 7, "dead_letter_events": 2},
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    with factory() as session:
+        device = session.get(Device, DEVICE_ID)
+        assert device is not None
+        assert device.pending_events == 7
+        assert device.dead_letter_events == 2
+        assert device.queue_updated_at is not None
+        assert device.camera_status == "online"
+
+
+def test_device_health_warns_on_dead_letter_backlog(
+    runtime_database: tuple[sessionmaker[Session], dict[str, Any]],
+) -> None:
+    factory, _time_data = runtime_database
+    with factory.begin() as session:
+        device = session.get(Device, DEVICE_ID)
+        assert device is not None
+        device.last_seen_at = datetime.now(UTC)
+        device.camera_enabled = True
+        device.camera_status = "online"
+        device.pending_events = 3
+        device.dead_letter_events = 1
+
+    with factory() as session:
+        device = session.get(Device, DEVICE_ID)
+        assert device is not None
+        assert device_health_status(device) == "warning"
+
+
+def test_device_health_warns_on_deep_pending_backlog(
+    runtime_database: tuple[sessionmaker[Session], dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PRESENSI_DEVICE_QUEUE_WARNING_DEPTH", "5")
+    factory, _time_data = runtime_database
+    with factory.begin() as session:
+        device = session.get(Device, DEVICE_ID)
+        assert device is not None
+        device.last_seen_at = datetime.now(UTC)
+        device.camera_enabled = True
+        device.camera_status = "online"
+        device.pending_events = 9
+        device.dead_letter_events = 0
+
+    with factory() as session:
+        device = session.get(Device, DEVICE_ID)
+        assert device is not None
+        assert device_health_status(device) == "warning"
+
+
+def test_device_health_stays_online_without_queue_reports(
+    runtime_database: tuple[sessionmaker[Session], dict[str, Any]],
+) -> None:
+    factory, _time_data = runtime_database
+    with factory.begin() as session:
+        device = session.get(Device, DEVICE_ID)
+        assert device is not None
+        device.last_seen_at = datetime.now(UTC)
+        device.camera_enabled = True
+        device.camera_status = "online"
+
+    with factory() as session:
+        device = session.get(Device, DEVICE_ID)
+        assert device is not None
+        assert device.pending_events is None
+        assert device_health_status(device) == "online"

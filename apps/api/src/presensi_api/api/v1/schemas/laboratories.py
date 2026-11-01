@@ -88,6 +88,11 @@ class DeviceCameraMetrics(ApiSchema):
     measured_at: AwareDatetime
 
 
+class DeviceQueueStatus(ApiSchema):
+    pending_events: int = Field(ge=0, le=100_000)
+    dead_letter_events: int = Field(ge=0, le=100_000)
+
+
 class DeviceHeartbeatRequest(ApiSchema):
     deployment_profile: Literal["AI_EDGE", "STB_GATEWAY"] | None = None
     app_version: str | None = Field(default=None, min_length=1, max_length=80)
@@ -97,6 +102,7 @@ class DeviceHeartbeatRequest(ApiSchema):
     ) = None
     latency_summary: DeviceLatencySummary | None = None
     camera_metrics: DeviceCameraMetrics | None = None
+    queue_status: DeviceQueueStatus | None = None
 
 
 class DeviceResponse(ApiSchema):
@@ -113,6 +119,9 @@ class DeviceResponse(ApiSchema):
     camera_enabled: bool
     latency_summary: DeviceLatencySummary | None
     camera_metrics: DeviceCameraMetrics | None
+    pending_events: int | None = Field(default=None, ge=0)
+    dead_letter_events: int | None = Field(default=None, ge=0)
+    queue_updated_at: AwareDatetime | None = None
     config_applied_revision: int = Field(ge=0)
     config_apply_status: Literal["not_configured", "pending", "applied", "error"]
     config_error_code: str | None

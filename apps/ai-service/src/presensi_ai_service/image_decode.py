@@ -36,7 +36,8 @@ def decode_image(
     decoding, applies EXIF orientation, and enforces dimensions before pixel
     allocation; OpenCV is only used for the final RGB-to-BGR array conversion.
     """
-    image_format = _MIME_FORMATS.get(content_type)
+    normalized_content_type = content_type.split(";", 1)[0].strip().lower()
+    image_format = _MIME_FORMATS.get(normalized_content_type)
     if image_format is None:
         raise ImageDecodeError("Unsupported image media type.")
     try:

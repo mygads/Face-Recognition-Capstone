@@ -6,8 +6,8 @@ from typing import Annotated, Literal, cast
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Query, Response, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from presensi_api.api.errors import OPENAPI_ERROR_RESPONSES, ApiProblem
@@ -270,7 +270,12 @@ def renew_device_credential(
 ) -> DeviceCredentialResponse:
     device = _device_for_path(principal, device_id)
     if not principal.used_current_credential:
-        raise HTTPException(status_code=401, detail="Current credential required.")
+        raise ApiProblem(
+            401,
+            "device_credential_rotation_requires_current",
+            "Rotasi kredensial membutuhkan kredensial aktif saat ini.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     token, expires_at, previous_until = rotate_device_credential(device)
     session.add(
         AuditLog(
@@ -343,6 +348,44 @@ def get_device_runtime_status(
     )
 
 
+def _gallery_version(
+    session: Session,
+    *,
+    session_id: UUID,
+    model_name: str,
+    model_version: str,
+    selected_updated_at: datetime,
+) -> datetime:
+    """Content version for conditional gallery refresh.
+
+    Advances only when the session row, its roster snapshot, or a roster
+    template actually changes, so edge agents can poll cheaply (HTTP 304)
+    instead of re-downloading and re-parsing identical galleries.
+    """
+    snapshot_max = session.scalar(
+        select(func.max(SessionStudent.snapshot_taken_at)).where(
+            SessionStudent.session_id == session_id
+        )
+    )
+    template_max = session.scalar(
+        select(func.max(FaceTemplate.updated_at)).where(
+            FaceTemplate.student_id.in_(
+                select(SessionStudent.student_id).where(
+                    SessionStudent.session_id == session_id
+                )
+            ),
+            FaceTemplate.model_name == model_name,
+            FaceTemplate.model_version == model_version,
+            FaceTemplate.revoked_at.is_(None),
+        )
+    )
+    version_candidates = [as_utc(selected_updated_at)]
+    version_candidates.extend(
+        as_utc(value) for value in (snapshot_max, template_max) if value is not None
+    )
+    return max(version_candidates)
+
+
 @router.get(
     "/devices/{device_id}/active-session-cache",
     response_model=ActiveSessionCacheResponse,
@@ -358,7 +401,8 @@ def get_active_session_cache(
     model_name: Annotated[str, Query(min_length=1, max_length=120)],
     model_version: Annotated[str, Query(min_length=1, max_length=80)],
     session_id: UUID | None = None,
-) -> ActiveSessionCacheResponse:
+    known_generated_at: datetime | None = None,
+) -> ActiveSessionCacheResponse | Response:
     device = _device_for_path(principal, device_id)
     if not device.camera_enabled:
         raise ApiProblem(
@@ -422,10 +466,26 @@ def get_active_session_cache(
             "Tidak ada template aktif yang sesuai dengan model perangkat.",
         )
 
-    generated_at = datetime.now(UTC)
+    # The gallery version must be stable across polls: edge agents skip
+    # gallery rebuilds while generated_at is unchanged, and a fresh
+    # timestamp on every request would defeat that change detection.
+    # The version advances only when the session, its roster snapshot, or
+    # a roster template actually changes.
+    generated_at = _gallery_version(
+        session,
+        session_id=selected.id,
+        model_name=model_name,
+        model_version=model_version,
+        selected_updated_at=selected.updated_at,
+    )
+    if known_generated_at is not None and as_utc(known_generated_at) >= generated_at:
+        # The edge already holds this exact version: skip the roster join,
+        # template decryption, and payload serialization entirely.
+        return Response(status_code=304)
+    request_now = datetime.now(UTC)
     expires_at = min(
         end_at,
-        generated_at + timedelta(seconds=_gallery_max_age_seconds()),
+        request_now + timedelta(seconds=_gallery_max_age_seconds()),
     )
     return ActiveSessionCacheResponse(
         device_id=device.id,
@@ -566,6 +626,7 @@ def device_heartbeat(
     request: DeviceHeartbeatRequest | None = None,
 ) -> DeviceHeartbeatDeviceResponse:
     device = _device_for_path(principal, device_id)
+    now = datetime.now(UTC)
     if request is not None:
         if (
             request.deployment_profile is not None
@@ -576,22 +637,15 @@ def device_heartbeat(
                 "deployment_profile_mismatch",
                 "Profil heartbeat tidak sesuai dengan registry perangkat.",
             )
-        for key in ("app_version", "model_version", "camera_status"):
-            value = getattr(request, key)
-            if value is not None:
-                setattr(device, key, value)
-        if request.latency_summary is not None:
-            device.latency_summary = request.latency_summary.model_dump(
-                exclude_unset=True
-            )
-        if request.camera_metrics is not None:
-            device.camera_metrics = request.camera_metrics.model_dump(
-                mode="json", exclude_unset=True
-            )
-    now = datetime.now(UTC)
+        apply_heartbeat_request(device, request, now=now)
     device.last_seen_at = now
     if device.credential_expires_at is None:
-        raise HTTPException(status_code=401, detail="Device credential has expired.")
+        raise ApiProblem(
+            401,
+            "device_credential_expired",
+            "Kredensial perangkat sudah kedaluwarsa.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     session.commit()
     return DeviceHeartbeatDeviceResponse(
         device_id=device.id,
@@ -618,6 +672,26 @@ def device_recognition_event(
             403, "device_id_mismatch", "Event device does not match its credential."
         )
     return decide_recognition_event(session, request, None)
+
+
+def apply_heartbeat_request(
+    device: Device, request: DeviceHeartbeatRequest, *, now: datetime
+) -> None:
+    """Apply operator-visible heartbeat fields from either heartbeat route."""
+    for key in ("app_version", "model_version", "camera_status"):
+        value = getattr(request, key)
+        if value is not None:
+            setattr(device, key, value)
+    if request.latency_summary is not None:
+        device.latency_summary = request.latency_summary.model_dump(exclude_unset=True)
+    if request.camera_metrics is not None:
+        device.camera_metrics = request.camera_metrics.model_dump(
+            mode="json", exclude_unset=True
+        )
+    if request.queue_status is not None:
+        device.pending_events = request.queue_status.pending_events
+        device.dead_letter_events = request.queue_status.dead_letter_events
+        device.queue_updated_at = now
 
 
 def _gallery_max_age_seconds() -> int:

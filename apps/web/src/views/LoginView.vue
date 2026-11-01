@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { isSafeRedirectPath } from '../router/index'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
@@ -18,10 +19,7 @@ async function submitLogin(): Promise<void> {
     }
     const requestedPath = route.query.redirect
     const safeDestination =
-      typeof requestedPath === 'string' &&
-      requestedPath.startsWith('/') &&
-      !requestedPath.startsWith('//') &&
-      router.resolve(requestedPath).matched.length > 0
+      isSafeRedirectPath(requestedPath) && router.resolve(requestedPath).matched.length > 0
         ? requestedPath
         : { name: 'dashboard' }
 

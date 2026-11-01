@@ -259,7 +259,7 @@ export interface paths {
         };
         /**
          * List user accounts
-         * @description Contract placeholder; currently returns 501.
+         * @description List staff and administrator accounts for account management.
          */
         get: operations["list_accounts_api_v1_accounts_get"];
         put?: never;
@@ -1978,6 +1978,7 @@ export interface components {
             camera_status?: ("unknown" | "online" | "offline" | "error" | "disabled") | null;
             latency_summary?: components["schemas"]["DeviceLatencySummary"] | null;
             camera_metrics?: components["schemas"]["DeviceCameraMetrics"] | null;
+            queue_status?: components["schemas"]["DeviceQueueStatus"] | null;
         };
         /** DeviceHeartbeatResponse */
         DeviceHeartbeatResponse: {
@@ -1998,6 +1999,13 @@ export interface components {
             p50_ms?: number | null;
             /** P95 Ms */
             p95_ms?: number | null;
+        };
+        /** DeviceQueueStatus */
+        DeviceQueueStatus: {
+            /** Pending Events */
+            pending_events: number;
+            /** Dead Letter Events */
+            dead_letter_events: number;
         };
         /** DeviceResponse */
         DeviceResponse: {
@@ -2040,6 +2048,12 @@ export interface components {
             camera_enabled: boolean;
             latency_summary: components["schemas"]["DeviceLatencySummary"] | null;
             camera_metrics: components["schemas"]["DeviceCameraMetrics"] | null;
+            /** Pending Events */
+            pending_events?: number | null;
+            /** Dead Letter Events */
+            dead_letter_events?: number | null;
+            /** Queue Updated At */
+            queue_updated_at?: string | null;
             /** Config Applied Revision */
             config_applied_revision: number;
             /**
@@ -2432,6 +2446,16 @@ export interface components {
             min_top1_similarity?: number | null;
             /** Min Top1 Top2 Margin */
             min_top1_top2_margin?: number | null;
+            /**
+             * Yunet Score Threshold
+             * @default 0.9
+             */
+            yunet_score_threshold: number;
+            /**
+             * Yunet Nms Threshold
+             * @default 0.3
+             */
+            yunet_nms_threshold: number;
             /** Minimum Agreeing Frames */
             minimum_agreeing_frames: number;
             /** Sample Every N Frames */
@@ -2669,6 +2693,10 @@ export interface components {
             present: number;
             /** Late */
             late: number;
+            /** Excused */
+            excused: number;
+            /** Absent */
+            absent: number;
             /** Not Present */
             not_present: number;
         };
@@ -2698,6 +2726,10 @@ export interface components {
              * @enum {string}
              */
             camera_status: "unknown" | "online" | "offline" | "error" | "disabled";
+            /** Pending Events */
+            pending_events?: number | null;
+            /** Dead Letter Events */
+            dead_letter_events?: number | null;
             /** Last Seen At */
             last_seen_at: string | null;
         };
@@ -9320,6 +9352,7 @@ export interface operations {
                 model_name: string;
                 model_version: string;
                 session_id?: string | null;
+                known_generated_at?: string | null;
             };
             header?: {
                 "X-Device-ID"?: string | null;

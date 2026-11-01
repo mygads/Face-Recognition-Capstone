@@ -203,6 +203,7 @@ def test_valid_burst_runs_shared_pipeline_and_returns_only_decision_metadata() -
     assert result["outcome"] == "matched"
     assert result["candidate"]["student_id"] == str(STUDENT_ID)
     assert result["frames_processed"] == 3
+    assert result["model_name"] == MODEL_NAME
     assert result["model_version"] == MODEL_VERSION
     assert "image_base64" not in response.text
     assert "embedding" not in response.text
@@ -584,3 +585,155 @@ def test_validated_gallery_continues_during_bounded_core_api_outage() -> None:
     assert first.status_code == second.status_code == 200
     assert provider.validation_calls == 1
     assert provider.fetch_calls == 1
+
+
+def test_burst_with_unsupported_gallery_model_is_rejected_with_cause() -> None:
+    from recognition_core.domain import GalleryEntry
+
+    other_name = "other-vendor-model"
+    entries = tuple(
+        GalleryEntry(
+            student_id=entry.student_id,
+            embedding=FaceEmbedding(
+                values=entry.embedding.values,
+                model_name=other_name,
+                model_version=entry.embedding.model_version,
+                normalized=True,
+            ),
+        )
+        for entry in _gallery().entries
+    )
+    base = _gallery()
+    custom_gallery = SessionGallery(
+        device_id=base.device_id,
+        session_id=base.session_id,
+        status="active",
+        generated_at=base.generated_at,
+        session_ends_at=base.session_ends_at,
+        expires_at=base.expires_at,
+        model_name=other_name,
+        model_version=MODEL_VERSION,
+        entries=entries,
+    )
+    cache = SessionGalleryCache(max_age_seconds=300)
+    cache.install(custom_gallery)
+    app = create_app(
+        settings=_settings(),
+        runner=RecognitionRunner(_pipeline()),
+        gallery_cache=cache,
+    )
+
+    async def exercise() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            return await client.post(
+                f"/api/v1/recognition/sessions/{SESSION_ID}/bursts",
+                headers=_headers(),
+                json=_body(),
+            )
+
+    response = asyncio.run(exercise())
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "template_model_mismatch"
+
+
+def test_burst_response_carries_operator_safe_quality_signals() -> None:
+    from presensi_ai_service.inference import QualityRecorder
+    from presensi_ai_service.main import _quality_signals
+    from recognition_core.domain import BoundingBox, FaceDetection, FaceQuality
+
+    detected = FaceDetection(box=BoundingBox(2, 2, 40, 40), confidence=0.99)
+    assessed = FaceQuality(score=0.82, acceptable=True, signals=(("sharpness", 60.0),))
+
+    class FakeAssessor:
+        def assess(self, _frame: object, _detection: FaceDetection) -> FaceQuality:
+            return assessed
+
+    pipeline = _pipeline()
+    recorder = QualityRecorder(FakeAssessor())
+    runner = RecognitionRunner(pipeline, quality_recorder=recorder)
+    assert _quality_signals(runner) is None
+    recorder.assess(object(), detected)
+    signals = _quality_signals(runner)
+    assert signals is not None
+    assert signals.score == 0.82
+    assert signals.acceptable is True
+    assert signals.signals == {"sharpness": 60.0}
+    assert _quality_signals(RecognitionRunner(pipeline)) is None
+
+
+def test_device_rate_limiter_bounds_tracked_devices() -> None:
+    from presensi_ai_service.main import DeviceRateLimiter
+
+    limiter = DeviceRateLimiter(rate=1000.0, capacity=1000)
+    limiter.MAX_TRACKED_DEVICES = 8
+
+    async def exercise() -> None:
+        for _ in range(20):
+            assert await limiter.allow(uuid4()) is None
+
+    asyncio.run(exercise())
+    assert len(limiter._buckets) <= 8
+
+
+def test_gallery_cache_prunes_finished_sessions_without_touching_live_ones() -> None:
+    from datetime import timedelta
+
+    now = datetime.now(UTC)
+    cache = SessionGalleryCache(max_age_seconds=300)
+    live = _gallery(now=now)
+    finished = SessionGallery(
+        device_id=live.device_id,
+        session_id=uuid4(),
+        status="active",
+        generated_at=now - timedelta(hours=2),
+        session_ends_at=now - timedelta(hours=1),
+        expires_at=now + timedelta(minutes=5),
+        model_name=live.model_name,
+        model_version=live.model_version,
+        entries=live.entries,
+    )
+    cache.install(live, now=now)
+    cache.install(finished, now=now - timedelta(hours=2))
+    assert cache.prune_expired(now=now) == 1
+    assert cache.get(live.device_id, live.session_id, now=now) is not None
+    assert cache.get(finished.device_id, finished.session_id, now=now) is None
+
+
+def test_decode_image_accepts_charset_suffixed_media_type() -> None:
+    from presensi_ai_service.image_decode import decode_image
+
+    raw = _image_bytes()
+    encoded = base64.b64encode(raw).decode("ascii")
+    frame = decode_image(
+        encoded,
+        "image/png; charset=binary",
+        max_encoded_bytes=2_000_000,
+        max_width=4096,
+        max_height=4096,
+        max_pixels=16_000_000,
+    )
+    assert frame is not None
+
+
+def test_runner_bounds_remembered_track_ids_per_session() -> None:
+    from presensi_ai_service.inference import CapturedFrame
+
+    runner = RecognitionRunner(_pipeline())
+    gallery = _gallery()
+    frame = CapturedFrame(image=object(), captured_at=datetime.now(UTC))
+    total = RecognitionRunner.MAX_TRACK_IDS_PER_SESSION + 50
+    for index in range(total):
+        runner._process_burst_sync(
+            DEVICE_ID, SESSION_ID, f"track-{index}", (frame,), gallery, None
+        )
+    remembered = runner._track_ids[(DEVICE_ID, SESSION_ID)]
+    assert len(remembered) == RecognitionRunner.MAX_TRACK_IDS_PER_SESSION
+    newest = f"{DEVICE_ID}:{SESSION_ID}:track-{total - 1}"
+    oldest = f"{DEVICE_ID}:{SESSION_ID}:track-0"
+    assert newest in remembered
+    assert oldest not in remembered
+    runner.invalidate_session(DEVICE_ID, SESSION_ID)
+    assert (DEVICE_ID, SESSION_ID) not in runner._track_ids

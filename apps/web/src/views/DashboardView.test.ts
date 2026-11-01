@@ -55,7 +55,7 @@ function snapshotFor(sessionId: string, status: 'active' | 'manual_override') {
     session_id: sessionId,
     session_status: status,
     generated_at: '2026-10-05T02:30:00Z',
-    summary: { total_roster: 2, present: 1, late: 0, not_present: 1 },
+    summary: { total_roster: 2, present: 1, late: 0, excused: 0, absent: 0, not_present: 1 },
     devices: [],
     recent_activity: [],
   }
@@ -282,5 +282,209 @@ describe('dashboard at-risk watchlist', () => {
     expect(wrapper.find('[data-testid="at-risk-thresholds"]').text()).toContain(
       'Jendela 30 hari · ambang absen 20% · ambang terlambat 3x',
     )
+  })
+})
+
+describe('dashboard professional hero', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.stubGlobal('WebSocket', StubWebSocket)
+    api.listAttendanceSessions.mockImplementation(async ({ status }: { status: string }) => ({
+      items: status === 'active' ? [activeSession] : [],
+      pagination: { total: 1, limit: 100, offset: 0 },
+    }))
+    api.getSessionDashboardSnapshot.mockImplementation(async (sessionId: string) =>
+      snapshotFor(sessionId, 'active'),
+    )
+    api.listAtRiskStudents.mockResolvedValue({ ...atRiskPayload, items: [] })
+  })
+
+  it('renders the attendance rate ring from the live summary', async () => {
+    const wrapper = mount(DashboardView, {
+      global: { plugins: [teacherPinia(), testRouter()] },
+    })
+    await flushPromises()
+
+    const rate = wrapper.find('[data-testid="attendance-rate"]')
+    expect(rate.exists()).toBe(true)
+    expect(rate.attributes('aria-label')).toContain('50 persen')
+    expect(rate.text()).toContain('50%')
+  })
+
+  it('marks high-absence students with the high severity chip', async () => {
+    api.listAtRiskStudents.mockResolvedValue(atRiskPayload)
+    const wrapper = mount(DashboardView, {
+      global: { plugins: [teacherPinia(), testRouter()] },
+    })
+    await flushPromises()
+
+    const rows = wrapper.findAll('[data-testid="at-risk-row"]')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].find('.dashboard-view__at-risk-reasons').classes()).toContain(
+      'dashboard-view__at-risk-reasons--high',
+    )
+    expect(rows[1].find('.dashboard-view__at-risk-reasons').classes()).toContain(
+      'dashboard-view__at-risk-reasons--medium',
+    )
+  })
+})
+
+describe('dashboard device queue backlog', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.stubGlobal('WebSocket', StubWebSocket)
+    api.listAttendanceSessions.mockResolvedValue({
+      items: [activeSession],
+      pagination: { total: 1, limit: 100, offset: 0 },
+    })
+    api.listAtRiskStudents.mockResolvedValue({ items: [], pagination: { total: 0 } })
+  })
+
+  function snapshotWithDevices(devices: unknown[]) {
+    return {
+      session_id: 'session-active',
+      session_status: 'active',
+      generated_at: '2026-10-05T02:30:00Z',
+      summary: { total_roster: 2, present: 1, late: 0, excused: 0, absent: 0, not_present: 1 },
+      devices,
+      recent_activity: [],
+    }
+  }
+
+  const healthyDevice = {
+    id: 'device-1',
+    name: 'Edge Lab 1',
+    device_type: 'edge_pc',
+    is_online: true,
+    health_status: 'online',
+    camera_status: 'online',
+    pending_events: 0,
+    dead_letter_events: 0,
+    last_seen_at: '2026-10-05T02:29:00Z',
+  }
+
+  it('shows a backlog badge only for devices with queued or failed events', async () => {
+    api.getSessionDashboardSnapshot.mockResolvedValue(
+      snapshotWithDevices([
+        healthyDevice,
+        {
+          ...healthyDevice,
+          id: 'device-2',
+          name: 'Edge Lab 2',
+          health_status: 'warning',
+          pending_events: 12,
+          dead_letter_events: 3,
+        },
+      ]),
+    )
+    const wrapper = mount(DashboardView, {
+      global: { plugins: [teacherPinia(), testRouter()] },
+    })
+    await flushPromises()
+
+    const badges = wrapper.findAll('[data-testid="device-queue-backlog"]')
+    expect(badges).toHaveLength(1)
+    expect(badges[0].text()).toContain('Antrean 12 tertunda')
+    expect(badges[0].text()).toContain('3 gagal kirim')
+  })
+
+  it('hides the backlog badge when no queue data is reported', async () => {
+    api.getSessionDashboardSnapshot.mockResolvedValue(
+      snapshotWithDevices([{ ...healthyDevice, pending_events: null }]),
+    )
+    const wrapper = mount(DashboardView, {
+      global: { plugins: [teacherPinia(), testRouter()] },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="device-queue-backlog"]').exists()).toBe(false)
+  })
+})
+
+describe('dashboard websocket close codes', () => {
+  class TrackingSocket {
+    static readonly CLOSING = 2
+    static instances: TrackingSocket[] = []
+    readonly readyState = 1
+    onopen: ((event: unknown) => void) | null = null
+    onmessage: ((event: unknown) => void) | null = null
+    onerror: ((event: unknown) => void) | null = null
+    onclose: ((event?: { code?: number }) => void) | null = null
+    send = vi.fn()
+    close = vi.fn()
+    constructor(public readonly url: string) {
+      TrackingSocket.instances.push(this)
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    TrackingSocket.instances = []
+    vi.stubGlobal('WebSocket', TrackingSocket)
+    api.listAttendanceSessions.mockImplementation(async ({ status }: { status: string }) => ({
+      items: status === 'active' ? [activeSession] : [],
+      pagination: { total: 1, limit: 100, offset: 0 },
+    }))
+    api.getSessionDashboardSnapshot.mockImplementation(async (sessionId: string) =>
+      snapshotFor(sessionId, 'active'),
+    )
+    api.listAtRiskStudents.mockResolvedValue({
+      items: [],
+      pagination: { total: 0, limit: 25, offset: 0 },
+      effective_window_days: 30,
+      effective_absence_pct_threshold: 20,
+      effective_late_count_threshold: 3,
+      policy_revision: 0,
+      generated_at: '2026-10-05T03:00:00Z',
+    })
+  })
+
+  it('redirects to login without reconnect on 4401 auth expiry', async () => {
+    const router = testRouter()
+    mount(DashboardView, { global: { plugins: [teacherPinia(), router] } })
+    await flushPromises()
+    expect(TrackingSocket.instances).toHaveLength(1)
+
+    TrackingSocket.instances[0].onclose?.({ code: 4401 })
+    await flushPromises()
+    await router.isReady()
+
+    expect(router.currentRoute.value.name).toBe('login')
+    expect(TrackingSocket.instances).toHaveLength(1)
+  })
+
+  it('shows a final error without reconnect on 4404 session gone', async () => {
+    const wrapper = mount(DashboardView, {
+      global: { plugins: [teacherPinia(), testRouter()] },
+    })
+    await flushPromises()
+    expect(TrackingSocket.instances).toHaveLength(1)
+
+    TrackingSocket.instances[0].onclose?.({ code: 4404 })
+    await flushPromises()
+
+    expect(wrapper.find('.dashboard-view__alert').text()).toContain('Sesi tidak ditemukan.')
+    expect(TrackingSocket.instances).toHaveLength(1)
+  })
+
+  it('reconnects with backoff on abnormal close', async () => {
+    vi.useFakeTimers()
+    try {
+      const wrapper = mount(DashboardView, {
+        global: { plugins: [teacherPinia(), testRouter()] },
+      })
+      await flushPromises()
+      expect(TrackingSocket.instances).toHaveLength(1)
+
+      TrackingSocket.instances[0].onclose?.({ code: 1006 })
+      await flushPromises()
+      expect(wrapper.text()).toContain('Menyambungkan ulang')
+
+      await vi.advanceTimersByTimeAsync(2000)
+      await flushPromises()
+      expect(TrackingSocket.instances.length).toBeGreaterThan(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

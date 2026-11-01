@@ -12,7 +12,11 @@ from recognition_core.domain import (
     LivenessDecision,
     TrackDecision,
 )
-from recognition_core.temporal import MultiFrameDecisionEngine, TemporalDecisionConfig
+from recognition_core.temporal import (
+    MultiFrameDecisionEngine,
+    TemporalDecisionConfig,
+    _TrackState,
+)
 
 PERSON_A = UUID(int=101)
 PERSON_B = UUID(int=202)
@@ -230,6 +234,38 @@ def test_only_best_quality_frames_are_aggregated() -> None:
 
     assert final.state == "accepted"
     assert final.decision.confidence == pytest.approx(0.95)
+
+
+def test_expiry_sweep_is_amortized_not_per_frame() -> None:
+    """The stale-track sweep must not scan the table on every observation."""
+    engine = _engine()
+    assert engine.should_sample(_observation(1, track_id="a")) is True
+    assert engine._last_sweep_at is not None
+    first_sweep = engine._last_sweep_at
+    # Same observation instant: the sweep must not run again.
+    assert engine.should_sample(_observation(1, track_id="b")) is True
+    assert engine._last_sweep_at == first_sweep
+    # A stale track is only evicted once the TTL/2 cadence elapses.
+    engine._tracks["stale"] = _TrackState(
+        last_observed_at=BASE_TIME - timedelta(seconds=3600)
+    )
+    engine.should_sample(_observation(2, track_id="c"))
+    assert "stale" in engine._tracks
+    engine.should_sample(
+        FrameObservation(
+            track_id="d",
+            captured_at=BASE_TIME + timedelta(seconds=10),
+        )
+    )
+    assert "stale" not in engine._tracks
+
+
+def test_track_table_is_bounded_fail_closed() -> None:
+    """Unbounded track ids must not grow memory without limit."""
+    engine = _engine()
+    for index in range(engine.MAX_TRACK_STATES + 500):
+        engine.should_sample(_observation(1, track_id=f"track-{index}"))
+    assert len(engine._tracks) <= engine.MAX_TRACK_STATES
 
 
 def test_sampling_stride_skips_configured_intermediate_frames() -> None:

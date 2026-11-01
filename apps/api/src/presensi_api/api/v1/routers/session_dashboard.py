@@ -94,6 +94,21 @@ def _decision_reason(event: RecognitionEvent) -> AttendanceDecisionReason | None
     return None
 
 
+def _commit_if_dirty(db: Session) -> None:
+    """Persist auto-close side effects without a write per read-only poll.
+
+    The dashboard snapshot and WS tick run every ~2s per connected client;
+    an unconditional commit opens a write transaction on every tick even
+    when `close_expired_sessions` changed nothing. Only commit when the
+    session actually holds writes, otherwise roll back to release the
+    (read-only) transaction promptly.
+    """
+    if db.new or db.dirty or db.deleted:
+        db.commit()
+    else:
+        db.rollback()
+
+
 def _build_snapshot(
     db: Session,
     attendance_session: AttendanceSession,
@@ -123,6 +138,8 @@ def _build_snapshot(
     }
     present = status_counts.get("present", 0)
     late = status_counts.get("late", 0)
+    excused = status_counts.get("excused", 0)
+    absent = status_counts.get("absent", 0)
 
     recognition_rows = db.execute(
         select(
@@ -215,6 +232,8 @@ def _build_snapshot(
                 Literal["unknown", "online", "offline", "error"],
                 device.camera_status,
             ),
+            pending_events=device.pending_events,
+            dead_letter_events=device.dead_letter_events,
             last_seen_at=(
                 as_utc(device.last_seen_at) if device.last_seen_at is not None else None
             ),
@@ -233,7 +252,9 @@ def _build_snapshot(
             total_roster=total_roster,
             present=present,
             late=late,
-            not_present=max(total_roster - present - late, 0),
+            excused=excused,
+            absent=absent,
+            not_present=max(total_roster - present - late - excused - absent, 0),
         ),
         devices=devices,
         recent_activity=activities[:10],
@@ -294,7 +315,7 @@ def get_session_dashboard(
 ) -> SessionDashboardSnapshot:
     attendance_session, schedule = _session_for_principal(db, session_id, principal)
     snapshot = _build_snapshot(db, attendance_session, schedule)
-    db.commit()
+    _commit_if_dirty(db)
     return snapshot
 
 
@@ -357,12 +378,14 @@ async def stream_session_updates(
             await websocket.send_json(
                 {"type": "snapshot", "data": snapshot.model_dump(mode="json")}
             )
-            db.commit()
+            _commit_if_dirty(db)
             try:
                 await asyncio.wait_for(
                     websocket.receive_text(), timeout=_poll_interval_seconds()
                 )
             except TimeoutError:
                 db.expire_all()
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
+        # A browser tab may vanish between snapshots; a closed socket is a
+        # normal goodbye, not a server error worth a 500 traceback.
         return

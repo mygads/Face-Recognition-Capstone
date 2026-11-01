@@ -5,6 +5,7 @@ Aturan pemetaan: stadium TANPA incoming = start; stadium TANPA outgoing = end;
 rect/parallelogram = task; rhombus = gateway. Label dibandingkan ternormalisasi
 (huruf kecil, alnum saja). Subgraph/partition/note = representasi, dilewati.
 """
+
 import os
 import re
 import sys
@@ -74,8 +75,13 @@ def parse_mmd(text):
     nodes, edges = {}, []
     for raw in text.splitlines():
         ln = raw.strip()
-        if not ln or ln.startswith("%%") or ln.startswith("flowchart") \
-                or ln.startswith("subgraph") or ln == "end":
+        if (
+            not ln
+            or ln.startswith("%%")
+            or ln.startswith("flowchart")
+            or ln.startswith("subgraph")
+            or ln == "end"
+        ):
             continue
         rest = ln
         for m in re.finditer(r"(\w+)\(\[(.*?)\]\)", rest):
@@ -96,8 +102,7 @@ def parse_mmd(text):
             edges.append((a, g, b))
         tmp = re.sub(r"--\s*.*?\s*-->", "-->", nl)
         for m in re.finditer(r"(\w+)\s*-->\s*(\w+)", tmp):
-            if not any(e[0] == m.group(1) and e[2] == m.group(2)
-                       for e in edges):
+            if not any(e[0] == m.group(1) and e[2] == m.group(2) for e in edges):
                 edges.append((m.group(1), "", m.group(2)))
     return nodes, edges
 
@@ -130,21 +135,26 @@ def check_flow(mid, fid, nodes, edges):
             want = "task"
         got = flabel.get(norm(text))
         if got is None:
-            err("%s: node mmd '%s' [%s] tak ada di flow %s"
-                % (mid, text, shape, fid))
+            err("%s: node mmd '%s' [%s] tak ada di flow %s" % (mid, text, shape, fid))
         elif want == "start":
             # stadium entri diwakili start generik "Mulai" + task berlabel entri
             if not any(k in ("start", "task") for _, k in got):
-                err("%s: '%s' harusnya start/entri di flow (dapat %s)"
-                    % (mid, text, sorted({k for _, k in got})))
+                err(
+                    "%s: '%s' harusnya start/entri di flow (dapat %s)"
+                    % (mid, text, sorted({k for _, k in got}))
+                )
         elif want == "end":
             if not any(k == want for _, k in got):
-                err("%s: '%s' harusnya %s di flow (dapat %s)"
-                    % (mid, text, want, sorted({k for _, k in got})))
+                err(
+                    "%s: '%s' harusnya %s di flow (dapat %s)"
+                    % (mid, text, want, sorted({k for _, k in got}))
+                )
         elif want == "task":
             if not any(k == "task" for _, k in got):
-                err("%s: '%s' harusnya task di flow (dapat %s)"
-                    % (mid, text, sorted({k for _, k in got})))
+                err(
+                    "%s: '%s' harusnya task di flow (dapat %s)"
+                    % (mid, text, sorted({k for _, k in got}))
+                )
         elif isinstance(want, tuple):
             if not any(k in want for _, k in got):
                 err("%s: gateway '%s' tak ada di flow" % (mid, text))
@@ -158,8 +168,10 @@ def check_flow(mid, fid, nodes, edges):
         if n == "selesai" and kind == "end":
             continue  # ujung generik jalur terminal (BPMN wajibkan end)
         if not any(norm(t) == n for _, (_, t) in nodes.items()):
-            err("%s: node flow '%s' (%s) tak ada di mermaid (temuan?)"
-                % (mid, label, nid))
+            err(
+                "%s: node flow '%s' (%s) tak ada di mermaid (temuan?)"
+                % (mid, label, nid)
+            )
     by_label = {}
     for nid, (shape, text) in nodes.items():
         by_label.setdefault(norm(text), []).append(nid)
@@ -175,8 +187,10 @@ def check_flow(mid, fid, nodes, edges):
                 ok = True
                 break
         if not ok:
-            err("%s: edge '%s' --%s--> '%s' tak ada di flow"
-                % (mid, ta, g or "(tanpa guard)", tb))
+            err(
+                "%s: edge '%s' --%s--> '%s' tak ada di flow"
+                % (mid, ta, g or "(tanpa guard)", tb)
+            )
 
 
 def parse_puml(path):
@@ -191,8 +205,12 @@ def parse_puml(path):
             if re.match(r"^end note(\s|$)", ln):
                 in_note = False
             continue
-        if ln.startswith("'") or ln.startswith("|") or \
-                ln.startswith("title") or ln.startswith("@"):
+        if (
+            ln.startswith("'")
+            or ln.startswith("|")
+            or ln.startswith("title")
+            or ln.startswith("@")
+        ):
             continue
         m = re.match(r"^:(.*?);\s*$", ln)
         if m:
@@ -231,11 +249,12 @@ def check_puml(mid, fid, nodes, edges):
             continue
         if shape == "rhombus":
             if norm(text) not in [norm(c) for c in conds]:
-                err("%s: gateway mmd '%s' tak ada di puml %s"
-                    % (mid, text, PUML_OF[fid]))
+                err(
+                    "%s: gateway mmd '%s' tak ada di puml %s"
+                    % (mid, text, PUML_OF[fid])
+                )
         elif norm(text) not in have:
-            err("%s: node mmd '%s' tak ada di puml %s"
-                % (mid, text, PUML_OF[fid]))
+            err("%s: node mmd '%s' tak ada di puml %s" % (mid, text, PUML_OF[fid]))
     mg = {norm(g) for _, g, _ in edges if g}
     pg = {norm(g) for g in guards}
     for g in sorted(mg - pg):
@@ -261,8 +280,9 @@ def main():
         check_puml(mid, fid, n, e)
     covered = {s for s, _ in MAP}
     for s in sorted(by_stem):
-        if s not in covered and not s.startswith(("04-use-case", "07-data",
-                                                  "08-arsitektur")):
+        if s not in covered and not s.startswith(
+            ("04-use-case", "07-data", "08-arsitektur")
+        ):
             err("stem mmd tanpa pasangan flow: %s" % s)
     if issues:
         print("SELISIH (%d):" % len(issues))

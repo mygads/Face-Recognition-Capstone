@@ -387,3 +387,19 @@ def test_preview_config_rejects_non_loopback_bind_host(tmp_path: Path) -> None:
 
     with pytest.raises(EdgeConfigError, match="loopback"):
         load_config(config_path)
+
+
+def test_preview_session_slides_expiry_while_watched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview, port, token = _start_preview(monkeypatch, ["ADMIN"])
+    try:
+        first_expiry = preview._sessions[token]
+        _request(port, "/v1/status", token=token).read()
+        second_expiry = preview._sessions[token]
+        # Activity extends the session instead of forcing a re-authenticate
+        # round-trip in the middle of an operator watch.
+        assert second_expiry > first_expiry
+        assert preview.has_active_viewer() is True
+    finally:
+        preview.stop()

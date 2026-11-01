@@ -126,12 +126,13 @@ def request(
     method: str,
     path: str,
     body: dict[str, object] | None = None,
+    params: dict[str, str] | None = None,
 ) -> httpx.Response:
     async def send() -> httpx.Response:
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://testserver"
         ) as client:
-            return await client.request(method, path, json=body)
+            return await client.request(method, path, json=body, params=params)
 
     return asyncio.run(send())
 
@@ -652,3 +653,87 @@ def test_worker_opens_only_automatic_teachers_and_closes_both_statuses(
         )
         assert audit is not None
         assert audit.before_state == {"status": "manual_override"}
+
+
+def test_manual_open_rejects_empty_class_roster(
+    api_database: sessionmaker[Session],
+) -> None:
+    practicum_schedule_id = schedule_id(api_database)
+    with api_database.begin() as session:
+        schedule = session.get(PracticumSchedule, practicum_schedule_id)
+        assert schedule is not None
+        empty_class = SchoolClass(
+            code="X-EMPTY",
+            name="Kelas Kosong",
+            grade=10,
+            academic_year="2026-2027",
+        )
+        session.add(empty_class)
+        session.flush()
+        schedule.class_id = empty_class.id
+    opened = request(
+        "POST",
+        "/api/v1/sessions",
+        {"practicum_schedule_id": str(practicum_schedule_id)},
+    )
+    assert opened.status_code == 422
+    assert opened.json()["error"]["code"] == "empty_class_roster"
+    with api_database() as session:
+        assert session.scalars(select(AttendanceSession)).all() == []
+
+
+def test_attendance_list_returns_final_records_with_filters(
+    api_database: sessionmaker[Session],
+) -> None:
+    opened = request(
+        "POST",
+        "/api/v1/sessions",
+        {"practicum_schedule_id": str(schedule_id(api_database))},
+    )
+    assert opened.status_code == 201, opened.text
+    session_id = opened.json()["id"]
+    roster = request("GET", f"/api/v1/sessions/{session_id}/roster")
+    assert roster.status_code == 200
+    student_id = roster.json()[0]["student_id"]
+    marked = request(
+        "POST",
+        f"/api/v1/attendance/sessions/{session_id}/manual-marks",
+        {"student_id": student_id, "status": "present"},
+    )
+    assert marked.status_code == 201, marked.text
+
+    listed = request("GET", "/api/v1/attendance")
+    assert listed.status_code == 200
+    body = listed.json()
+    assert body["pagination"]["total"] == 1
+    assert body["items"][0]["session_id"] == session_id
+    assert body["items"][0]["student_id"] == student_id
+    assert body["items"][0]["status"] == "present"
+    assert body["items"][0]["source"] == "manual"
+
+    filtered = request(
+        "GET", "/api/v1/attendance", params={"student_id": str(UUID(int=999))}
+    )
+    assert filtered.status_code == 200
+    assert filtered.json()["pagination"]["total"] == 0
+
+    scoped = request("GET", "/api/v1/attendance", params={"session_id": session_id})
+    assert scoped.status_code == 200
+    assert scoped.json()["pagination"]["total"] == 1
+
+
+def test_openable_schedules_hide_running_session(
+    api_database: sessionmaker[Session],
+) -> None:
+    before = request("GET", "/api/v1/sessions/openable-schedules")
+    assert before.status_code == 200
+    assert [item["id"] for item in before.json()] == [str(schedule_id(api_database))]
+    opened = request(
+        "POST",
+        "/api/v1/sessions",
+        {"practicum_schedule_id": str(schedule_id(api_database))},
+    )
+    assert opened.status_code == 201, opened.text
+    after = request("GET", "/api/v1/sessions/openable-schedules")
+    assert after.status_code == 200
+    assert after.json() == []

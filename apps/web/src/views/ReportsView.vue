@@ -14,6 +14,7 @@ import {
   type Schedule,
 } from '../api/client'
 import { triggerDownload } from '../utils/download'
+import { formatDateTimeLocal, todayLocalISO } from '../utils/dateFormat'
 
 const pageSize = 20
 const filters = reactive({
@@ -47,9 +48,7 @@ const laboratoryOptions = computed(() => {
 })
 
 function localDate(dayOffset: number): string {
-  const value = new Date()
-  value.setDate(value.getDate() + dayOffset)
-  return new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
+  return todayLocalISO(dayOffset)
 }
 
 function formatError(error: unknown): string {
@@ -152,12 +151,7 @@ function statusClass(status: AttendanceReportRow['status']): string {
 }
 
 function formatDate(value: string | null): string {
-  if (!value) return '—'
-  return new Intl.DateTimeFormat('id-ID', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: 'Asia/Jakarta',
-  }).format(new Date(value))
+  return formatDateTimeLocal(value)
 }
 
 function sessionLabel(session: AttendanceSession): string {

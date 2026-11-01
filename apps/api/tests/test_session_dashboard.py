@@ -201,6 +201,8 @@ def test_websocket_sends_safe_snapshot_and_updates_attendance_live(
                 "total_roster": 3,
                 "present": 1,
                 "late": 0,
+                "excused": 0,
+                "absent": 0,
                 "not_present": 2,
             }
             assert first["recent_activity"][0]["student_name"] == "Siswa 1"
@@ -224,6 +226,8 @@ def test_websocket_sends_safe_snapshot_and_updates_attendance_live(
                 "total_roster": 3,
                 "present": 1,
                 "late": 1,
+                "excused": 0,
+                "absent": 0,
                 "not_present": 1,
             }
             assert updated["recent_activity"][0]["student_name"] == "Siswa 2"
@@ -303,3 +307,69 @@ def test_websocket_rejects_bootstrap_password_change_token(
                 )
                 websocket.receive_json()
     assert disconnected.value.code == 4401
+
+
+def test_commit_if_dirty_skips_write_transaction_on_read_only_poll() -> None:
+    """Dashboard polls every ~2s per client; reads must not open writes."""
+    from presensi_api.api.v1.routers.session_dashboard import _commit_if_dirty
+
+    class StubSession:
+        def __init__(self) -> None:
+            self.committed = False
+            self.rolled_back = False
+            self.new: set[object] = set()
+            self.dirty: set[object] = set()
+            self.deleted: set[object] = set()
+
+        def commit(self) -> None:
+            self.committed = True
+
+        def rollback(self) -> None:
+            self.rolled_back = True
+
+    clean = StubSession()
+    _commit_if_dirty(clean)  # type: ignore[arg-type]
+    assert clean.committed is False
+    assert clean.rolled_back is True
+
+    dirty = StubSession()
+    dirty.new.add(object())
+    _commit_if_dirty(dirty)  # type: ignore[arg-type]
+    assert dirty.committed is True
+    assert dirty.rolled_back is False
+
+
+def test_dashboard_summary_separates_excused_absent_and_unmarked(
+    dashboard_database: tuple[sessionmaker[Session], dict[str, UUID]],
+) -> None:
+    factory, ids = dashboard_database
+    with factory.begin() as db:
+        db.add(
+            AttendanceRecord(
+                session_id=ids["session"],
+                student_id=ids["late_student"],
+                status="excused",
+                source="manual",
+                recorded_at=datetime.now(UTC),
+            )
+        )
+        db.add(
+            AttendanceRecord(
+                session_id=ids["session"],
+                student_id=ids["absent_student"],
+                status="absent",
+                source="manual",
+                recorded_at=datetime.now(UTC),
+            )
+        )
+    with TestClient(app) as client:
+        response = client.get(f"/api/v1/sessions/{ids['session']}/dashboard")
+    assert response.status_code == 200
+    assert response.json()["summary"] == {
+        "total_roster": 3,
+        "present": 1,
+        "late": 0,
+        "excused": 1,
+        "absent": 1,
+        "not_present": 0,
+    }

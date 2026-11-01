@@ -19,9 +19,15 @@ from presensi_api.api.security.roles import AuthenticatedUser, Permission
 class SlidingWindowRateLimiter:
     """Small process-local limiter for already-authenticated principals."""
 
+    #: Full-table sweeps are amortized: every request prunes only its own key,
+    #: while the O(N) expired-key sweep runs once per this many calls so steady
+    #: heartbeat/device traffic stays O(1) per request.
+    _FULL_SWEEP_EVERY = 128
+
     def __init__(self) -> None:
         self._requests: dict[str, deque[float]] = {}
         self._lock = Lock()
+        self._calls_since_sweep = 0
 
     def allow(
         self,
@@ -36,12 +42,22 @@ class SlidingWindowRateLimiter:
         current = monotonic() if now is None else now
         cutoff = current - window_seconds
         with self._lock:
-            for old_key, timestamps in tuple(self._requests.items()):
+            # Amortized sweep runs before the per-key update so it can never
+            # evict the bucket this request is about to append to.
+            self._calls_since_sweep += 1
+            if self._calls_since_sweep >= self._FULL_SWEEP_EVERY:
+                self._calls_since_sweep = 0
+                for old_key, other in tuple(self._requests.items()):
+                    while other and other[0] <= cutoff:
+                        other.popleft()
+                    if not other:
+                        self._requests.pop(old_key, None)
+            timestamps = self._requests.get(key)
+            if timestamps is None:
+                timestamps = self._requests[key] = deque()
+            else:
                 while timestamps and timestamps[0] <= cutoff:
                     timestamps.popleft()
-                if not timestamps:
-                    self._requests.pop(old_key, None)
-            timestamps = self._requests.setdefault(key, deque())
             if len(timestamps) >= limit:
                 return False
             timestamps.append(current)

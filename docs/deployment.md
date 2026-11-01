@@ -303,6 +303,58 @@ hidup saat gagal, cache valid dipakai sampai expiry lalu fail-closed, event
 valid terkirim FIFO dengan `event_id` sama, sesi uji baru lolos). Backup/
 restore server mengikuti pola Bagian 3 (dump GPG + keyring terpisah).
 
+## Lampiran: tuning kinerja, CPU, dan akurasi
+
+Aturan umum: deteksi (YuNet) adalah biaya CPU terbesar; embedding/matching
+kecil untuk roster satu kelas. Jangan naikkan resolusi/FPS untuk mengejar
+akurasi — wajah < `min_face_pixels` (default 80 px) tetap ditolak walau
+kamera 1080p.
+
+- **AI_EDGE di PC lemah**: set `recognition.detection_max_width: 640`
+  (env `PRESENSI_EDGE_DETECTION_MAX_WIDTH`). YuNet berjalan pada salinan
+  kecil (±9x lebih ringan pada 1920→640) dan kotak dipetakan kembali;
+  quality/align/embed tetap memakai frame penuh sehingga jalur acceptance
+  tidak berubah. Wajib konfirmasi ulang via laporan kalibrasi lokal sebelum
+  produksi (recall wajah jauh bisa turun).
+- **Resolusi/FPS kamera**: validasi mewanti di atas 1280x720/15fps. Untuk
+  lorong walk-through, 720p@10fps + `sample_every_n_frames: 6` cukup; PC
+  kuat boleh 720p@15fps + stride 4–5. STB_GATEWAY cukup 640x360@10fps
+  (contoh bawaan) karena deteksi terpusat.
+- **Burst STB**: `burst_frame_count` 3–5, `minimum_burst_interval_seconds` ≥5,
+  `periodic_burst_seconds` 30 sebagai jaring pengaman; `jpeg_quality` 70
+  default, naikkan hanya bila wajah jauh sering `frame_blurry`.
+- **Polling galeri**: agent mengirim `known_generated_at`; server menjawab
+  `304` tanpa roster bila tidak ada perubahan (cek log edge
+  `session_cache_not_modified`). Versi galeri hanya maju saat sesi/roster/
+  template berubah, jadi polling 3 detik tidak membebani DB saat idle.
+- **Kalibrasi threshold** (wajib per lab, bukan salin angka): kumpulkan
+  pasangan wajah relawan/sintetis lalu jalankan evaluasi CLI
+  (`recognition_core.evaluation.evaluate_pairs` via `cli.py`) untuk memilih
+  `min_top1_similarity` + `min_top1_top2_margin` dari kurva FAR/FRR target
+  (mulai: FAR ≤1% pada data lab). Catat referensi laporan di
+  `calibration_reference` sebelum mengisi threshold produksi.
+- **Kualitas enrollment menentukan akurasi**: tolak registrasi buram/gelap
+  (gate `min_face_pixels`/`min_laplacian_variance`/rentang brightness sudah
+  aktif di enrollment); 2–3 template per siswa dari sudut berbeda menaikkan
+  recall jauh lebih besar daripada menurunkan threshold.
+- **Rate limit API**: sliding-window per principal dengan sweep global
+  amortized tiap 128 request (prune per-key tiap request O(1)) — heartbeat
+  rutin tetap murah.
+- **Outbox**: `max_retry_seconds` 60 (backoff cap) + `max_outbox_events`
+  50000; pantau `dead_letter_events` di dashboard — antrean mati >0 berarti
+  kredensial/model bermasalah, bukan jaringan.
+- **Retensi/validasi event**: sweep retensi berjalan tiap
+  `PRESENSI_RETENTION_SWEEP_HOURS` (default 24; 0 = jadwal nonaktif, CLI
+  manual tetap bisa); event dengan `occurred_at` lebih dari
+  `PRESENSI_EVENT_FUTURE_SKEW_SECONDS` (default 300) ke masa depan ditolak
+  422 agar jam perangkat yang ngaco tidak mencemari presensi; dashboard
+  menandai device `warning` saat antrean ≥ `PRESENSI_DEVICE_QUEUE_WARNING_DEPTH`
+  (default 50) atau ada dead-letter.
+- **Operating point YuNet**: `PRESENSI_AI_YUNET_SCORE_THRESHOLD` (default 0.9)
+  + `PRESENSI_AI_YUNET_NMS_THRESHOLD` (default 0.3) diteruskan ke container
+  AI Central via compose overlay; ubah hanya dari laporan kalibrasi lokal
+  (skor rendah menaikkan recall tapi juga false-positive dan beban CPU).
+
 ## Lampiran: Cloudflare Tunnel (opsional)
 
 Hanya untuk akses browser operator tanpa buka inbound router; device memakai

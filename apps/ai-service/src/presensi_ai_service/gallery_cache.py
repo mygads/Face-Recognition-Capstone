@@ -122,6 +122,27 @@ class SessionGalleryCache:
         with self._lock:
             return self._entries.pop((device_id, session_id), None) is not None
 
+    def prune_expired(self, *, now: datetime | None = None) -> int:
+        """Drop galleries whose session ended or whose TTL elapsed.
+
+        Entries are otherwise evicted lazily on access, so without pruning a
+        long-running worker would retain one snapshot per finished session
+        for the life of the process. Called on every recognition burst; the
+        scan only touches cache keys, never embeddings.
+        """
+        current = _utc(now or datetime.now(UTC), "now")
+        with self._lock:
+            expired = [
+                key
+                for key, gallery in self._entries.items()
+                if gallery.status != "active"
+                or gallery.expires_at <= current
+                or gallery.session_ends_at <= current
+            ]
+            for key in expired:
+                self._entries.pop(key, None)
+            return len(expired)
+
     def clear(self) -> None:
         with self._lock:
             self._entries.clear()

@@ -732,9 +732,9 @@ def test_expired_bearer_token_is_rejected(api_database: sessionmaker[Session]) -
             None,
             404,
         ),
-        ("ADMIN", "GET", "/api/v1/attendance", None, 501),
-        ("TEACHER", "GET", "/api/v1/attendance", None, 501),
-        ("LABORANT", "GET", "/api/v1/attendance", None, 501),
+        ("ADMIN", "GET", "/api/v1/attendance", None, 200),
+        ("TEACHER", "GET", "/api/v1/attendance", None, 200),
+        ("LABORANT", "GET", "/api/v1/attendance", None, 200),
         (
             "ADMIN",
             "POST",
@@ -768,7 +768,7 @@ def test_expired_bearer_token_is_rejected(api_database: sessionmaker[Session]) -
             },
             403,
         ),
-        ("ADMIN", "GET", "/api/v1/accounts", None, 501),
+        ("ADMIN", "GET", "/api/v1/accounts", None, 200),
         ("TEACHER", "GET", "/api/v1/accounts", None, 403),
         ("LABORANT", "GET", "/api/v1/accounts", None, 403),
         (
@@ -819,3 +819,21 @@ def test_endpoint_role_permissions(
     assert response.status_code == expected_status
     if expected_status == 403:
         assert response.json()["error"]["code"] == "forbidden"
+
+
+def test_auth_failures_use_coded_problem_envelope(
+    api_database: sessionmaker[Session],
+) -> None:
+    add_user(api_database, secrets.token_urlsafe(24))
+    bad_password = request(
+        "POST",
+        "/api/v1/auth/login",
+        form={"username": "teacher@example.edu", "password": "wrong-password-123"},
+    )
+    assert bad_password.status_code == 401
+    assert bad_password.json()["error"]["code"] == "auth_invalid_credentials"
+    assert "WWW-Authenticate" in bad_password.headers
+
+    missing_header = request("POST", "/api/v1/auth/logout")
+    assert missing_header.status_code == 403
+    assert missing_header.json()["error"]["code"] == "browser_session_header_required"

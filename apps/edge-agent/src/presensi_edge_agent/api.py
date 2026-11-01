@@ -7,11 +7,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import quote
 from uuid import UUID
 
 import httpx
 
 from presensi_edge_agent.config import ApiSettings
+from recognition_core.opencv_models import SFaceModel
 
 
 class ApiCallError(RuntimeError):
@@ -28,6 +30,10 @@ class ApiCallError(RuntimeError):
 class ApiHealth:
     reachable: bool
     status_code: int | None
+
+
+class GalleryNotModified(RuntimeError):
+    """The session gallery has not changed since the known version."""
 
 
 class CoreApiClient:
@@ -49,6 +55,8 @@ class CoreApiClient:
         self._last_heartbeat_expiry: datetime | None = None
         self._camera_status_provider: Callable[[], str] | None = None
         self._camera_metrics_provider: Callable[[], dict[str, object]] | None = None
+        self._queue_status_provider: Callable[[], dict[str, object]] | None = None
+        self._gallery_version_provider: Callable[[], str | None] | None = None
         self._client = client or httpx.Client(
             base_url=settings.base_url,
             timeout=settings.timeout_seconds,
@@ -111,6 +119,8 @@ class CoreApiClient:
             payload["camera_status"] = self._camera_status_provider()
         if self._camera_metrics_provider is not None:
             payload["camera_metrics"] = self._camera_metrics_provider()
+        if self._queue_status_provider is not None:
+            payload["queue_status"] = self._queue_status_provider()
         response = self._request(
             "POST",
             f"/api/v1/devices/{self.device_id}/device-heartbeat",
@@ -152,11 +162,19 @@ class CoreApiClient:
     ) -> None:
         self._camera_metrics_provider = provider
 
+    def set_queue_status_provider(
+        self, provider: Callable[[], dict[str, object]]
+    ) -> None:
+        self._queue_status_provider = provider
+
+    def set_gallery_version_provider(self, provider: Callable[[], str | None]) -> None:
+        self._gallery_version_provider = provider
+
     def fetch_active_session_cache(self) -> dict[str, Any]:
         version = str(self._heartbeat_metadata.get("model_version", ""))
         path = self._cache_path.format(
             device_id=self.device_id,
-            model_name="opencv-zoo-sface",
+            model_name=SFaceModel.model_name,
             model_version=version,
         )
         if "model_name=" not in path or "model_version=" not in path:
@@ -164,7 +182,17 @@ class CoreApiClient:
             path = (
                 f"{path}{separator}model_name=opencv-zoo-sface&model_version={version}"
             )
+        if self._gallery_version_provider is not None:
+            known = self._gallery_version_provider()
+            if known:
+                separator = "&" if "?" in path else "?"
+                encoded = quote(known, safe="")
+                path = f"{path}{separator}known_generated_at={encoded}"
         response = self._request("GET", path)
+        if response.status_code == 304:
+            raise GalleryNotModified(
+                "The session gallery has not changed since the known version."
+            )
         try:
             payload = response.json()
         except ValueError as exc:
@@ -211,9 +239,12 @@ class CoreApiClient:
         try:
             result = response.json()
         except ValueError as exc:
-            raise ApiCallError(response.status_code, retryable=True) from exc
+            # HTTP 200 means the server stored and decided the event; a body
+            # that is not JSON can never be fixed by resending, so fail
+            # closed to the dead-letter path instead of retrying forever.
+            raise ApiCallError(response.status_code, retryable=False) from exc
         if not isinstance(result, dict):
-            raise ApiCallError(response.status_code, retryable=True)
+            raise ApiCallError(response.status_code, retryable=False)
         return cast(dict[str, Any], result)
 
     def fetch_runtime_configuration(self) -> dict[str, object]:
@@ -246,8 +277,6 @@ class CoreApiClient:
         token = payload.get("token")
         expires_at = payload.get("expires_at")
         if not isinstance(token, str) or not token or not isinstance(expires_at, str):
-            return
-        if not token or not expires_at:
             return
         path = self.settings.token_file
         if path is None:

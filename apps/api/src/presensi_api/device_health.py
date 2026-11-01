@@ -5,6 +5,18 @@ from datetime import UTC, datetime, timedelta
 
 from presensi_api.db.models import Device
 
+DEFAULT_QUEUE_WARNING_DEPTH = 50
+MAX_QUEUE_WARNING_DEPTH = 100_000
+
+
+def queue_warning_depth() -> int:
+    raw = os.getenv("PRESENSI_DEVICE_QUEUE_WARNING_DEPTH", "50")
+    try:
+        configured = int(raw)
+    except ValueError:
+        return DEFAULT_QUEUE_WARNING_DEPTH
+    return min(max(configured, 1), MAX_QUEUE_WARNING_DEPTH)
+
 
 def heartbeat_timeout_seconds() -> int:
     raw = os.getenv(
@@ -32,5 +44,11 @@ def device_health_status(device: Device, *, now: datetime | None = None) -> str:
     if not has_recent_heartbeat(device, now=now):
         return "offline"
     if not device.camera_enabled:
+        return "warning"
+    pending = getattr(device, "pending_events", None)
+    dead_letter = getattr(device, "dead_letter_events", None)
+    if isinstance(dead_letter, int) and dead_letter > 0:
+        return "warning"
+    if isinstance(pending, int) and pending >= queue_warning_depth():
         return "warning"
     return "online" if device.camera_status == "online" else "warning"

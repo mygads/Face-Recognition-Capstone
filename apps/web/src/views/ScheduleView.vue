@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { todayLocalISO } from '../utils/dateFormat'
 import {
   ApiError,
   createSchedule,
@@ -56,9 +57,7 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize))
 
 function emptyForm(): ScheduleForm {
   const now = new Date()
-  const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
-    .toISOString()
-    .slice(0, 10)
+  const localDate = todayLocalISO()
   return {
     class_id: '',
     laboratory_id: '',

@@ -91,6 +91,14 @@ class CandidateMetadata(BaseModel):
     margin: float | None
 
 
+class QualitySignals(BaseModel):
+    """Operator-safe numeric quality outcome for the processed burst."""
+
+    score: float | None = None
+    acceptable: bool | None = None
+    signals: dict[str, float] = Field(default_factory=dict)
+
+
 class BurstDecisionResponse(BaseModel):
     session_id: UUID
     track_id: str
@@ -99,9 +107,24 @@ class BurstDecisionResponse(BaseModel):
     candidate: CandidateMetadata | None
     reason_code: str | None
     liveness_score: float | None
+    quality: QualitySignals | None = None
     observations: int
     frames_processed: int
+    model_name: str
     model_version: str
+
+
+def _quality_signals(runner: RecognitionRunner | None) -> QualitySignals | None:
+    if runner is None:
+        return None
+    last = runner.last_quality
+    if last is None:
+        return None
+    return QualitySignals(
+        score=last.score,
+        acceptable=last.acceptable,
+        signals={name: value for name, value in last.signals},
+    )
 
 
 class Metrics(BaseModel):
@@ -187,6 +210,11 @@ class DeviceAuthenticator:
 
 
 class DeviceRateLimiter:
+    #: Bound per-device token buckets so unauthenticated/open-auth traffic
+    #: can never grow memory without limit. Production deployments always
+    #: authenticate known devices; the bound only matters for junk IDs.
+    MAX_TRACKED_DEVICES = 4096
+
     def __init__(self, *, rate: float, capacity: int) -> None:
         self._rate = rate
         self._capacity = float(capacity)
@@ -198,6 +226,9 @@ class DeviceRateLimiter:
         async with self._lock:
             tokens, updated_at = self._buckets.get(device_id, (self._capacity, now))
             tokens = min(self._capacity, tokens + (now - updated_at) * self._rate)
+            if device_id not in self._buckets:
+                while len(self._buckets) >= self.MAX_TRACKED_DEVICES:
+                    self._buckets.pop(next(iter(self._buckets)))
             if tokens < 1:
                 self._buckets[device_id] = (tokens, now)
                 return (1 - tokens) / self._rate
@@ -425,6 +456,8 @@ def create_app(
                                 "min_laplacian_variance",
                                 "min_brightness",
                                 "max_brightness",
+                                "yunet_score_threshold",
+                                "yunet_nms_threshold",
                                 "calibration_reference",
                             }
                             if set(values) != allowed_fields:
@@ -678,6 +711,7 @@ def create_app(
                 ),
             )
             device_token = credentials.credentials if credentials is not None else None
+            app.state.gallery_cache.prune_expired()
             retry_after = await app.state.rate_limiter.allow(device_id)
             if retry_after is not None:
                 response = _error(
@@ -886,8 +920,10 @@ def create_app(
                 candidate=candidate,
                 reason_code=decision.decision.reason_code,
                 liveness_score=decision.decision.liveness_score,
+                quality=_quality_signals(active_runner),
                 observations=decision.observation_count,
                 frames_processed=len(decoded),
+                model_name=gallery.model_name,
                 model_version=gallery.model_version,
             )
         except ImageDecodeError as exc:

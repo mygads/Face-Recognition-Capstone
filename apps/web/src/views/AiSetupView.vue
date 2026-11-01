@@ -19,10 +19,16 @@ import {
   type RecognitionConfiguration,
   type StbGatewayConfiguration,
 } from '../api/client'
+import {
+  numeric,
+  recognitionDefaults,
+  recognitionFrom,
+  sanitizeRecognitionForm,
+  type UnknownSettings,
+} from '../utils/recognitionConfig'
+import { createRefreshEpoch } from '../utils/refresh'
 
 type SettingsTab = 'enrollment' | 'devices' | 'central'
-type UnknownSettings = Record<string, unknown>
-
 const readiness = ref<AiReadiness | null>(null)
 const devices = ref<Device[]>([])
 const selectedDeviceId = ref('')
@@ -88,62 +94,6 @@ const centralThresholdsConfigured = computed(
     centralForm.value.min_top1_top2_margin !== null,
 )
 
-function recognitionDefaults(): RecognitionConfiguration {
-  return {
-    min_face_pixels: 80,
-    min_laplacian_variance: 45,
-    min_brightness: 25,
-    max_brightness: 235,
-    min_top1_similarity: null,
-    min_top1_top2_margin: null,
-    minimum_agreeing_frames: 3,
-    sample_every_n_frames: 5,
-    best_frame_count: 5,
-    max_history_frames: 10,
-    calibration_reference: null,
-  }
-}
-
-function numeric(settings: UnknownSettings, key: string, fallback: number): number {
-  const value = settings[key]
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
-}
-
-function optionalNumeric(settings: UnknownSettings, key: string): number | null {
-  const value = settings[key]
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-function recognitionFrom(settings: UnknownSettings): RecognitionConfiguration {
-  const defaults = recognitionDefaults()
-  return {
-    min_face_pixels: numeric(settings, 'min_face_pixels', defaults.min_face_pixels),
-    min_laplacian_variance: numeric(
-      settings,
-      'min_laplacian_variance',
-      defaults.min_laplacian_variance,
-    ),
-    min_brightness: numeric(settings, 'min_brightness', defaults.min_brightness),
-    max_brightness: numeric(settings, 'max_brightness', defaults.max_brightness),
-    min_top1_similarity: optionalNumeric(settings, 'min_top1_similarity'),
-    min_top1_top2_margin: optionalNumeric(settings, 'min_top1_top2_margin'),
-    minimum_agreeing_frames: numeric(
-      settings,
-      'minimum_agreeing_frames',
-      defaults.minimum_agreeing_frames,
-    ),
-    sample_every_n_frames: numeric(
-      settings,
-      'sample_every_n_frames',
-      defaults.sample_every_n_frames,
-    ),
-    best_frame_count: numeric(settings, 'best_frame_count', defaults.best_frame_count),
-    max_history_frames: numeric(settings, 'max_history_frames', defaults.max_history_frames),
-    calibration_reference:
-      typeof settings.calibration_reference === 'string' ? settings.calibration_reference : null,
-  }
-}
-
 function copyEnrollmentQualityToEdge(): void {
   edgeForm.value = {
     ...edgeForm.value,
@@ -181,7 +131,10 @@ function gatewayFrom(settings: UnknownSettings): StbGatewayConfiguration {
   }
 }
 
+const readinessEpoch = createRefreshEpoch()
+
 async function refreshReadiness(forceSettings = false): Promise<void> {
+  const epoch = readinessEpoch.next()
   isLoading.value = true
   errorMessage.value = null
   try {
@@ -200,6 +153,7 @@ async function refreshReadiness(forceSettings = false): Promise<void> {
         ? getCentralRecognitionConfiguration()
         : null,
     ])
+    if (!readinessEpoch.isCurrent(epoch)) return
     readiness.value = nextReadiness
     devices.value = nextDevices.items.filter(
       (device) => device.is_active && device.deployment_profile === expectedDeviceProfile,
@@ -238,10 +192,12 @@ async function refreshReadiness(forceSettings = false): Promise<void> {
       deviceConfiguration.value = null
     }
   } catch (error) {
-    errorMessage.value =
-      error instanceof ApiError ? error.message : 'Status dan konfigurasi AI tidak dapat dimuat.'
+    if (readinessEpoch.isCurrent(epoch)) {
+      errorMessage.value =
+        error instanceof ApiError ? error.message : 'Status dan konfigurasi AI tidak dapat dimuat.'
+    }
   } finally {
-    isLoading.value = false
+    if (readinessEpoch.isCurrent(epoch)) isLoading.value = false
   }
 }
 
@@ -341,24 +297,6 @@ async function saveSettings(action: () => Promise<void>, message: string): Promi
 function parseOptionalNumber(event: Event): number | null {
   const value = (event.target as HTMLInputElement).value
   return value === '' ? null : Number(value)
-}
-
-function sanitizeOptionalNumber(value: number | null | undefined): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-function sanitizeRecognitionForm(form: RecognitionConfiguration): string | null {
-  const top1 = sanitizeOptionalNumber(form.min_top1_similarity)
-  const margin = sanitizeOptionalNumber(form.min_top1_top2_margin)
-  form.min_top1_similarity = top1
-  form.min_top1_top2_margin = margin
-  if ((top1 === null) !== (margin === null)) {
-    return 'Top-1 dan margin harus diisi bersamaan atau dikosongkan keduanya.'
-  }
-  if (top1 !== null && !(form.calibration_reference ?? '').trim()) {
-    return 'Referensi laporan kalibrasi wajib diisi bila threshold diatur.'
-  }
-  return null
 }
 
 function setCentralTop1(event: Event): void {
@@ -656,6 +594,24 @@ onBeforeUnmount(() => {
                 @input="setEdgeMargin"
             /></label>
             <label
+              >YuNet score threshold<input
+                v-model.number="edgeForm.yunet_score_threshold"
+                type="number"
+                min="0"
+                max="1"
+                step="any"
+                required
+            /></label>
+            <label
+              >YuNet NMS threshold<input
+                v-model.number="edgeForm.yunet_nms_threshold"
+                type="number"
+                min="0"
+                max="1"
+                step="any"
+                required
+            /></label>
+            <label
               >Frame yang harus sepakat<input
                 v-model.number="edgeForm.minimum_agreeing_frames"
                 type="number"
@@ -923,6 +879,24 @@ onBeforeUnmount(() => {
               step="any"
               :required="centralForm.min_top1_similarity !== null"
               @input="setCentralMargin"
+          /></label>
+          <label
+            >YuNet score threshold<input
+              v-model.number="centralForm.yunet_score_threshold"
+              type="number"
+              min="0"
+              max="1"
+              step="any"
+              required
+          /></label>
+          <label
+            >YuNet NMS threshold<input
+              v-model.number="centralForm.yunet_nms_threshold"
+              type="number"
+              min="0"
+              max="1"
+              step="any"
+              required
           /></label>
           <label
             >Frame yang harus sepakat<input

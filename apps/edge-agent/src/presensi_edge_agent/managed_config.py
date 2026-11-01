@@ -21,6 +21,8 @@ _RECOGNITION_KEYS = {
     "min_laplacian_variance",
     "min_brightness",
     "max_brightness",
+    "yunet_score_threshold",
+    "yunet_nms_threshold",
     "calibration_reference",
 }
 _GATEWAY_KEYS = {
@@ -59,6 +61,8 @@ def apply_managed_configuration(
             sample_every_n_frames=_integer(settings, "sample_every_n_frames", 1, 60),
             best_frame_count=_integer(settings, "best_frame_count", 1, 20),
             max_history_frames=_integer(settings, "max_history_frames", 1, 60),
+            yunet_score_threshold=_number(settings, "yunet_score_threshold", 0, 1),
+            yunet_nms_threshold=_number(settings, "yunet_nms_threshold", 0, 1),
         )
         quality = replace(
             config.quality,

@@ -499,3 +499,36 @@ def test_teacher_cannot_submit_another_teachers_session(
     with factory() as db:
         assert db.scalar(select(RecognitionEvent)) is not None
         assert db.scalar(select(AttendanceRecord)) is None
+
+
+def test_event_stamped_in_the_future_is_rejected_without_persisting(
+    attendance_database: tuple[sessionmaker[Session], dict[str, UUID]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PRESENSI_EVENT_FUTURE_SKEW_SECONDS", "300")
+    factory, ids = attendance_database
+    future = datetime.now(UTC) + timedelta(hours=2)
+
+    response = post_event(event_body(ids, occurred_at=future))
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "event_occurred_at_in_future"
+    with factory() as db:
+        assert db.scalar(select(RecognitionEvent)) is None
+        assert db.scalar(select(AttendanceRecord)) is None
+
+
+def test_event_within_clock_skew_allowance_is_accepted(
+    attendance_database: tuple[sessionmaker[Session], dict[str, UUID]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PRESENSI_EVENT_FUTURE_SKEW_SECONDS", "300")
+    factory, ids = attendance_database
+    near_future = datetime.now(UTC) + timedelta(minutes=2)
+
+    response = post_event(event_body(ids, occurred_at=near_future))
+
+    assert response.status_code == 200, response.text
+    assert response.json()["decision"] == "attendance_recorded"
+    with factory() as db:
+        assert db.scalar(select(RecognitionEvent)) is not None

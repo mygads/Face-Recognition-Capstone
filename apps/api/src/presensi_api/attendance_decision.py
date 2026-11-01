@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
@@ -35,6 +36,26 @@ from presensi_api.session_lifecycle import (
     close_expired_sessions,
     scheduled_start_at,
 )
+
+# Clock-skew allowance for device-reported event timestamps, in seconds.
+# Events stamped further in the future than this are rejected so a device
+# with a misconfigured clock cannot corrupt present/late decisions or
+# activity ordering. Rejections are 4xx, so edge agents dead-letter them
+# instead of retrying.
+DEFAULT_EVENT_FUTURE_SKEW_SECONDS = 300
+MAX_EVENT_FUTURE_SKEW_SECONDS = 3600
+
+
+def event_future_skew_seconds() -> int:
+    raw = os.getenv(
+        "PRESENSI_EVENT_FUTURE_SKEW_SECONDS",
+        str(DEFAULT_EVENT_FUTURE_SKEW_SECONDS),
+    )
+    try:
+        configured = int(raw)
+    except ValueError:
+        return DEFAULT_EVENT_FUTURE_SKEW_SECONDS
+    return min(max(configured, 0), MAX_EVENT_FUTURE_SKEW_SECONDS)
 
 
 def _request_fingerprint(request: RecognitionEventRequest) -> str:
@@ -120,6 +141,14 @@ def decide_recognition_event(
     principal: AuthenticatedUser | None,
 ) -> RecognitionEventDecisionResponse:
     """Persist one AI event and create a final record only when domain rules pass."""
+    request_now = datetime.now(UTC)
+    skew_cutoff = request_now + timedelta(seconds=event_future_skew_seconds())
+    if as_utc(request.occurred_at) > skew_cutoff:
+        raise ApiProblem(
+            422,
+            "event_occurred_at_in_future",
+            "Stempel waktu event berada di masa depan; periksa jam perangkat.",
+        )
     close_expired_sessions(db, session_id=request.session_id)
     attendance_session = db.scalar(
         select(AttendanceSession)

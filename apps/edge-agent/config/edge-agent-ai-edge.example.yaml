@@ -42,6 +42,14 @@ recognition:
   best_frame_count: 5
   max_history_frames: 10
   track_ttl_seconds: 3
+  # Calibrated YuNet operating point (confirm via local benchmark report).
+  yunet_score_threshold: 0.9
+  yunet_nms_threshold: 0.3
+  # Optional detector input cap for weak lab PCs (0 = disabled). When set
+  # (e.g. 640), YuNet runs on a downscaled copy and boxes are mapped back;
+  # quality/align/embed still use the full frame. Confirm recall impact with
+  # the local calibration report before enabling in production.
+  detection_max_width: 0
 
 liveness:
   enabled: false

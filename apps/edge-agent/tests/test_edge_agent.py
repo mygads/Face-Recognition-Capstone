@@ -206,6 +206,8 @@ def test_managed_edge_defaults_can_apply_without_enabling_recognition() -> None:
         "sample_every_n_frames": 5,
         "best_frame_count": 5,
         "max_history_frames": 10,
+        "yunet_score_threshold": 0.9,
+        "yunet_nms_threshold": 0.3,
         "calibration_reference": None,
     }
 
@@ -218,7 +220,139 @@ def test_managed_edge_defaults_can_apply_without_enabling_recognition() -> None:
     assert updated.recognition.sample_every_n_frames == 5
     assert updated.recognition.min_top1_similarity is None
     assert updated.recognition.min_top1_top2_margin is None
+    assert updated.recognition.yunet_score_threshold == 0.9
+    assert updated.recognition.yunet_nms_threshold == 0.3
     assert recognizer.pipeline is None
+
+
+def test_detection_max_width_defaults_to_zero_and_accepts_env_override() -> None:
+    config = load_config(
+        EXAMPLE_CONFIG, environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)}
+    )
+    assert config.recognition.detection_max_width == 0
+
+    config = load_config(
+        EXAMPLE_CONFIG,
+        environ={
+            "PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID),
+            "PRESENSI_EDGE_DETECTION_MAX_WIDTH": "640",
+        },
+    )
+    assert config.recognition.detection_max_width == 640
+
+
+def test_detection_max_width_rejects_out_of_range_values() -> None:
+    for raw in ("100", "2000", "-640", "wide"):
+        with pytest.raises(EdgeConfigError):
+            load_config(
+                EXAMPLE_CONFIG,
+                environ={
+                    "PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID),
+                    "PRESENSI_EDGE_DETECTION_MAX_WIDTH": raw,
+                },
+            )
+
+
+def test_downscaling_detector_maps_boxes_back_to_full_resolution() -> None:
+    numpy = pytest.importorskip("numpy")
+    from presensi_edge_agent.recognition import DownscalingDetector
+    from recognition_core.domain import BoundingBox, FaceDetection
+
+    seen_shapes: list[tuple[int, ...]] = []
+
+    class FakeDetector:
+        def detect(self, frame: object) -> tuple[FaceDetection, ...]:
+            seen_shapes.append(tuple(int(v) for v in frame.shape[:2]))
+            return (
+                FaceDetection(
+                    box=BoundingBox(64.0, 36.0, 128.0, 72.0),
+                    confidence=0.95,
+                    landmarks=((96.0, 54.0),),
+                ),
+            )
+
+    detector = DownscalingDetector(FakeDetector(), max_width=640)
+    frame = numpy.zeros((720, 1280, 3), dtype=numpy.uint8)
+    (detection,) = detector.detect(frame)
+
+    assert seen_shapes == [(360, 640)]
+    assert detection.box.x == pytest.approx(128.0)
+    assert detection.box.y == pytest.approx(72.0)
+    assert detection.box.width == pytest.approx(256.0)
+    assert detection.box.height == pytest.approx(144.0)
+    assert detection.landmarks == ((192.0, 108.0),)
+    assert detection.confidence == 0.95
+
+
+def test_build_pipeline_wraps_detector_when_downscale_enabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import presensi_edge_agent.recognition as recognition_module
+    from presensi_edge_agent.recognition import DownscalingDetector
+
+    yunet_path = tmp_path / "yunet.onnx"
+    sface_path = tmp_path / "sface.onnx"
+    yunet_path.write_bytes(b"fake")
+    sface_path.write_bytes(b"fake")
+
+    class FakeDetector:
+        def __init__(self, *args: object, **kwargs: object) -> None: ...
+
+        def detect(self, frame: object) -> tuple[()]:
+            return ()
+
+    class FakeModel:
+        def __init__(self, *args: object, **kwargs: object) -> None: ...
+
+    monkeypatch.setattr(recognition_module, "YuNetFaceDetector", FakeDetector)
+    monkeypatch.setattr(recognition_module, "SFaceModel", FakeModel)
+    config = load_config(
+        EXAMPLE_CONFIG,
+        environ={
+            "PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID),
+            "PRESENSI_EDGE_DETECTION_MAX_WIDTH": "640",
+            "PRESENSI_EDGE_MIN_TOP1_SIMILARITY": "0.4",
+            "PRESENSI_EDGE_MIN_TOP1_TOP2_MARGIN": "0.2",
+            "PRESENSI_EDGE_YUNET_MODEL_PATH": str(yunet_path),
+            "PRESENSI_EDGE_SFACE_MODEL_PATH": str(sface_path),
+        },
+    )
+    pipeline = recognition_module.build_pipeline(config)
+    assert isinstance(pipeline.detector, DownscalingDetector)
+
+    plain = replace(
+        config, recognition=replace(config.recognition, detection_max_width=0)
+    )
+    pipeline = recognition_module.build_pipeline(plain)
+    assert isinstance(pipeline.detector, FakeDetector)
+
+
+def test_downscaling_detector_passes_through_small_frames() -> None:
+    numpy = pytest.importorskip("numpy")
+    from presensi_edge_agent.recognition import DownscalingDetector
+    from recognition_core.domain import BoundingBox, FaceDetection
+
+    calls = 0
+
+    class FakeDetector:
+        def detect(self, frame: object) -> tuple[FaceDetection, ...]:
+            nonlocal calls
+            calls += 1
+            assert tuple(int(v) for v in frame.shape[:2]) == (360, 640)
+            return (
+                FaceDetection(
+                    box=BoundingBox(10.0, 10.0, 100.0, 100.0),
+                    confidence=0.9,
+                ),
+            )
+
+    detector = DownscalingDetector(FakeDetector(), max_width=640)
+    (detection,) = detector.detect(numpy.zeros((360, 640, 3), dtype=numpy.uint8))
+    assert calls == 1
+    assert (detection.box.x, detection.box.width) == (10.0, 100.0)
+
+    with pytest.raises(ValueError, match="at least 320"):
+        DownscalingDetector(FakeDetector(), max_width=100)
 
 
 def test_managed_edge_config_rejects_partial_or_uncalibrated_thresholds() -> None:
@@ -236,6 +370,8 @@ def test_managed_edge_config_rejects_partial_or_uncalibrated_thresholds() -> Non
         "sample_every_n_frames": 5,
         "best_frame_count": 5,
         "max_history_frames": 10,
+        "yunet_score_threshold": 0.9,
+        "yunet_nms_threshold": 0.3,
         "calibration_reference": None,
     }
 
@@ -543,6 +679,55 @@ def test_core_api_client_uses_bearer_header_for_heartbeat_and_event() -> None:
     assert decision == {"status": "ok"}
     client.close()
     http.close()
+
+
+def test_submit_event_with_unparseable_success_body_is_not_retryable(
+    tmp_path: Path,
+) -> None:
+    """A 200 with a broken body must dead-letter, not retry forever.
+
+    The server already stored the idempotent event; resending the same
+    payload reproduces the same broken body on every flush tick and would
+    head-of-line block the whole outbox behind a poison response.
+    """
+    for body, json_body in ((b"<html>proxy error</html>", None), (None, [1, 2])):
+
+        def respond(
+            request: httpx.Request,
+            *,
+            raw: bytes | None = body,
+            data: object = json_body,
+        ) -> httpx.Response:
+            if data is not None:
+                return httpx.Response(200, json=data)
+            assert raw is not None
+            return httpx.Response(
+                200, content=raw, headers={"Content-Type": "text/html"}
+            )
+
+        http = httpx.Client(
+            base_url="https://api.example.test",
+            transport=httpx.MockTransport(respond),
+        )
+        client = CoreApiClient(
+            ApiSettings(
+                base_url="https://api.example.test",
+                timeout_seconds=1,
+                heartbeat_interval_seconds=5,
+                cache_refresh_seconds=3,
+                cache_path="/api/v1/devices/{device_id}/active-session-cache",
+                token_file=None,
+            ),
+            DEVICE_ID,
+            lambda: "short-lived-test-token",
+            client=http,
+        )
+        with pytest.raises(ApiCallError) as failure:
+            client.submit_recognition_event({"event_id": str(uuid4())})
+        assert failure.value.status_code == 200
+        assert failure.value.retryable is False
+        client.close()
+        http.close()
 
 
 def test_camera_preview_skips_face_detection_without_an_active_viewer(
@@ -964,6 +1149,93 @@ def test_expired_cache_prevents_service_from_running_another_decision(
     outbox.close()
 
 
+def test_outbox_due_returns_nothing_while_head_event_backs_off(
+    tmp_path: Path,
+) -> None:
+    """A backing-off head event must not cost payload parsing on every poll.
+
+    The cheap head check returns early while preserving strict FIFO: events
+    behind the head are never skipped ahead of it.
+    """
+    outbox = EventOutbox(tmp_path / "head-blocked.sqlite3", max_pending=10)
+    first = outbox.enqueue(
+        {
+            "event_id": str(uuid4()),
+            "device_id": str(DEVICE_ID),
+            "session_id": str(SESSION_ID),
+            "student_id": str(STUDENT_ID),
+            "outcome": "matched",
+            "similarity": 0.9,
+            "confidence": 0.9,
+            "margin": 0.4,
+            "liveness_passed": None,
+            "liveness_score": None,
+            "occurred_at": datetime.now(UTC).isoformat(),
+            "model_name": MODEL_NAME,
+            "model_version": MODEL_VERSION,
+        }
+    )
+    outbox.enqueue(
+        {
+            "event_id": str(uuid4()),
+            "device_id": str(DEVICE_ID),
+            "session_id": str(SESSION_ID),
+            "student_id": str(STUDENT_ID),
+            "outcome": "ambiguous",
+            "similarity": None,
+            "confidence": None,
+            "margin": None,
+            "liveness_passed": None,
+            "liveness_score": None,
+            "occurred_at": datetime.now(UTC).isoformat(),
+            "model_name": MODEL_NAME,
+            "model_version": MODEL_VERSION,
+        }
+    )
+    outbox.retry(first, max_delay_seconds=3600, status_code=503)
+    assert outbox.due() == []
+    outbox.close()
+
+
+def test_outbox_retry_applies_jitter_within_bounded_range(tmp_path: Path) -> None:
+    """Retry backoff must spread load instead of retrying in lockstep.
+
+    After a shared API outage, deterministic 2**attempts delays make every
+    device retry on the same tick. Jitter keeps the delay within
+    [0.8, 1.0] of the exponential base (capped by max_delay_seconds).
+    """
+    outbox = EventOutbox(tmp_path / "jitter.sqlite3", max_pending=10)
+    event_id = outbox.enqueue(
+        {
+            "event_id": str(uuid4()),
+            "device_id": str(DEVICE_ID),
+            "session_id": str(SESSION_ID),
+            "student_id": str(STUDENT_ID),
+            "outcome": "matched",
+            "similarity": 0.9,
+            "confidence": 0.9,
+            "margin": 0.4,
+            "liveness_passed": None,
+            "liveness_score": None,
+            "occurred_at": datetime.now(UTC).isoformat(),
+            "model_name": MODEL_NAME,
+            "model_version": MODEL_VERSION,
+        }
+    )
+    before = datetime.now(UTC)
+    outbox.retry(event_id, max_delay_seconds=3600, status_code=503)
+    after = datetime.now(UTC)
+    row = outbox._db.execute(
+        "SELECT next_attempt_at FROM edge_event_outbox WHERE event_id = ?",
+        (str(event_id),),
+    ).fetchone()
+    scheduled = datetime.fromisoformat(str(row["next_attempt_at"]))
+    delay = (scheduled - before).total_seconds()
+    # Base delay for the first attempt is 2**0 = 1s; jitter band [0.8, 1.2].
+    assert 0.75 <= delay <= (after - before).total_seconds() + 1.25
+    outbox.close()
+
+
 def test_outbox_keeps_idempotent_event_payloads_across_retry(tmp_path: Path) -> None:
     outbox = EventOutbox(tmp_path / "events.sqlite3", max_pending=2)
     payload = event_payload(
@@ -1294,6 +1566,49 @@ def test_transient_api_failures_leave_edge_service_and_outbox_usable(
     outbox.close()
 
 
+def test_refresh_cache_keeps_current_gallery_when_server_reports_not_modified(
+    tmp_path: Path,
+) -> None:
+    """HTTP 304 must not disturb the gallery that inference is using."""
+    from presensi_edge_agent.api import GalleryNotModified
+
+    config = load_config(
+        EXAMPLE_CONFIG, environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)}
+    )
+
+    def not_modified() -> dict[str, object]:
+        raise GalleryNotModified("unchanged")
+
+    class Camera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            return False, None
+
+        def close(self) -> None: ...
+
+    class Api:
+        def close(self) -> None: ...
+
+    class Recognizer:
+        def process(self, _frame, _gallery, _captured_at):  # type: ignore[no-untyped-def]
+            raise AssertionError("no inference expected")
+
+        def reset(self) -> None: ...
+
+    service = EdgeService(
+        config,
+        Camera(),
+        Api(),  # type: ignore[arg-type]
+        EventOutbox(tmp_path / "not-modified.sqlite3", max_pending=10),
+        Recognizer(),  # type: ignore[arg-type]
+        not_modified,
+    )
+    assert service._refresh_cache() is True
+    assert service.cache.current() is None
+    service.outbox.close()
+
+
 def test_ten_offline_events_survive_restart_and_reconnect_in_fifo_idempotently(
     tmp_path: Path,
 ) -> None:
@@ -1457,3 +1772,245 @@ def test_ten_offline_events_survive_restart_and_reconnect_in_fifo_idempotently(
     assert api.attempted.count(expected_order[0]) == 3
     assert reopened_outbox.counts() == (0, 0)
     reopened_outbox.close()
+
+
+def test_diagnostic_recognizers_are_flagged_and_blocked_from_submit_path(
+    tmp_path: Path,
+) -> None:
+    from presensi_edge_agent.service import require_attendance_recognizer
+
+    config = load_config(
+        EXAMPLE_CONFIG, environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)}
+    )
+    outbox = EventOutbox(tmp_path / "guard-outbox.sqlite3", max_pending=10)
+
+    class FakeCamera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            return False, None
+
+        def close(self) -> None: ...
+
+    class FakeApi:
+        def close(self) -> None: ...
+
+    production = LocalRecognizer(None, DEVICE_ID)
+    assert production.diagnostic_only is False
+    require_attendance_recognizer(production)
+    flagged = LocalRecognizer(None, DEVICE_ID, diagnostic_only=True)
+    with pytest.raises(RuntimeError, match="Diagnostic recognizers must never enqueue"):
+        require_attendance_recognizer(flagged)
+
+    import presensi_edge_agent.recognition as recognition_module
+
+    service = EdgeService(
+        config,
+        FakeCamera(),
+        FakeApi(),  # type: ignore[arg-type]
+        outbox,
+        production,  # type: ignore[arg-type]
+        lambda: {},
+    )
+    real_build_pipeline = recognition_module.build_pipeline
+    recognition_module.build_pipeline = lambda _config: None  # type: ignore[assignment]
+    try:
+        preview_recognizer = service._create_preview_recognizer()
+        calibration_recognizer = service._create_calibration_recognizer()
+    finally:
+        recognition_module.build_pipeline = real_build_pipeline
+    assert preview_recognizer.diagnostic_only is True
+    assert calibration_recognizer.diagnostic_only is True
+    outbox.close()
+
+
+def test_heartbeat_reports_outbox_backlog_to_core_api(tmp_path: Path) -> None:
+    captured: list[dict[str, object]] = []
+    renewed_expiry = datetime.now(UTC) + timedelta(days=90)
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/device-heartbeat")
+        payload = json.loads(request.content.decode("utf-8"))
+        assert isinstance(payload, dict)
+        captured.append(payload)
+        return httpx.Response(
+            200,
+            json={
+                "device_id": str(DEVICE_ID),
+                "last_seen_at": datetime.now(UTC).isoformat(),
+                "credential_expires_at": renewed_expiry.isoformat(),
+            },
+        )
+
+    http = httpx.Client(
+        base_url="https://api.example.test", transport=httpx.MockTransport(respond)
+    )
+    client = CoreApiClient(
+        ApiSettings(
+            base_url="https://api.example.test",
+            timeout_seconds=1,
+            heartbeat_interval_seconds=5,
+            cache_refresh_seconds=3,
+            cache_path="/api/v1/devices/{device_id}/active-session-cache",
+            token_file=None,
+        ),
+        DEVICE_ID,
+        lambda: "test-token",
+        client=http,
+    )
+    client.set_queue_status_provider(
+        lambda: {"pending_events": 4, "dead_letter_events": 1}
+    )
+    try:
+        client.heartbeat()
+    finally:
+        client.close()
+        http.close()
+
+    assert len(captured) == 1
+    assert captured[0]["queue_status"] == {
+        "pending_events": 4,
+        "dead_letter_events": 1,
+    }
+
+
+def test_edge_service_wires_outbox_queue_provider(tmp_path: Path) -> None:
+    config = load_config(
+        EXAMPLE_CONFIG, environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)}
+    )
+    captured: list[dict[str, object]] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        assert isinstance(payload, dict)
+        captured.append(payload)
+        return httpx.Response(
+            200,
+            json={
+                "device_id": str(DEVICE_ID),
+                "last_seen_at": datetime.now(UTC).isoformat(),
+                "credential_expires_at": renewed_expiry.isoformat(),
+            },
+        )
+
+    renewed_expiry = datetime.now(UTC) + timedelta(days=90)
+    http = httpx.Client(
+        base_url="https://api.example.test", transport=httpx.MockTransport(respond)
+    )
+    client = CoreApiClient(
+        config.api,
+        DEVICE_ID,
+        lambda: "test-token",
+        client=http,
+    )
+
+    class FakeCamera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            return False, None
+
+        def close(self) -> None: ...
+
+    class FakeRecognizer:
+        def process(self, _frame, _gallery, _captured_at):  # type: ignore[no-untyped-def]
+            raise AssertionError("no frames expected")
+
+        def reset(self) -> None: ...
+
+    outbox = EventOutbox(tmp_path / "queue-wired.sqlite3", max_pending=10)
+    service = EdgeService(
+        config,
+        FakeCamera(),
+        client,  # type: ignore[arg-type]
+        outbox,
+        FakeRecognizer(),  # type: ignore[arg-type]
+        lambda: {},
+    )
+    try:
+        outbox.enqueue(
+            {
+                "event_id": str(uuid4()),
+                "device_id": str(DEVICE_ID),
+                "session_id": str(uuid4()),
+                "student_id": None,
+                "outcome": "no_match",
+                "similarity": 0.1,
+                "confidence": 0.2,
+                "margin": 0.0,
+                "liveness_passed": None,
+                "liveness_score": None,
+                "occurred_at": datetime.now(UTC).isoformat(),
+                "model_name": MODEL_NAME,
+                "model_version": MODEL_VERSION,
+            }
+        )
+        assert service._queue_status_snapshot() == {
+            "pending_events": 1,
+            "dead_letter_events": 0,
+        }
+        service._send_heartbeat()
+    finally:
+        service.outbox.close()
+        client.close()
+        http.close()
+
+    assert len(captured) == 1
+    assert captured[0]["queue_status"] == {
+        "pending_events": 1,
+        "dead_letter_events": 0,
+    }
+
+
+def test_preview_gallery_reuses_valid_cache_without_refetch(tmp_path: Path) -> None:
+    config = load_config(
+        EXAMPLE_CONFIG, environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)}
+    )
+    payload = sample_bundle_payload()
+    bundle = parse_preview_gallery(
+        payload,
+        device_id=DEVICE_ID,
+        model_name=MODEL_NAME,
+        model_version=MODEL_VERSION,
+    )
+
+    class FakeCamera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            return False, None
+
+        def close(self) -> None: ...
+
+    class CountingApi:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def fetch_preview_gallery(self) -> dict[str, object]:
+            self.calls += 1
+            raise AssertionError("must not refetch while cache is valid")
+
+        def close(self) -> None: ...
+
+    class FakeRecognizer:
+        def process(self, _frame, _gallery, _captured_at):  # type: ignore[no-untyped-def]
+            raise AssertionError("no inference in this test")
+
+        def reset(self) -> None: ...
+
+    outbox = EventOutbox(tmp_path / "preview-reuse.sqlite3", max_pending=10)
+    api = CountingApi()
+    service = EdgeService(
+        config,
+        FakeCamera(),
+        api,  # type: ignore[arg-type]
+        outbox,
+        FakeRecognizer(),  # type: ignore[arg-type]
+        lambda: {},
+    )
+    try:
+        service.preview_cache.replace(bundle)
+        assert service._refresh_preview_gallery() is True
+        assert api.calls == 0
+    finally:
+        outbox.close()

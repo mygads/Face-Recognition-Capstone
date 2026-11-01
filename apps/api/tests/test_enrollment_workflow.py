@@ -404,3 +404,29 @@ def test_low_quality_frames_and_incompatible_uploads_store_nothing(
     assert unsupported.status_code == 415
     with factory() as session:
         assert session.scalar(select(func.count()).select_from(FaceTemplate)) == 0
+
+
+def test_capture_content_type_with_charset_suffix_is_accepted(
+    enrollment_runtime: tuple["sessionmaker[Session]", "SyntheticEnrollmentProcessor"],
+) -> None:
+    factory, _processor = enrollment_runtime
+    files = [
+        (
+            "captures",
+            (
+                f"capture-{index}.jpg",
+                bytes([index]) + b"-synthetic-private-frame",
+                "image/jpeg; charset=binary",
+            ),
+        )
+        for index in range(3)
+    ]
+    response = _request(
+        "POST",
+        "/api/v1/enrollments/captures",
+        data={"student_id": str(TARGET_STUDENT_ID)},
+        files=files,
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["accepted_frames"] == 3

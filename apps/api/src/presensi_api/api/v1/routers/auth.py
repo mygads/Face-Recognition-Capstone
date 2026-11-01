@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Cookie, Depends, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
@@ -58,9 +58,10 @@ def _clear_session_cookie(response: Response, settings: AuthSettings) -> None:
 
 def _require_browser_session_header(request: Request) -> None:
     if request.headers.get(SESSION_HEADER_NAME) != SESSION_HEADER_VALUE:
-        raise HTTPException(
+        raise ApiProblem(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Browser session request is missing its required header.",
+            code="browser_session_header_required",
+            message="Permintaan sesi browser tidak menyertakan header yang diwajibkan.",
         )
 
 
@@ -97,9 +98,10 @@ def login(
             )
         )
         session.commit()
-        raise HTTPException(
+        raise ApiProblem(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password.",
+            code="auth_invalid_credentials",
+            message="Email atau kata sandi salah.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -116,9 +118,10 @@ def login(
             )
         )
         session.commit()
-        raise HTTPException(
+        raise ApiProblem(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password.",
+            code="auth_invalid_credentials",
+            message="Email atau kata sandi salah.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -198,17 +201,19 @@ def refresh_session(
         or not user.is_active
         or user.auth_token_version != claims.token_version
     ):
-        raise HTTPException(
+        raise ApiProblem(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired browser session.",
+            code="browser_session_invalid",
+            message="Sesi browser tidak valid atau sudah kedaluwarsa.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
     principal = principal_for_user(session, user)
     if not principal.roles:
-        raise HTTPException(
+        raise ApiProblem(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired browser session.",
+            code="browser_session_invalid",
+            message="Sesi browser tidak valid atau sudah kedaluwarsa.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -302,9 +307,10 @@ def change_password(
 ) -> PasswordChangeResponse:
     user = session.get(User, principal.id)
     if user is None or not user.is_active:
-        raise HTTPException(
+        raise ApiProblem(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials.",
+            code="auth_invalid_credentials",
+            message="Kredensial autentikasi tidak valid.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     if not verify_password(request.current_password, user.password_hash):

@@ -51,11 +51,13 @@ class ApiProblem(Exception):
         code: str,
         message: str,
         details: list[ErrorDetail] | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> None:
         self.status_code = status_code
         self.code = code
         self.message = message
         self.details = details
+        self.headers = dict(headers) if headers else None
 
 
 def _error_response(
@@ -74,7 +76,9 @@ def _error_response(
 
 
 async def api_problem_handler(_: Request, exc: ApiProblem) -> JSONResponse:
-    return _error_response(exc.status_code, exc.code, exc.message, exc.details)
+    return _error_response(
+        exc.status_code, exc.code, exc.message, exc.details, exc.headers
+    )
 
 
 async def http_exception_handler(

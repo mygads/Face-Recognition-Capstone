@@ -2,6 +2,7 @@ from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from presensi_api.api.errors import OPENAPI_ERROR_RESPONSES, ApiProblem
@@ -11,7 +12,6 @@ from presensi_api.api.security.roles import (
     Permission,
     RoleCode,
 )
-from presensi_api.api.v1.routers._placeholder import feature_not_implemented
 from presensi_api.api.v1.schemas.attendance import (
     AttendanceCorrectionRequest,
     AttendanceCorrectionResponse,
@@ -23,7 +23,7 @@ from presensi_api.api.v1.schemas.attendance import (
     RecognitionEventDecisionResponse,
     RecognitionEventRequest,
 )
-from presensi_api.api.v1.schemas.common import PageResponse
+from presensi_api.api.v1.schemas.common import PageResponse, Pagination
 from presensi_api.attendance_decision import decide_recognition_event
 from presensi_api.attendance_manual import mark_manual_attendance
 from presensi_api.db.models import (
@@ -98,16 +98,60 @@ def create_manual_mark(
     response_model=PageResponse[AttendanceRecordResponse],
     responses=OPENAPI_ERROR_RESPONSES,
     summary="List final attendance records",
-    description="Contract placeholder; currently returns 501.",
-    dependencies=[Depends(require_permissions(Permission.ATTENDANCE_READ))],
+    description=(
+        "Final attendance only: one row per student/session after session, "
+        "roster, liveness, and duplicate validation. Teachers see only "
+        "their own schedules."
+    ),
 )
 def list_attendance(
+    principal: Annotated[
+        AuthenticatedUser, Depends(require_permissions(Permission.ATTENDANCE_READ))
+    ],
+    session: DbSession,
     session_id: UUID | None = None,
     student_id: UUID | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> PageResponse[AttendanceRecordResponse]:
-    feature_not_implemented("attendance records")
+    query = (
+        select(AttendanceRecord)
+        .join(
+            AttendanceSession,
+            AttendanceSession.id == AttendanceRecord.session_id,
+        )
+        .join(
+            PracticumSchedule,
+            PracticumSchedule.id == AttendanceSession.practicum_schedule_id,
+        )
+    )
+    if RoleCode.TEACHER in principal.roles and RoleCode.ADMIN not in principal.roles:
+        query = query.where(PracticumSchedule.teacher_user_id == principal.id)
+    if session_id is not None:
+        query = query.where(AttendanceRecord.session_id == session_id)
+    if student_id is not None:
+        query = query.where(AttendanceRecord.student_id == student_id)
+    total = session.scalar(select(func.count()).select_from(query.subquery())) or 0
+    rows = session.scalars(
+        query.order_by(AttendanceRecord.recorded_at.desc(), AttendanceRecord.id.desc())
+        .limit(limit)
+        .offset(offset)
+    ).all()
+    return PageResponse(
+        items=[
+            AttendanceRecordResponse(
+                id=row.id,
+                session_id=row.session_id,
+                student_id=row.student_id,
+                status=cast(AttendanceStatus, row.status),
+                source=cast(AttendanceSource, row.source),
+                recognition_event_id=row.recognition_event_id,
+                recorded_at=as_utc(row.recorded_at),
+            )
+            for row in rows
+        ],
+        pagination=Pagination(total=total, limit=limit, offset=offset),
+    )
 
 
 @router.post(

@@ -25,6 +25,7 @@ from presensi_api.db.models import (
     User,
     UserRole,
 )
+from presensi_api.db.search import like_contains
 from presensi_api.db.session import get_db_session
 
 router = APIRouter(prefix="/schedules", tags=["schedules"])
@@ -223,14 +224,14 @@ def list_schedules(
         filters.append(PracticumSchedule.laboratory_id == laboratory_id)
     query = select(PracticumSchedule).join(SchoolClass).join(Laboratory)
     if search:
-        pattern = f"%{search.strip()}%"
+        pattern = like_contains(search)
         filters.append(
             or_(
-                PracticumSchedule.subject.ilike(pattern),
-                SchoolClass.name.ilike(pattern),
-                SchoolClass.code.ilike(pattern),
-                Laboratory.name.ilike(pattern),
-                Laboratory.code.ilike(pattern),
+                PracticumSchedule.subject.ilike(pattern, escape="\\"),
+                SchoolClass.name.ilike(pattern, escape="\\"),
+                SchoolClass.code.ilike(pattern, escape="\\"),
+                Laboratory.name.ilike(pattern, escape="\\"),
+                Laboratory.code.ilike(pattern, escape="\\"),
             )
         )
     if filters:
