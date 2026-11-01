@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.gzip import GZipMiddleware
 
 from presensi_api.api.errors import (
     ApiProblem,
@@ -157,6 +158,9 @@ max_request_bytes = _positive_integer_setting(
     maximum=64 * 1024 * 1024,
 )
 configure_multipart_memory_only(max_request_bytes)
+# GZip first: gallery snapshots carry thousands of embeddings and shrink
+# ~70% over the wire; minimum_size keeps tiny health/auth payloads untouched.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(RequestBodySizeLimitMiddleware, max_bytes=max_request_bytes)
 app.add_middleware(SecurityHeadersMiddleware)
 add_restrictive_cors(

@@ -9,20 +9,20 @@ import type { Pinia } from 'pinia'
 import { useAuthStore } from '../stores/auth'
 import AppShell from '../components/AppShell.vue'
 import AuthLayout from '../layouts/AuthLayout.vue'
-import DashboardView from '../views/DashboardView.vue'
-import DevicesView from '../views/DevicesView.vue'
-import EnrollmentView from '../views/EnrollmentView.vue'
-import ForbiddenView from '../views/ForbiddenView.vue'
-import LoginView from '../views/LoginView.vue'
-import MasterDataView from '../views/MasterDataView.vue'
-import ChangePasswordView from '../views/ChangePasswordView.vue'
-import AccountsView from '../views/AccountsView.vue'
-import ProfileView from '../views/ProfileView.vue'
-import ReportsView from '../views/ReportsView.vue'
-import ScheduleView from '../views/ScheduleView.vue'
-import SessionsView from '../views/SessionsView.vue'
-import AiSetupView from '../views/AiSetupView.vue'
-import CameraPreviewView from '../views/CameraPreviewView.vue'
+const DashboardView = () => import('../views/DashboardView.vue')
+const DevicesView = () => import('../views/DevicesView.vue')
+const EnrollmentView = () => import('../views/EnrollmentView.vue')
+const ForbiddenView = () => import('../views/ForbiddenView.vue')
+const LoginView = () => import('../views/LoginView.vue')
+const MasterDataView = () => import('../views/MasterDataView.vue')
+const ChangePasswordView = () => import('../views/ChangePasswordView.vue')
+const AccountsView = () => import('../views/AccountsView.vue')
+const ProfileView = () => import('../views/ProfileView.vue')
+const ReportsView = () => import('../views/ReportsView.vue')
+const ScheduleView = () => import('../views/ScheduleView.vue')
+const SessionsView = () => import('../views/SessionsView.vue')
+const AiSetupView = () => import('../views/AiSetupView.vue')
+const CameraPreviewView = () => import('../views/CameraPreviewView.vue')
 
 export const routes: RouteRecordRaw[] = [
   {

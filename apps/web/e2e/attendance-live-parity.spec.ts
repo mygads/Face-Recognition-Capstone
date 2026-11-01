@@ -27,7 +27,9 @@ test('live stack serves health, login, and dashboard snapshot path', async ({ pa
 
   const dashboard = page.locator('.dashboard-view')
   await expect(dashboard).toBeVisible()
-  const hasSession = await page.getByTestId('metric-roster').count()
-  const hasEmpty = await page.getByTestId('no-active-session').count()
-  expect(hasSession + hasEmpty).toBeGreaterThan(0)
+  // The dashboard loads sessions + snapshot asynchronously; wait for either
+  // the populated metrics or the empty state instead of counting instantly.
+  await expect(
+    page.getByTestId('metric-roster').or(page.getByTestId('no-active-session')).first(),
+  ).toBeVisible({ timeout: 15_000 })
 })

@@ -544,6 +544,7 @@ class AttendanceRecord(UUIDPrimaryKey, TimestampMixin, Base):
             ondelete="RESTRICT",
         ),
         Index("ix_attendance_records_student_id", "student_id"),
+        Index("ix_attendance_records_session_status", "session_id", "status"),
         Index("ix_attendance_records_recorded_by_user_id", "recorded_by_user_id"),
     )
 

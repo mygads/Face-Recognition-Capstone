@@ -340,6 +340,21 @@ kamera 1080p.
 - **Rate limit API**: sliding-window per principal dengan sweep global
   amortized tiap 128 request (prune per-key tiap request O(1)) — heartbeat
   rutin tetap murah.
+- **Responsif ala KAI (banyak lab + guru polling bersamaan)**:
+  `GZipMiddleware` mengompresi respons JSON >1 KiB (galeri 277 KiB → 16 KiB
+  diukur live); pool koneksi DB bisa disetel via `PRESENSI_DB_POOL_SIZE`
+  (default 5), `PRESENSI_DB_MAX_OVERFLOW` (10), `PRESENSI_DB_POOL_TIMEOUT`
+  (30 dtk), `PRESENSI_DB_POOL_RECYCLE` (1800 dtk) — naikkan pool di server
+  central (mis. 20 untuk puluhan lab), biarkan kecil di PC lab; indeks
+  komposit `(session_id, status)` di `attendance_records` melayani ringkasan
+  dashboard tiap polling; route frontend di-split per halaman (lazy import)
+  agar first-paint ringan. Polling dashboard 2 dtk + WS hanya per sesi yang
+  dibuka, bukan broadcast.
+- **Default aman sementara**: tombol "Pakai default aman" di AI Setup mengisi
+  threshold ketat (0.65/0.20) + referensi `DEFAULT-AMAN-SEMENTARA` agar
+  instalasi langsung jalan end-to-end (wajah meragukan → ulangi/manual).
+  Banner mengingatkan kalibrasi lokal wajib sebelum produksi (P0-5) —
+  default ini BUKAN hasil kalibrasi.
 - **Outbox**: `max_retry_seconds` 60 (backoff cap) + `max_outbox_events`
   50000; pantau `dead_letter_events` di dashboard — antrean mati >0 berarti
   kredensial/model bermasalah, bukan jaringan.

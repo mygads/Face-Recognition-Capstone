@@ -123,7 +123,7 @@ status/pemilik: [docs/backlog.md](docs/backlog.md).
 
 Catatan: `docs/final-audit.md` (2026-10-02) sudah basi dan dihapus saat
 konsolidasi docs; snapshot PASS-nya tercatat sebagai arsip di backlog, bukan
-klaim berlaku kini. Gate berjalan: 409 pytest, 64 Vitest, ruff/mypy/
+klaim berlaku kini. Gate berjalan: 409 pytest, 65 Vitest, ruff/mypy/
 vue-tsc/eslint hijau.
 
 ## 7. Link docs detail

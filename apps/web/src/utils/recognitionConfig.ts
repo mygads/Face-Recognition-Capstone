@@ -66,6 +66,32 @@ export function recognitionFrom(settings: UnknownSettings): RecognitionConfigura
   }
 }
 
+/**
+ * Titik awal ketat SEMENTARA agar instalasi baru langsung jalan end-to-end.
+ *
+ * Ini BUKAN hasil kalibrasi: nilainya sengaja ketat (presisi tinggi, recall
+ * rendah — wajah meragukan jatuh ke "ulangi/frontal" atau presensi manual)
+ * dan referensinya menandai diri sebagai non-final. Produksi WAJIB kalibrasi
+ * lokal (backlog P0-5) sebelum threshold ini dianggap final.
+ */
+export const FACTORY_SAFE_CALIBRATION_REFERENCE =
+  'DEFAULT-AMAN-SEMENTARA — wajib kalibrasi lokal sebelum produksi (P0-5)'
+
+export function factorySafeThresholds(): Pick<
+  RecognitionConfiguration,
+  'min_top1_similarity' | 'min_top1_top2_margin' | 'calibration_reference'
+> {
+  return {
+    min_top1_similarity: 0.65,
+    min_top1_top2_margin: 0.2,
+    calibration_reference: FACTORY_SAFE_CALIBRATION_REFERENCE,
+  }
+}
+
+export function isFactoryDefaultReference(reference: string | null | undefined): boolean {
+  return typeof reference === 'string' && reference.startsWith('DEFAULT-AMAN-SEMENTARA')
+}
+
 export function sanitizeOptionalNumber(value: number | null | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }

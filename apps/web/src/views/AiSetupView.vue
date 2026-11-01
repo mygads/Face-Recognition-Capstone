@@ -20,6 +20,8 @@ import {
   type StbGatewayConfiguration,
 } from '../api/client'
 import {
+  factorySafeThresholds,
+  isFactoryDefaultReference,
   numeric,
   recognitionDefaults,
   recognitionFrom,
@@ -93,6 +95,21 @@ const centralThresholdsConfigured = computed(
     centralForm.value.min_top1_similarity !== null &&
     centralForm.value.min_top1_top2_margin !== null,
 )
+
+const centralUsesFactoryDefaults = computed(() =>
+  isFactoryDefaultReference(centralForm.value.calibration_reference),
+)
+const edgeUsesFactoryDefaults = computed(() =>
+  isFactoryDefaultReference(edgeForm.value.calibration_reference),
+)
+
+function applyFactoryDefaults(): void {
+  const safe = factorySafeThresholds()
+  centralForm.value = { ...centralForm.value, ...safe }
+  edgeForm.value = { ...edgeForm.value, ...safe }
+  successMessage.value =
+    'Default aman sementara terisi. Simpan untuk mengaktifkan, lalu WAJIB kalibrasi lokal sebelum produksi.'
+}
 
 function copyEnrollmentQualityToEdge(): void {
   edgeForm.value = {
@@ -651,7 +668,19 @@ onBeforeUnmount(() => {
                 :required="edgeThresholdsConfigured"
                 placeholder="ID/nama laporan kalibrasi yang disetujui"
             /></label>
+            <p v-if="edgeUsesFactoryDefaults" class="ai-setup-view__note" role="status">
+              Berjalan dengan default aman sementara — presensi meragukan akan diminta mengulang
+              atau dicatat manual. Kalibrasi lokal wajib sebelum produksi.
+            </p>
             <div class="master-data__form-actions ai-setup-view__form-wide">
+              <button
+                class="button button--text"
+                type="button"
+                :disabled="isSaving"
+                @click="applyFactoryDefaults"
+              >
+                Pakai default aman
+              </button>
               <button class="button button--primary" type="submit" :disabled="isSaving">
                 {{ isSaving ? 'Menyimpan…' : 'Terapkan ke perangkat' }}
               </button>
@@ -938,7 +967,19 @@ onBeforeUnmount(() => {
               :required="centralThresholdsConfigured"
               placeholder="Wajib diisi bila threshold diatur"
           /></label>
+          <p v-if="centralUsesFactoryDefaults" class="ai-setup-view__note" role="status">
+            Berjalan dengan default aman sementara — presensi meragukan akan diminta mengulang atau
+            dicatat manual. Kalibrasi lokal wajib sebelum produksi.
+          </p>
           <div class="master-data__form-actions ai-setup-view__form-wide">
+            <button
+              class="button button--text"
+              type="button"
+              :disabled="isSaving"
+              @click="applyFactoryDefaults"
+            >
+              Pakai default aman
+            </button>
             <button class="button button--primary" type="submit" :disabled="isSaving">
               {{ isSaving ? 'Menyimpan…' : 'Simpan dan terapkan' }}
             </button>

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  factorySafeThresholds,
+  isFactoryDefaultReference,
   recognitionDefaults,
   recognitionFrom,
   sanitizeRecognitionForm,
@@ -54,6 +56,17 @@ describe('recognition configuration helpers', () => {
     expect(sanitizeRecognitionForm(formWith({ yunet_score_threshold: Number.NaN }))).toContain(
       'angka',
     )
+  })
+
+  it('provides strict temporary factory defaults flagged as non-final', () => {
+    const safe = factorySafeThresholds()
+    expect(safe.min_top1_similarity).toBe(0.65)
+    expect(safe.min_top1_top2_margin).toBe(0.2)
+    expect(isFactoryDefaultReference(safe.calibration_reference)).toBe(true)
+    expect(isFactoryDefaultReference('LAP-2026-011')).toBe(false)
+    expect(isFactoryDefaultReference(null)).toBe(false)
+    const form = { ...formWith({}), ...safe }
+    expect(sanitizeRecognitionForm(form)).toBeNull()
   })
 
   it('keeps requiring top-1 and margin together', () => {
