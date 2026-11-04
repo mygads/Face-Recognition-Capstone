@@ -56,6 +56,7 @@ class AttendanceReportRow(ApiSchema):
     source: Literal["face_recognition", "manual", "system"] | None
     session_opened_at: AwareDatetime
     recorded_at: AwareDatetime | None
+    note: str | None = None
 
 
 class AttendanceReportPage(PageResponse[AttendanceReportRow]):

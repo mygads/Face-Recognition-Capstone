@@ -289,3 +289,38 @@ def test_sampling_stride_skips_configured_intermediate_frames() -> None:
     assert engine.should_sample(second) is False
     assert engine.on_skipped(second) == first_result
     assert engine.should_sample(third) is False
+
+
+def test_replayed_burst_returns_prior_decision_without_new_evidence() -> None:
+    """Burst retries must be idempotent at the decision layer.
+
+    The STB gateway retries the identical burst (same track id and frame
+    timestamps) after a retryable failure such as an inference 504 whose
+    work already finished server-side. Replaying those timestamps must add
+    no evidence — otherwise a retry would accelerate consensus with
+    duplicate frames and bypass the calibrated ``minimum_agreeing_frames``.
+    """
+    engine = _engine()
+    matches = _matches(PERSON_A, 0.92)
+    assert _decide(engine, 1, matches).state == "collecting"
+    assert _decide(engine, 2, matches).state == "collecting"
+    final = _decide(engine, 3, matches)
+    assert final.state == "accepted"
+
+    state = engine._tracks["track-1"]
+    evidence_before = list(state.evidence)
+    frames_seen_before = state.frames_seen
+    sampled_before = state.sampled_frames
+    observed_before = state.last_observed_at
+
+    for frame in (1, 2, 3):
+        assert _decide(engine, frame, matches) == final
+
+    assert state.evidence == evidence_before
+    assert state.frames_seen == frames_seen_before
+    assert state.sampled_frames == sampled_before
+    assert state.last_observed_at == observed_before
+
+    fourth = _decide(engine, 4, matches)
+    assert fourth.state == "accepted"
+    assert fourth.observation_count > final.observation_count

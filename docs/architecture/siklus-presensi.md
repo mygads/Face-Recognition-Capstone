@@ -137,7 +137,7 @@ login (tanpa reconnect storm); `4403`/`4404` → error final tanpa retry;
 tutup lain → reconnect backoff eksponensial + jitter (anti-thundering-herd),
 reset tiap pesan live/ganti sesi.
 
-Polling snapshot default tiap 2 detik (`SESSION_DASHBOARD_POLL_SECONDS`,
+Polling snapshot default tiap 2 detik (`PRESENSI_SESSION_DASHBOARD_POLL_SECONDS`, warisan `SESSION_DASHBOARD_POLL_SECONDS`,
 clamp 0,25–30). Online window device
 `PRESENSI_DEVICE_HEARTBEAT_TIMEOUT_SECONDS` (default 60, clamp 5–3600;
 `DEVICE_ONLINE_THRESHOLD_SECONDS` fallback lama). Summary: roster size,

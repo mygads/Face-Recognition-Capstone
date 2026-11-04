@@ -280,7 +280,16 @@ async function openSession(schedule: OpenableSchedule): Promise<void> {
           ' siswa di roster.'
     await reload()
   } catch (error) {
-    pageError.value = formatError(error)
+    if (error instanceof ApiError && error.code === 'session_already_active') {
+      // Race with another opener (or the auto-open worker): the schedule left
+      // the openable list on the server, so refresh before telling the teacher.
+      await reload()
+      if (!pageError.value) {
+        pageError.value = 'Sesi untuk jadwal ini sudah dibuka. Daftar dimuat ulang.'
+      }
+    } else {
+      pageError.value = formatError(error)
+    }
   } finally {
     openingScheduleId.value = null
   }
@@ -679,6 +688,7 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
               <tr>
                 <th scope="col">Siswa</th>
                 <th scope="col">Status</th>
+                <th scope="col">Catatan</th>
               </tr>
             </thead>
             <tbody>
@@ -691,6 +701,10 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
                   <span class="status-badge" :class="rosterStatusClass(entry.record_status)">{{
                     rosterStatusLabel(entry.record_status)
                   }}</span>
+                </td>
+                <td data-label="Catatan">
+                  <small v-if="entry.record_note">{{ entry.record_note }}</small>
+                  <span v-else class="master-data__muted">–</span>
                 </td>
               </tr>
             </tbody>

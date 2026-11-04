@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from typing import Literal
 from uuid import UUID, uuid4
@@ -10,8 +11,15 @@ RecognitionOutcome = Literal["matched", "ambiguous", "no_match", "error"]
 
 
 def _api_score(value: float | None) -> float | None:
-    """Match the API's six-decimal score contract."""
-    return round(value, 6) if value is not None else None
+    """Match the API's six-decimal score contract.
+
+    Replaceable liveness models may report non-finite scores; the outbox
+    serializes with ``allow_nan=False``, so map them to ``None`` instead of
+    letting the whole attendance event die as a rejected payload.
+    """
+    if value is None or not math.isfinite(value):
+        return None
+    return round(value, 6)
 
 
 def event_payload(

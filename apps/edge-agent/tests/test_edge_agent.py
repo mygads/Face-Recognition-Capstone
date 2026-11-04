@@ -35,7 +35,7 @@ from presensi_edge_agent.config import (
     RuntimeSettings,
     load_config,
 )
-from presensi_edge_agent.events import event_payload
+from presensi_edge_agent.events import _api_score, event_payload
 from presensi_edge_agent.logging import JsonLogFormatter
 from presensi_edge_agent.managed_config import apply_managed_configuration
 from presensi_edge_agent.outbox import (
@@ -1289,6 +1289,64 @@ def test_outbox_keeps_idempotent_event_payloads_across_retry(tmp_path: Path) -> 
     outbox.close()
 
 
+def test_api_score_maps_non_finite_scores_to_none() -> None:
+    """Replaceable models must never leak NaN/inf into the outbox payload.
+
+    The outbox serializes with ``allow_nan=False``, so a single non-finite
+    score would reject the whole attendance event. Finite scores keep the
+    six-decimal API contract.
+    """
+    assert _api_score(None) is None
+    assert _api_score(float("nan")) is None
+    assert _api_score(float("inf")) is None
+    assert _api_score(float("-inf")) is None
+    assert _api_score(0.123456789) == 0.123457
+
+
+def test_event_payload_drops_non_finite_liveness_score(
+    tmp_path: Path,
+) -> None:
+    """A non-finite liveness score must not kill a matched attendance event.
+
+    Domain dataclasses reject NaN at construction, so duck-typed decisions
+    stand in for a future/custom model that bypasses validation: the payload
+    must carry ``liveness_score=None`` and stay enqueuable instead of raising
+    ``ValueError`` from the outbox JSON encoder.
+    """
+    from types import SimpleNamespace
+
+    for raw in (float("nan"), float("inf"), float("-inf")):
+        stub = SimpleNamespace(
+            state="accepted",
+            decision=SimpleNamespace(
+                outcome="matched",
+                student_id=STUDENT_ID,
+                confidence=0.95,
+                margin=0.4,
+                liveness_score=raw,
+                reason_code=None,
+            ),
+        )
+        payload = event_payload(
+            stub,  # type: ignore[arg-type]
+            device_id=DEVICE_ID,
+            session_id=SESSION_ID,
+            occurred_at=datetime.now(UTC),
+            model_name=MODEL_NAME,
+            model_version=MODEL_VERSION,
+            liveness_required=False,
+            liveness_enabled=True,
+            min_live_score=0.5,
+        )
+        assert payload["liveness_score"] is None
+        outbox = EventOutbox(tmp_path / f"nonfinite-{raw}.sqlite3", max_pending=10)
+        try:
+            outbox.enqueue(payload)
+            assert outbox.counts() == (1, 0)
+        finally:
+            outbox.close()
+
+
 def test_outbox_refuses_biometrics_and_detects_local_id_reuse(tmp_path: Path) -> None:
     outbox = EventOutbox(tmp_path / "events.sqlite3", max_pending=1)
     payload: dict[str, object] = {
@@ -2012,5 +2070,286 @@ def test_preview_gallery_reuses_valid_cache_without_refetch(tmp_path: Path) -> N
         service.preview_cache.replace(bundle)
         assert service._refresh_preview_gallery() is True
         assert api.calls == 0
+    finally:
+        outbox.close()
+
+
+def test_require_runtime_rejects_unreachable_sampling(tmp_path: Path) -> None:
+    """Startup must fail fast when the stride can never reach consensus.
+
+    At 5 fps with a 3 s track TTL and stride 6 only ~3 frames per track are
+    evaluated, so requiring 4 agreeing frames would stall every track in
+    "collecting" with no attendance and no error.
+    """
+    config = load_config(
+        EXAMPLE_CONFIG, environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)}
+    )
+    model_path = tmp_path / "model.onnx"
+    model_path.write_bytes(b"synthetic model placeholder")
+    config = replace(
+        config,
+        models=replace(config.models, yunet_path=model_path, sface_path=model_path),
+        camera=replace(config.camera, fps=5),
+        recognition=replace(
+            config.recognition,
+            min_top1_similarity=0.7,
+            min_top1_top2_margin=0.1,
+            minimum_agreeing_frames=4,
+            sample_every_n_frames=6,
+            track_ttl_seconds=3.0,
+        ),
+    )
+    with pytest.raises(EdgeConfigError, match="cannot reach consensus"):
+        config.require_runtime(api_token="injected-test-token")
+
+
+def test_require_runtime_accepts_reachable_default_sampling(
+    tmp_path: Path,
+) -> None:
+    """The shipped example (30 fps, TTL 3 s, stride 6) evaluates ~15 frames
+    per track, comfortably covering the default minimum of 3."""
+    config = load_config(
+        EXAMPLE_CONFIG, environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)}
+    )
+    model_path = tmp_path / "model.onnx"
+    model_path.write_bytes(b"synthetic model placeholder")
+    config = replace(
+        config,
+        models=replace(config.models, yunet_path=model_path, sface_path=model_path),
+        recognition=replace(
+            config.recognition,
+            min_top1_similarity=0.7,
+            min_top1_top2_margin=0.1,
+        ),
+    )
+    config.require_runtime(api_token="injected-test-token")
+
+
+def test_managed_edge_config_rejects_unreachable_sampling() -> None:
+    """A pushed policy whose stride starves consensus must be refused."""
+    config = load_config(
+        EXAMPLE_CONFIG, environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)}
+    )
+    settings: dict[str, object] = {
+        "min_face_pixels": 80,
+        "min_laplacian_variance": 45.0,
+        "min_brightness": 25.0,
+        "max_brightness": 235.0,
+        "min_top1_similarity": 0.7,
+        "min_top1_top2_margin": 0.1,
+        "minimum_agreeing_frames": 10,
+        "sample_every_n_frames": 60,
+        "best_frame_count": 10,
+        "max_history_frames": 10,
+        "yunet_score_threshold": 0.9,
+        "yunet_nms_threshold": 0.3,
+        "calibration_reference": "synthetic-test",
+    }
+    with pytest.raises(EdgeConfigError, match="not usable"):
+        apply_managed_configuration(config, revision=2, settings=settings)
+
+
+def test_managed_reconfiguration_clears_stale_decision_signature(
+    tmp_path: Path,
+) -> None:
+    """After a managed threshold push, the first decision of the recalibrated
+    pipeline must not be suppressed by the previous pipeline's signature."""
+    from presensi_edge_agent.service import EdgeService
+
+    config = load_config(
+        EXAMPLE_CONFIG, environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)}
+    )
+    model_path = tmp_path / "model.onnx"
+    model_path.write_bytes(b"synthetic model placeholder")
+    config = replace(
+        config,
+        models=replace(config.models, yunet_path=model_path, sface_path=model_path),
+        recognition=replace(
+            config.recognition,
+            min_top1_similarity=0.7,
+            min_top1_top2_margin=0.1,
+        ),
+        runtime=replace(config.runtime, outbox_path=tmp_path / "edge.sqlite3"),
+    )
+
+    applied: list[object] = []
+    reported: list[tuple[int, str]] = []
+
+    class FakeApi:
+        def heartbeat(self) -> None: ...
+
+        def submit_recognition_event(self, _payload: dict[str, object]) -> None: ...
+
+        def fetch_runtime_configuration(self) -> dict[str, object]:
+            return {
+                "revision": 1,
+                "camera_enabled": True,
+                "settings": {
+                    "min_face_pixels": 80,
+                    "min_laplacian_variance": 45.0,
+                    "min_brightness": 25.0,
+                    "max_brightness": 235.0,
+                    "min_top1_similarity": 0.75,
+                    "min_top1_top2_margin": 0.15,
+                    "minimum_agreeing_frames": 3,
+                    "sample_every_n_frames": 5,
+                    "best_frame_count": 5,
+                    "max_history_frames": 10,
+                    "yunet_score_threshold": 0.9,
+                    "yunet_nms_threshold": 0.3,
+                    "calibration_reference": "synthetic-test",
+                },
+            }
+
+        def report_runtime_configuration(
+            self, *, revision: int, status: str, **_kwargs: object
+        ) -> None:
+            reported.append((revision, status))
+
+    class FakeCamera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            return False, None
+
+        def close(self) -> None: ...
+
+    class FakeRecognizer:
+        def apply_configuration(self, _config: object) -> None:
+            applied.append(_config)
+
+        def reset(self) -> None: ...
+
+    outbox = EventOutbox(tmp_path / "edge.sqlite3", max_pending=10)
+    service = EdgeService(
+        config,
+        FakeCamera(),
+        FakeApi(),  # type: ignore[arg-type]
+        outbox,
+        FakeRecognizer(),  # type: ignore[arg-type]
+        lambda: {},
+    )
+    service._last_decision = ("rejected", None, "top1_below_threshold")
+    service._sync_managed_configuration()
+    assert service._last_decision is None
+    assert service.config.runtime_config_revision == 1
+    assert len(applied) == 1
+    assert reported == [(1, "applied")]
+    outbox.close()
+
+
+def test_full_outbox_does_not_suppress_walkthrough_retry(tmp_path: Path) -> None:
+    """A walk-through lost to a full outbox must be retried, not suppressed.
+
+    The duplicate-signature guard exists to stop re-queueing the same
+    lingering person every frame — but if the first sighting hit
+    OutboxFullError, nothing was durably queued, so stamping the signature
+    would drop the attendance silently while the lab is offline. The next
+    frame must re-attempt the enqueue once space frees up.
+    """
+    config = EdgeConfig(
+        config_path=tmp_path / "edge.yaml",
+        device_id=DEVICE_ID,
+        api=ApiSettings(
+            base_url="https://api.example.test",
+            timeout_seconds=1,
+            heartbeat_interval_seconds=5,
+            cache_refresh_seconds=3,
+            cache_path="/api/v1/devices/{device_id}/active-session-cache",
+            token_file=None,
+        ),
+        camera=CameraSettings(0, 640, 360, 30, "auto", 4, 1),
+        models=ModelSettings(None, None, MODEL_VERSION, None, None),
+        quality=QualitySettings(80, 45, 25, 235),
+        recognition=RecognitionSettings(0.5, 0.1, 3, 5, 5, 10, 3.0),
+        liveness=LivenessSettings(False, False, None),
+        runtime=RuntimeSettings(tmp_path / "queue.sqlite3", 1, 0.5, "INFO"),
+    )
+
+    class FakeCamera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            return False, None
+
+        def close(self) -> None: ...
+
+    class FakeApi:
+        def close(self) -> None: ...
+
+    class FakeRecognizer:
+        def process(
+            self,
+            _frame: object,
+            _gallery: tuple[GalleryEntry, ...],
+            _captured_at: datetime,
+        ) -> TrackDecision:
+            return TrackDecision(
+                track_id="offline-test-camera",
+                state="accepted",
+                decision=RecognitionDecision(
+                    outcome="matched",
+                    student_id=STUDENT_ID,
+                    confidence=0.95,
+                    margin=0.4,
+                ),
+                observation_count=3,
+            )
+
+        def reset(self) -> None: ...
+
+    outbox = EventOutbox(tmp_path / "queue.sqlite3", max_pending=1)
+    filler = {
+        "event_id": str(uuid4()),
+        "device_id": str(DEVICE_ID),
+        "session_id": str(SESSION_ID),
+        "student_id": str(uuid4()),
+        "outcome": "matched",
+        "similarity": 0.9,
+        "confidence": 0.95,
+        "margin": 0.2,
+        "liveness_passed": None,
+        "liveness_score": None,
+        "occurred_at": datetime.now(UTC).isoformat(),
+        "model_name": MODEL_NAME,
+        "model_version": MODEL_VERSION,
+    }
+    outbox.enqueue(filler)
+    service = EdgeService(
+        config,
+        FakeCamera(),
+        FakeApi(),  # type: ignore[arg-type]
+        outbox,
+        FakeRecognizer(),  # type: ignore[arg-type]
+        lambda: {},
+    )
+    service.cache.replace(
+        parse_session_cache(
+            sample_bundle_payload(),
+            device_id=DEVICE_ID,
+            model_name=MODEL_NAME,
+            model_version=MODEL_VERSION,
+        )
+    )
+    try:
+        # First sighting while the lab is offline: the queue is full, the
+        # event is lost, but the signature must stay open.
+        service._process_frame(object())
+        assert outbox.counts() == (1, 0)
+        assert service._last_decision is None
+
+        # Space frees up (sync worker drained the filler): the same
+        # lingering person must now be queued instead of suppressed.
+        outbox.acknowledge(outbox.due()[0].event_id)
+        assert outbox.counts() == (0, 0)
+        service._process_frame(object())
+        assert outbox.counts() == (1, 0)
+        assert service._last_decision is not None
+        queued = outbox.due()[0]
+        assert queued.payload["student_id"] == str(STUDENT_ID)
+
+        # ...and from here the normal duplicate guard applies again.
+        service._process_frame(object())
+        assert outbox.counts() == (1, 0)
     finally:
         outbox.close()

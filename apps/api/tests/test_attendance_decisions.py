@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Generator
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta, tzinfo
 from decimal import Decimal
+from typing import Any, cast
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
@@ -35,10 +36,51 @@ from presensi_api.main import app
 from presensi_api.session_lifecycle import as_utc
 
 
+class _FrozenDecisionClock(datetime):
+    """Deterministic clock for the decision fixture (R27).
+
+    ``close_expired_sessions`` derives the deadline from ``opened_at``'s local
+    date, so opening "30 minutes ago" near midnight (WIB) lands on the previous
+    day and the session is legitimately auto-closed before the event posts
+    (14 failures in the 00:00-00:30 WIB window). Freezing product + fixture
+    time at local noon keeps every relative assertion exact at any hour.
+    """
+
+    _frozen_base: datetime = datetime.combine(
+        datetime.now(ZoneInfo("Asia/Jakarta")).date(),
+        time(12, 0),
+        tzinfo=ZoneInfo("Asia/Jakarta"),
+    ).astimezone(UTC)
+
+    @classmethod
+    def now(cls, tz: tzinfo | None = None) -> _FrozenDecisionClock:
+        if tz is None:
+            return cast("_FrozenDecisionClock", cls._frozen_base.replace(tzinfo=None))
+        return cast("_FrozenDecisionClock", cls._frozen_base.astimezone(tz))
+
+
+def frozen_now_utc() -> datetime:
+    """Now on the fixture clock (frozen at local noon while it runs).
+
+    Lets contract tests stamp payloads on the same clock the endpoint
+    validates against, instead of wall time (which fails with
+    ``event_occurred_at_in_future`` on any run after 12:05 WIB).
+    """
+    return datetime.now(UTC)
+
+
 @pytest.fixture
-def attendance_database() -> Generator[
-    tuple[sessionmaker[Session], dict[str, UUID]], None, None
-]:
+def attendance_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[tuple[sessionmaker[Session], dict[str, UUID]], None, None]:
+    import sys
+
+    from presensi_api import attendance_decision as decision_module
+    from presensi_api import session_lifecycle as lifecycle_module
+
+    monkeypatch.setattr(decision_module, "datetime", _FrozenDecisionClock)
+    monkeypatch.setattr(lifecycle_module, "datetime", _FrozenDecisionClock)
+    monkeypatch.setattr(sys.modules[__name__], "datetime", _FrozenDecisionClock)
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -443,6 +485,95 @@ def test_concurrent_duplicate_keeps_audit_event_and_reports_clean_duplicate(
     with factory() as db:
         assert db.scalar(select(RecognitionEvent)) is not None
         assert db.scalar(select(AttendanceRecord)) is None
+
+
+def test_concurrent_duplicate_event_id_replays_winner_instead_of_500(
+    attendance_database: tuple[sessionmaker[Session], dict[str, UUID]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A UNIQUE(event_uuid) violation racing the pre-check must replay cleanly.
+
+    The concurrent winner is pre-committed; the pre-check is forced to miss it
+    once (simulating the interleaving) and the event flush is forced to raise
+    (simulating the loser's UNIQUE violation). The loser must answer with the
+    winner's decision instead of a 500.
+    """
+    from presensi_api import attendance_decision as decision_module
+    from presensi_api.api.v1.schemas.attendance import RecognitionEventRequest
+
+    factory, ids = attendance_database
+    occurred_at = datetime.now(UTC).replace(microsecond=0)
+    body = event_body(ids, event_id=uuid4(), occurred_at=occurred_at)
+    fingerprint = decision_module._request_fingerprint(
+        RecognitionEventRequest.model_validate(body)
+    )
+    with factory.begin() as db:
+        winner = RecognitionEvent(
+            event_uuid=UUID(str(body["event_id"])),
+            session_id=ids["session"],
+            device_id=ids["device"],
+            recognized_student_id=ids["student"],
+            occurred_at=occurred_at,
+            outcome="matched",
+            model_name="synthetic-sface",
+            model_version="test-1",
+            confidence=Decimal("0.987654"),
+            similarity=Decimal("0.812345"),
+            margin=Decimal("0.123456"),
+            quality_metadata={"idempotency_fingerprint": fingerprint},
+        )
+        db.add(winner)
+        db.flush()
+        db.add(
+            AttendanceRecord(
+                session_id=ids["session"],
+                student_id=ids["student"],
+                recognition_event_id=winner.id,
+                recorded_by_user_id=None,
+                status="present",
+                source="face_recognition",
+            )
+        )
+
+    real_scalar = Session.scalar
+    missed = {"count": 0}
+
+    def miss_precheck_once(
+        self: Session, statement: Any, *args: Any, **kwargs: Any
+    ) -> Any:
+        if (
+            missed["count"] == 0
+            and "FROM recognition_events" in str(statement)
+            and "event_uuid" in str(statement)
+        ):
+            missed["count"] = 1
+            return None
+        return real_scalar(self, statement, *args, **kwargs)
+
+    monkeypatch.setattr(Session, "scalar", miss_precheck_once)
+    real_flush = Session.flush
+
+    def fail_event_flush(self: Session) -> None:
+        if any(isinstance(obj, RecognitionEvent) for obj in self.new):
+            raise IntegrityError(
+                "INSERT INTO recognition_events",
+                {},
+                Exception("uq_recognition_events_event_uuid"),
+            )
+        real_flush(self)
+
+    monkeypatch.setattr(Session, "flush", fail_event_flush)
+
+    response = post_event(body)
+
+    assert missed["count"] == 1
+    assert response.status_code == 200, response.text
+    assert response.json()["replayed"] is True
+    assert response.json()["decision"] == "attendance_recorded"
+    assert response.json()["attendance"]["status"] == "present"
+    with factory() as db:
+        assert len(db.scalars(select(RecognitionEvent)).all()) == 1
+        assert len(db.scalars(select(AttendanceRecord)).all()) == 1
 
 
 def test_same_event_id_retry_is_idempotent_and_returns_original_decision(

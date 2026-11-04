@@ -820,3 +820,376 @@ def test_gateway_sync_worker_survives_unexpected_error(tmp_path: Path) -> None:
     assert api.heartbeats >= 1
     assert worker.is_alive() is False
     outbox.close()
+
+
+def _suppression_service(
+    tmp_path: Path, decisions: list[CentralDecision], max_pending: int = 10
+):
+    """Gateway service whose central-AI replays canned burst decisions."""
+    from collections.abc import Iterator
+
+    config = gateway_config(tmp_path)
+
+    class Camera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            return True, object()
+
+        def close(self) -> None: ...
+
+    class Api:
+        def heartbeat(self) -> None: ...
+
+        def submit_recognition_event(self, _payload: dict[str, object]) -> None: ...
+
+    class CannedAI:
+        def __init__(self) -> None:
+            self._pending: Iterator[CentralDecision] = iter(decisions)
+
+        def recognize_burst(self, **_kwargs: object) -> CentralDecision:
+            return next(self._pending)
+
+        def close(self) -> None: ...
+
+    class Processor:
+        def assess(self, _frame: object) -> FrameAssessment:
+            return FrameAssessment(8, 120, 12)
+
+        def encode_jpeg(self, _frame: object, _quality: int) -> bytes:
+            return b"jpeg"
+
+    outbox = EventOutbox(tmp_path / "suppression.sqlite3", max_pending=max_pending)
+    service = StbGatewayService(
+        config,
+        Camera(),
+        Api(),
+        CannedAI(),
+        outbox,
+        Processor(),  # type: ignore[arg-type]
+    )
+    assert service.session_id == SESSION_ID
+    return service, outbox
+
+
+def _matched_decision(
+    student: UUID = STUDENT_ID, session: UUID = SESSION_ID
+) -> CentralDecision:
+    return CentralDecision(
+        session_id=session,
+        track_id="camera-0",
+        outcome="matched",
+        student_id=student,
+        confidence=0.9,
+        margin=1.2,
+        reason_code=None,
+        liveness_score=None,
+        model_name="opencv-zoo-sface",
+        model_version="central-v3",
+    )
+
+
+def test_gateway_suppresses_repeat_match_for_lingering_person(
+    tmp_path: Path,
+) -> None:
+    """A person standing at the gate must not store an event per burst."""
+    service, outbox = _suppression_service(
+        tmp_path, [_matched_decision(), _matched_decision()]
+    )
+    frame = BurstFrame(b"jpeg", datetime.now(UTC))
+    service._submit_burst([frame])
+    service._submit_burst([BurstFrame(b"jpeg", datetime.now(UTC))])
+    assert outbox.counts() == (1, 0)
+    outbox.close()
+
+
+def test_gateway_queues_match_for_different_student_or_session(
+    tmp_path: Path,
+) -> None:
+    other_student = UUID("44000000-0000-4000-8000-000000000009")
+    other_session = UUID("44000000-0000-4000-8000-000000000008")
+    service, outbox = _suppression_service(
+        tmp_path,
+        [
+            _matched_decision(),
+            _matched_decision(student=other_student),
+            _matched_decision(session=other_session),
+        ],
+    )
+    service._submit_burst([BurstFrame(b"jpeg", datetime.now(UTC))])
+    service._submit_burst([BurstFrame(b"jpeg", datetime.now(UTC))])
+    service._submit_burst([BurstFrame(b"jpeg", datetime.now(UTC))])
+    assert outbox.counts() == (3, 0)
+    outbox.close()
+
+
+def test_gateway_never_suppresses_non_matched_bursts(tmp_path: Path) -> None:
+    no_match = CentralDecision(
+        session_id=SESSION_ID,
+        track_id="camera-0",
+        outcome="no_match",
+        student_id=None,
+        confidence=None,
+        margin=None,
+        reason_code="top1_below_threshold",
+        liveness_score=None,
+        model_name="opencv-zoo-sface",
+        model_version="central-v3",
+    )
+    service, outbox = _suppression_service(tmp_path, [no_match, no_match])
+    service._submit_burst([BurstFrame(b"jpeg", datetime.now(UTC))])
+    service._submit_burst([BurstFrame(b"jpeg", datetime.now(UTC))])
+    assert outbox.counts() == (2, 0)
+    outbox.close()
+
+
+def test_gateway_retries_one_transient_burst_failure(tmp_path: Path) -> None:
+    """A 503 while the central inference slot is busy must not drop a
+    walk-through burst: one bounded retry with the same track id recovers."""
+    service, outbox = _suppression_service(tmp_path, [_matched_decision()])
+    calls: list[str] = []
+    real_recognize = service.ai.recognize_burst
+
+    def flaky(**kwargs: object) -> CentralDecision:
+        track_id = kwargs.get("track_id")
+        assert isinstance(track_id, str)
+        calls.append(track_id)
+        if len(calls) == 1:
+            raise ApiCallError(503, retryable=True)
+        return real_recognize(**kwargs)
+
+    service.ai.recognize_burst = flaky  # type: ignore[method-assign]
+    service._submit_burst([BurstFrame(b"jpeg", datetime.now(UTC))])
+    assert outbox.counts() == (1, 0)
+    assert len(calls) == 2
+    assert calls[0] == calls[1]
+    outbox.close()
+
+
+def test_gateway_drops_burst_after_second_transient_failure(
+    tmp_path: Path,
+) -> None:
+    """Two transient failures in a row still drop the burst (bounded retry)."""
+    config = gateway_config(tmp_path)
+
+    class Camera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            return True, object()
+
+        def close(self) -> None: ...
+
+    class Api:
+        def heartbeat(self) -> None: ...
+
+        def submit_recognition_event(self, _payload: dict[str, object]) -> None: ...
+
+    class AlwaysBusyAI:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def recognize_burst(self, **_kwargs: object) -> CentralDecision:
+            self.calls += 1
+            raise ApiCallError(503, retryable=True)
+
+        def close(self) -> None: ...
+
+    class Processor:
+        def assess(self, _frame: object) -> FrameAssessment:
+            return FrameAssessment(8, 120, 12)
+
+        def encode_jpeg(self, _frame: object, _quality: int) -> bytes:
+            return b"jpeg"
+
+    outbox = EventOutbox(tmp_path / "retry.sqlite3", max_pending=10)
+    busy = AlwaysBusyAI()
+    service = StbGatewayService(
+        config,
+        Camera(),
+        Api(),
+        busy,
+        outbox,
+        Processor(),  # type: ignore[arg-type]
+    )
+    with pytest.raises(ApiCallError):
+        service._submit_burst([BurstFrame(b"jpeg", datetime.now(UTC))])
+    assert busy.calls == 2
+    assert outbox.counts() == (0, 0)
+    outbox.close()
+
+
+def test_gateway_never_retries_non_retryable_rejection(tmp_path: Path) -> None:
+    """A 401/409 rejection must surface immediately without a retry."""
+    config = gateway_config(tmp_path)
+
+    class Camera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            return True, object()
+
+        def close(self) -> None: ...
+
+    class Api:
+        def heartbeat(self) -> None: ...
+
+        def submit_recognition_event(self, _payload: dict[str, object]) -> None: ...
+
+    class RejectingAI:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def recognize_burst(self, **_kwargs: object) -> CentralDecision:
+            self.calls += 1
+            raise ApiCallError(409, retryable=False)
+
+        def close(self) -> None: ...
+
+    class Processor:
+        def assess(self, _frame: object) -> FrameAssessment:
+            return FrameAssessment(8, 120, 12)
+
+        def encode_jpeg(self, _frame: object, _quality: int) -> bytes:
+            return b"jpeg"
+
+    outbox = EventOutbox(tmp_path / "noretry.sqlite3", max_pending=10)
+    rejecting = RejectingAI()
+    service = StbGatewayService(
+        config,
+        Camera(),
+        Api(),
+        rejecting,
+        outbox,
+        Processor(),  # type: ignore[arg-type]
+    )
+    with pytest.raises(ApiCallError):
+        service._submit_burst([BurstFrame(b"jpeg", datetime.now(UTC))])
+    assert rejecting.calls == 1
+    assert outbox.counts() == (0, 0)
+    outbox.close()
+
+
+def test_gateway_full_outbox_does_not_suppress_walkthrough_retry(
+    tmp_path: Path,
+) -> None:
+    """A burst lost to a full outbox must be retried, not suppressed.
+
+    Same failure mode as the AI_EDGE path: the lingering-person key may only
+    be stamped after the burst is durably queued, otherwise a walk-through
+    during an offline window is dropped silently.
+    """
+    # Three bursts: the first hits a full outbox, the second queues after
+    # the drain, the third must be suppressed as a lingering-person repeat.
+    # (Suppression is checked after the AI call, so every burst consumes one
+    # canned decision.)
+    service, outbox = _suppression_service(
+        tmp_path,
+        [_matched_decision(), _matched_decision(), _matched_decision()],
+        max_pending=1,
+    )
+    filler = {
+        "event_id": "55000000-0000-4000-8000-000000000099",
+        "device_id": str(service.device_id),
+        "session_id": str(SESSION_ID),
+        "student_id": "55000000-0000-4000-8000-000000000098",
+        "outcome": "matched",
+        "similarity": 0.9,
+        "confidence": 0.95,
+        "margin": 0.2,
+        "liveness_passed": None,
+        "liveness_score": None,
+        "occurred_at": datetime.now(UTC).isoformat(),
+        "model_name": "opencv-zoo-sface",
+        "model_version": "central-v3",
+    }
+    outbox.enqueue(filler)
+    try:
+        frame = BurstFrame(b"jpeg", datetime.now(UTC))
+        service._submit_burst([frame])
+        assert outbox.counts() == (1, 0)
+        assert service._last_accepted_match is None
+
+        outbox.acknowledge(outbox.due()[0].event_id)
+        assert outbox.counts() == (0, 0)
+        service._submit_burst([BurstFrame(b"jpeg", datetime.now(UTC))])
+        assert outbox.counts() == (1, 0)
+        assert service._last_accepted_match is not None
+        queued = outbox.due()[0]
+        assert queued.payload["student_id"] == str(STUDENT_ID)
+
+        # ...and from here the lingering-person guard applies again.
+        service._submit_burst([BurstFrame(b"jpeg", datetime.now(UTC))])
+        assert outbox.counts() == (1, 0)
+    finally:
+        outbox.close()
+
+
+def test_gateway_retry_keeps_burst_session_id(tmp_path: Path) -> None:
+    """The bounded retry must reuse the burst-scoped session id.
+
+    Frames are captured under the session active at burst start; if discovery
+    pins a new session during the ~1 s backoff, attributing the same frames
+    to the new session would corrupt attendance. The retry therefore reuses
+    the original session id instead of re-reading the live pin.
+    """
+    service, outbox = _suppression_service(tmp_path, [_matched_decision()])
+    seen_sessions: list[object] = []
+    real_recognize = service.ai.recognize_burst
+
+    def flaky(**kwargs: object) -> CentralDecision:
+        seen_sessions.append(kwargs.get("session_id"))
+        if len(seen_sessions) == 1:
+            raise ApiCallError(503, retryable=True)
+        return real_recognize(**kwargs)
+
+    service.ai.recognize_burst = flaky  # type: ignore[method-assign]
+    original_wait = service.stop_event.wait
+
+    def wait_and_rotate_session(timeout: float | None = None) -> bool:
+        service.session_id = UUID("44000000-0000-4000-8000-000000000007")
+        return original_wait(0)
+
+    service.stop_event.wait = wait_and_rotate_session  # type: ignore[method-assign]
+    try:
+        service._submit_burst([BurstFrame(b"jpeg", datetime.now(UTC))])
+    finally:
+        service.stop_event.wait = original_wait  # type: ignore[method-assign]
+    assert outbox.counts() == (1, 0)
+    assert seen_sessions == [SESSION_ID, SESSION_ID]
+    outbox.close()
+
+
+def test_gateway_rejected_payload_does_not_flap_camera(tmp_path: Path) -> None:
+    """A deterministically rejected payload must not trigger a reconnect.
+
+    Like the AI_EDGE path, a `ValueError` from outbox validation is logged as
+    `event_queue_rejected` and the lingering-person key is stamped (anti-spam),
+    but no exception escapes to the capture loop — otherwise every burst
+    would close and reopen the camera.
+    """
+    service, outbox = _suppression_service(tmp_path, [_matched_decision()])
+    real_enqueue = outbox.enqueue
+
+    def reject(payload: dict[str, object]) -> object:
+        raise ValueError("synthetic-contract-violation")
+
+    outbox.enqueue = reject  # type: ignore[method-assign]
+    try:
+        service._submit_burst([BurstFrame(b"jpeg", datetime.now(UTC))])
+    finally:
+        outbox.enqueue = real_enqueue  # type: ignore[method-assign]
+    assert outbox.counts() == (0, 0)
+    assert service._last_accepted_match is not None
+    # A follow-up burst with the same person is suppressed instead of
+    # re-logging the same contract violation on every frame.
+    outbox.enqueue = reject  # type: ignore[method-assign]
+    try:
+        service.ai.recognize_burst = (  # type: ignore[method-assign]
+            lambda **_kwargs: _matched_decision()
+        )
+        service._submit_burst([BurstFrame(b"jpeg", datetime.now(UTC))])
+    finally:
+        outbox.enqueue = real_enqueue  # type: ignore[method-assign]
+    assert outbox.counts() == (0, 0)
+    outbox.close()

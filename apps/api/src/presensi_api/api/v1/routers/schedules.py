@@ -238,7 +238,11 @@ def list_schedules(
         query = query.where(and_(*filters))
     total = session.scalar(select(func.count()).select_from(query.subquery())) or 0
     schedules = session.scalars(
-        query.order_by(PracticumSchedule.weekday, PracticumSchedule.start_time)
+        query.order_by(
+            PracticumSchedule.weekday,
+            PracticumSchedule.start_time,
+            PracticumSchedule.id,
+        )
         .limit(limit)
         .offset(offset)
     ).all()

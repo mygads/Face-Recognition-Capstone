@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { shouldPausePolling } from '../utils/visibility'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import PageHeader from '../components/PageHeader.vue'
 import {
@@ -28,6 +29,7 @@ import {
   sanitizeRecognitionForm,
   type UnknownSettings,
 } from '../utils/recognitionConfig'
+import { centralSyncStatusLabel } from '../utils/configStatus'
 import { createRefreshEpoch } from '../utils/refresh'
 
 type SettingsTab = 'enrollment' | 'devices' | 'central'
@@ -369,7 +371,10 @@ function configStatusLabel(status: Device['config_apply_status']): string {
 
 onMounted(() => {
   void refreshReadiness(true)
-  refreshTimer = setInterval(() => void refreshReadiness(), 30_000)
+  refreshTimer = setInterval(() => {
+    if (shouldPausePolling()) return
+    void refreshReadiness()
+  }, 30_000)
 })
 
 onBeforeUnmount(() => {
@@ -443,6 +448,15 @@ onBeforeUnmount(() => {
               <dd>
                 {{ readiness.central_ai_config_applied_revision ?? 'Belum diketahui' }} /
                 {{ readiness.central_ai_config_desired_revision ?? '—' }}
+              </dd>
+            </div>
+            <div>
+              <dt>Status sinkron</dt>
+              <dd>
+                {{ centralSyncStatusLabel(readiness.central_ai_config_sync_status) }}
+                <code v-if="readiness.central_ai_config_sync_error_code">{{
+                  readiness.central_ai_config_sync_error_code
+                }}</code>
               </dd>
             </div>
           </dl>

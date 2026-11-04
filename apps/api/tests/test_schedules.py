@@ -312,3 +312,35 @@ def test_schedule_update_rejects_conflict_and_can_deactivate(
     )
     assert deactivated.status_code == 200
     assert deactivated.json()["is_active"] is False
+
+
+def test_list_schedules_pagination_stable_on_identical_weekday_start(
+    api_database: sessionmaker[Session],
+) -> None:
+    """Same weekday+start_time rows must page without duplication or loss."""
+    class_a, class_b, labs = setup_master_data()
+    teacher_a = str(UUID(int=43))
+    teacher_b = str(UUID(int=44))
+    first = request(
+        "POST",
+        "/api/v1/schedules",
+        payload(class_a["id"], labs["a"]["id"], teacher_a),
+    )
+    assert first.status_code == 201, first.text
+    second = request(
+        "POST",
+        "/api/v1/schedules",
+        {
+            **payload(class_b["id"], labs["b"]["id"], teacher_b),
+            "subject": "Praktikum Kedua",
+        },
+    )
+    assert second.status_code == 201, second.text
+    page_one = request("GET", "/api/v1/schedules?limit=1&offset=0")
+    page_two = request("GET", "/api/v1/schedules?limit=1&offset=1")
+    assert page_one.status_code == 200
+    assert page_two.status_code == 200
+    first_id = page_one.json()["items"][0]["id"]
+    second_id = page_two.json()["items"][0]["id"]
+    assert first_id != second_id
+    assert {first_id, second_id} == {first.json()["id"], second.json()["id"]}

@@ -40,3 +40,11 @@ def test_burst_then_quiet_keeps_only_live_buckets() -> None:
         limiter.allow("steady", limit=1000, now=61.0)
     assert "steady" in limiter._requests
     assert not any(key.startswith("one-shot:") for key in limiter._requests)
+
+
+def test_reset_clears_buckets_for_test_isolation() -> None:
+    limiter = SlidingWindowRateLimiter()
+    assert limiter.allow("login:email:a@example.edu", limit=1, now=0.0) is True
+    assert limiter.allow("login:email:a@example.edu", limit=1, now=1.0) is False
+    limiter.reset()
+    assert limiter.allow("login:email:a@example.edu", limit=1, now=1.0) is True

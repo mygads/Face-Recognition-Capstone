@@ -14,6 +14,7 @@ import {
 } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { formatTimeOfDay } from '../utils/dateFormat'
+import { shouldPausePolling } from '../utils/visibility'
 import { useRouter } from 'vue-router'
 
 type DashboardMessage = {
@@ -185,20 +186,25 @@ async function selectSession(sessionId: string): Promise<void> {
   }
 }
 
+async function refreshSessionList(): Promise<AttendanceSession[]> {
+  const [activePage, overridePage] = await Promise.all([
+    listAttendanceSessions({ status: 'active', limit: 100, offset: 0 }),
+    listAttendanceSessions({ status: 'manual_override', limit: 100, offset: 0 }),
+  ])
+  const merged = new Map<string, AttendanceSession>()
+  for (const item of [...activePage.items, ...overridePage.items]) {
+    if (!merged.has(item.id)) merged.set(item.id, item)
+  }
+  sessions.value = [...merged.values()]
+  return sessions.value
+}
+
 async function loadDashboard(): Promise<void> {
   isLoading.value = true
   pageError.value = null
   void loadAtRisk()
   try {
-    const [activePage, overridePage] = await Promise.all([
-      listAttendanceSessions({ status: 'active', limit: 100, offset: 0 }),
-      listAttendanceSessions({ status: 'manual_override', limit: 100, offset: 0 }),
-    ])
-    const merged = new Map<string, AttendanceSession>()
-    for (const item of [...activePage.items, ...overridePage.items]) {
-      if (!merged.has(item.id)) merged.set(item.id, item)
-    }
-    sessions.value = [...merged.values()]
+    await refreshSessionList()
     const retainedSession = sessions.value.find((item) => item.id === selectedSessionId.value)
     const nextSessionId = (retainedSession ?? sessions.value[0])?.id ?? ''
     await selectSession(nextSessionId)
@@ -271,13 +277,42 @@ async function loadAtRisk(): Promise<void> {
   }
 }
 
+function handleVisibilityChange(): void {
+  if (!mounted) return
+  if (shouldPausePolling()) {
+    // Tab disembunyikan: putus WS agar snapshot DB 2-detik berhenti.
+    closeSocket()
+    connectionState.value = 'disconnected'
+    return
+  }
+  if (selectedSessionId.value && socket === null) {
+    // Kembali terlihat: daftar sesi bisa basi (sesi ditutup dari ruangan
+    // lain selama tab disembunyikan). Muat ulang daftar dulu tanpa mereset
+    // pilihan guru; bila sesi pilihan sudah hilang, jatuh ke sesi pertama.
+    void (async () => {
+      try {
+        await refreshSessionList()
+      } catch {
+        // Daftar gagal dimuat ulang (mis. token kedaluwarsa saat hidden):
+        // selectSession di bawah tetap mencoba snapshot dan akan
+        // mengarahkan ke login bila 401.
+      }
+      if (!mounted || shouldPausePolling()) return
+      const retained = sessions.value.some((item) => item.id === selectedSessionId.value)
+      await selectSession(retained ? selectedSessionId.value : (sessions.value[0]?.id ?? ''))
+    })()
+  }
+}
+
 onMounted(() => {
   mounted = true
   void loadDashboard()
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
 onBeforeUnmount(() => {
   mounted = false
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
   closeSocket()
 })
 </script>

@@ -30,6 +30,7 @@ from presensi_api.enrollment_processing import (
     get_enrollment_processor,
 )
 from presensi_api.main import app
+from presensi_api.runtime_configuration import enrollment_quality_from_environment
 
 OPERATOR_ID = UUID("c8939f05-b76a-4f6f-bf5c-7e0f326c56c1")
 TARGET_STUDENT_ID = UUID("994548ad-b426-4b6c-9e9b-28251268ac20")
@@ -430,3 +431,36 @@ def test_capture_content_type_with_charset_suffix_is_accepted(
     assert response.status_code == 201
     body = response.json()
     assert body["accepted_frames"] == 3
+
+
+def test_enrollment_quality_gates_honor_environment_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Enrollment quality env vars must actually move the API gates.
+
+    These four vars were forwarded nowhere (compose/examples), so operators
+    tuned invisible code defaults. Defaults mirror the documented examples.
+    """
+    for name in (
+        "PRESENSI_ENROLLMENT_MIN_FACE_PIXELS",
+        "PRESENSI_ENROLLMENT_MIN_SHARPNESS",
+        "PRESENSI_ENROLLMENT_MIN_BRIGHTNESS",
+        "PRESENSI_ENROLLMENT_MAX_BRIGHTNESS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    assert enrollment_quality_from_environment() == {
+        "min_face_pixels": 80,
+        "min_sharpness": 45.0,
+        "min_brightness": 25.0,
+        "max_brightness": 235.0,
+    }
+    monkeypatch.setenv("PRESENSI_ENROLLMENT_MIN_FACE_PIXELS", "100")
+    monkeypatch.setenv("PRESENSI_ENROLLMENT_MIN_SHARPNESS", "50.0")
+    monkeypatch.setenv("PRESENSI_ENROLLMENT_MIN_BRIGHTNESS", "30.0")
+    monkeypatch.setenv("PRESENSI_ENROLLMENT_MAX_BRIGHTNESS", "220.0")
+    assert enrollment_quality_from_environment() == {
+        "min_face_pixels": 100,
+        "min_sharpness": 50.0,
+        "min_brightness": 30.0,
+        "max_brightness": 220.0,
+    }

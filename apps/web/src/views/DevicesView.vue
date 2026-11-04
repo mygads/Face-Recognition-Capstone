@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { shouldPausePolling } from '../utils/visibility'
 import { useAuthStore } from '../stores/auth'
 import PageHeader from '../components/PageHeader.vue'
 import {
@@ -777,6 +778,7 @@ onMounted(() => {
     await Promise.all([loadDevices(), loadLaboratories()])
   })()
   refreshTimer = setInterval(() => {
+    if (shouldPausePolling()) return
     void (async () => {
       await loadAiReadiness()
       await loadDevices()

@@ -465,3 +465,87 @@ def test_truncated_runner_up_triggers_wider_matcher_requery() -> None:
         STUDENT_ID,
         other_student,
     }
+
+
+def test_pipeline_replay_skips_inference_and_replays_prior_decision() -> None:
+    """A retried burst must cost zero inference and change no track state.
+
+    The pipeline asks the temporal engine first: a replayed observation
+    (same track id, timestamps at or before the last observed instant) is
+    answered from the prior decision without running detection or matching.
+    """
+    from datetime import timedelta
+
+    from recognition_core.temporal import (
+        MultiFrameDecisionEngine,
+        TemporalDecisionConfig,
+    )
+
+    calls: list[str] = []
+    face = FaceDetection(
+        box=BoundingBox(10, 20, 80, 90),
+        confidence=0.99,
+        landmarks=((30, 45), (65, 45), (48, 60), (35, 82), (62, 82)),
+    )
+    quality = FaceQuality(score=0.95, acceptable=True, signals=(("blur", 0.02),))
+    live = LivenessDecision(state="live", live_score=0.98, required=True, passed=True)
+    embedding = FaceEmbedding(
+        values=(0.6, 0.8),
+        model_name="fake-embedder",
+        model_version="test",
+        normalized=True,
+    )
+    matches = (
+        CandidateMatch(student_id=STUDENT_ID, similarity=0.92),
+        CandidateMatch(student_id=UUID(int=78), similarity=0.3),
+    )
+    engine = MultiFrameDecisionEngine(
+        TemporalDecisionConfig(
+            min_top1_similarity=0.8,
+            min_top1_top2_margin=0.2,
+            minimum_agreeing_frames=3,
+            sample_every_n_frames=1,
+            best_frame_count=3,
+            max_history_frames=5,
+        )
+    )
+    pipeline = RecognitionPipeline(
+        preprocessor=FakePreprocessor(calls),
+        detector=FakeFaceDetector(calls, (face,)),
+        quality_assessor=FakeFaceQualityAssessor(calls, quality),
+        aligner=FakeFaceAligner(calls),
+        liveness_config=LivenessConfig(
+            enabled=True,
+            required=True,
+            min_live_score=0.6,
+        ),
+        liveness_model=FakeLivenessModel(calls, live),
+        embedder=FakeFaceEmbedder(calls, embedding),
+        matcher=FakeMatcher(calls, matches),
+        temporal_decision=engine,
+    )
+    gallery = (
+        dummy_gallery_entry(STUDENT_ID, embedding),
+        dummy_gallery_entry(UUID(int=78), embedding),
+    )
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    observations = [
+        FrameObservation(
+            track_id=TEACHER_TRACK,
+            captured_at=base + timedelta(milliseconds=100 * frame),
+        )
+        for frame in (1, 2, 3)
+    ]
+
+    decisions = [pipeline.process(any_frame(), gallery, obs) for obs in observations]
+    assert [decision.state for decision in decisions] == [
+        "collecting",
+        "collecting",
+        "accepted",
+    ]
+    detect_calls = calls.count("detect")
+
+    replayed = [pipeline.process(any_frame(), gallery, obs) for obs in observations]
+    assert replayed == [decisions[-1]] * len(observations)
+    assert calls.count("detect") == detect_calls
+    assert calls.count("match") == detect_calls

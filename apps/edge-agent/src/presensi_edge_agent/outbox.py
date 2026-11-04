@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import random
 import sqlite3
 import threading
@@ -9,6 +10,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 from uuid import UUID
+
+from presensi_edge_agent.logging import log_event
+
+logger = logging.getLogger(__name__)
 
 
 class OutboxFullError(RuntimeError):
@@ -46,11 +51,22 @@ _ALLOWED_PAYLOAD_FIELDS = {
 class EventOutbox:
     """SQLite idempotent event queue; the schema has no image/vector columns."""
 
-    def __init__(self, path: str | Path, *, max_pending: int) -> None:
+    #: Default cap for poison-pill rows. Dead-letter rows are never retried,
+    #: so without a bound a flapping device fills the edge disk over months.
+    DEFAULT_MAX_DEAD_LETTER = 5000
+
+    def __init__(
+        self, path: str | Path, *, max_pending: int, max_dead_letter: int | None = None
+    ) -> None:
         self.path = Path(path)
         if max_pending < 1:
             raise ValueError("max_pending must be positive.")
         self.max_pending = max_pending
+        if max_dead_letter is None:
+            max_dead_letter = self.DEFAULT_MAX_DEAD_LETTER
+        if max_dead_letter < 1:
+            raise ValueError("max_dead_letter must be positive.")
+        self.max_dead_letter = max_dead_letter
         self._lock = threading.RLock()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(self.path, check_same_thread=False)
@@ -164,21 +180,42 @@ class EventOutbox:
                 (limit,),
             ).fetchall()
         result: list[QueuedEvent] = []
+        corrupt: list[str] = []
         for row in rows:
             # A retrying head event blocks later events, preserving strict FIFO
             # order instead of skipping ahead while its backoff is in effect.
             if str(row["next_attempt_at"]) > timestamp:
                 break
-            payload = json.loads(row["payload_json"])
-            if not isinstance(payload, dict):
+            try:
+                payload = json.loads(row["payload_json"])
+                if not isinstance(payload, dict):
+                    raise ValueError("Outbox row payload is not an object.")
+                event_id = UUID(str(row["event_id"]))
+                attempts = int(row["attempts"])
+            except (TypeError, ValueError) as exc:
+                # A stored row that no longer decodes (disk corruption, manual
+                # tampering, legacy junk) must never poison the whole queue:
+                # quarantine it as a dead letter and keep draining the rest.
+                # Without this, every sync cycle raises here and all pending
+                # events behind the bad row stall forever.
+                corrupt.append(str(row["event_id"]))
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "event_queue_row_quarantined",
+                    event_id=str(row["event_id"]),
+                    error_type=type(exc).__name__,
+                )
                 continue
             result.append(
                 QueuedEvent(
-                    event_id=UUID(row["event_id"]),
+                    event_id=event_id,
                     payload=cast(dict[str, object], payload),
-                    attempts=int(row["attempts"]),
+                    attempts=attempts,
                 )
             )
+        for event_id_text in corrupt:
+            self.dead_letter(event_id_text, status_code=None)
         return result
 
     def acknowledge(self, event_id: UUID) -> None:
@@ -214,13 +251,49 @@ class EventOutbox:
                 (attempts, next_attempt, status_code, str(event_id)),
             )
 
-    def dead_letter(self, event_id: UUID, *, status_code: int | None) -> None:
+    def dead_letter(self, event_id: UUID | str, *, status_code: int | None) -> None:
         with self._lock, self._db:
             self._db.execute(
                 "UPDATE edge_event_outbox SET status = 'dead_letter', "
                 "last_error_status = ? WHERE event_id = ?",
                 (status_code, str(event_id)),
             )
+            self._trim_dead_letter()
+
+    def _trim_dead_letter(self) -> None:
+        """Drop oldest dead-letter rows beyond the cap (caller holds lock+tx).
+
+        Dead-letter rows are terminal diagnostics, never retried. Keeping only
+        the newest N preserves recent failure evidence for the operator while
+        bounding edge-disk usage on long-lived lab PCs.
+        """
+        self._db.execute(
+            "DELETE FROM edge_event_outbox WHERE queue_seq IN ("
+            "SELECT queue_seq FROM edge_event_outbox "
+            "WHERE status = 'dead_letter' ORDER BY queue_seq DESC "
+            "LIMIT -1 OFFSET ?)",
+            (self.max_dead_letter,),
+        )
+
+    def purge_dead_letter(self, *, keep_latest: int | None = None) -> int:
+        """Delete dead-letter rows, keeping the newest ``keep_latest``.
+
+        Returns the number of rows removed. Operators call this after
+        exporting diagnostics; the automatic trim in :meth:`dead_letter`
+        keeps the queue bounded between manual purges.
+        """
+        keep = self.max_dead_letter if keep_latest is None else keep_latest
+        if keep < 0:
+            raise ValueError("keep_latest must be non-negative.")
+        with self._lock, self._db:
+            cursor = self._db.execute(
+                "DELETE FROM edge_event_outbox WHERE queue_seq IN ("
+                "SELECT queue_seq FROM edge_event_outbox "
+                "WHERE status = 'dead_letter' ORDER BY queue_seq DESC "
+                "LIMIT -1 OFFSET ?)",
+                (keep,),
+            )
+            return cursor.rowcount if cursor.rowcount is not None else 0
 
     def counts(self) -> tuple[int, int]:
         with self._lock:

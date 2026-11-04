@@ -241,7 +241,9 @@ def list_sessions(
         query = query.where(AttendanceSession.status == session_status)
     total = session.scalar(select(func.count()).select_from(query.subquery())) or 0
     sessions = session.scalars(
-        query.order_by(AttendanceSession.opened_at.desc()).limit(limit).offset(offset)
+        query.order_by(AttendanceSession.opened_at.desc(), AttendanceSession.id.desc())
+        .limit(limit)
+        .offset(offset)
     ).all()
     return PageResponse(
         items=[_session_response(session, item) for item in sessions],
@@ -543,6 +545,7 @@ def get_session_roster(
             SessionStudent.student_number_snapshot,
             SessionStudent.full_name_snapshot,
             AttendanceRecord.status,
+            AttendanceRecord.note,
         )
         .outerjoin(
             AttendanceRecord,
@@ -558,6 +561,7 @@ def get_session_roster(
             student_number=student_number,
             full_name=full_name,
             record_status=cast(AttendanceStatus | None, record_status),
+            record_note=record_note,
         )
-        for student_id, student_number, full_name, record_status in rows
+        for student_id, student_number, full_name, record_status, record_note in rows
     ]

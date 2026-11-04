@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Generator
+from pathlib import Path
 from uuid import UUID
 
 import httpx
@@ -263,3 +264,80 @@ def test_openapi_documents_device_queue_status_in_heartbeat() -> None:
     assert {"pending_events", "dead_letter_events", "queue_updated_at"} <= set(
         device_schema
     )
+
+
+def _generated_web_schema() -> str:
+    schema_path = (
+        Path(__file__).resolve().parents[3]
+        / "apps"
+        / "web"
+        / "src"
+        / "api"
+        / "generated"
+        / "schema.d.ts"
+    )
+    return schema_path.read_text(encoding="utf-8")
+
+
+def _slice_block(marker: str, text: str, *end_markers: str) -> str:
+    """Slice a generated block from its marker to the next sibling key."""
+    start = text.index(marker)
+    rest = text[start + len(marker) :]
+    positions = [rest.index(end) for end in end_markers if end in rest]
+    assert positions, f"no block end after {marker!r}"
+    return rest[: min(positions)]
+
+
+def test_generated_web_schema_matches_openapi_contract() -> None:
+    """The checked-in TypeScript schema must mirror the served OpenAPI.
+
+    ``schema.d.ts`` is touched by hand between ``npm run api:generate``
+    runs, so a forgotten regen makes the teacher UI lie about routes,
+    operations, and response fields. The failure names the exact missing
+    piece; regenerate instead of hand-editing when it fires.
+    """
+    document = app.openapi()
+    schema = _generated_web_schema()
+
+    missing_routes: list[str] = []
+    for path, item in document["paths"].items():
+        marker = f'    "{path}": {{'
+        if marker not in schema:
+            missing_routes.append(path)
+            continue
+        block = _slice_block(marker, schema, '\n    "', "\n}")
+        methods = [method for method in item if method != "parameters"]
+        missing_routes.extend(
+            f"{method.upper()} {path}"
+            for method in methods
+            if f"\n        {method}:" not in block
+        )
+
+    missing_operations: list[str] = []
+    for item in document["paths"].values():
+        for method, operation in item.items():
+            if method == "parameters" or not isinstance(operation, dict):
+                continue
+            operation_id = str(operation.get("operationId", ""))
+            if f"\n    {operation_id}: {{" not in schema:
+                missing_operations.append(operation_id)
+
+    missing_fields: list[str] = []
+    schemas = document["components"]["schemas"]
+    for name, definition in schemas.items():
+        marker = f"\n        {name}: {{"
+        if marker not in schema:
+            missing_fields.append(name)
+            continue
+        block = _slice_block(marker, schema, "\n        /**", "\n    };")
+        for prop in definition.get("properties", {}):
+            found = block.find(f"\n            {prop}")
+            prop_end = found + len("\n            ") + len(prop)
+            if found < 0 or block[prop_end] not in "?: ":
+                missing_fields.append(f"{name}.{prop}")
+
+    assert missing_routes == [], f"web schema misses routes: {missing_routes}"
+    assert missing_operations == [], (
+        f"web schema misses operations: {missing_operations}"
+    )
+    assert missing_fields == [], f"web schema misses fields: {missing_fields}"

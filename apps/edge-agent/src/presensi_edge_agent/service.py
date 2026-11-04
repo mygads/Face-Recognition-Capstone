@@ -632,7 +632,6 @@ class EdgeService:
         )
         if signature == self._last_decision:
             return
-        self._last_decision = signature
         payload = event_payload(
             decision,
             device_id=self.device_id,
@@ -648,9 +647,15 @@ class EdgeService:
         try:
             self.outbox.enqueue(payload)
         except OutboxFullError:
+            # Transient pressure: the event was NOT durably queued, so the
+            # signature must stay open — the next frame retries instead of
+            # the walk-through being lost silently while the lab is offline.
             log_event(logger, logging.ERROR, "event_queue_full")
             return
         except ValueError as exc:
+            # Deterministically rejected payloads (contract violation) would
+            # only spam the log on every frame; suppress like a duplicate.
+            self._last_decision = signature
             log_event(
                 logger,
                 logging.ERROR,
@@ -658,6 +663,7 @@ class EdgeService:
                 exception_type=type(exc).__name__,
             )
             return
+        self._last_decision = signature
         if self.preview is not None and payload.get("outcome") == "matched":
             self.preview.update_attendance_result("pending")
         pending, _ = self.outbox.counts()
@@ -913,6 +919,11 @@ class EdgeService:
                         raise ValueError("recognition_reconfigure_unavailable")
                     apply_recognition(updated_config)
                     self.recognizer.reset()
+                    # The cached signature describes the previous pipeline's
+                    # output; without clearing it, the first decision of the
+                    # recalibrated pipeline with an identical signature would
+                    # be suppressed as a duplicate.
+                    self._last_decision = None
                 if not isinstance(settings, dict):
                     raise ValueError("invalid_settings")
                 persist_managed_configuration(

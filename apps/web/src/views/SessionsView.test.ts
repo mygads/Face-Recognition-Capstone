@@ -164,6 +164,27 @@ describe('sessions view', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('sudah tercatat')
   })
+
+  it('reloads lists when opening races with another opener', async () => {
+    const wrapper = mount(SessionsView, { global: { plugins: [teacherPinia()] } })
+    await flushPromises()
+
+    const opened = { ...overrideSession, id: 'session-race' }
+    api.openAttendanceSession.mockRejectedValueOnce(
+      new ApiError(409, 'session_already_active', 'Sesi untuk jadwal ini masih terbuka.'),
+    )
+    api.listOpenableSchedules.mockResolvedValue([])
+    api.listAttendanceSessions.mockResolvedValue({
+      items: [opened],
+      pagination: { total: 1, limit: 50, offset: 0 },
+    })
+    const reloadCalls = api.listOpenableSchedules.mock.calls.length
+    await wrapper.get('[data-testid="open-session-schedule-1"]').trigger('click')
+    await flushPromises()
+
+    expect(api.listOpenableSchedules.mock.calls.length).toBeGreaterThan(reloadCalls)
+    expect(wrapper.text()).toContain('sudah dibuka. Daftar dimuat ulang.')
+  })
 })
 
 describe('session roster overview', () => {
@@ -206,6 +227,34 @@ describe('session roster overview', () => {
     expect(wrapper.text()).toContain('Belum tercatat (1)')
     expect(wrapper.text()).toContain('Hadir')
     expect(wrapper.text()).toContain('Terlambat')
+  })
+
+  it('shows the teacher note in the roster when a manual mark has one', async () => {
+    api.getAttendanceSessionStatus.mockResolvedValue(overrideSession)
+    api.getSessionRoster.mockResolvedValue([
+      {
+        student_id: 'student-1',
+        student_number: 'S-001',
+        full_name: 'Siswa Satu',
+        record_status: 'excused',
+        record_note: 'Surat dokter dari TU',
+      },
+      {
+        student_id: 'student-2',
+        student_number: 'S-002',
+        full_name: 'Siswa Dua',
+        record_status: 'present',
+        record_note: null,
+      },
+    ])
+    const wrapper = mount(SessionsView, { global: { plugins: [teacherPinia()] } })
+    await flushPromises()
+    await wrapper.get('button.button--text').trigger('click')
+    await flushPromises()
+    const rows = wrapper.findAll('[data-testid="roster-row"]')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].text()).toContain('Surat dokter dari TU')
+    expect(rows[1].text()).toContain('–')
   })
 
   it('filters the roster by search text and status chips', async () => {

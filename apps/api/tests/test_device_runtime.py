@@ -307,6 +307,82 @@ def test_session_gallery_supports_conditional_refresh_with_304(
     assert changed.json()["generated_at"] > version
 
 
+def _gallery_url(known: str | None = None) -> str:
+    from urllib.parse import quote
+
+    params = (
+        f"?session_id={SESSION_ID}&model_name={MODEL_NAME}"
+        f"&model_version={MODEL_VERSION}"
+    )
+    if known is not None:
+        params += f"&known_generated_at={quote(known, safe='')}"
+    return f"/api/v1/devices/{DEVICE_ID}/active-session-cache{params}"
+
+
+def test_session_gallery_revocation_advances_version_instead_of_304(
+    runtime_database: tuple[sessionmaker[Session], dict[str, Any]],
+) -> None:
+    """Revoking a template must advance generated_at, never hide behind 304.
+
+    Revocation bumps ``FaceTemplate.updated_at`` via ``onupdate``; the
+    version query deliberately includes revoked rows so the edge refetches
+    and drops the revoked template instead of keeps recognizing it.
+    """
+    factory, _ids = runtime_database
+    first = _request("GET", _gallery_url())
+    assert first.status_code == 200, first.text
+    version = str(first.json()["generated_at"])
+
+    # SQLite timestamps resolve to whole seconds, so cross a second boundary
+    # before revoking to observe the version advance deterministically.
+    _sleep(1.1)
+    with factory.begin() as session:
+        template = session.scalars(
+            select(FaceTemplate).where(FaceTemplate.student_id == STUDENT_ID)
+        ).first()
+        assert template is not None
+        template.revoked_at = datetime.now(UTC)
+        template.embedding_ciphertext = None
+        template.encryption_key_id = None
+        template.embedding_dimension = None
+
+    changed = _request("GET", _gallery_url(version))
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["generated_at"] > version
+    roster = changed.json()["roster"]
+    assert len(roster) == 1
+    assert len(roster[0]["templates"]) == 1
+
+
+def test_session_gallery_304_skips_roster_join_and_decryption(
+    runtime_database: tuple[sessionmaker[Session], dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The 304 short-circuit must run before roster join + keyring decrypt.
+
+    If the roster work still executed on the 304 path, making it explode
+    would break the poll. A cheap 304 keeps every gallery poll at three
+    scalar queries instead of a join plus per-template decryption.
+    """
+    from presensi_api.api.v1.routers import device_runtime
+
+    _factory, _ids = runtime_database
+    first = _request("GET", _gallery_url())
+    assert first.status_code == 200, first.text
+    version = str(first.json()["generated_at"])
+
+    def explode(
+        rows: object,
+        **_kwargs: object,
+    ) -> tuple[list[object], int]:
+        raise AssertionError("roster work must not run on the 304 path")
+
+    monkeypatch.setattr(device_runtime, "_template_roster", explode)
+    not_modified = _request("GET", _gallery_url(version))
+    assert not_modified.status_code == 304
+    assert not_modified.content == b""
+
+
 def test_preview_gallery_is_lab_and_schedule_scoped_without_an_active_session(
     runtime_database: tuple[sessionmaker[Session], dict[str, Any]],
     monkeypatch: pytest.MonkeyPatch,

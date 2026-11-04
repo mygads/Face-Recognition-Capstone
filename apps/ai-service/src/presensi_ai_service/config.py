@@ -34,7 +34,12 @@ class AISettings:
     min_top1_similarity: float | None = None
     min_top1_top2_margin: float | None = None
     minimum_agreeing_frames: int = 3
-    sample_every_n_frames: int = 2
+    # Central bursts are isolated single tracks of at most
+    # max_frames_per_burst frames (the gateway mints a fresh track id per
+    # burst), so every frame must be eligible by default. A stride > 1 can
+    # make consensus unreachable within one burst; __post_init__ rejects
+    # such combinations fail-fast instead of collecting forever.
+    sample_every_n_frames: int = 1
     best_frame_count: int = 5
     max_history_frames: int = 10
     min_face_pixels: int = 80
@@ -87,6 +92,20 @@ class AISettings:
         if self.best_frame_count < self.minimum_agreeing_frames:
             raise AIServiceConfigError(
                 "best_frame_count must cover minimum_agreeing_frames."
+            )
+        # Each burst carries a fresh track id, so consensus must be reachable
+        # inside a single burst of at most max_frames_per_burst frames. With
+        # a sampling stride only ceil(max_frames/sample_every) frames are
+        # ever evaluated; requiring more agreeing frames than that would
+        # leave every burst stuck in "collecting" and record no attendance.
+        reachable = math.ceil(self.max_frames_per_burst / self.sample_every_n_frames)
+        if self.minimum_agreeing_frames > reachable:
+            raise AIServiceConfigError(
+                "minimum_agreeing_frames is unreachable: at most "
+                f"{reachable} frame(s) of a {self.max_frames_per_burst}-frame "
+                "burst are evaluated with "
+                f"sample_every_n_frames={self.sample_every_n_frames}. Lower "
+                "the minimum, the stride, or raise max_frames_per_burst."
             )
         if self.min_brightness >= self.max_brightness:
             raise AIServiceConfigError("min_brightness must be below max_brightness.")

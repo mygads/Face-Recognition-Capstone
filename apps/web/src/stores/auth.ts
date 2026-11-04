@@ -115,10 +115,15 @@ export const useAuthStore = defineStore('auth', () => {
     } catch (error) {
       clearSession()
       restoreAttempted = true
-      errorMessage.value =
-        error instanceof ApiError && error.status === 401
-          ? 'Email atau kata sandi tidak valid.'
-          : 'Tidak dapat masuk saat ini. Periksa koneksi lalu coba lagi.'
+      if (error instanceof ApiError && error.status === 401) {
+        errorMessage.value = 'Email atau kata sandi tidak valid.'
+      } else if (error instanceof ApiError && error.status === 429) {
+        // Server menolak karena rate-limit: tampilkan pesannya (sudah
+        // Bahasa Indonesia) agar pengguna tahu kapan boleh mencoba lagi.
+        errorMessage.value = error.message || 'Terlalu banyak percobaan masuk. Coba lagi sebentar.'
+      } else {
+        errorMessage.value = 'Tidak dapat masuk saat ini. Periksa koneksi lalu coba lagi.'
+      }
       throw error
     } finally {
       isLoading.value = false

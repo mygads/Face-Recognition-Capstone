@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { fetchWithPreviewTimeout } from '../utils/previewFetch'
 import { useAuthStore } from '../stores/auth'
 
 type PreviewStatus = {
@@ -347,7 +348,7 @@ async function openPreviewSession(): Promise<string> {
   }
   const accessToken = auth.getValidAccessToken()
   if (!accessToken) throw new Error('Sesi login sudah berakhir. Masuk kembali lalu buka preview.')
-  const response = await fetch(`${previewBaseUrl.value}/v1/session`, {
+  const response = await fetchWithPreviewTimeout(`${previewBaseUrl.value}/v1/session`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -373,7 +374,7 @@ async function authorizedFetch(
   if (!previewBaseUrl.value || !previewToken.value) throw new Error('Sesi preview belum aktif.')
   const headers = new Headers(init.headers)
   headers.set('X-Presensi-Preview-Token', previewToken.value)
-  const response = await fetch(`${previewBaseUrl.value}${path}`, {
+  const response = await fetchWithPreviewTimeout(`${previewBaseUrl.value}${path}`, {
     ...init,
     headers,
     cache: 'no-store',
@@ -381,7 +382,7 @@ async function authorizedFetch(
   if (response.status === 401) {
     previewToken.value = await openPreviewSession()
     headers.set('X-Presensi-Preview-Token', previewToken.value)
-    return fetch(`${previewBaseUrl.value}${path}`, {
+    return fetchWithPreviewTimeout(`${previewBaseUrl.value}${path}`, {
       ...init,
       headers,
       cache: 'no-store',

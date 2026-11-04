@@ -309,6 +309,30 @@ def test_websocket_rejects_bootstrap_password_change_token(
     assert disconnected.value.code == 4401
 
 
+def test_poll_interval_prefers_canonical_env_and_clamps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PRESENSI_ kanonis menang; warisan tetap jalan; rusak → 2 dtk; jepit 0.25–30."""
+    from presensi_api.api.v1.routers.session_dashboard import _poll_interval_seconds
+
+    monkeypatch.delenv("PRESENSI_SESSION_DASHBOARD_POLL_SECONDS", raising=False)
+    monkeypatch.delenv("SESSION_DASHBOARD_POLL_SECONDS", raising=False)
+    assert _poll_interval_seconds() == 2.0
+    monkeypatch.setenv("SESSION_DASHBOARD_POLL_SECONDS", "5")
+    assert _poll_interval_seconds() == 5.0
+    monkeypatch.setenv("PRESENSI_SESSION_DASHBOARD_POLL_SECONDS", "3")
+    assert _poll_interval_seconds() == 3.0
+    monkeypatch.setenv("PRESENSI_SESSION_DASHBOARD_POLL_SECONDS", "not-a-number")
+    monkeypatch.delenv("SESSION_DASHBOARD_POLL_SECONDS", raising=False)
+    # Kanonis rusak + warisan kosong → fallback aman (warisan dihapus di atas).
+    monkeypatch.setenv("SESSION_DASHBOARD_POLL_SECONDS", "bogus")
+    assert _poll_interval_seconds() == 2.0
+    monkeypatch.setenv("PRESENSI_SESSION_DASHBOARD_POLL_SECONDS", "100")
+    assert _poll_interval_seconds() == 30.0
+    monkeypatch.setenv("PRESENSI_SESSION_DASHBOARD_POLL_SECONDS", "0.01")
+    assert _poll_interval_seconds() == 0.25
+
+
 def test_commit_if_dirty_skips_write_transaction_on_read_only_poll() -> None:
     """Dashboard polls every ~2s per client; reads must not open writes."""
     from presensi_api.api.v1.routers.session_dashboard import _commit_if_dirty

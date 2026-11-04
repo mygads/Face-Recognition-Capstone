@@ -145,4 +145,24 @@ describe('auth store', () => {
     expect(auth.errorMessage).toBe('Email atau kata sandi tidak valid.')
     expect(Boolean(auth.accessToken)).toBe(false)
   })
+
+  it('shows the server message when login is rate-limited', async () => {
+    vi.mocked(loginWithPassword).mockRejectedValue(
+      new ApiError(
+        429,
+        'auth_login_rate_limit_exceeded',
+        'Terlalu banyak percobaan masuk untuk akun ini. Coba lagi sebentar.',
+      ),
+    )
+    const auth = useAuthStore()
+
+    await expect(
+      auth.login('teacher@example.test', 'unit-fixture-password'),
+    ).rejects.toBeInstanceOf(ApiError)
+
+    expect(auth.hasActiveSession()).toBe(false)
+    expect(auth.errorMessage).toBe(
+      'Terlalu banyak percobaan masuk untuk akun ini. Coba lagi sebentar.',
+    )
+  })
 })

@@ -358,9 +358,13 @@ def _gallery_version(
 ) -> datetime:
     """Content version for conditional gallery refresh.
 
-    Advances only when the session row, its roster snapshot, or a roster
+    Advances when the session row, its roster snapshot, or any roster
     template actually changes, so edge agents can poll cheaply (HTTP 304)
-    instead of re-downloading and re-parsing identical galleries.
+    instead of re-downloading and re-parsing identical galleries. Revoked
+    rows are deliberately included: revocation bumps ``updated_at`` via
+    ``onupdate``, and excluding revoked rows would let the version stall or
+    move backwards after a revocation — hiding the change behind a 304
+    while the edge keeps recognizing the revoked template.
     """
     snapshot_max = session.scalar(
         select(func.max(SessionStudent.snapshot_taken_at)).where(
@@ -376,7 +380,6 @@ def _gallery_version(
             ),
             FaceTemplate.model_name == model_name,
             FaceTemplate.model_version == model_version,
-            FaceTemplate.revoked_at.is_(None),
         )
     )
     version_candidates = [as_utc(selected_updated_at)]
@@ -432,6 +435,27 @@ def get_active_session_cache(
             )
         selected, schedule, end_at = selected_row
 
+    # The gallery version must be stable across polls: edge agents skip
+    # gallery rebuilds while generated_at is unchanged, and a fresh
+    # timestamp on every request would defeat that change detection.
+    # The cheap version check runs BEFORE the roster join and template
+    # decryption below, so a 304 poll costs three scalar queries instead of
+    # a join plus per-template keyring decryption. The version advances on
+    # session, roster-snapshot, enrollment, and revocation changes, so an
+    # unchanged version guarantees identical gallery content (in particular
+    # the 409 empty-gallery state below cannot appear under a 304).
+    generated_at = _gallery_version(
+        session,
+        session_id=selected.id,
+        model_name=model_name,
+        model_version=model_version,
+        selected_updated_at=selected.updated_at,
+    )
+    if known_generated_at is not None and as_utc(known_generated_at) >= generated_at:
+        # The edge already holds this exact version: skip the roster join,
+        # template decryption, and payload serialization entirely.
+        return Response(status_code=304)
+
     roster_rows = session.execute(
         select(
             SessionStudent.student_id,
@@ -466,22 +490,6 @@ def get_active_session_cache(
             "Tidak ada template aktif yang sesuai dengan model perangkat.",
         )
 
-    # The gallery version must be stable across polls: edge agents skip
-    # gallery rebuilds while generated_at is unchanged, and a fresh
-    # timestamp on every request would defeat that change detection.
-    # The version advances only when the session, its roster snapshot, or
-    # a roster template actually changes.
-    generated_at = _gallery_version(
-        session,
-        session_id=selected.id,
-        model_name=model_name,
-        model_version=model_version,
-        selected_updated_at=selected.updated_at,
-    )
-    if known_generated_at is not None and as_utc(known_generated_at) >= generated_at:
-        # The edge already holds this exact version: skip the roster join,
-        # template decryption, and payload serialization entirely.
-        return Response(status_code=304)
     request_now = datetime.now(UTC)
     expires_at = min(
         end_at,

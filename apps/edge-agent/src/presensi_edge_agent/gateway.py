@@ -22,6 +22,15 @@ from presensi_edge_agent.outbox import EventOutbox, OutboxFullError
 
 logger = logging.getLogger("presensi_edge_agent")
 
+#: Window during which a repeated central-AI match for the same student in
+#: the same session is not re-enqueued. The STB gateway mints a fresh track
+#: id per burst, so unlike the AI_EDGE path (which dedups via its sticky
+#: track signature) every lingering-person burst would otherwise store
+#: another "attendance_already_recorded" event. The first event still flows
+#: through the outbox idempotently; 120 s keeps the dashboard feed quiet
+#: while a person stands at the gate without hiding genuine re-entries.
+REPEAT_MATCH_SUPPRESSION_SECONDS = 120.0
+
 
 class CameraSource(Protocol):
     def open(self) -> None: ...
@@ -145,6 +154,7 @@ class StbGatewayService:
         self._camera_open = False
         self._last_burst_at = 0.0
         self._last_periodic_at = 0.0
+        self._last_accepted_match: tuple[UUID, UUID, float] | None = None
 
     def _queue_status_snapshot(self) -> dict[str, object]:
         pending, dead_letter = self.outbox.counts()
@@ -429,13 +439,11 @@ class StbGatewayService:
             return
         # A burst is one short track: a later person at the same camera must
         # not inherit temporal evidence from the previous candidate.
+        session_id = self.session_id
+        assert session_id is not None
         track_id = f"camera-{self.config.camera.index}-{uuid4()}"
         try:
-            decision = self.ai.recognize_burst(
-                session_id=self.session_id,
-                track_id=track_id,
-                frames=frames,
-            )
+            decision = self._recognize_burst_with_retry(session_id, track_id, frames)
         except ValueError as exc:
             # Malformed burst data (clock skew between captures, oversized
             # frame) is a data problem, not a camera failure: skip this burst
@@ -447,6 +455,28 @@ class StbGatewayService:
                 exception_type=type(exc).__name__,
             )
             return
+        if decision.outcome == "matched" and decision.student_id is not None:
+            # A lingering person would otherwise enqueue a duplicate event on
+            # every motion/periodic burst (the API would store each one as
+            # "attendance_already_recorded"). Suppress repeats of the same
+            # student within the window; the first event still flows through
+            # the outbox idempotently, and a session change re-keys the
+            # suppression automatically.
+            now_monotonic = time.monotonic()
+            last = self._last_accepted_match
+            if (
+                last is not None
+                and last[0] == decision.session_id
+                and last[1] == decision.student_id
+                and now_monotonic - last[2] < REPEAT_MATCH_SUPPRESSION_SECONDS
+            ):
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    "central_ai_duplicate_match_suppressed",
+                    student_id=str(decision.student_id),
+                )
+                return
         payload = _event_payload(
             decision,
             device_id=self.device_id,
@@ -455,8 +485,39 @@ class StbGatewayService:
         try:
             self.outbox.enqueue(payload)
         except OutboxFullError:
+            # Transient pressure: the burst was NOT durably queued, so the
+            # repeat-match key must stay open — the next burst retries
+            # instead of the walk-through being lost silently.
             log_event(logger, logging.ERROR, "event_queue_full")
             return
+        except ValueError as exc:
+            # Deterministically rejected payloads (contract violation) would
+            # only spam the log on every burst and must not flap the camera
+            # via the generic capture-loop reconnect: suppress like a
+            # duplicate and keep capturing.
+            if decision.outcome == "matched" and decision.student_id is not None:
+                self._last_accepted_match = (
+                    decision.session_id,
+                    decision.student_id,
+                    time.monotonic(),
+                )
+            log_event(
+                logger,
+                logging.ERROR,
+                "event_queue_rejected",
+                exception_type=type(exc).__name__,
+            )
+            return
+        # Stamp only after durable queueing; a full outbox must not swallow
+        # the walk-through (the lingering-person window still applies).
+        # Only matched bursts arm the lingering-person window; other outcomes
+        # leave the previous key untouched.
+        if decision.outcome == "matched" and decision.student_id is not None:
+            self._last_accepted_match = (
+                decision.session_id,
+                decision.student_id,
+                time.monotonic(),
+            )
         log_event(
             logger,
             logging.INFO,
@@ -464,6 +525,45 @@ class StbGatewayService:
             recognition_outcome=decision.outcome,
             reason_code=decision.reason_code,
         )
+
+    def _recognize_burst_with_retry(
+        self, session_id: UUID, track_id: str, frames: list[BurstFrame]
+    ) -> CentralDecision:
+        """Recognize one burst, retrying a single transient failure.
+
+        The central worker serializes all devices through one inference
+        slot and answers 503 while busy; the capture loop must not drop a
+        walk-through burst on the first collision. One bounded retry ~1 s
+        later (same track id, session id, and frames) doubles the odds
+        without stalling capture: the retry reuses the burst-scoped session
+        id so frames captured under the old session are never attributed to
+        a newly discovered session mid-wait. Non-retryable rejections and a
+        second failure propagate to the caller and the burst is skipped
+        like before.
+        """
+        try:
+            return self.ai.recognize_burst(
+                session_id=session_id,
+                track_id=track_id,
+                frames=frames,
+            )
+        except ApiCallError as exc:
+            if not exc.retryable or self.stop_event.is_set():
+                raise
+            log_event(
+                logger,
+                logging.INFO,
+                "central_ai_burst_retrying",
+                status_code=exc.status_code,
+            )
+            self.stop_event.wait(1.0)
+            if self.stop_event.is_set():
+                raise
+            return self.ai.recognize_burst(
+                session_id=session_id,
+                track_id=track_id,
+                frames=frames,
+            )
 
     def _sync_worker(self) -> None:
         next_heartbeat = 0.0

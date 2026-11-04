@@ -339,7 +339,16 @@ kamera 1080p.
   recall jauh lebih besar daripada menurunkan threshold.
 - **Rate limit API**: sliding-window per principal dengan sweep global
   amortized tiap 128 request (prune per-key tiap request O(1)) — heartbeat
-  rutin tetap murah.
+  rutin tetap murah. Login dilindungi ganda sebelum verifikasi argon2:
+  `PRESENSI_AUTH_LOGIN_EMAIL_ATTEMPTS_PER_MINUTE` (default 10, per akun)
+  + `PRESENSI_AUTH_LOGIN_IP_ATTEMPTS_PER_MINUTE` (default 120, per IP
+  socket — tak memakai `X-Forwarded-For` agar tak bisa di-spoof; bila di
+  belakang reverse proxy, pasang juga limit di proxy). Pelanggaran balas
+  429 + `Retry-After: 60` tanpa menulis baris audit.
+- **Timeout browser**: semua request UI dibatasi 30 dtk
+  (`apiTimeout.milliseconds`, selaras statement timeout server) agar kabel
+  lepas/AP macet tak menggantung spinner; unduhan ekspor memakai pagu
+  120 dtk karena file semester bisa bermegabyte.
 - **Responsif ala KAI (banyak lab + guru polling bersamaan)**:
   `GZipMiddleware` mengompresi respons JSON >1 KiB (galeri 277 KiB → 16 KiB
   diukur live); pool koneksi DB bisa disetel via `PRESENSI_DB_POOL_SIZE`
@@ -348,16 +357,61 @@ kamera 1080p.
   central (mis. 20 untuk puluhan lab), biarkan kecil di PC lab; indeks
   komposit `(session_id, status)` di `attendance_records` melayani ringkasan
   dashboard tiap polling; route frontend di-split per halaman (lazy import)
-  agar first-paint ringan. Polling dashboard 2 dtk + WS hanya per sesi yang
-  dibuka, bukan broadcast.
+  agar first-paint ringan. Dashboard sesi memakai WS per sesi yang dibuka
+  (bukan broadcast); WS otomatis diputus saat tab disembunyikan dan disambung
+  lagi saat terlihat — puluhan tab guru yang lupa ditutup tak lagi membebani
+  DB. Tick WS 2 dtk bisa disetel via
+  `PRESENSI_SESSION_DASHBOARD_POLL_SECONDS` (jepit 0,25–30; warisan tanpa prefix
+  tetap dibaca). Polling Devices (15 dtk) dan AI Setup (30 dtk) juga dilewati saat tab
+  hidden (`shouldPausePolling`).
 - **Default aman sementara**: tombol "Pakai default aman" di AI Setup mengisi
   threshold ketat (0.65/0.20) + referensi `DEFAULT-AMAN-SEMENTARA` agar
   instalasi langsung jalan end-to-end (wajah meragukan → ulangi/manual).
   Banner mengingatkan kalibrasi lokal wajib sebelum produksi (P0-5) —
-  default ini BUKAN hasil kalibrasi.
+  default ini BUKAN hasil kalibrasi. Angka terbitan SFace 0.363 (LFW,
+  Szarvas et al.) hanya titik awal literatur — validasi kami justru memilih
+  0.65 yang lebih ketat agar fail-closed; jangan turunkan tanpa kurva FAR/FRR
+  lab sendiri.
+- **PgBouncer (opsional, skala puluhan lab)**: jalankan PgBouncer
+  `transaction pooling` di depan Postgres, lalu set
+  `PRESENSI_DB_POOL_DISABLED=1` (app memakai NullPool — tanpa double-pooling)
+  + `PRESENSI_DB_STATEMENT_TIMEOUT_MS=30000` (satu laporan lambat tak boleh
+  menahan worker; 0 = nonaktif untuk migrasi lama manual). Tanpa PgBouncer,
+  biarkan pool app aktif (default 5/10) + `pool_pre_ping`. Statement timeout
+  hanya untuk PostgreSQL via `options`; SQLite dev diabaikan.
+- **Ukuran input YuNet**: detector tahan di resolusi kecil — untuk jarak
+  check-in (±1–3 m) cukup frame ~128–320 px sisi panjang di sisi deteksi
+  (`detection_max_width` 640 untuk PC lemah, 0 = mati). Jangan naikkan
+  resolusi demi "akurasi": wajah kecil di lorong lebih terbantu oleh
+  enrollment 2–3 sudut + pencahayaan daripada frame 1080p yang hanya
+  menaikkan CPU.
 - **Outbox**: `max_retry_seconds` 60 (backoff cap) + `max_outbox_events`
   50000; pantau `dead_letter_events` di dashboard — antrean mati >0 berarti
-  kredensial/model bermasalah, bukan jaringan.
+  kredensial/model bermasalah, bukan jaringan. Dead-letter dibatasi
+  `runtime.max_dead_letter_events` (default 5000; env
+  `PRESENSI_EDGE_MAX_DEAD_LETTER_EVENTS`) — baris tertua otomatis dipangkas
+  agar PC lab tak kehabisan disk dalam hitungan bulan; `purge_dead_letter()`
+  tersedia untuk bersih-bersih manual pasca-diagnostik.
+- **Konsensus temporal (anti macet-diam)**: tiap burst STB memakai track
+  id baru sehingga konsensus harus tercapai dalam SATU burst —
+  `ceil(PRESENSI_AI_MAX_FRAMES / PRESENSI_AI_SAMPLE_EVERY_N_FRAMES)` wajib
+  menutupi `PRESENSI_AI_MINIMUM_AGREEING_FRAMES` (default 5/1 → 5 ≥ 3).
+  Kombinasi tak-tercapai ditolak saat startup AI service. Di sisi edge
+  (track kontinu), `ceil(track_ttl_seconds × fps / sample_every_n_frames)`
+  wajib menutupi `minimum_agreeing_frames` (contoh yaml 3 dtk × 30 fps / 6
+  ≈ 15 ≥ 3); startup dan managed-config menolak kebijakan yang membuat
+  semua track macet di "collecting" tanpa kehadiran tercatat.
+- **Burst STB anti-spam & anti-hilang**: gateway menekan event duplikat
+  orang yang diam di depan kamera (match yang sama dalam 120 dtk tidak
+  di-enqueue ulang; kehadiran pertama tetap mengalir idempoten via outbox)
+  sehingga tabel event tak dibanjiri `attendance_already_recorded`.
+  Sebaliknya satu kegagalan transient (mis. 503 slot inferensi sibuk) di-retry
+  sekali ~1 dtk kemudian dengan track id yang sama — burst walk-through yang
+  hanya lewat sekali tidak hilang begitu saja. Dua gagal beruntun tetap drop
+  (fail-fast) agar capture tak macet.
+- **Export hemat DB**: guard 413 export kini memakai satu query ber-batas
+  (`LIMIT 50.001`) sehingga rentang raksasa berhenti dini, bukan COUNT(*)
+  penuh + SELECT penuh. Batas 50.000 baris tak berubah.
 - **Retensi/validasi event**: sweep retensi berjalan tiap
   `PRESENSI_RETENTION_SWEEP_HOURS` (default 24; 0 = jadwal nonaktif, CLI
   manual tetap bisa); event dengan `occurred_at` lebih dari

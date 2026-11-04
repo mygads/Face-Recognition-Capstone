@@ -18,3 +18,4 @@ class AiReadinessResponse(ApiSchema):
     central_ai_config_sync_status: (
         Literal["disabled", "pending", "applied", "error", "unavailable"] | None
     )
+    central_ai_config_sync_error_code: str | None

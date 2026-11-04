@@ -88,6 +88,10 @@ class RuntimeSettings:
     max_outbox_events: int
     max_retry_seconds: float
     log_level: str
+    # Batas diagnostik poison-pill (terminal, tak pernah di-retry). Default di
+    # sini agar konstruksi posisional lama (path, max_outbox, retry, level)
+    # tetap valid; nilai yaml/env selalu ditulis eksplisit oleh load_config.
+    max_dead_letter_events: int = 5000
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +229,30 @@ class EdgeConfig:
                 raise EdgeConfigError(
                     "Enabled liveness needs a locally calibrated min_live_score."
                 )
+        # Fail-fast when the sampling stride can never reach consensus inside
+        # one track lifetime. A track observes roughly fps*ttl frames and
+        # only every sample_every_n_frames-th frame is evaluated, so the
+        # reachable evidence per track is ceil(ttl*fps/stride). Requiring
+        # more agreeing frames than that would leave every track stuck in
+        # "collecting" (no attendance, no error) — e.g. ttl=3s at 5 fps with
+        # stride 6 yields ~3 evaluated frames, so minimum_agreeing_frames=4
+        # could never accept.
+        recognition = self.recognition
+        reachable = math.ceil(
+            self.camera.fps
+            * recognition.track_ttl_seconds
+            / recognition.sample_every_n_frames
+        )
+        if reachable < recognition.minimum_agreeing_frames:
+            raise EdgeConfigError(
+                "Recognition sampling cannot reach consensus: "
+                f"~{reachable} evaluated frame(s) per track "
+                f"(track_ttl_seconds={recognition.track_ttl_seconds}, "
+                f"camera fps={self.camera.fps}, "
+                f"sample_every_n_frames={recognition.sample_every_n_frames}) "
+                f"but minimum_agreeing_frames={recognition.minimum_agreeing_frames}. "
+                "Lower the stride/minimum or raise the track TTL."
+            )
 
 
 _ENVIRONMENT_OVERRIDES: dict[
@@ -282,6 +310,12 @@ _ENVIRONMENT_OVERRIDES: dict[
         int,
     ),
     "PRESENSI_EDGE_LOG_LEVEL": ("runtime", "log_level", str),
+    "PRESENSI_EDGE_MAX_OUTBOX_EVENTS": ("runtime", "max_outbox_events", int),
+    "PRESENSI_EDGE_MAX_DEAD_LETTER_EVENTS": (
+        "runtime",
+        "max_dead_letter_events",
+        int,
+    ),
 }
 
 
@@ -701,6 +735,7 @@ def load_config(
             or base / "data/camera-queue/edge-events.sqlite3"
         ),
         max_outbox_events=_integer(runtime_raw, "max_outbox_events", 50000),
+        max_dead_letter_events=_integer(runtime_raw, "max_dead_letter_events", 5000),
         max_retry_seconds=_positive_number(
             runtime_raw.get("max_retry_seconds", 60), "runtime.max_retry_seconds"
         ),

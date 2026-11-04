@@ -17,6 +17,7 @@ from presensi_api.api.security.dependencies import (
     issue_browser_session_token,
 )
 from presensi_api.api.security.passwords import hash_password, verify_password
+from presensi_api.api.security.request_rate_limit import enforce_login_rate_limit
 from presensi_api.api.security.roles import AuthenticatedUser, principal_for_user
 from presensi_api.api.v1.schemas.auth import (
     CurrentUserResponse,
@@ -82,6 +83,8 @@ def login(
     settings: AuthSettings = Depends(get_auth_settings),
 ) -> TokenResponse:
     email = form.username.strip().casefold()
+    # Brute-force guard first: no argon2 verify and no audit row while limited.
+    enforce_login_rate_limit(request, email)
     user = session.scalar(select(User).where(func.lower(User.email) == email))
     valid_password = verify_password(
         form.password, user.password_hash if user is not None else None

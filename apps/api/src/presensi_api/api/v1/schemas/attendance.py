@@ -31,6 +31,7 @@ class AttendanceRecordResponse(ApiSchema):
     source: AttendanceSource
     recognition_event_id: UUID | None
     recorded_at: AwareDatetime
+    note: str | None = None
 
 
 class RecognitionEventRequest(ApiSchema):

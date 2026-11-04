@@ -95,6 +95,16 @@ def apply_managed_configuration(
             or quality.min_brightness >= quality.max_brightness
         ):
             raise EdgeConfigError("The managed AI_EDGE policy is not usable.")
+        # Same fail-fast as startup validation: the pushed stride must leave
+        # consensus reachable inside one track lifetime at this PC's camera
+        # rate, otherwise every track would stall in "collecting" silently.
+        managed_reachable = math.ceil(
+            config.camera.fps
+            * config.recognition.track_ttl_seconds
+            / recognition.sample_every_n_frames
+        )
+        if managed_reachable < recognition.minimum_agreeing_frames:
+            raise EdgeConfigError("The managed AI_EDGE policy is not usable.")
         return replace(
             config,
             quality=quality,

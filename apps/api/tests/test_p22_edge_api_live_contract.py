@@ -8,12 +8,15 @@ Postgres runs remain MANUAL HARDWARE TEST REQUIRED (see docs/pengujian.md).
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from test_attendance_decisions import attendance_database, post_event  # noqa: F401
+from test_attendance_decisions import (  # noqa: F401
+    attendance_database,
+    frozen_now_utc,
+    post_event,
+)
 
 from presensi_api.db.models import AttendanceRecord, RecognitionEvent
 from presensi_edge_agent.events import event_payload
@@ -35,11 +38,15 @@ def test_real_edge_payload_records_attendance(
         ),
         observation_count=3,
     )
+    # Stamp on the fixture clock, not wall time: the R27 noon fixture
+    # freezes the skew cutoff, so a wall-clock stamp fails with
+    # event_occurred_at_in_future on any run after 12:05 WIB.
+    occurred_at = frozen_now_utc()
     payload = event_payload(
         decision,
         device_id=ids["device"],
         session_id=ids["session"],
-        occurred_at=datetime.now(UTC),
+        occurred_at=occurred_at,
         model_name="opencv-zoo-sface",
         model_version="contract-p22",
         liveness_required=False,

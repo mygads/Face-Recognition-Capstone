@@ -92,6 +92,7 @@ def _response_for_event(
             source=cast(AttendanceSource, record.source),
             recognition_event_id=record.recognition_event_id,
             recorded_at=as_utc(record.recorded_at),
+            note=record.note,
         )
         return RecognitionEventDecisionResponse(
             event_id=event.event_uuid,
@@ -208,7 +209,25 @@ def decide_recognition_event(
         quality_metadata=metadata,
     )
     db.add(event)
-    db.flush()
+    try:
+        # A concurrent delivery of the same event_id can slip past the
+        # pre-check above; the savepoint keeps the UNIQUE(event_uuid)
+        # violation from aborting the session, and the winner's row decides
+        # the replay response (mirrors the attendance-record race below).
+        with db.begin_nested():
+            db.flush()
+    except IntegrityError:
+        # Detach the loser so the re-query below does not autoflush it into
+        # a second UNIQUE violation before it can read the winner's row.
+        db.expunge(event)
+        raced = db.scalar(
+            select(RecognitionEvent).where(
+                RecognitionEvent.event_uuid == request.event_id
+            )
+        )
+        if raced is None:
+            raise
+        return _idempotent_response(db, raced, request)
     device.last_seen_at = datetime.now(UTC)
     device.model_version = request.model_version
 

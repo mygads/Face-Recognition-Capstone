@@ -73,6 +73,7 @@ EXPORT_COLUMNS: tuple[tuple[str, str], ...] = (
     ("session_id", "ID sesi"),
     ("student_id", "ID siswa"),
     ("attendance_record_id", "ID record presensi"),
+    ("note", "Catatan"),
 )
 
 
@@ -117,6 +118,7 @@ def _statement(
             AttendanceRecord.source.label("source"),
             AttendanceSession.opened_at.label("session_opened_at"),
             AttendanceRecord.recorded_at.label("recorded_at"),
+            AttendanceRecord.note.label("note"),
         )
         .select_from(SessionStudent)
         .join(
@@ -184,6 +186,7 @@ def _query_rows(
     principal: AuthenticatedUser,
     *,
     page: bool,
+    limit: int | None = None,
 ) -> list[AttendanceReportRow]:
     statement = _statement(query, principal).order_by(
         AttendanceSession.opened_at.desc(),
@@ -192,6 +195,8 @@ def _query_rows(
     )
     if page:
         statement = statement.limit(query.limit).offset(query.offset)
+    elif limit is not None:
+        statement = statement.limit(limit)
     return [_report_row(row) for row in db.execute(statement).all()]
 
 
@@ -492,15 +497,18 @@ def list_attendance_report_records(
 def _export_rows(
     db: Session, query: AttendanceReportQuery, principal: AuthenticatedUser
 ) -> list[AttendanceReportRow]:
-    filtered = _statement(query, principal).subquery()
-    total = db.scalar(select(func.count()).select_from(filtered)) or 0
-    if total > MAX_EXPORT_ROWS:
+    # Probe with a single capped query instead of a full COUNT(*) plus a full
+    # SELECT: for ranges far above the cap the database stops after
+    # MAX_EXPORT_ROWS + 1 rows instead of scanning everything twice. The 413
+    # boundary is unchanged (more than MAX_EXPORT_ROWS rows still rejected).
+    rows = _query_rows(db, query, principal, page=False, limit=MAX_EXPORT_ROWS + 1)
+    if len(rows) > MAX_EXPORT_ROWS:
         raise ApiProblem(
             413,
             "report_export_too_large",
             f"Export dibatasi maksimal {MAX_EXPORT_ROWS:,} baris. Tambahkan filter.",
         )
-    return _query_rows(db, query, principal, page=False)
+    return rows
 
 
 def _spreadsheet_value(value: object) -> str | int | float | None:

@@ -29,6 +29,12 @@ class SlidingWindowRateLimiter:
         self._lock = Lock()
         self._calls_since_sweep = 0
 
+    def reset(self) -> None:
+        """Drop all buckets; used by the test-suite to isolate rate-limit tests."""
+        with self._lock:
+            self._requests.clear()
+            self._calls_since_sweep = 0
+
     def allow(
         self,
         key: str,
@@ -100,3 +106,35 @@ DeviceActor = Annotated[AuthenticatedDevice, Depends(rate_limited_device)]
 EnrollmentOperator = Annotated[
     AuthenticatedUser, Depends(rate_limited_enrollment_operator)
 ]
+
+
+def enforce_login_rate_limit(request: Request, email: str) -> None:
+    """Bound password-guessing and argon2 CPU burn before any DB work.
+
+    Two buckets: per-email (a targeted account cannot be hammered even from
+    a botnet) and per-IP (one client cannot spray many accounts or flood
+    argon2 verifies). Rejected attempts return 429 without an audit row so
+    a flood cannot bloat `audit_logs` either. Limits come from app.state so
+    tests can tighten them without touching production defaults.
+    """
+    limiter: SlidingWindowRateLimiter = request.app.state.request_rate_limiter
+    # Form usernames are unbounded; cap the key so a giant payload cannot
+    # bloat limiter memory (real emails fit in 254 chars).
+    normalized = email.strip().casefold()[:256]
+    email_limit: int = request.app.state.login_email_attempts_per_minute
+    if not limiter.allow(f"login:email:{normalized}", limit=email_limit):
+        raise ApiProblem(
+            429,
+            "auth_login_rate_limit_exceeded",
+            "Terlalu banyak percobaan masuk untuk akun ini. Coba lagi sebentar.",
+            headers={"Retry-After": "60"},
+        )
+    client_ip = request.client.host if request.client is not None else "unknown"
+    ip_limit: int = request.app.state.login_ip_attempts_per_minute
+    if not limiter.allow(f"login:ip:{client_ip}", limit=ip_limit):
+        raise ApiProblem(
+            429,
+            "auth_login_rate_limit_exceeded",
+            "Terlalu banyak percobaan masuk dari jaringan ini. Coba lagi sebentar.",
+            headers={"Retry-After": "60"},
+        )

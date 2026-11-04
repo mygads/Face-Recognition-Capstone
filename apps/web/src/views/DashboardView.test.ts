@@ -488,3 +488,41 @@ describe('dashboard websocket close codes', () => {
     }
   })
 })
+
+describe('dashboard visibility pause', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.stubGlobal('WebSocket', StubWebSocket)
+    api.listAttendanceSessions.mockImplementation(async ({ status }: { status: string }) => ({
+      items: status === 'active' ? [activeSession] : [],
+      pagination: { total: 1, limit: 100, offset: 0 },
+    }))
+    api.getSessionDashboardSnapshot.mockImplementation(async (sessionId: string) =>
+      snapshotFor(sessionId, 'active'),
+    )
+    api.listAtRiskStudents.mockResolvedValue({ ...atRiskPayload, items: [] })
+  })
+
+  it('refreshes the session list without resetting the selection on visible', async () => {
+    const wrapper = mount(DashboardView, {
+      global: { plugins: [teacherPinia(), testRouter()] },
+    })
+    await flushPromises()
+    const initialListCalls = api.listAttendanceSessions.mock.calls.length
+    expect(initialListCalls).toBeGreaterThan(0)
+
+    Object.defineProperty(document, 'hidden', { value: true, configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+    await flushPromises()
+
+    // Daftar dimuat ulang setelah tab terlihat lagi; pilihan sesi dipertahankan.
+    expect(api.listAttendanceSessions.mock.calls.length).toBeGreaterThan(initialListCalls)
+    const select = wrapper.find('select')
+    expect((select.element as HTMLSelectElement).value).toBe('session-active')
+  })
+})

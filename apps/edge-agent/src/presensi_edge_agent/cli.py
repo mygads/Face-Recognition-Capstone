@@ -199,6 +199,7 @@ def _run_service(config: EdgeConfig) -> int:
         outbox = EventOutbox(
             config.runtime.outbox_path,
             max_pending=config.runtime.max_outbox_events,
+            max_dead_letter=config.runtime.max_dead_letter_events,
         )
         gateway_service = StbGatewayService(
             config=config,
@@ -239,6 +240,7 @@ def _run_service(config: EdgeConfig) -> int:
     outbox = EventOutbox(
         config.runtime.outbox_path,
         max_pending=config.runtime.max_outbox_events,
+        max_dead_letter=config.runtime.max_dead_letter_events,
     )
     from presensi_edge_agent.recognition import LocalRecognizer, build_pipeline
     from presensi_edge_agent.service import EdgeService

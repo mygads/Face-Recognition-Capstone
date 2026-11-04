@@ -18,6 +18,7 @@ from presensi_api.api.errors import (
     unexpected_exception_handler,
     validation_exception_handler,
 )
+from presensi_api.api.security.config import AuthSettings
 from presensi_api.api.security.request_rate_limit import SlidingWindowRateLimiter
 from presensi_api.api.v1.router import api_v1_router
 from presensi_api.api.v1.schemas.health import HealthResponse
@@ -128,6 +129,11 @@ async def _session_auto_close_worker() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # Fail fast when auth cannot work: a missing/short JWT_SECRET otherwise
+    # surfaces as a generic 503 on every login/token endpoint while the
+    # server looks healthy (R27: live restart without the secret served 503
+    # until the env gap was found). Crash here with a clear message instead.
+    AuthSettings.from_environment()
     worker = asyncio.create_task(_session_auto_close_worker())
     try:
         yield
@@ -150,6 +156,12 @@ app.state.device_requests_per_minute = _positive_integer_setting(
 )
 app.state.enrollment_requests_per_minute = _positive_integer_setting(
     "PRESENSI_ENROLLMENT_REQUESTS_PER_MINUTE", 10
+)
+app.state.login_email_attempts_per_minute = _positive_integer_setting(
+    "PRESENSI_AUTH_LOGIN_EMAIL_ATTEMPTS_PER_MINUTE", 10
+)
+app.state.login_ip_attempts_per_minute = _positive_integer_setting(
+    "PRESENSI_AUTH_LOGIN_IP_ATTEMPTS_PER_MINUTE", 120
 )
 max_request_bytes = _positive_integer_setting(
     "PRESENSI_API_MAX_REQUEST_BYTES",

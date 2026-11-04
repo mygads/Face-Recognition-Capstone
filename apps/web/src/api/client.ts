@@ -111,14 +111,58 @@ const authMiddleware: Middleware = {
       authHandlers.onUnauthorized()
     }
   },
-  onError() {
-    return new ApiError(0, 'network_error', 'Tidak dapat terhubung ke server.')
+  onError({ error }) {
+    return toTransportError(error)
   },
+}
+
+/**
+ * Batas waktu request browser. Tanpa ini, koneksi yang menggantung (kabel
+ * lepas, AP lab macet) membuat spinner/loading jalan selamanya karena
+ * `fetch` tidak punya timeout bawaan. 30 dtk selaras dengan guard
+ * `PRESENSI_DB_STATEMENT_TIMEOUT_MS` server: respons normal harusnya
+ * milidetik; yang lewat dari ini sudah pasti jaringan, bukan antrean.
+ * Diuji via `apiTimeout.milliseconds`; abort penelepon ikut diteruskan
+ * sehingga pembatalan eksplisit tetap berfungsi berdampingan dengan pagu.
+ */
+export const apiTimeout = {
+  milliseconds: 30_000,
+}
+
+export function fetchWithTimeout(
+  request: Request,
+  timeoutMs = apiTimeout.milliseconds,
+): Promise<Response> {
+  // `request.signal` selalu ada (default tak pernah abort), jadi tidak bisa
+  // dipakai untuk mendeteksi signal penelepon — teruskan saja: abort dari
+  // penelepon ikut membatalkan, timeout kita tetap jadi pagu terakhir.
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  if (request.signal.aborted) {
+    controller.abort()
+  } else {
+    request.signal.addEventListener('abort', () => controller.abort(), { once: true })
+  }
+  return fetch(request, { credentials: 'include', signal: controller.signal }).finally(() => {
+    clearTimeout(timer)
+  })
+}
+
+/** Petakan kegagalan transport ke ApiError berkode agar UI bisa bicara jelas. */
+export function toTransportError(error: unknown): ApiError {
+  if (error instanceof DOMException && error.name === 'AbortError') {
+    return new ApiError(
+      0,
+      'request_timeout',
+      'Permintaan kedaluwarsa. Periksa koneksi lalu coba lagi.',
+    )
+  }
+  return new ApiError(0, 'network_error', 'Tidak dapat terhubung ke server.')
 }
 
 const apiClient = createClient<paths>({
   baseUrl: '',
-  fetch: (request) => fetch(request, { credentials: 'include' }),
+  fetch: (request) => fetchWithTimeout(request),
 })
 apiClient.use(authMiddleware)
 
@@ -549,14 +593,16 @@ export async function downloadAttendanceReport(
   const token = authHandlers.getAccessToken()
   if (token) headers.set('Authorization', `Bearer ${token}`)
 
+  // Ekspor semester bisa bermegabyte: pagu 120 dtk (query server sendiri
+  // dibatasi statement timeout 30 dtk; sisanya untuk build + transfer wifi lab).
   let response: Response
   try {
-    response = await fetch(`/api/v1/reports/attendance/export?${search.toString()}`, {
-      headers,
-      credentials: 'include',
-    })
-  } catch {
-    throw new ApiError(0, 'network_error', 'Tidak dapat terhubung ke server.')
+    response = await fetchWithTimeout(
+      new Request(`/api/v1/reports/attendance/export?${search.toString()}`, { headers }),
+      120_000,
+    )
+  } catch (error) {
+    throw toTransportError(error)
   }
   if (response.status === 401) authHandlers.onUnauthorized()
   if (!response.ok) {

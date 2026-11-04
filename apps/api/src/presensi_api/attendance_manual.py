@@ -97,6 +97,7 @@ def mark_manual_attendance(
                 status=request.status,
                 source="manual",
                 recorded_at=datetime.now(UTC),
+                note=note,
             )
             db.add(record)
             db.flush()

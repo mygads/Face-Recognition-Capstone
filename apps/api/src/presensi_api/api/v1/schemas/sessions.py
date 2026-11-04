@@ -114,3 +114,4 @@ class SessionRosterEntry(ApiSchema):
     student_number: str
     full_name: str
     record_status: AttendanceStatus | None = None
+    record_note: str | None = None

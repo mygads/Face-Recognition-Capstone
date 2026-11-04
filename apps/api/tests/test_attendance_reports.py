@@ -10,7 +10,7 @@ from uuid import UUID
 import httpx
 import pytest
 from openpyxl import load_workbook
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -321,3 +321,69 @@ def test_csv_and_xlsx_exports_use_report_fixture_safely(
     assert len(workbook_rows) == 5
     xlsx_name_column = workbook_rows[0].index("Nama siswa")
     assert any(str(row[xlsx_name_column]).startswith("'=") for row in workbook_rows[1:])
+
+
+def test_export_rejects_over_cap_without_scanning_everything(
+    report_database: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The 413 guard must trigger from a single capped query.
+
+    With the cap lowered to 1 the fixture's 4 rows exceed it; the endpoint
+    must answer 413 instead of building a file.
+    """
+    from presensi_api.api.v1.routers import reports as reports_router
+
+    monkeypatch.setattr(reports_router, "MAX_EXPORT_ROWS", 1)
+    admin = principal(RoleCode.ADMIN, ADMIN_ID)
+    response = request(
+        "/api/v1/reports/attendance/export?"
+        "starts_on=2026-09-01&ends_on=2026-09-30&format=csv",
+        admin,
+    )
+    assert response.status_code == 413
+
+
+def test_export_at_cap_still_succeeds(
+    report_database: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exactly MAX rows is allowed; only MAX+1 is rejected."""
+    from presensi_api.api.v1.routers import reports as reports_router
+
+    monkeypatch.setattr(reports_router, "MAX_EXPORT_ROWS", 4)
+    admin = principal(RoleCode.ADMIN, ADMIN_ID)
+    response = request(
+        "/api/v1/reports/attendance/export?"
+        "starts_on=2026-09-01&ends_on=2026-09-30&format=csv",
+        admin,
+    )
+    assert response.status_code == 200
+
+
+def test_report_rows_and_exports_surface_teacher_note(
+    report_database: sessionmaker[Session],
+) -> None:
+    """Manual-mark notes must reach TU rekap: JSON rows + CSV/XLSX (R27)."""
+    admin = principal(RoleCode.ADMIN, ADMIN_ID)
+    with report_database.begin() as db:
+        record = db.scalar(
+            select(AttendanceRecord).where(
+                AttendanceRecord.session_id == SESSION_A_ID,
+                AttendanceRecord.student_id == STUDENT_A_ID,
+            )
+        )
+        assert record is not None
+        record.note = "=1+1 catat hadir"
+    common = "starts_on=2026-09-01&ends_on=2026-09-30"
+    rows = request(f"/api/v1/reports/attendance/records?{common}", admin)
+    assert rows.status_code == 200, rows.text
+    by_student = {row["student_id"]: row for row in rows.json()["items"]}
+    assert by_student[str(STUDENT_A_ID)]["note"] == "=1+1 catat hadir"
+    assert by_student[str(STUDENT_B_ID)]["note"] is None
+
+    csv_response = request(
+        f"/api/v1/reports/attendance/export?{common}&format=csv", admin
+    )
+    assert csv_response.status_code == 200, csv_response.text
+    csv_rows = list(csv.reader(StringIO(csv_response.text.lstrip("\ufeff"))))
+    note_column = csv_rows[0].index("Catatan")
+    assert any(row[note_column] == "'=1+1 catat hadir" for row in csv_rows[1:])

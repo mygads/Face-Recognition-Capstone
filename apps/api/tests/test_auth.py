@@ -837,3 +837,84 @@ def test_auth_failures_use_coded_problem_envelope(
     missing_header = request("POST", "/api/v1/auth/logout")
     assert missing_header.status_code == 403
     assert missing_header.json()["error"]["code"] == "browser_session_header_required"
+
+
+def test_login_rate_limited_per_email_after_repeated_failures(
+    api_database: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Brute-force guard: menebak satu akun berulang → 429 + tanpa baris audit."""
+    monkeypatch.setattr(app.state, "login_email_attempts_per_minute", 2)
+    monkeypatch.setattr(app.state, "login_ip_attempts_per_minute", 10_000)
+    email = f"guessed-{secrets.token_hex(4)}@example.edu"
+    headers = {"X-Presensi-Session": "browser"}
+    for attempt in ("nope-1", "nope-2"):
+        denied = request(
+            "POST",
+            "/api/v1/auth/login",
+            form={"username": email, "password": attempt},
+            headers=headers,
+        )
+        assert denied.status_code == 401
+    limited = request(
+        "POST",
+        "/api/v1/auth/login",
+        form={"username": email, "password": "nope-3"},
+        headers=headers,
+    )
+    assert limited.status_code == 429
+    assert limited.json()["error"]["code"] == "auth_login_rate_limit_exceeded"
+    assert limited.headers.get("Retry-After") == "60"
+    with api_database() as session:
+        failures = session.scalars(
+            select(AuditLog).where(AuditLog.action == "auth.login.failed")
+        ).all()
+    assert len(failures) == 2
+
+
+def test_login_rate_limited_per_ip_across_accounts(
+    api_database: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Satu IP menyapu banyak akun → 429 agar CPU argon2 tak terbakar."""
+    monkeypatch.setattr(app.state, "login_email_attempts_per_minute", 10_000)
+    monkeypatch.setattr(app.state, "login_ip_attempts_per_minute", 2)
+    headers = {"X-Presensi-Session": "browser"}
+    for index in range(2):
+        denied = request(
+            "POST",
+            "/api/v1/auth/login",
+            form={
+                "username": f"sweep-{secrets.token_hex(4)}-{index}@example.edu",
+                "password": "nope",
+            },
+            headers=headers,
+        )
+        assert denied.status_code == 401
+    limited = request(
+        "POST",
+        "/api/v1/auth/login",
+        form={
+            "username": f"sweep-{secrets.token_hex(4)}-x@example.edu",
+            "password": "nope",
+        },
+        headers=headers,
+    )
+    assert limited.status_code == 429
+    assert limited.json()["error"]["code"] == "auth_login_rate_limit_exceeded"
+
+
+def test_startup_refuses_to_boot_without_jwt_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing/short JWT_SECRET must fail fast at startup (R27).
+
+    Otherwise every login/token endpoint answers a generic 503 while the
+    server looks healthy, hiding an operator env gap.
+    """
+    from fastapi.testclient import TestClient
+
+    from presensi_api.api.security.config import AuthConfigurationError
+
+    monkeypatch.delenv("JWT_SECRET", raising=False)
+    with pytest.raises(AuthConfigurationError):
+        with TestClient(app):
+            pass

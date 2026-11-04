@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 from sqlalchemy import create_engine, event, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -737,3 +738,109 @@ def test_openable_schedules_hide_running_session(
     after = request("GET", "/api/v1/sessions/openable-schedules")
     assert after.status_code == 200
     assert after.json() == []
+
+
+def test_list_sessions_pagination_stable_on_identical_opened_at(
+    api_database: sessionmaker[Session],
+) -> None:
+    """Identical opened_at values must not duplicate/drop rows across pages.
+
+    The auto-open worker stamps one ``current_time`` for a whole sweep, so
+    ties are routine, not theoretical. The ``id`` tiebreaker keeps page
+    boundaries deterministic.
+    """
+    first_schedule_id = schedule_id(api_database)
+    with api_database.begin() as session:
+        existing = session.scalars(select(PracticumSchedule)).one()
+        extra = PracticumSchedule(
+            class_id=existing.class_id,
+            laboratory_id=existing.laboratory_id,
+            teacher_user_id=existing.teacher_user_id,
+            subject="Praktikum Kedua",
+            weekday=existing.weekday,
+            start_time=existing.start_time,
+            end_time=existing.end_time,
+            timezone_name=existing.timezone_name,
+            effective_from=existing.effective_from,
+            effective_through=existing.effective_through,
+        )
+        session.add(extra)
+        session.flush()
+        extra_id = extra.id
+    first = request(
+        "POST",
+        "/api/v1/sessions",
+        {"practicum_schedule_id": str(first_schedule_id)},
+    )
+    assert first.status_code == 201, first.text
+    second = request(
+        "POST",
+        "/api/v1/sessions",
+        {"practicum_schedule_id": str(extra_id)},
+    )
+    assert second.status_code == 201, second.text
+    frozen = datetime.now(UTC)
+    with api_database.begin() as session:
+        for row in session.scalars(select(AttendanceSession)).all():
+            row.opened_at = frozen
+    page_one = request("GET", "/api/v1/sessions", params={"limit": "1", "offset": "0"})
+    page_two = request("GET", "/api/v1/sessions", params={"limit": "1", "offset": "1"})
+    assert page_one.status_code == 200
+    assert page_two.status_code == 200
+    first_id = page_one.json()["items"][0]["id"]
+    second_id = page_two.json()["items"][0]["id"]
+    assert first_id != second_id
+    assert {first_id, second_id} == {first.json()["id"], second.json()["id"]}
+
+
+def test_concurrent_open_blocked_by_partial_unique_index(
+    api_database: sessionmaker[Session],
+) -> None:
+    """Race guard: SELECT-then-INSERT alone is not enough.
+
+    Two concurrent open requests can both pass the SELECT guard; the
+    partial unique index ``uq_attendance_sessions_active_schedule``
+    must reject the second INSERT at the database. This test inserts
+    directly (bypassing the API guard) to prove the index holds on the
+    configured backend, then checks the API still answers 409 and that
+    closing releases the index so reopen works.
+    """
+    practicum_schedule_id = schedule_id(api_database)
+    opened = request(
+        "POST",
+        "/api/v1/sessions",
+        {"practicum_schedule_id": str(practicum_schedule_id)},
+    )
+    assert opened.status_code == 201, opened.text
+    session_id = opened.json()["id"]
+
+    with pytest.raises(IntegrityError):
+        with api_database.begin() as session:
+            session.add(
+                AttendanceSession(
+                    practicum_schedule_id=practicum_schedule_id,
+                    opened_by_user_id=UUID(int=43),
+                    status="active",
+                    opened_at=datetime.now(UTC),
+                    grace_period_minutes=15,
+                )
+            )
+
+    duplicate = request(
+        "POST",
+        "/api/v1/sessions",
+        {"practicum_schedule_id": str(practicum_schedule_id)},
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["error"]["code"] == "session_already_active"
+
+    closed = request("POST", f"/api/v1/sessions/{session_id}/close")
+    assert closed.status_code == 200
+    assert closed.json()["status"] == "closed"
+
+    reopened = request(
+        "POST",
+        "/api/v1/sessions",
+        {"practicum_schedule_id": str(practicum_schedule_id)},
+    )
+    assert reopened.status_code == 201, reopened.text

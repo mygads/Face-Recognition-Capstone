@@ -89,6 +89,7 @@ def create_manual_mark(
             source=cast(AttendanceSource, record.source),
             recognition_event_id=record.recognition_event_id,
             recorded_at=as_utc(record.recorded_at),
+            note=record.note,
         )
     )
 
@@ -147,6 +148,7 @@ def list_attendance(
                 source=cast(AttendanceSource, row.source),
                 recognition_event_id=row.recognition_event_id,
                 recorded_at=as_utc(row.recorded_at),
+                note=row.note,
             )
             for row in rows
         ],

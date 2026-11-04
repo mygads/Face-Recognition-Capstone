@@ -1011,7 +1011,7 @@ export interface paths {
         };
         /**
          * List final attendance records
-         * @description Contract placeholder; currently returns 501.
+         * @description Final attendance only: one row per student/session after session, roster, liveness, and duplicate validation. Teachers see only their own schedules.
          */
         get: operations["list_attendance_api_v1_attendance_get"];
         put?: never;
@@ -1276,6 +1276,8 @@ export interface components {
             central_ai_config_applied_revision: number | null;
             /** Central Ai Config Sync Status */
             central_ai_config_sync_status: ("disabled" | "pending" | "applied" | "error" | "unavailable") | null;
+            /** Central Ai Config Sync Error Code */
+            central_ai_config_sync_error_code: string | null;
         };
         /** ApiError */
         ApiError: {
@@ -1463,6 +1465,8 @@ export interface components {
              * Format: date-time
              */
             recorded_at: string;
+            /** Note */
+            note?: string | null;
         };
         /** AttendanceReportPage */
         AttendanceReportPage: {
@@ -1554,6 +1558,8 @@ export interface components {
             session_opened_at: string;
             /** Recorded At */
             recorded_at: string | null;
+            /** Note */
+            note?: string | null;
         };
         /** AttendanceSessionCreateRequest */
         AttendanceSessionCreateRequest: {
@@ -2847,6 +2853,8 @@ export interface components {
             full_name: string;
             /** Record Status */
             record_status?: ("present" | "late" | "absent" | "excused") | null;
+            /** Record Note */
+            record_note?: string | null;
         };
         /** SessionRosterStudentResponse */
         SessionRosterStudentResponse: {

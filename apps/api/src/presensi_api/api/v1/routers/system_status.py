@@ -21,6 +21,24 @@ router = APIRouter(prefix="/admin/system", tags=["system-status"])
 DbSession = Annotated[Session, Depends(get_db_session)]
 
 
+def _central_sync_error_code(payload: dict[str, object]) -> str | None:
+    """Forward the AI service apply error, sanitized for display.
+
+    The central worker rejects unreachable managed combinations (e.g. a
+    consensus minimum no burst can reach) while the Core API already
+    accepted them at publish time; without this code the admin only sees
+    diverging revisions and cannot tell a rejection from a network outage.
+    """
+    raw_error_code = payload.get("configuration_sync_error_code")
+    if (
+        not isinstance(raw_error_code, str)
+        or not raw_error_code.strip()
+        or not raw_error_code.replace("_", "").isalnum()
+    ):
+        return None
+    return raw_error_code.strip()[:64]
+
+
 @router.get(
     "/ai-readiness",
     response_model=AiReadinessResponse,
@@ -59,6 +77,7 @@ def get_ai_readiness(session: DbSession) -> AiReadinessResponse:
             central_ai_config_desired_revision=None,
             central_ai_config_applied_revision=None,
             central_ai_config_sync_status=None,
+            central_ai_config_sync_error_code=None,
         )
 
     central_revision, _, _ = configuration_values(session, "AI_CENTRAL")
@@ -115,6 +134,7 @@ def get_ai_readiness(session: DbSession) -> AiReadinessResponse:
                 Literal["disabled", "pending", "applied", "error", "unavailable"],
                 raw_sync_status,
             ),
+            central_ai_config_sync_error_code=_central_sync_error_code(payload),
         )
     except (OSError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
         return AiReadinessResponse(
@@ -130,4 +150,5 @@ def get_ai_readiness(session: DbSession) -> AiReadinessResponse:
             central_ai_config_desired_revision=central_revision,
             central_ai_config_applied_revision=None,
             central_ai_config_sync_status="unavailable",
+            central_ai_config_sync_error_code=None,
         )

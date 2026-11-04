@@ -569,6 +569,7 @@ class AttendanceRecord(UUIDPrimaryKey, TimestampMixin, Base):
     recorded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    note: Mapped[str | None] = mapped_column(Text)
 
 
 class AttendanceCorrection(UUIDPrimaryKey, TimestampMixin, Base):

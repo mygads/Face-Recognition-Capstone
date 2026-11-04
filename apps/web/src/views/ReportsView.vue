@@ -328,15 +328,16 @@ onMounted(async () => {
             <th scope="col">Praktikum</th>
             <th scope="col">Guru</th>
             <th scope="col">Status</th>
+            <th scope="col">Catatan</th>
             <th scope="col">Waktu tercatat</th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="isLoading">
-            <td colspan="8" class="master-data__empty">Memuat laporan…</td>
+            <td colspan="9" class="master-data__empty">Memuat laporan…</td>
           </tr>
           <tr v-else-if="rows.length === 0">
-            <td colspan="8" class="master-data__empty">Tidak ada data untuk filter ini.</td>
+            <td colspan="9" class="master-data__empty">Tidak ada data untuk filter ini.</td>
           </tr>
           <tr v-for="row in rows" v-else :key="`${row.session_id}-${row.student_id}`">
             <td data-label="Waktu sesi">{{ formatDate(row.session_opened_at) }}</td>
@@ -352,6 +353,10 @@ onMounted(async () => {
               <span class="reports__status" :class="statusClass(row.status)">
                 {{ statusLabel(row.status) }}
               </span>
+            </td>
+            <td data-label="Catatan">
+              <small v-if="row.note">{{ row.note }}</small>
+              <span v-else class="master-data__muted">–</span>
             </td>
             <td data-label="Waktu tercatat">{{ formatDate(row.recorded_at) }}</td>
           </tr>

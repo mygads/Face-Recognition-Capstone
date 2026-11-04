@@ -78,6 +78,39 @@ central_ai:
   base_url: https://ai.attendance.example.edu
 ```
 
+### Peta env override → kunci YAML (edge-agent & STB gateway)
+
+Setiap `PRESENSI_EDGE_*` mengalahkan kunci YAML di bawahnya; YAML tetap
+permukaan utama di PC lab/STB. Token langsung (`*_TOKEN`) mengalahkan
+`token_file`; token AI jatuh kembali ke token API bila keduanya kosong.
+
+| Env | Kunci YAML | Catatan |
+| --- | --- | --- |
+| `PRESENSI_EDGE_CONFIG` | (argumen `--config` CLI) | Path file YAML yang dibaca |
+| `PRESENSI_EDGE_DEVICE_ID` | `device_id` | Wajib per perangkat |
+| `PRESENSI_EDGE_MODE` | `mode` | `AI_EDGE` / `STB_GATEWAY` |
+| `PRESENSI_EDGE_API_BASE_URL` | `api.base_url` | URL Core API |
+| `PRESENSI_EDGE_API_TOKEN` | (langsung, tanpa kunci YAML) | Mengalahkan `api.token_file` |
+| `PRESENSI_EDGE_API_TOKEN_FILE` | `api.token_file` | File kredensial perangkat |
+| `PRESENSI_EDGE_AI_BASE_URL` | `central_ai.base_url` | URL AI Central (STB) |
+| `PRESENSI_EDGE_AI_TOKEN` | (langsung, tanpa kunci YAML) | Mengalahkan `central_ai.token_file` |
+| `PRESENSI_EDGE_AI_TOKEN_FILE` | `central_ai.token_file` | Jatuh kembali ke token API |
+| `PRESENSI_EDGE_CACHE_MAX_OFFLINE_SECONDS` | `api.cache_max_offline_seconds` | Plafon offline lokal |
+| `PRESENSI_EDGE_CAMERA_INDEX` / `_WIDTH` / `_HEIGHT` / `_FPS` | `camera.index` / `width` / `height` / `fps` | Wizard `configure-camera` |
+| `PRESENSI_EDGE_SESSION_ID` / `_STARTS_AT` / `_ENDS_AT` | `gateway.session_id` / `session_starts_at` / `session_ends_at` | Filter opsional; discovery API otoritatif |
+| `PRESENSI_EDGE_SAMPLE_EVERY_N_FRAMES` | `recognition.sample_every_n_frames` | Stride sampling |
+| `PRESENSI_EDGE_YUNET_MODEL_PATH` | `models.yunet_path` | Tidak dibaca STB gateway |
+| `PRESENSI_EDGE_SFACE_MODEL_PATH` | `models.sface_path` | Tidak dibaca STB gateway |
+| `PRESENSI_EDGE_MODEL_VERSION` | `models.version` | Wajib cocok galeri |
+| `PRESENSI_EDGE_MIN_TOP1_SIMILARITY` | `recognition.min_top1_similarity` | Kalibrasi lokal, berpasangan |
+| `PRESENSI_EDGE_MIN_TOP1_TOP2_MARGIN` | `recognition.min_top1_top2_margin` | Kalibrasi lokal, berpasangan |
+| `PRESENSI_EDGE_YUNET_SCORE_THRESHOLD` / `_NMS_THRESHOLD` | `recognition.yunet_score_threshold` / `yunet_nms_threshold` | Titik operasi detektor |
+| `PRESENSI_EDGE_DETECTION_MAX_WIDTH` | `recognition.detection_max_width` | `0` = mati; untuk PC lemah |
+| `PRESENSI_EDGE_LOG_LEVEL` | `runtime.log_level` | Level log proses |
+| `PRESENSI_EDGE_MAX_OUTBOX_EVENTS` | `runtime.max_outbox_events` | Penuh = frame berikut retry |
+| `PRESENSI_EDGE_MAX_DEAD_LETTER_EVENTS` | `runtime.max_dead_letter_events` | Cap anti-penuh disk |
+| `PRESENSI_EDGE_PERFORMANCE_LOGS` | (tanpa kunci YAML, `=1`) | Log diagnostik JSON dev |
+
 ## Wizard kamera
 
 Installer Windows (AI_EDGE) dan Linux (kedua profile) menawarkan wizard:

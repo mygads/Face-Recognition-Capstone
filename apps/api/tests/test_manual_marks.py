@@ -449,3 +449,46 @@ def test_manual_mark_never_accepts_image_or_embedding_fields(
         },
     )
     assert response.status_code == 422
+
+
+def test_manual_mark_note_surfaces_in_response_roster_and_list(
+    manual_marks_database: tuple[sessionmaker[Session], dict[str, UUID]],
+) -> None:
+    """Teacher note must be readable, not only buried in audit JSON (R26)."""
+    factory, ids = manual_marks_database
+    response = post_mark(
+        ids["session"],
+        {
+            "student_id": str(ids["first"]),
+            "status": "excused",
+            "note": "Surat dokter dari TU",
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["record"]["note"] == "Surat dokter dari TU"
+
+    plain = post_mark(
+        ids["session"],
+        {"student_id": str(ids["second"]), "status": "present"},
+    )
+    assert plain.status_code == 201, plain.text
+    assert plain.json()["record"]["note"] is None
+
+    roster = asyncio.run(_get(f"/api/v1/sessions/{ids['session']}/roster"))
+    assert roster.status_code == 200
+    by_student = {row["student_id"]: row for row in roster.json()}
+    assert by_student[str(ids["first"])]["record_note"] == "Surat dokter dari TU"
+    assert by_student[str(ids["second"])]["record_note"] is None
+
+    listed = asyncio.run(_get(f"/api/v1/attendance?session_id={ids['session']}"))
+    assert listed.status_code == 200, listed.text
+    by_student_list = {row["student_id"]: row for row in listed.json()["items"]}
+    assert by_student_list[str(ids["first"])]["note"] == "Surat dokter dari TU"
+    assert by_student_list[str(ids["second"])]["note"] is None
+
+    with factory() as db:
+        stored = db.scalars(select(AttendanceRecord)).all()
+        assert {str(row.student_id): row.note for row in stored} == {
+            str(ids["first"]): "Surat dokter dari TU",
+            str(ids["second"]): None,
+        }

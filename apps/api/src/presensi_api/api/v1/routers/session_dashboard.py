@@ -69,8 +69,13 @@ def _session_for_principal(
 
 
 def _poll_interval_seconds() -> float:
+    # Kanonis: PRESENSI_SESSION_DASHBOARD_POLL_SECONDS; warisan tanpa prefix
+    # tetap dibaca agar deployment lama tidak pecah.
+    raw = os.getenv("PRESENSI_SESSION_DASHBOARD_POLL_SECONDS")
+    if not raw:
+        raw = os.getenv("SESSION_DASHBOARD_POLL_SECONDS", "2")
     try:
-        configured = float(os.getenv("SESSION_DASHBOARD_POLL_SECONDS", "2"))
+        configured = float(raw)
     except ValueError:
         return 2.0
     return min(max(configured, 0.25), 30.0)
@@ -384,7 +389,11 @@ async def stream_session_updates(
                     websocket.receive_text(), timeout=_poll_interval_seconds()
                 )
             except TimeoutError:
-                db.expire_all()
+                # No client message is the normal tick path (the browser only
+                # sends the initial authenticate frame). Do not expire here:
+                # _build_snapshot() expires at the top of the next iteration,
+                # so a second expire would re-evict everything twice per tick.
+                pass
     except (WebSocketDisconnect, RuntimeError):
         # A browser tab may vanish between snapshots; a closed socket is a
         # normal goodbye, not a server error worth a 500 traceback.

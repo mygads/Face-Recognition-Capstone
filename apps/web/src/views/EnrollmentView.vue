@@ -25,6 +25,7 @@ const countdownValue = ref(3)
 const captureIndex = ref(0)
 const captureResult = ref<EnrollmentCaptureResult | null>(null)
 const duplicateWarnings = computed(() => captureResult.value?.duplicate_warnings ?? [])
+const confirmationRequired = computed(() => captureResult.value?.confirmation_required ?? true)
 const activeTemplates = ref<FaceTemplate[]>([])
 const isLoadingTemplates = ref(false)
 const isRevoking = ref(false)
@@ -262,7 +263,12 @@ async function revokeSelectedTemplates(): Promise<void> {
 }
 
 function confirmIdentityAndContinue(): void {
-  if (!identityConfirmed.value || !captureResult.value || !selectedStudent.value) return
+  if (
+    !captureResult.value ||
+    !selectedStudent.value ||
+    (confirmationRequired.value && !identityConfirmed.value)
+  )
+    return
   const currentIndex = students.value.findIndex((student) => student.id === selectedStudentId.value)
   students.value = students.value.map((student) =>
     student.id === selectedStudentId.value
@@ -460,7 +466,7 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
               {{ captureResult.accepted_frames }} dari 4 capture siap. Pastikan siswa pada preview
               cocok dengan identitas berikut.
             </p>
-            <label class="enrollment-view__confirm">
+            <label v-if="confirmationRequired" class="enrollment-view__confirm">
               <input v-model="identityConfirmed" type="checkbox" />
               <span>
                 Saya memastikan siswa di kamera adalah {{ selectedStudent.full_name }} ({{
@@ -481,7 +487,7 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
               class="button button--primary"
               type="button"
               data-testid="confirm-enrollment-identity"
-              :disabled="!identityConfirmed"
+              :disabled="confirmationRequired && !identityConfirmed"
               @click="confirmIdentityAndContinue"
             >
               Konfirmasi identitas & lanjut

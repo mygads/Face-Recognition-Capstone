@@ -110,3 +110,38 @@ above.
 - Threshold candidate + FMR/FRR summary:
 - Holdout validation statement: a separate holdout validation is required
   before any production threshold; this run alone does not clear one.
+
+## Menerapkan hasil (kalibrasi lokal → env produksi)
+
+Benchmark ini tidak menetapkan threshold produksi. Setelah kandidat
+tervalidasi pada holdout set terpisah (lihat "Benchmark sign-off"), terapkan
+dengan variabel lingkungan berikut. Tanpa keduanya diset, inferensi lokal
+nonaktif (fail-closed) — AI service mencatat peringatan dan menolak
+menilai, sehingga tidak ada auto-accept yang terjadi:
+
+| Hasil benchmark | Variabel lingkungan |
+|---|---|
+| Kandidat ambang kemiripan top-1 (skor cosine SFace) | `PRESENSI_AI_MIN_TOP1_SIMILARITY` |
+| Kandidat margin top-1 lawan top-2 (selisih cosine) | `PRESENSI_AI_MIN_TOP1_TOP2_MARGIN` |
+| Titik operasi detektor YuNet (skor + NMS) | `PRESENSI_AI_YUNET_SCORE_THRESHOLD`, `PRESENSI_AI_YUNET_NMS_THRESHOLD` |
+
+Keduanya (`..._SIMILARITY` dan `..._MARGIN`) wajib diisi berpasangan;
+mengisi salah satunya saja sama dengan tidak mengisi (tetap fail-closed).
+
+Knob konsensus (`PRESENSI_AI_MINIMUM_AGREEING_FRAMES`,
+`PRESENSI_AI_SAMPLE_EVERY_N_FRAMES`, `PRESENSI_AI_BEST_FRAME_COUNT`,
+`PRESENSI_AI_MAX_HISTORY_FRAMES`, `PRESENSI_AI_MAX_FRAMES`) wajib memenuhi
+`ceil(MAX_FRAMES / SAMPLE_EVERY_N_FRAMES) >= MINIMUM_AGREEING_FRAMES` —
+tiap burst memakai track id baru sehingga konsensus harus tercapai dalam
+satu burst; kombinasi yang tak tercapai ditolak saat startup, bukan macet
+diam-diam dalam status "collecting". Profil default (5/1 → 5 dievaluasi
+untuk 3 yang disyaratkan) sudah benar untuk `burst_frame_count: 3`.
+Nilai literatur/internet — termasuk baseline SFace 1:1 LFW ≈ 0,363 —
+hanya titik awal, bukan nilai final; ambang produksi 1:N harus berasal dari
+benchmark lokal pada fixture yang disetujui. Contoh (ganti dengan hasil
+kalibrasi lokal Anda):
+
+```bash
+export PRESENSI_AI_MIN_TOP1_SIMILARITY=0.65
+export PRESENSI_AI_MIN_TOP1_TOP2_MARGIN=0.20
+```
