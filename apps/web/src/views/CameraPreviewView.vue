@@ -580,7 +580,10 @@ onBeforeUnmount(() => {
                 :y="face.y * cameraObservation.frame_height"
                 :width="face.width * cameraObservation.frame_width"
                 :height="face.height * cameraObservation.frame_height"
-                class="camera-preview-view__face-box"
+                :class="[
+                  'camera-preview-view__face-box',
+                  face.acceptable || identityMatched ? 'is-ready' : 'is-adjust',
+                ]"
               />
               <template v-if="face.detection_confidence !== undefined">
                 <rect

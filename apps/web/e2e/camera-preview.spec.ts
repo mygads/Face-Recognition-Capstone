@@ -163,7 +163,7 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
   await expect(
     page.getByText(/MIPA 1.*Kemiripan model 90.2%.*Identitas masih kandidat/),
   ).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Buka AI & kamera' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Atur kualitas & pengenalan' })).toBeVisible()
   await expect(page.getByText('Kandidat sementara · belum diverifikasi presensi')).toBeVisible()
   const candidatePanel = page.locator('.camera-preview-view__candidate')
   await expect(candidatePanel).toContainText('Yoga')
@@ -179,14 +179,14 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
 
   recognitionState = 'accepted'
   await expect(page.getByRole('heading', { name: 'Yoga' })).toBeVisible()
-  await expect(page.getByText(/Presensi menunggu validasi Core API/)).toBeVisible()
+  await expect(page.getByText(/Identitas cocok. Mengirim presensi/)).toBeVisible()
   await expect(page.getByRole('img')).toHaveCount(1)
 
   await page.getByRole('button', { name: 'Tampilan depan kamera' }).click()
   await expect(page.locator('.camera-preview-view')).toBeVisible()
   await expect(page.getByText('Kandidat sementara · belum diverifikasi presensi')).toHaveCount(0)
-  await expect(page.getByRole('heading', { name: 'Memeriksa presensi' })).toBeVisible()
-  await expect(page.locator('.camera-preview-view__identity h3')).not.toHaveText('Yoga')
+  await expect(page.getByRole('heading', { name: 'Yoga' })).toBeVisible()
+  await expect(page.getByText('Identitas cocok · menunggu konfirmasi server')).toBeVisible()
   attendanceRecorded = true
   await expect(page.getByRole('heading', { name: 'Yoga' })).toBeVisible({
     timeout: 5000,

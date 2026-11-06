@@ -4,6 +4,14 @@ Bukti visual: `screenshots/` (40 PNG desktop 1440px + 2 tablet 1024px) +
 `rekap.csv` / `rekap.xlsx` (hasil unduh laporan asli). UAT browser
 **5/5 HIJAU** (Playwright Chromium, timeout 120 dtk/tes, ±28 dtk total).
 
+> Catatan 6 Nov malam: sesi demo pertama auto-tutup melewati akhir jadwal
+> (domain: backend selalu menutup sesi di akhir jadwal — by design). Seed
+> dibuat sadar-waktu (`demo_window()`: mulai-30 mnt s/d +2 jam, dijepit
+> 23:59 bila lewat tengah malam; jadwal kedaluwarsa digeser via PATCH,
+> jadwal yang masih menutupi jam jalan dipakai ulang). 30 screenshot
+> halaman-panjang diretake setelah layout shell fixed→sticky + tabel
+> laporan wrap (sidebar/topbar benar di full-page capture, 9 kolom muat).
+
 ## 1. Cara mereproduksi
 
 ```bash
@@ -15,7 +23,7 @@ Akun demo: `admin@local.test` / `DemoAdmin2026!x`;
 `dewi.guru@sekolah.test`, `agus.guru@sekolah.test` / `GuruDemo2026!x`;
 `budi.laboran@sekolah.test` / `LabDemo2026!x`.
 Data: lab LAB-RPL1 + LAB-FIS; kelas XII-RPL-1 (10 siswa NIS 20260101–10) +
-XII-TKJ-1 (8 siswa NIS 20260201–08); jadwal hari berjalan 16–19 & 17–20 WIB;
+XII-TKJ-1 (8 siswa NIS 20260201–08); jadwal mengikuti jam jalan (mulai-30 mnt s/d +2 jam, maks 23:59);
 device `edge-pc-rpl-01` + `stb-fis-01`; sesi RPL AKTIF (5 event face-recognition
 + 1 ambiguous + manual present/late/excused/absent + 1 belum tercatat) dan sesi
 TKJ DITUTUP (4 present + 1 late + 1 excused + 2 absen otomatis).

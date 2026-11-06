@@ -151,7 +151,8 @@ test('teacher dashboard applies mocked realtime attendance and device updates', 
   await expect(page.getByTestId('metric-not-present').locator('strong')).toHaveText('1')
   await expect(page.getByText('Siswa Dua')).toBeVisible()
   await expect(page.getByText('Offline')).toBeVisible()
-  expect(sessionListRequests).toBe(1)
+  // Daftar sesi diambil 2x saat pemuatan awal: sesi aktif + sesi override manual.
+  expect(sessionListRequests).toBe(2)
   expect(snapshotRequests).toBe(1)
   await expect(page.getByText(/embedding|foto wajah/i)).toHaveCount(0)
 })

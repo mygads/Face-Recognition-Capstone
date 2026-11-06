@@ -35,3 +35,10 @@ edit hasil generate manual). Klaim angka: gate 469 pytest + 84 vitest.
 1. Terapkan baris 1–12 ke `.puml`/proposal §4–§8 + `schema-erd.sql` (kolom `note`; `ews_follow_ups` tetap planned).
 2. Regenerate via generator di `docs/diagrams/README.md`; verifikasi diff semantik 1-per-1 vs tabel di atas.
 3. Setelah regenerasi, pindahkan baris ke "Sudah tercermin" + catat tanggal.
+
+## 2026-11-06 — Shell layout fixed → sticky (screenshot full-page)
+- `AppShell`: sidebar/topbar `position: fixed` → sticky-in-flow; visual runtime
+  identik (sidebar penuh viewport, topbar menempel), tetapi full-page capture
+  kini benar (sebelumnya sidebar kepotong + topbar melayang di tengah halaman).
+- Tabel laporan: sel `white-space: nowrap` → normal agar 9 kolom muat 1440px.
+- Tidak mengubah alur/fitur di diagram; hanya rendering shell + tabel.

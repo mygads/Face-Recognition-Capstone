@@ -92,12 +92,6 @@ const selectedDevice = computed(
 const edgeThresholdsConfigured = computed(
   () => edgeForm.value.min_top1_similarity !== null && edgeForm.value.min_top1_top2_margin !== null,
 )
-const centralThresholdsConfigured = computed(
-  () =>
-    centralForm.value.min_top1_similarity !== null &&
-    centralForm.value.min_top1_top2_margin !== null,
-)
-
 const centralUsesFactoryDefaults = computed(() =>
   isFactoryDefaultReference(centralForm.value.calibration_reference),
 )
@@ -978,7 +972,6 @@ onBeforeUnmount(() => {
               v-model="centralForm.calibration_reference"
               type="text"
               maxlength="200"
-              :required="centralThresholdsConfigured"
               placeholder="Wajib diisi bila threshold diatur"
           /></label>
           <p v-if="centralUsesFactoryDefaults" class="ai-setup-view__note" role="status">

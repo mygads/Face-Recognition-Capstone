@@ -51,7 +51,9 @@ a:focus-visible {
 .app-shell {
   --shell-sidebar-width: var(--sidebar-w);
 
+  display: flex;
   min-height: 100vh;
+  align-items: stretch;
 }
 
 .app-shell--sidebar-collapsed {
@@ -59,11 +61,13 @@ a:focus-visible {
 }
 
 .app-sidebar {
-  position: fixed;
+  position: sticky;
   z-index: 30;
-  inset: 0 auto 0 0;
+  top: 0;
   display: flex;
   width: var(--shell-sidebar-width);
+  height: 100vh;
+  flex: 0 0 auto;
   flex-direction: column;
   overflow: hidden;
   color: var(--sidebar-text);
@@ -121,6 +125,7 @@ a:focus-visible {
 
 .app-sidebar__nav {
   flex: 1;
+  overflow-y: auto;
   padding: var(--space-3) var(--space-2);
 }
 
@@ -214,26 +219,26 @@ a:focus-visible {
 }
 
 .app-shell__workspace {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
   min-height: 100vh;
-  margin-left: var(--shell-sidebar-width);
-  transition: margin-left 180ms ease;
 }
 
 .app-topbar {
-  position: fixed;
+  position: sticky;
   z-index: 20;
   top: 0;
-  right: 0;
-  left: var(--shell-sidebar-width);
   display: flex;
   height: 64px;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   padding: 0 var(--space-6);
   border-bottom: 1px solid var(--border-color);
   background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
   backdrop-filter: blur(12px);
-  transition: left 180ms ease;
 }
 
 .app-topbar__left,
@@ -376,7 +381,7 @@ a:focus-visible {
   width: min(100%, 1440px);
   min-height: calc(100vh - 116px);
   margin: 0 auto;
-  padding: 96px var(--space-6) var(--space-7);
+  padding: var(--space-6) var(--space-6) var(--space-7);
 }
 
 .page-header {
@@ -680,7 +685,10 @@ a:focus-visible {
   }
 
   .app-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
     width: min(var(--sidebar-w), calc(100vw - 56px));
+    height: auto;
     transform: translateX(-100%);
   }
 
@@ -714,14 +722,6 @@ a:focus-visible {
     display: block;
     border: 0;
     background: rgb(9 17 28 / 44%);
-  }
-
-  .app-topbar {
-    left: 0;
-  }
-
-  .app-shell__main {
-    padding-top: 92px;
   }
 }
 
@@ -1510,6 +1510,12 @@ a:focus-visible {
   color: var(--text);
   font-size: 1.35rem;
   font-weight: 600;
+}
+
+.reports__table th,
+.reports__table td {
+  white-space: normal;
+  vertical-align: top;
 }
 
 .reports__table td strong,

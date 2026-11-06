@@ -2,7 +2,7 @@
 
 Idempoten: aman dijalankan ulang (get-or-create + lewati event/mark yang
 sudah tercatat). Alur: bootstrap admin -> ganti sandi -> akun guru/laboran
--> lab/kelas/siswa -> jadwal hari berjalan (menutupi jam demo) -> device +
+-> lab/kelas/siswa -> jadwal demo (window ikut jam jalan) -> device +
 kredensial -> sesi RPL AKTIF (campuran present/manual/late/excused/absent +
 1 unrecorded) -> sesi TKJ DITUTUP (ada absen otomatis) -> heartbeat Online.
 
@@ -219,30 +219,73 @@ cls_tkj, sis_tkj = buat_kelas_siswa(
 )
 
 
-# 5. jadwal hari berjalan (menutupi jam demo)
+# 5. jadwal demo: window mengikuti jam jalan (sesi lama auto-tutup di akhir jadwal,
+#    jadi window statis hanya hidup beberapa jam). Idempoten: cocokkan jadwal by
+#    (kelas, mapel, weekday); bila window kedaluwarsa, geser via PUT.
+def demo_window() -> tuple[str, str]:
+    from datetime import timedelta
+
+    mulai = (now_jkt - timedelta(minutes=30)).replace(second=0, microsecond=0)
+    selesai = (now_jkt + timedelta(hours=2)).replace(second=0, microsecond=0)
+    # Lewat tengah malam -> kunci di 23:59 hari yang sama.
+    if selesai.time() <= mulai.time():
+        selesai = now_jkt.replace(hour=23, minute=59, second=0, microsecond=0)
+    if mulai >= selesai:
+        mulai = (selesai - timedelta(hours=2)).replace(second=0, microsecond=0)
+    return mulai.strftime("%H:%M:%S"), selesai.strftime("%H:%M:%S")
+
+
+WIN_START, WIN_END = demo_window()
+
+
+def window_covers_now(it: dict[str, Any]) -> bool:
+    sekarang = now_jkt.strftime("%H:%M:%S")
+    mulai = str(it.get("start_time", ""))
+    selesai = str(it.get("end_time", ""))
+    return bool(mulai <= sekarang <= selesai)
+
+
 def buat_jadwal(
     cls: dict[str, Any],
     lab: dict[str, Any],
     teacher_id: str,
     subject: str,
-    start: str,
-    end: str,
 ) -> dict[str, Any]:
+    start, end = WIN_START, WIN_END
     r = c.get("/api/v1/schedules", headers=A, params={"limit": 100})
+    cocok: list[dict[str, Any]] = []
     if r.status_code == 200:
         sched_rows: list[dict[str, Any]] = r.json().get("items", [])
-        for it in sched_rows:
+        cocok = [
+            it
+            for it in sched_rows
             if (
-                (
-                    it.get("school_class_id") == cls["id"]
-                    or it.get("class_id") == cls["id"]
-                )
-                and it.get("weekday") == weekday
-                and it.get("start_time", "").startswith(start[:5])
-            ):
+                it.get("school_class_id") == cls["id"]
+                or it.get("class_id") == cls["id"]
+            )
+            and it.get("weekday") == weekday
+            and it.get("subject") == subject
+        ]
+        for it in cocok:  # pass 1: pakai yang window-nya menutupi jam jalan
+            if window_covers_now(it):
                 print("INFO jadwal ada:", subject)
                 check(f"jadwal {subject}", True)
                 return it
+        for it in cocok:  # pass 2: geser window yang kedaluwarsa
+            if True:
+                u = c.patch(
+                    f"/api/v1/schedules/{it['id']}",
+                    headers=A,
+                    json={
+                        "start_time": start,
+                        "end_time": end,
+                        "effective_from": today,
+                    },
+                )
+                assert u.status_code == 200, u.text[:300]
+                print("INFO jadwal digeser ke jam jalan:", subject, start, "-", end)
+                check(f"jadwal {subject}", True)
+                return dict(u.json())
     r = c.post(
         "/api/v1/schedules",
         headers=A,
@@ -272,12 +315,8 @@ def buat_jadwal(
     return payload
 
 
-sched_rpl = buat_jadwal(
-    cls_rpl, lab_rpl, dewi_id, "Praktikum Pemrograman Web", "17:00:00", "20:00:00"
-)
-sched_tkj = buat_jadwal(
-    cls_tkj, lab_fis, agus_id, "Praktikum Jaringan Komputer", "16:00:00", "19:00:00"
-)
+sched_rpl = buat_jadwal(cls_rpl, lab_rpl, dewi_id, "Praktikum Pemrograman Web")
+sched_tkj = buat_jadwal(cls_tkj, lab_fis, agus_id, "Praktikum Jaringan Komputer")
 
 
 # 6. device + kredensial

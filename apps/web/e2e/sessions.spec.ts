@@ -122,9 +122,7 @@ test('teacher opens and manually closes a session with a roster snapshot', async
   await expect(page.getByRole('status')).toContainText('telah ditutup')
 })
 
-test('admin can enable automatic schedule opening with a configurable time window', async ({
-  page,
-}) => {
+test('admin can configure the automatic opening window', async ({ page }) => {
   const timestamp = '2026-10-05T02:05:00Z'
   const schedule = {
     id: 'schedule-1',
@@ -138,7 +136,7 @@ test('admin can enable automatic schedule opening with a configurable time windo
     timezone_name: 'Asia/Jakarta',
   }
   let policy: Record<string, unknown> = {
-    mode: 'manual',
+    mode: 'automatic',
     auto_open_minutes_before: 0,
     auto_open_minutes_after: 15,
     default_grace_period_minutes: 15,
@@ -182,7 +180,7 @@ test('admin can enable automatic schedule opening with a configurable time windo
       return route.fulfill({ status: 200, json: policy })
     }
     if (url.pathname.endsWith('/openable-schedules')) {
-      return route.fulfill({ status: 200, json: policy.mode === 'automatic' ? [] : [schedule] })
+      return route.fulfill({ status: 200, json: [schedule] })
     }
     return route.fulfill({
       status: 200,
@@ -197,17 +195,16 @@ test('admin can enable automatic schedule opening with a configurable time windo
   await expect(page).toHaveURL(/\/app\/sessions$/)
   await expect(page.getByRole('heading', { name: 'Cara membuka presensi' })).toBeVisible()
 
-  await page.getByLabel('Mode pembukaan').selectOption('automatic')
   await page.getByLabel('Buka sebelum jadwal').fill('15')
   await page.getByLabel('Buka setelah jadwal mulai').fill('5')
   await page.getByRole('button', { name: 'Simpan kebijakan' }).click()
 
-  await expect(page.locator('.master-data__success')).toContainText('Pembukaan otomatis tersimpan')
-  await expect(page.getByText('Sesi akan mengikuti jadwal laboratorium')).toBeVisible()
-  await expect(page.getByTestId('no-openable-schedules')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Buka sesi' })).toHaveCount(0)
+  await expect(page.locator('.master-data__success')).toContainText(
+    'Jendela buka otomatis dan grace period tersimpan',
+  )
+  await expect(page.getByText('Pembukaan otomatis aktif')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Buka sesi' })).toHaveCount(1)
   expect(policy).toMatchObject({
-    mode: 'automatic',
     auto_open_minutes_before: 15,
     auto_open_minutes_after: 5,
   })
