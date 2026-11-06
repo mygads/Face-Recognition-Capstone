@@ -18,6 +18,7 @@ import {
   provisionDeviceCredential,
   rotateDeviceCredential,
   setDeviceCameraEnabled,
+  setLaboratoryDisplayPin,
   updateDevice,
   type Device,
   type DeviceCredential,
@@ -71,6 +72,22 @@ const isSaving = ref(false)
 const editingDeviceId = ref<string | null>(null)
 const form = ref<DeviceForm>(emptyForm())
 const credentialDevice = ref<Device | null>(null)
+const displayPinDrafts = ref<Record<string, string>>({})
+const displayPinMessage = ref<string | null>(null)
+async function saveDisplayPin(labId: string): Promise<void> {
+  const pin = (displayPinDrafts.value[labId] ?? '').trim()
+  if (pin.length < 4) {
+    displayPinMessage.value = 'PIN minimal 4 karakter.'
+    return
+  }
+  try {
+    await setLaboratoryDisplayPin(labId, pin)
+    displayPinMessage.value = 'PIN layar diperbarui untuk lab ' + labId
+    displayPinDrafts.value[labId] = ''
+  } catch (err) {
+    displayPinMessage.value = err instanceof Error ? err.message : 'Gagal menyimpan PIN.'
+  }
+}
 const issuedCredential = ref<DeviceCredential | null>(null)
 const credentialError = ref<string | null>(null)
 const credentialCopyMessage = ref<string | null>(null)
@@ -936,6 +953,42 @@ onBeforeUnmount(() => {
       frame dan sampling dapat diatur di AI &amp; kamera. Resolusi/FPS diubah lewat wizard kamera di
       host perangkat.
     </p>
+    <section class="master-data__panel" data-testid="display-pin-panel">
+      <div class="master-data__panel-heading">
+        <div>
+          <p class="master-data__eyebrow">Layar publik</p>
+          <h2>PIN layar per lab (tanpa login)</h2>
+        </div>
+      </div>
+      <p class="accounts-view__hint">
+        PIN dipakai siswa di halaman <code>/display</code> fullscreen: pilih lab + PIN untuk melihat
+        status sudah-masuk / belum. Atur PIN per lab di sini.
+      </p>
+      <p v-if="displayPinMessage" class="master-data__success" role="status">
+        {{ displayPinMessage }}
+      </p>
+      <ul class="accounts-view__list">
+        <li v-for="lab in laboratories" :key="lab.id" class="accounts-view__row">
+          <div>
+            <strong>{{ lab.code }}</strong>
+            <small
+              >{{ lab.name }} · PIN: {{ lab.has_display_pin ? 'sudah diatur' : 'belum' }}</small
+            >
+          </div>
+          <input
+            v-model="displayPinDrafts[lab.id]"
+            type="password"
+            minlength="4"
+            maxlength="32"
+            placeholder="PIN baru"
+            :aria-label="'PIN untuk ' + lab.name"
+          />
+          <button class="button button--secondary" type="button" @click="saveDisplayPin(lab.id)">
+            Simpan PIN
+          </button>
+        </li>
+      </ul>
+    </section>
 
     <section v-if="isFormOpen" class="master-data__panel devices-view__form-panel">
       <div class="master-data__panel-heading">

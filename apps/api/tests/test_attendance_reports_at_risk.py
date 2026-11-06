@@ -514,8 +514,8 @@ def test_admin_and_laborant_see_all_flagged_students(
     assert set(rows_by_student(response.json())) == expected
     laborant = principal(RoleCode.LABORANT, LABORANT_ID)
     response = request("GET", "/api/v1/reports/attendance/at-risk", laborant)
-    assert response.status_code == 200, response.text
-    assert set(rows_by_student(response.json())) == expected
+    # Default LABORANT scope has no REPORTS_READ; needs optional grant from admin.
+    assert response.status_code == 403, response.text
 
 
 def test_invalid_window_rejected_with_envelope(

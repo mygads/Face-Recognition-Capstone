@@ -24,6 +24,16 @@ edit hasil generate manual). Klaim angka: gate 469 pytest + 84 vitest.
 | 11 | DB KAI-scale: `PRESENSI_DB_STATEMENT_TIMEOUT_MS` + `PRESENSI_DB_POOL_DISABLED=1` (NullPool di belakang PgBouncer) | deployment-container |
 | 12 | At-risk watchlist panel + policy (`tingkat_absen`/`sering_terlambat`); `GET /api/v1/attendance` (hapus 501) | use case + activity laporan (F-08/F-09/F-10) |
 | 13 | EWS tahap 2 (U-01–U-04) masih usulan; ERD sudah memuat `ews_follow_ups` (belum ada tabel/model/migrasi) | ERD + class: tandai "planned", jangan digambar sebagai implemented |
+| 14 | Scope LABORANT dipangkas (default 4 permission) + hak opsional per akun (`user_permission_grants`, 6 grantable) + sidebar/route berbasis permission; backend 403 tanpa grant | use case + activity akun/sesi/laporan (aktor LABORANT bercabang: default vs +grant), deployment-container tidak berubah |
+| 15 | Penugasan laboran → lab (`laborant_lab_assignments`, N lab per laboran) + CRUD di AccountsView | use case kelola akun + ERD/class (entitas penugasan), activity penugasan |
+| 16 | Akun staf lengkap: `is_active`, reset sandi sementara oleh ADMIN, `opening_mode` per guru di AccountsView | use case kelola akun + sequence reset/nonaktif |
+| 17 | Layar publik presensi `/display` (tanpa login): pilih lab + PIN (`/public/laboratories`, `/public/display`) | use case baru "Lihat layar presensi lab" (aktor: siswa/tamu tanpa login), sequence public display |
+| 18 | PIN layar per lab (`display_pin_hash`, min 4 char) + panel PIN di DevicesView | ERD/class laboratories + sequence set-PIN |
+| 19 | Koreksi penuh 2 kasus (ada record / tanpa record→absen turunan) + daftar + putusan ADMIN + penerapan ke record final | activity koreksi (ganti "pending saja"), sequence decision, state record |
+| 20 | EWS U-02 terealisasi: `ews_follow_ups` + endpoint + UI tindak lanjut di ReportsView (tetap tanpa notifikasi/eskalsi) | ERD/class: `ews_follow_ups` planned→implemented; activity EWS + laporan |
+| 21 | Watermark TERLAMBAT + `minutes_late`/`recorded_at` di roster + kolom Terlambat laporan | activity laporan + sequence roster (atribut tampilan) |
+| 22 | Rename "Pendaftaran siswa" → "Pendaftaran wajah" ( crates: master identitas vs acuan wajah) + caption mode pembukaan global vs per-guru | use case + activity enrollment/master (nama + batas makna), activity sesi (caption mode) |
+| 23 | Preview kamera: dropdown perangkat/lab; DevicesView: tabel wrap 8 kolom di 1440px; koreksi list ber-style; hapus emoji ⏰ (tofu) di layar publik | deployment-container/preview (label multi-device), rendering shell + tabel (bukan alur) |
 
 ## Sudah tercermin (tidak perlu diubah)
 

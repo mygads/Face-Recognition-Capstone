@@ -20,6 +20,11 @@ class LaboratoryResponse(ApiSchema):
     is_active: bool
     created_at: AwareDatetime
     updated_at: AwareDatetime
+    has_display_pin: bool = False
+
+
+class LaboratoryDisplayPinRequest(ApiSchema):
+    pin: str = Field(min_length=4, max_length=32)
 
 
 class LaboratoryUpdateRequest(ApiSchema):

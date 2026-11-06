@@ -176,7 +176,14 @@ def list_schedule_teachers(
     session: Annotated[Session, Depends(get_db_session)],
 ) -> list[ScheduleTeacherResponse]:
     if RoleCode.ADMIN not in principal.roles:
-        return [ScheduleTeacherResponse(id=principal.id, full_name=principal.full_name)]
+        me = session.get(User, principal.id)
+        return [
+            ScheduleTeacherResponse(
+                id=principal.id,
+                full_name=principal.full_name,
+                opening_mode=me.opening_mode if me else None,
+            )
+        ]
     teacher_role_id = _teacher_role_id(session)
     if teacher_role_id is None:
         return []
@@ -187,7 +194,9 @@ def list_schedule_teachers(
         .order_by(User.full_name, User.id)
     ).all()
     return [
-        ScheduleTeacherResponse(id=user.id, full_name=user.full_name)
+        ScheduleTeacherResponse(
+            id=user.id, full_name=user.full_name, opening_mode=user.opening_mode
+        )
         for user in teachers
     ]
 

@@ -91,6 +91,13 @@ function teacherPinia() {
       full_name: 'Test Teacher',
       roles: ['TEACHER'],
       must_change_password: false,
+      permissions: [
+        'reports_read',
+        'schedule_read',
+        'session_operate',
+        'attendance_read',
+        'attendance_correct',
+      ],
     },
   })
   return pinia

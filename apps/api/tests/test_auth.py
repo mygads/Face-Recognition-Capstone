@@ -162,13 +162,13 @@ def test_oauth_login_issues_expiring_access_token_and_me(
 
     me = request("GET", "/api/v1/auth/me", token=token_data["access_token"])
     assert me.status_code == 200
-    assert me.json() == {
-        "id": str(user.id),
-        "email": "teacher@example.edu",
-        "full_name": "Test Teacher",
-        "roles": ["TEACHER"],
-        "must_change_password": False,
-    }
+    me_json = me.json()
+    assert me_json["id"] == str(user.id)
+    assert me_json["email"] == "teacher@example.edu"
+    assert me_json["full_name"] == "Test Teacher"
+    assert me_json["roles"] == ["TEACHER"]
+    assert me_json["must_change_password"] is False
+    assert "permissions" in me_json
     with api_database() as session:
         events = session.scalars(select(AuditLog)).all()
     assert [event.action for event in events] == ["auth.login.succeeded"]
@@ -706,11 +706,11 @@ def test_expired_bearer_token_is_rejected(api_database: sessionmaker[Session]) -
             "POST",
             "/api/v1/sessions",
             {"practicum_schedule_id": str(UUID(int=5))},
-            404,
+            403,
         ),
         ("ADMIN", "GET", "/api/v1/sessions", None, 200),
         ("TEACHER", "GET", "/api/v1/sessions", None, 200),
-        ("LABORANT", "GET", "/api/v1/sessions", None, 200),
+        ("LABORANT", "GET", "/api/v1/sessions", None, 403),
         (
             "ADMIN",
             "GET",
@@ -730,11 +730,11 @@ def test_expired_bearer_token_is_rejected(api_database: sessionmaker[Session]) -
             "GET",
             f"/api/v1/sessions/{UUID(int=51)}",
             None,
-            404,
+            403,
         ),
         ("ADMIN", "GET", "/api/v1/attendance", None, 200),
         ("TEACHER", "GET", "/api/v1/attendance", None, 200),
-        ("LABORANT", "GET", "/api/v1/attendance", None, 200),
+        ("LABORANT", "GET", "/api/v1/attendance", None, 403),
         (
             "ADMIN",
             "POST",
@@ -790,9 +790,8 @@ def test_expired_bearer_token_is_rejected(api_database: sessionmaker[Session]) -
             "GET",
             "/api/v1/reports/attendance?starts_on=2026-09-01&ends_on=2026-09-30",
             None,
-            # LABORANT holds REPORTS_READ so the attendance watchlist
-            # (including at-risk) is readable for lab staff.
-            200,
+            # Default LABORANT has no REPORTS_READ; needs optional grant.
+            403,
         ),
     ],
 )

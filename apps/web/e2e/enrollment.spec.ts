@@ -46,6 +46,7 @@ async function loginAsLaborant(page: Page): Promise<void> {
         email: 'laborant@example.test',
         full_name: 'Laboran Praktikum',
         roles: ['LABORANT'],
+        permissions: ['roster_read', 'laboratory_read', 'device_operate', 'enrollment_manage'],
       },
     }),
   )

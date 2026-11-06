@@ -19,6 +19,7 @@ class CurrentUserResponse(ApiSchema):
     full_name: str
     roles: list[str]
     must_change_password: bool
+    permissions: list[str] = []
 
 
 class PasswordChangeRequest(ApiSchema):
@@ -79,3 +80,35 @@ class StaffAccountCreatedResponse(ApiSchema):
     is_active: bool
     must_change_password: bool
     temporary_password: str
+
+
+class AccountDetailResponse(ApiSchema):
+    id: UUID
+    email: str
+    full_name: str
+    is_active: bool
+    roles: list[str]
+    opening_mode: str | None = None
+    extra_permissions: list[str] = []
+    created_at: AwareDatetime
+
+
+class StaffAccountUpdateRequest(ApiSchema):
+    full_name: str | None = Field(default=None, min_length=2, max_length=200)
+    is_active: bool | None = None
+    opening_mode: Literal["manual", "automatic"] | None = None
+
+
+class StaffPasswordResetResponse(ApiSchema):
+    id: UUID
+    email: str
+    must_change_password: bool
+    temporary_password: str
+
+
+class PermissionGrantRequest(ApiSchema):
+    permission: str = Field(min_length=2, max_length=64)
+
+
+class LaborantAssignmentRequest(ApiSchema):
+    laboratory_id: UUID

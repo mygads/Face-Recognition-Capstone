@@ -136,3 +136,16 @@ class AtRiskPage(PageResponse[AtRiskStudentRow]):
     effective_late_count_threshold: int = Field(ge=0)
     policy_revision: int = Field(ge=0)
     generated_at: AwareDatetime
+
+
+class EwsFollowUpCreateRequest(ApiSchema):
+    note: str = Field(min_length=2, max_length=2000)
+
+
+class EwsFollowUpResponse(ApiSchema):
+    id: UUID
+    student_id: UUID
+    author_user_id: UUID
+    author_name: str | None = None
+    note: str
+    created_at: AwareDatetime

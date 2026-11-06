@@ -24,6 +24,20 @@ type DashboardMessage = {
 
 const auth = useAuthStore()
 const router = useRouter()
+const isAdmin = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
+const isTeacher = computed(() => auth.account?.roles.includes('TEACHER') ?? false)
+const isLaborant = computed(() => auth.account?.roles.includes('LABORANT') ?? false)
+const canViewReports = computed(() => {
+  const perms = (auth.account?.permissions ?? []) as string[]
+  if (isAdmin.value) return true
+  return perms.includes('reports_read')
+})
+const roleLabel = computed(() => {
+  if (isAdmin.value) return 'Admin — semua lab, sesi, dan laporan'
+  if (isTeacher.value) return 'Guru — hanya jadwal & kelas yang ditugaskan ke Anda'
+  if (isLaborant.value) return 'Laboran — perangkat, preview kamera & pendaftaran wajah'
+  return ''
+})
 const sessions = ref<AttendanceSession[]>([])
 const selectedSessionId = ref('')
 const snapshot = ref<SessionDashboardSnapshot | null>(null)
@@ -268,6 +282,11 @@ async function loadAtRisk(): Promise<void> {
   // websocket sesi live: kegagalan di sini tidak menghentikan dashboard.
   atRiskLoading.value = true
   atRiskError.value = null
+  if (!canViewReports.value) {
+    atRisk.value = null
+    atRiskLoading.value = false
+    return
+  }
   try {
     atRisk.value = await listAtRiskStudents({ limit: 25, offset: 0 })
   } catch (error) {
@@ -319,6 +338,26 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="dashboard-view" aria-label="Dashboard presensi">
+    <p class="dashboard-view__muted" data-testid="role-scope-note">{{ roleLabel }}</p>
+    <div class="dashboard-view__toolbar" style="gap: 8px">
+      <RouterLink class="button button--secondary" to="/app/sessions" data-testid="goto-sessions"
+        >Buka sesi presensi</RouterLink
+      >
+      <RouterLink
+        v-if="canViewReports"
+        class="button button--secondary"
+        to="/app/reports"
+        data-testid="goto-reports"
+        >Lihat laporan &amp; riwayat</RouterLink
+      >
+      <RouterLink
+        v-if="isLaborant || isAdmin"
+        class="button button--secondary"
+        to="/app/devices"
+        data-testid="goto-devices"
+        >Perangkat &amp; AI</RouterLink
+      >
+    </div>
     <div class="dashboard-view__toolbar">
       <label v-if="sessions.length" class="dashboard-view__session-picker">
         <span>Sesi berjalan</span>
@@ -554,7 +593,24 @@ onBeforeUnmount(() => {
     </template>
 
     <section
-      v-if="!isLoading"
+      v-if="!isLoading && !canViewReports"
+      class="dashboard-view__panel"
+      data-testid="laborant-infra-note"
+    >
+      <div class="dashboard-view__panel-heading">
+        <div>
+          <p class="dashboard-view__eyebrow">Fokus laboran</p>
+          <h2>Perangkat &amp; pendaftaran wajah</h2>
+        </div>
+      </div>
+      <p class="dashboard-view__muted">
+        Peran Anda fokus ke infrastruktur: pastikan perangkat online, preview kamera siap sebelum
+        sesi, dan pendaftaran wajah siswa lengkap. Jadwal/sesi/laporan/EWS hanya tampil bila admin
+        memberi hak akses opsional.
+      </p>
+    </section>
+    <section
+      v-if="!isLoading && canViewReports"
       class="dashboard-view__panel dashboard-view__at-risk"
       aria-labelledby="at-risk-heading"
       data-testid="at-risk-panel"
@@ -570,7 +626,11 @@ onBeforeUnmount(() => {
       </p>
       <p class="dashboard-view__muted">
         Daftar pantauan ini bukan sanksi dan tidak memblokir presensi. Tindak lanjut dilakukan
-        manual oleh guru/BK; tidak ada notifikasi otomatis.
+        manual oleh guru/BK; tidak ada notifikasi otomatis. Tahap 1: watchlist saja + catatan tindak
+        lanjut manual di Laporan.
+      </p>
+      <p v-if="canViewReports" class="dashboard-view__muted">
+        <RouterLink to="/app/reports">Buka riwayat siswa di Laporan →</RouterLink>
       </p>
       <p v-if="atRiskLoading" class="dashboard-view__muted" aria-live="polite">
         Memuat daftar pantauan…

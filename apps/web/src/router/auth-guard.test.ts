@@ -46,6 +46,7 @@ describe('route authorization', () => {
         full_name: 'Test Teacher',
         roles: ['TEACHER'],
         must_change_password: false,
+        permissions: [],
       },
     })
     const router = createAppRouter(createMemoryHistory())
@@ -62,7 +63,7 @@ describe('route authorization', () => {
     expect(router.currentRoute.value.name).toBe('forbidden')
   })
 
-  it('allows teachers into reports and rejects laborants', async () => {
+  it('allows teachers and laborants (grants enforced by API) into reports', async () => {
     const pinia = createPinia()
     const auth = useAuthStore(pinia)
     auth.$patch({
@@ -74,6 +75,7 @@ describe('route authorization', () => {
         full_name: 'Test Teacher',
         roles: ['TEACHER'],
         must_change_password: false,
+        permissions: [],
       },
     })
     const router = createAppRouter(createMemoryHistory())
@@ -85,7 +87,7 @@ describe('route authorization', () => {
     await router.push('/app/dashboard')
     auth.account!.roles = ['LABORANT']
     await router.push('/app/reports')
-    expect(router.currentRoute.value.name).toBe('forbidden')
+    expect(router.currentRoute.value.name).toBe('reports')
   })
 
   it('keeps master data limited to administrators', async () => {
@@ -100,6 +102,7 @@ describe('route authorization', () => {
         full_name: 'Test Teacher',
         roles: ['TEACHER'],
         must_change_password: false,
+        permissions: [],
       },
     })
     const router = createAppRouter(createMemoryHistory())
@@ -139,6 +142,7 @@ describe('route authorization', () => {
       full_name: 'Test Administrator',
       roles: ['ADMIN'],
       must_change_password: false,
+      permissions: [],
     })
     const pinia = createPinia()
     const router = createAppRouter(createMemoryHistory())
@@ -178,6 +182,7 @@ describe('post-login redirect safety', () => {
         full_name: 'Test Admin',
         roles: ['ADMIN'],
         must_change_password: false,
+        permissions: [],
       },
     })
     const router = createAppRouter(createMemoryHistory())

@@ -2,10 +2,22 @@
 import { onMounted, ref } from 'vue'
 import PageHeader from '../components/PageHeader.vue'
 import {
+  addLaborantAssignment,
   ApiError,
   createStaffAccount,
+  getStaffAccount,
+  grantOptionalPermission,
   listAccounts,
+  listLaboratories,
+  listLaborantAssignments,
+  listPermissionGrants,
+  removeLaborantAssignment,
+  resetStaffPassword,
+  revokeOptionalPermission,
+  updateStaffAccount,
   type Account,
+  type AccountDetail,
+  type Laboratory,
   type StaffAccountCreate,
   type StaffAccountCreated,
 } from '../api/client'
@@ -23,6 +35,19 @@ const accounts = ref<Account[]>([])
 const accountsTotal = ref(0)
 const isLoadingAccounts = ref(false)
 const accountsError = ref<string | null>(null)
+const selectedDetail = ref<AccountDetail | null>(null)
+const detailError = ref<string | null>(null)
+const laboratories = ref<Laboratory[]>([])
+const assignments = ref<{ laboratory_id: string; code: string | null; name: string | null }[]>([])
+const grants = ref<{ extra_permissions: string[]; grantable: string[] }>({
+  extra_permissions: [],
+  grantable: [],
+})
+const editName = ref('')
+const editActive = ref(true)
+const editOpeningMode = ref<'manual' | 'automatic'>('manual')
+const resetResult = ref<string | null>(null)
+const manageMessage = ref<string | null>(null)
 
 async function loadAccounts(): Promise<void> {
   isLoadingAccounts.value = true
@@ -38,8 +63,101 @@ async function loadAccounts(): Promise<void> {
   }
 }
 
+async function loadLabs(): Promise<void> {
+  try {
+    const page = await listLaboratories({ limit: 100, offset: 0 })
+    laboratories.value = page.items
+  } catch {
+    // optional
+  }
+}
+
+async function selectAccount(account: Account): Promise<void> {
+  detailError.value = null
+  manageMessage.value = null
+  resetResult.value = null
+  try {
+    selectedDetail.value = await getStaffAccount(account.id)
+    editName.value = selectedDetail.value.full_name
+    editActive.value = selectedDetail.value.is_active
+    editOpeningMode.value =
+      selectedDetail.value.opening_mode === 'automatic' ? 'automatic' : 'manual'
+    const [assignRes, grantRes] = await Promise.all([
+      listLaborantAssignments(account.id).catch(() => ({ items: [] })),
+      listPermissionGrants(account.id).catch(() => ({ extra_permissions: [], grantable: [] })),
+    ])
+    assignments.value = (assignRes as { items: typeof assignments.value }).items
+    grants.value = grantRes as typeof grants.value
+  } catch (error) {
+    detailError.value = formatError(error)
+  }
+}
+
+async function saveAccount(): Promise<void> {
+  if (!selectedDetail.value) return
+  try {
+    selectedDetail.value = await updateStaffAccount(selectedDetail.value.id, {
+      full_name: editName.value.trim() || undefined,
+      is_active: editActive.value,
+      opening_mode: editOpeningMode.value,
+    })
+    manageMessage.value = 'Akun diperbarui: aktif/nonaktif, nama, mode pembukaan.'
+    void loadAccounts()
+  } catch (error) {
+    detailError.value = formatError(error)
+  }
+}
+
+async function doReset(): Promise<void> {
+  if (!selectedDetail.value) return
+  try {
+    const res = await resetStaffPassword(selectedDetail.value.id)
+    resetResult.value = res.temporary_password
+    manageMessage.value = 'Kata sandi direset. Berikan sandi sementara baru ke staf.'
+  } catch (error) {
+    detailError.value = formatError(error)
+  }
+}
+
+async function toggleGrant(permission: string, enabled: boolean): Promise<void> {
+  if (!selectedDetail.value) return
+  try {
+    if (enabled) await grantOptionalPermission(selectedDetail.value.id, permission)
+    else await revokeOptionalPermission(selectedDetail.value.id, permission)
+    const g = await listPermissionGrants(selectedDetail.value.id)
+    grants.value = g
+    manageMessage.value = 'Hak akses opsional diperbarui.'
+  } catch (error) {
+    detailError.value = formatError(error)
+  }
+}
+
+async function assignLab(labId: string): Promise<void> {
+  if (!selectedDetail.value || !labId) return
+  try {
+    await addLaborantAssignment(selectedDetail.value.id, labId)
+    const a = await listLaborantAssignments(selectedDetail.value.id)
+    assignments.value = (a as { items: typeof assignments.value }).items
+    manageMessage.value = 'Penugasan lab diperbarui.'
+  } catch (error) {
+    detailError.value = formatError(error)
+  }
+}
+
+async function unassignLab(labId: string): Promise<void> {
+  if (!selectedDetail.value) return
+  try {
+    await removeLaborantAssignment(selectedDetail.value.id, labId)
+    const a = await listLaborantAssignments(selectedDetail.value.id)
+    assignments.value = (a as { items: typeof assignments.value }).items
+  } catch (error) {
+    detailError.value = formatError(error)
+  }
+}
+
 onMounted(() => {
   void loadAccounts()
+  void loadLabs()
 })
 
 function formatError(error: unknown): string {
@@ -172,6 +290,14 @@ async function copyTemporaryPassword(): Promise<void> {
           >
             {{ account.is_active ? 'Aktif' : 'Nonaktif' }}
           </span>
+          <button
+            class="button button--secondary"
+            type="button"
+            :data-testid="'manage-' + account.id"
+            @click="selectAccount(account)"
+          >
+            Kelola
+          </button>
         </li>
       </ul>
       <p v-else class="accounts-view__hint">Belum ada akun staf terdaftar.</p>
@@ -216,6 +342,94 @@ async function copyTemporaryPassword(): Promise<void> {
           </button>
         </div>
       </form>
+    </section>
+
+    <section v-if="selectedDetail" class="master-data__panel" data-testid="account-manage">
+      <div class="master-data__panel-heading">
+        <div>
+          <p class="master-data__eyebrow">Kelola staf</p>
+          <h2>{{ selectedDetail.full_name }} · {{ selectedDetail.email }}</h2>
+        </div>
+      </div>
+      <p v-if="detailError" class="master-data__alert" role="alert">{{ detailError }}</p>
+      <p v-if="manageMessage" class="master-data__success" role="status">{{ manageMessage }}</p>
+      <p class="accounts-view__hint">
+        Role: {{ selectedDetail.roles.join(', ') }} · Status:
+        {{ selectedDetail.is_active ? 'Aktif' : 'Nonaktif' }} · Mode buka:
+        {{ selectedDetail.opening_mode }} · Dibuat: {{ selectedDetail.created_at }}
+      </p>
+      <form class="master-data__form" @submit.prevent="saveAccount">
+        <label>
+          Nama lengkap
+          <input v-model="editName" minlength="2" maxlength="200" required />
+        </label>
+        <label>
+          Status akun
+          <select v-model="editActive">
+            <option :value="true">Aktif</option>
+            <option :value="false">Nonaktif</option>
+          </select>
+        </label>
+        <label>
+          Mode pembukaan sesi (guru)
+          <select v-model="editOpeningMode">
+            <option value="manual">Saya membuka sesi sendiri</option>
+            <option value="automatic">Sesi saya dibuka otomatis sesuai jadwal</option>
+          </select>
+        </label>
+        <div class="master-data__form-actions">
+          <button class="button button--primary" type="submit">Simpan perubahan</button>
+          <button class="button button--secondary" type="button" @click="doReset">
+            Reset kata sandi
+          </button>
+        </div>
+      </form>
+      <p v-if="resetResult" class="master-data__success" role="status">
+        Sandi sementara baru: <code>{{ resetResult }}</code>
+      </p>
+      <h3>Penugasan laboran → lab</h3>
+      <ul>
+        <li v-for="a in assignments" :key="a.laboratory_id">
+          {{ a.code }} — {{ a.name }}
+          <button class="button button--text" type="button" @click="unassignLab(a.laboratory_id)">
+            Lepas
+          </button>
+        </li>
+      </ul>
+      <form @submit.prevent="">
+        <label>
+          Tambah penugasan lab
+          <select
+            aria-label="Pilih lab untuk laboran"
+            @change="(e) => assignLab((e.target as HTMLSelectElement).value)"
+          >
+            <option value="">Pilih lab…</option>
+            <option v-for="lab in laboratories" :key="lab.id" :value="lab.id">
+              {{ lab.code }} — {{ lab.name }}
+            </option>
+          </select>
+        </label>
+      </form>
+      <h3>Hak akses opsional laboran (checklist)</h3>
+      <p class="accounts-view__hint">
+        Default laboran: perangkat, preview kamera, pendaftaran wajah. Centang untuk memberi akses
+        guru (jadwal/sesi/koreksi/laporan/EWS). Laboran full ≈ admin kecuali buat staf &amp; AI.
+      </p>
+      <ul>
+        <li v-for="perm in grants.grantable" :key="perm">
+          <label>
+            <input
+              type="checkbox"
+              :checked="grants.extra_permissions.includes(perm)"
+              @change="(e) => toggleGrant(perm, (e.target as HTMLInputElement).checked)"
+            />
+            {{ perm }}
+          </label>
+        </li>
+      </ul>
+      <p class="accounts-view__hint">
+        Aktif saat ini: {{ grants.extra_permissions.join(', ') || '—' }}
+      </p>
     </section>
   </section>
 </template>

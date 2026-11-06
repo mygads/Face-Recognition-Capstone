@@ -81,7 +81,9 @@ class RecognitionEventDecisionResponse(ApiSchema):
 
 
 class AttendanceCorrectionRequest(ApiSchema):
-    attendance_record_id: UUID
+    attendance_record_id: UUID | None = None
+    session_id: UUID | None = None
+    student_id: UUID | None = None
     corrected_status: AttendanceStatus
     reason: str = Field(min_length=1, max_length=2000)
 
@@ -93,16 +95,45 @@ class AttendanceCorrectionRequest(ApiSchema):
             raise ValueError("A correction reason is required.")
         return cleaned
 
+    @model_validator(mode="after")
+    def validate_target(self) -> Self:
+        has_record = self.attendance_record_id is not None
+        has_missing = self.session_id is not None and self.student_id is not None
+        if not has_record and not has_missing:
+            raise ValueError(
+                "Isi attendance_record_id atau pasangan session_id + student_id."
+            )
+        if has_record and has_missing:
+            raise ValueError("Pilih satu jenis koreksi saja.")
+        return self
+
+
+class AttendanceCorrectionDecisionRequest(ApiSchema):
+    decision: Literal["approved", "rejected"]
+    decision_note: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("decision_note")
+    @classmethod
+    def strip_and_validate_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
 
 class AttendanceCorrectionResponse(ApiSchema):
     id: UUID
-    attendance_record_id: UUID
+    attendance_record_id: UUID | None
+    session_id: UUID | None = None
+    student_id: UUID | None = None
     previous_status: AttendanceStatus
     corrected_status: AttendanceStatus
     decision_status: Literal["pending", "approved", "rejected"]
     reason: str
     created_at: AwareDatetime
     decided_at: AwareDatetime | None
+    decided_by_user_id: UUID | None = None
+    decision_note: str | None = None
 
 
 class ManualMarkRequest(ApiSchema):

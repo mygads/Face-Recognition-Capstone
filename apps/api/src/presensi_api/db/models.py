@@ -195,6 +195,10 @@ class Laboratory(UUIDPrimaryKey, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
     )
+    display_pin_hash: Mapped[str | None] = mapped_column(String(255))
+    display_pin_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
 
 class Device(UUIDPrimaryKey, TimestampMixin, Base):
@@ -600,10 +604,16 @@ class AttendanceCorrection(UUIDPrimaryKey, TimestampMixin, Base):
         Index("ix_attendance_corrections_requested_by_user_id", "requested_by_user_id"),
     )
 
-    attendance_record_id: Mapped[UUID] = mapped_column(
+    attendance_record_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("attendance_records.id", ondelete="RESTRICT"),
-        nullable=False,
+    )
+    session_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("attendance_sessions.id", ondelete="RESTRICT"),
+    )
+    student_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("students.id", ondelete="RESTRICT")
     )
     requested_by_user_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
@@ -619,6 +629,64 @@ class AttendanceCorrection(UUIDPrimaryKey, TimestampMixin, Base):
     )
     decision_note: Mapped[str | None] = mapped_column(Text)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class LaborantLabAssignment(TimestampMixin, Base):
+    __tablename__ = "laborant_lab_assignments"
+    __table_args__ = (
+        UniqueConstraint("user_id", "laboratory_id", name="uq_laborant_lab_user_lab"),
+        Index("ix_laborant_lab_lab_id", "laboratory_id"),
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    laboratory_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("laboratories.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    assigned_by_user_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+
+class UserPermissionGrant(TimestampMixin, Base):
+    __tablename__ = "user_permission_grants"
+    __table_args__ = (
+        UniqueConstraint("user_id", "permission", name="uq_user_permission_grant"),
+        Index("ix_user_permission_grant_user", "user_id"),
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    permission: Mapped[str] = mapped_column(String(64), primary_key=True)
+    granted_by_user_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+
+class EwsFollowUp(UUIDPrimaryKey, TimestampMixin, Base):
+    __tablename__ = "ews_follow_ups"
+    __table_args__ = (
+        Index("ix_ews_follow_ups_student_id", "student_id"),
+        Index("ix_ews_follow_ups_created_at", "created_at"),
+    )
+
+    student_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("students.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    author_user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    note: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class AuditLog(UUIDPrimaryKey, Base):

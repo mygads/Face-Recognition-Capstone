@@ -52,13 +52,22 @@ ROLE_PERMISSIONS: dict[RoleCode, FrozenSet[Permission]] = {
             Permission.ROSTER_READ,
             Permission.LABORATORY_READ,
             Permission.DEVICE_OPERATE,
-            Permission.SESSION_OPERATE,
             Permission.ENROLLMENT_MANAGE,
-            Permission.ATTENDANCE_READ,
-            Permission.REPORTS_READ,
         }
     ),
 }
+
+
+LABORANT_GRANTABLE_PERMISSIONS: frozenset[Permission] = frozenset(
+    {
+        Permission.SCHEDULE_READ,
+        Permission.SCHEDULE_MANAGE,
+        Permission.SESSION_OPERATE,
+        Permission.ATTENDANCE_READ,
+        Permission.ATTENDANCE_CORRECT,
+        Permission.REPORTS_READ,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -68,12 +77,15 @@ class AuthenticatedUser:
     full_name: str
     roles: frozenset[RoleCode]
     must_change_password: bool = False
+    extra_permissions: frozenset[Permission] = frozenset()
 
     @property
     def permissions(self) -> frozenset[Permission]:
-        return frozenset(
+        base = set(
             permission for role in self.roles for permission in ROLE_PERMISSIONS[role]
         )
+        base.update(self.extra_permissions)
+        return frozenset(base)
 
 
 def get_user_roles(session: Session, user_id: UUID) -> frozenset[RoleCode]:
@@ -92,6 +104,30 @@ def get_user_roles(session: Session, user_id: UUID) -> frozenset[RoleCode]:
     return frozenset(roles)
 
 
+def get_user_extra_permissions(
+    session: Session, user_id: UUID
+) -> frozenset[Permission]:
+    try:
+        from presensi_api.db.models import UserPermissionGrant
+    except Exception:
+        return frozenset()
+    try:
+        rows = session.scalars(
+            select(UserPermissionGrant.permission).where(
+                UserPermissionGrant.user_id == user_id
+            )
+        ).all()
+    except Exception:
+        return frozenset()
+    out: set[Permission] = set()
+    for raw in rows:
+        try:
+            out.add(Permission(raw))
+        except ValueError:
+            continue
+    return frozenset(out)
+
+
 def principal_for_user(session: Session, user: User) -> AuthenticatedUser:
     return AuthenticatedUser(
         id=user.id,
@@ -99,4 +135,5 @@ def principal_for_user(session: Session, user: User) -> AuthenticatedUser:
         full_name=user.full_name,
         roles=get_user_roles(session, user.id),
         must_change_password=user.must_change_password,
+        extra_permissions=get_user_extra_permissions(session, user.id),
     )

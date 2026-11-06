@@ -2,15 +2,20 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import {
   ApiError,
+  createEwsFollowUp,
   downloadAttendanceReport,
   getAttendanceReportSummary,
   listAttendanceReportRows,
+  listAtRiskStudents,
   listAttendanceSessions,
+  listEwsFollowUps,
   listSchedules,
   type AttendanceReportQuery,
   type AttendanceReportRow,
   type AttendanceReportSummary,
+  type AtRiskPage,
   type AttendanceSession,
+  type EwsFollowUp,
   type Schedule,
 } from '../api/client'
 import { triggerDownload } from '../utils/download'
@@ -28,6 +33,46 @@ const filters = reactive({
 })
 const schedules = ref<Schedule[]>([])
 const sessions = ref<AttendanceSession[]>([])
+const atRisk = ref<AtRiskPage | null>(null)
+const atRiskError = ref<string | null>(null)
+const followUps = ref<Record<string, EwsFollowUp[]>>({})
+const followUpDrafts = ref<Record<string, string>>({})
+const followUpError = ref<string | null>(null)
+function minutesLate(row: AttendanceReportRow): number | null {
+  if (row.status !== 'late' || !row.recorded_at) return null
+  const start = new Date(row.session_opened_at).getTime()
+  const rec = new Date(row.recorded_at).getTime()
+  if (Number.isNaN(start) || Number.isNaN(rec)) return null
+  return Math.max(0, Math.round((rec - start) / 60000))
+}
+async function loadAtRisk(): Promise<void> {
+  try {
+    atRisk.value = await listAtRiskStudents({ limit: 25, offset: 0 })
+  } catch (error) {
+    atRiskError.value = formatError(error)
+  }
+}
+async function loadFollowUps(studentId: string): Promise<void> {
+  try {
+    followUps.value[studentId] = await listEwsFollowUps(studentId)
+  } catch (error) {
+    followUpError.value = formatError(error)
+  }
+}
+async function submitFollowUp(studentId: string): Promise<void> {
+  const note = (followUpDrafts.value[studentId] ?? '').trim()
+  if (!note) {
+    followUpError.value = 'Catatan tindak lanjut tidak boleh kosong.'
+    return
+  }
+  try {
+    const created = await createEwsFollowUp(studentId, note)
+    followUpDrafts.value[studentId] = ''
+    followUps.value[studentId] = [created, ...(followUps.value[studentId] ?? [])]
+  } catch (error) {
+    followUpError.value = formatError(error)
+  }
+}
 const summary = ref<AttendanceReportSummary | null>(null)
 const rows = ref<AttendanceReportRow[]>([])
 const total = ref(0)
@@ -185,7 +230,7 @@ async function loadOptions(): Promise<void> {
 }
 
 onMounted(async () => {
-  await Promise.all([loadOptions(), applyFilters()])
+  await Promise.all([loadOptions(), applyFilters(), loadAtRisk()])
 })
 </script>
 
@@ -328,16 +373,17 @@ onMounted(async () => {
             <th scope="col">Praktikum</th>
             <th scope="col">Guru</th>
             <th scope="col">Status</th>
+            <th scope="col">Terlambat</th>
             <th scope="col">Catatan</th>
             <th scope="col">Waktu tercatat</th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="isLoading">
-            <td colspan="9" class="master-data__empty">Memuat laporan…</td>
+            <td colspan="10" class="master-data__empty">Memuat laporan…</td>
           </tr>
           <tr v-else-if="rows.length === 0">
-            <td colspan="9" class="master-data__empty">Tidak ada data untuk filter ini.</td>
+            <td colspan="10" class="master-data__empty">Tidak ada data untuk filter ini.</td>
           </tr>
           <tr v-for="row in rows" v-else :key="`${row.session_id}-${row.student_id}`">
             <td data-label="Waktu sesi">{{ formatDate(row.session_opened_at) }}</td>
@@ -353,6 +399,16 @@ onMounted(async () => {
               <span class="reports__status" :class="statusClass(row.status)">
                 {{ statusLabel(row.status) }}
               </span>
+              <span
+                v-if="row.status === 'late'"
+                class="reports__status reports__status--late"
+                data-testid="late-watermark"
+                >TERLAMBAT</span
+              >
+            </td>
+            <td data-label="Terlambat">
+              <small v-if="minutesLate(row) != null">telat {{ minutesLate(row) }} mnt</small>
+              <span v-else class="master-data__muted">–</span>
             </td>
             <td data-label="Catatan">
               <small v-if="row.note">{{ row.note }}</small>
@@ -364,6 +420,65 @@ onMounted(async () => {
       </table>
     </div>
 
+    <section class="master-data__panel" aria-label="EWS tahap 1" data-testid="ews-panel">
+      <div class="master-data__panel-heading">
+        <div>
+          <p class="master-data__eyebrow">EWS tahap 1 · watchlist</p>
+          <h2>Siswa perlu perhatian + tindak lanjut</h2>
+        </div>
+        <button class="button button--secondary" type="button" @click="loadAtRisk">
+          Muat ulang watchlist
+        </button>
+      </div>
+      <p class="accounts-view__hint">
+        Watchlist bukan sanksi dan tidak memblokir presensi. Klik siswa untuk melihat riwayat di
+        tabel di atas (filter NIS), lalu tulis catatan tindak lanjut. Tahap 1 tanpa notifikasi /
+        eskalasi otomatis.
+      </p>
+      <p v-if="atRiskError" class="master-data__alert" role="alert">{{ atRiskError }}</p>
+      <ul v-else-if="atRisk && atRisk.items.length" class="accounts-view__list">
+        <li
+          v-for="item in atRisk.items"
+          :key="item.student_id"
+          class="accounts-view__row"
+          data-testid="ews-row"
+        >
+          <div>
+            <strong>{{ item.full_name }}</strong>
+            <small
+              >{{ item.student_number }} · {{ item.class_name }} · absen {{ item.absence_pct }}% ·
+              terlambat {{ item.late_count }}x</small
+            >
+            <div>
+              <button
+                class="button button--text"
+                type="button"
+                @click="loadFollowUps(item.student_id)"
+              >
+                Lihat / tambah tindak lanjut
+              </button>
+            </div>
+            <ul v-if="followUps[item.student_id]?.length">
+              <li v-for="f in followUps[item.student_id]" :key="f.id">
+                <small>{{ f.created_at }} — {{ f.author_name }}: {{ f.note }}</small>
+              </li>
+            </ul>
+            <form @submit.prevent="submitFollowUp(item.student_id)">
+              <input
+                v-model="followUpDrafts[item.student_id]"
+                type="text"
+                maxlength="2000"
+                placeholder="Tulis tindak lanjut, mis. panggil orang tua / bimbingan"
+                :aria-label="'Tindak lanjut untuk ' + item.full_name"
+              />
+              <button class="button button--secondary" type="submit">Simpan catatan</button>
+            </form>
+          </div>
+        </li>
+      </ul>
+      <p v-else class="accounts-view__hint">Belum ada siswa yang perlu perhatian.</p>
+      <p v-if="followUpError" class="master-data__alert" role="alert">{{ followUpError }}</p>
+    </section>
     <div class="master-data__pagination" aria-label="Navigasi halaman laporan">
       <span>{{
         total === 0

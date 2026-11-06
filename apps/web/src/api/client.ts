@@ -42,9 +42,19 @@ export type TeacherOpeningPreferenceResponse =
 export type SessionRosterEntry = components['schemas']['SessionRosterEntry']
 export type ManualMarkRequest = components['schemas']['ManualMarkRequest']
 export type ManualMarkResponse = components['schemas']['ManualMarkResponse']
+export type AttendanceCorrectionRequest = components['schemas']['AttendanceCorrectionRequest']
+export type AttendanceCorrectionResponse = components['schemas']['AttendanceCorrectionResponse']
+export type AttendanceCorrectionDecisionRequest =
+  components['schemas']['AttendanceCorrectionDecisionRequest']
 export type StaffAccountCreate = components['schemas']['StaffAccountCreateRequest']
 export type StaffAccountCreated = components['schemas']['StaffAccountCreatedResponse']
 export type Account = components['schemas']['AccountResponse']
+export type AccountDetail = components['schemas']['AccountDetailResponse']
+export type StaffAccountUpdate = components['schemas']['StaffAccountUpdateRequest']
+export type StaffPasswordReset = components['schemas']['StaffPasswordResetResponse']
+export type EwsFollowUp = components['schemas']['EwsFollowUpResponse']
+export type PublicLaboratory = components['schemas']['PublicLaboratory']
+export type PublicDisplay = components['schemas']['PublicDisplayResponse']
 export type AttendanceReportQuery =
   operations['get_attendance_report_api_v1_reports_attendance_get']['parameters']['query']
 export type AttendanceReportSummary = components['schemas']['AttendanceReportResponse']
@@ -542,6 +552,167 @@ export async function markManualAttendance(
   const result = await apiClient.POST('/api/v1/attendance/sessions/{session_id}/manual-marks', {
     params: { path: { session_id: sessionId } },
     body,
+  })
+  return unwrap(result)
+}
+
+export async function requestAttendanceCorrection(
+  body: AttendanceCorrectionRequest,
+): Promise<AttendanceCorrectionResponse> {
+  const result = await apiClient.POST('/api/v1/attendance/corrections', { body })
+  return unwrap(result)
+}
+
+export async function listAttendanceCorrections(query?: {
+  decision_status?: 'pending' | 'approved' | 'rejected'
+  session_id?: string
+  limit?: number
+  offset?: number
+}): Promise<{
+  items: AttendanceCorrectionResponse[]
+  pagination: { total: number; limit: number; offset: number }
+}> {
+  const result = await apiClient.GET('/api/v1/attendance/corrections', {
+    params: { query: query ?? {} },
+  })
+  return unwrap(result)
+}
+
+export async function decideAttendanceCorrection(
+  correctionId: string,
+  body: AttendanceCorrectionDecisionRequest,
+): Promise<AttendanceCorrectionResponse> {
+  const result = await apiClient.POST('/api/v1/attendance/corrections/{correction_id}/decision', {
+    params: { path: { correction_id: correctionId } },
+    body,
+  })
+  return unwrap(result)
+}
+
+export async function getStaffAccount(accountId: string): Promise<AccountDetail> {
+  const result = await apiClient.GET('/api/v1/accounts/{account_id}', {
+    params: { path: { account_id: accountId } },
+  })
+  return unwrap(result)
+}
+
+export async function updateStaffAccount(
+  accountId: string,
+  body: StaffAccountUpdate,
+): Promise<AccountDetail> {
+  const result = await apiClient.PATCH('/api/v1/accounts/{account_id}', {
+    params: { path: { account_id: accountId } },
+    body,
+  })
+  return unwrap(result)
+}
+
+export async function resetStaffPassword(accountId: string): Promise<StaffPasswordReset> {
+  const result = await apiClient.POST('/api/v1/accounts/{account_id}/reset-password', {
+    params: { path: { account_id: accountId } },
+  })
+  return unwrap(result)
+}
+
+export async function listLaborantAssignments(accountId: string): Promise<{
+  items: { laboratory_id: string; code: string | null; name: string | null }[]
+}> {
+  const result = await apiClient.GET('/api/v1/accounts/{account_id}/laborant-assignments', {
+    params: { path: { account_id: accountId } },
+  })
+  return unwrap(result) as unknown as {
+    items: { laboratory_id: string; code: string | null; name: string | null }[]
+  }
+}
+
+export async function addLaborantAssignment(
+  accountId: string,
+  laboratoryId: string,
+): Promise<unknown> {
+  const result = await apiClient.POST('/api/v1/accounts/{account_id}/laborant-assignments', {
+    params: { path: { account_id: accountId } },
+    body: { laboratory_id: laboratoryId },
+  })
+  return unwrap(result)
+}
+
+export async function removeLaborantAssignment(
+  accountId: string,
+  laboratoryId: string,
+): Promise<unknown> {
+  const result = await apiClient.DELETE(
+    '/api/v1/accounts/{account_id}/laborant-assignments/{laboratory_id}',
+    { params: { path: { account_id: accountId, laboratory_id: laboratoryId } } },
+  )
+  return unwrap(result)
+}
+
+export async function listPermissionGrants(accountId: string): Promise<{
+  extra_permissions: string[]
+  grantable: string[]
+}> {
+  const result = await apiClient.GET('/api/v1/accounts/{account_id}/permission-grants', {
+    params: { path: { account_id: accountId } },
+  })
+  return unwrap(result) as unknown as { extra_permissions: string[]; grantable: string[] }
+}
+
+export async function grantOptionalPermission(
+  accountId: string,
+  permission: string,
+): Promise<unknown> {
+  const result = await apiClient.POST('/api/v1/accounts/{account_id}/permission-grants', {
+    params: { path: { account_id: accountId } },
+    body: { permission },
+  })
+  return unwrap(result)
+}
+
+export async function revokeOptionalPermission(
+  accountId: string,
+  permission: string,
+): Promise<unknown> {
+  const result = await apiClient.DELETE(
+    '/api/v1/accounts/{account_id}/permission-grants/{permission}',
+    { params: { path: { account_id: accountId, permission } } },
+  )
+  return unwrap(result)
+}
+
+export async function setLaboratoryDisplayPin(
+  laboratoryId: string,
+  pin: string,
+): Promise<Laboratory> {
+  const result = await apiClient.POST('/api/v1/laboratories/{laboratory_id}/display-pin', {
+    params: { path: { laboratory_id: laboratoryId } },
+    body: { pin },
+  })
+  return unwrap(result)
+}
+
+export async function listEwsFollowUps(studentId: string): Promise<EwsFollowUp[]> {
+  const result = await apiClient.GET('/api/v1/reports/attendance/at-risk/{student_id}/follow-ups', {
+    params: { path: { student_id: studentId } },
+  })
+  return unwrap(result)
+}
+
+export async function createEwsFollowUp(studentId: string, note: string): Promise<EwsFollowUp> {
+  const result = await apiClient.POST(
+    '/api/v1/reports/attendance/at-risk/{student_id}/follow-ups',
+    { params: { path: { student_id: studentId } }, body: { note } },
+  )
+  return unwrap(result)
+}
+
+export async function listPublicLaboratories(): Promise<PublicLaboratory[]> {
+  const result = await apiClient.GET('/api/v1/public/laboratories')
+  return unwrap(result)
+}
+
+export async function getPublicDisplay(laboratoryId: string, pin: string): Promise<PublicDisplay> {
+  const result = await apiClient.GET('/api/v1/public/display', {
+    params: { query: { laboratory_id: laboratoryId, pin } },
   })
   return unwrap(result)
 }

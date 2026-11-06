@@ -20,6 +20,16 @@ async function signInAsTeacher(page: Page): Promise<void> {
         email: 'teacher@example.test',
         full_name: 'Test Teacher',
         roles: ['TEACHER'],
+        permissions: [
+          'roster_read',
+          'laboratory_read',
+          'schedule_read',
+          'schedule_manage',
+          'session_operate',
+          'attendance_read',
+          'attendance_correct',
+          'reports_read',
+        ],
       },
     })
   })

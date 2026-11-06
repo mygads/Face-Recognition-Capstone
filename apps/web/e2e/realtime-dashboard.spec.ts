@@ -23,6 +23,16 @@ async function loginAsTeacher(page: Page): Promise<void> {
         email: 'teacher@example.test',
         full_name: 'Guru Praktikum',
         roles: ['TEACHER'],
+        permissions: [
+          'roster_read',
+          'laboratory_read',
+          'schedule_read',
+          'schedule_manage',
+          'session_operate',
+          'attendance_read',
+          'attendance_correct',
+          'reports_read',
+        ],
       },
     }),
   )

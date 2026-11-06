@@ -13,25 +13,20 @@ const emit = defineEmits<{
   navigate: []
 }>()
 const auth = useAuthStore()
-const canManageSchedules = computed(
-  () => auth.account?.roles.some((role) => role === 'ADMIN' || role === 'TEACHER') ?? false,
-)
-const canOperateSessions = computed(
-  () =>
-    auth.account?.roles.some((role) => ['ADMIN', 'TEACHER', 'LABORANT'].includes(role)) ?? false,
-)
-const canManageEnrollment = computed(
-  () => auth.account?.roles.some((role) => role === 'ADMIN' || role === 'LABORANT') ?? false,
-)
-const canViewDevices = computed(
-  () => auth.account?.roles.some((role) => role === 'ADMIN' || role === 'LABORANT') ?? false,
-)
-const canViewReports = computed(
-  () => auth.account?.roles.some((role) => role === 'ADMIN' || role === 'TEACHER') ?? false,
-)
-const canManageMasterData = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
-const canManageAccounts = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
-const canManageSettings = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
+function hasPerm(...perms: string[]): boolean {
+  const permsSet = auth.account?.permissions ?? []
+  const roles = auth.account?.roles ?? []
+  if (roles.includes('ADMIN')) return true
+  return perms.some((perm) => (permsSet as string[]).includes(perm))
+}
+const canManageSchedules = computed(() => hasPerm('schedule_read', 'schedule_manage'))
+const canOperateSessions = computed(() => hasPerm('session_operate'))
+const canManageEnrollment = computed(() => hasPerm('enrollment_manage'))
+const canViewDevices = computed(() => hasPerm('device_operate', 'laboratory_read'))
+const canViewReports = computed(() => hasPerm('reports_read'))
+const canManageMasterData = computed(() => hasPerm('manage_master_data'))
+const canManageAccounts = computed(() => hasPerm('manage_accounts'))
+const canManageSettings = computed(() => hasPerm('manage_settings'))
 </script>
 
 <template>
@@ -152,7 +147,7 @@ const canManageSettings = computed(() => auth.account?.roles.includes('ADMIN') ?
         class="app-sidebar__link"
         active-class="app-sidebar__link--active"
         to="/app/enrollment"
-        :aria-label="collapsed ? 'Pendaftaran siswa' : undefined"
+        :aria-label="collapsed ? 'Pendaftaran wajah' : undefined"
         data-testid="enrollment-link"
         @click="emit('navigate')"
       >
@@ -161,8 +156,11 @@ const canManageSettings = computed(() => auth.account?.roles.includes('ADMIN') ?
           <circle cx="9" cy="10" r="2.5" />
           <path d="M5.5 17c.7-2 2-3 3.5-3s2.8 1 3.5 3M15 9h3M15 12h3M15 15h3" />
         </svg>
-        <span class="app-sidebar__link-label">Pendaftaran siswa</span>
+        <span class="app-sidebar__link-label">Pendaftaran wajah</span>
       </RouterLink>
+      <p v-if="canViewDevices || canManageSettings" class="app-sidebar__section-label">
+        Perangkat &amp; AI
+      </p>
       <RouterLink
         v-if="canViewDevices"
         class="app-sidebar__link"

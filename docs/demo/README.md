@@ -1,8 +1,10 @@
 # Demo & UAT Terpandu untuk Dosen (data 100% sintetis)
 
-Bukti visual: `screenshots/` (40 PNG desktop 1440px + 2 tablet 1024px) +
-`rekap.csv` / `rekap.xlsx` (hasil unduh laporan asli). UAT browser
-**5/5 HIJAU** (Playwright Chromium, timeout 120 dtk/tes, ±28 dtk total).
+Bukti visual: `/tmp/shots/` (23 PNG desktop 1440px: 2 publik + 8 admin +
+4 guru + 6 laboran + 3 master-tab) + `rekap.csv` / `rekap.xlsx` (hasil unduh
+laporan asli). UAT browser **5/5 HIJAU** + `seed-demo` **24–25/24–25 HIJAU** (25 bila koreksi contoh baru dibuat)
+(Playwright Chromium). Arsip lama per halaman tetap di `screenshots/` (40 PNG
++ 2 tablet).
 
 > Catatan 6 Nov malam: sesi demo pertama auto-tutup melewati akhir jadwal
 > (domain: backend selalu menutup sesi di akhir jadwal — by design). Seed
@@ -16,7 +18,7 @@ Bukti visual: `screenshots/` (40 PNG desktop 1440px + 2 tablet 1024px) +
 
 ```bash
 # stack dev menyala (postgres :5432, API :8000, web :5173)
-python3 scripts/seed-demo.py   # idempoten, 18 checks: akun→lab/kelas/siswa→jadwal→device→2 sesi→heartbeat
+python3 scripts/seed-demo.py   # idempoten, 24-25 checks: akun→lab/kelas/siswa→jadwal→device→2 sesi→heartbeat→PIN→assignment→grant→mode guru→EWS follow-up→koreksi
 ```
 
 Akun demo: `admin@local.test` / `DemoAdmin2026!x`;
@@ -26,22 +28,26 @@ Data: lab LAB-RPL1 + LAB-FIS; kelas XII-RPL-1 (10 siswa NIS 20260101–10) +
 XII-TKJ-1 (8 siswa NIS 20260201–08); jadwal mengikuti jam jalan (mulai-30 mnt s/d +2 jam, maks 23:59);
 device `edge-pc-rpl-01` + `stb-fis-01`; sesi RPL AKTIF (5 event face-recognition
 + 1 ambiguous + manual present/late/excused/absent + 1 belum tercatat) dan sesi
-TKJ DITUTUP (4 present + 1 late + 1 excused + 2 absen otomatis).
+TKJ DITUTUP (4 present + 1 late + 1 excused + 2 absen otomatis); PIN layar `1234`
+di kedua lab; Budi ditugaskan ke 2 lab + 3 grant (`schedule_read`,
+`session_operate`, `reports_read`); Dewi mode otomatis, Agus manual;
+1 EWS follow-up; 1 koreksi approved (contoh).
 
 ## 2. Matriks role → menu (terverifikasi di router + sidebar + 13 permission)
 
-| Menu | ADMIN (11) | TEACHER (5) | LABORANT (6) |
+| Menu | ADMIN (10+profil) | TEACHER (4+dashboard) | LABORANT (4 default + hingga 3 grant) |
 |---|---|---|---|
-| Ringkasan | ✔ | ✔ miliknya | ✔ |
-| Data master | ✔ kelola | baca roster | baca roster |
-| Kelola akun staf | ✔ | — (25-forbidden) | — |
+| Layar publik `/display` | n/a (tanpa login: lab + PIN) | n/a | n/a |
+| Ringkasan | ✔ semua | ✔ miliknya | ✔ khusus laboran |
+| Data master (tab Siswa/Kelas/Lab) | ✔ kelola | — | — |
+| Kelola akun staf | ✔ (+ aktif/nonaktif, reset, grant, penugasan, mode guru) | — (forbidden) | — |
 | AI & kamera | ✔ | — | — |
-| Preview kamera | ✔ | — | ✔ |
-| Jadwal praktikum | ✔ semua | ✔ miliknya | baca |
-| Sesi presensi | ✔ semua | ✔ miliknya | ✔ operasional |
-| Pendaftaran siswa | ✔ | — | ✔ |
-| Perangkat | ✔ kelola penuh | — | ✔ pantau (tombol kelola disembunyikan) |
-| Laporan kehadiran | ✔ semua | ✔ miliknya | via API saja (36-forbidden, by design) |
+| Preview kamera | ✔ (+ pilih perangkat/lab) | — | ✔ (lab-nya + pilih perangkat/lab) |
+| Jadwal praktikum | ✔ semua | ✔ miliknya | ✔ via grant `schedule_read` |
+| Sesi presensi | ✔ semua | ✔ miliknya (+ manual & ajukan koreksi) | ✔ via grant `session_operate` |
+| Pendaftaran wajah | ✔ | — | ✔ (lab-nya) |
+| Perangkat (+ PIN layar) | ✔ kelola penuh | — | ✔ pantau (tombol kelola disembunyikan) |
+| Laporan kehadiran (+ Terlambat, EWS tindak lanjut) | ✔ semua | ✔ miliknya | ✔ via grant `reports_read` |
 | Profil | ✔ | ✔ | ✔ |
 
 ## 3. Urutan UAT (beres berurutan, semua tombol dicoba)
@@ -86,8 +92,24 @@ diizinkan, tanpa menu = by design). Tablet 1024px: `50`, `51`. ✔
 
 ### 3.6 Jelajah per-role (klik tiap menu, tiap role)
 
-`01` login; `02–12` semua 11 halaman ADMIN; `20–24` 5 halaman GURU;
-`30–35` 6 halaman LABORAN. ✔
+`00–01` layar publik (login + board RPL); `10–19` semua halaman ADMIN
+(master 3 tab, akun, perangkat+PIN, jadwal, sesi+koreksi, laporan+EWS,
+enrollment, preview); `20–23` GURU (dashboard, jadwal, sesi+koreksi,
+laporan+EWS); `30–35` LABORAN (dashboard, perangkat, preview, enrollment,
+sesi via grant, laporan via grant). ✔
+
+### 3.7 Fitur baru (pemetaan UAT → bukti)
+
+- Layar publik: `00` form lab+PIN → `01` board 10 siswa (SUDAH MASUK /
+  TERLAMBAT / IZIN). ✔
+- Grant laboran: `34` sesi + `35` laporan/EWS terbuka untuk Budi
+  (tanpa grant → 403 backend). ✔
+- Koreksi penuh: `16`/`22` panel ajukan (record + tanpa record) + daftar +
+  putusan ADMIN; seed membuat 1 approved. ✔
+- EWS tindak lanjut: `17`/`23`/`35` panel + catat; seed membuat 1 catatan. ✔
+- PIN layar: `14` panel PIN per lab (diatur `1234`). ✔
+- Watermark TERLAMBAT + "telat N mnt": roster `16`/`22` + laporan `17`. ✔
+- Preview multi-perangkat: `19`/`32` dropdown perangkat/lab. ✔
 
 ## 4. Bonus: profile AI_CENTRAL (`80`, `81`)
 

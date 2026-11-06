@@ -28,6 +28,7 @@ const accountFixture = {
   full_name: 'Test Teacher',
   roles: ['TEACHER'],
   must_change_password: false,
+  permissions: [],
 }
 
 describe('auth store', () => {

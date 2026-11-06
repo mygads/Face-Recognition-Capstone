@@ -115,3 +115,6 @@ class SessionRosterEntry(ApiSchema):
     full_name: str
     record_status: AttendanceStatus | None = None
     record_note: str | None = None
+    recorded_at: AwareDatetime | None = None
+    minutes_late: int | None = None
+    attendance_record_id: UUID | None = None

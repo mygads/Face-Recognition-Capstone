@@ -205,6 +205,10 @@ function goToPage(nextPage: number): void {
 <template>
   <section class="master-data schedule-view" aria-label="Jadwal praktikum">
     <p class="schedule-view__hint">
+      Mode guru: “Saya membuka sesi sendiri” (manual) atau “Sesi saya dibuka otomatis sesuai
+      jadwal”. Admin melihat mode tiap guru pada pilihan di atas.
+    </p>
+    <p class="schedule-view__hint">
       Jadwal berulang setiap minggu sesuai zona waktu dan rentang tanggal yang dipilih.
     </p>
 
@@ -273,7 +277,12 @@ function goToPage(nextPage: number): void {
           >Guru<select v-model="form.teacher_user_id" required :disabled="!canAssignTeacher">
             <option value="" disabled>Pilih guru</option>
             <option v-for="teacher in teachers" :key="teacher.id" :value="teacher.id">
-              {{ teacher.full_name }}
+              {{ teacher.full_name }} —
+              {{
+                teacher.opening_mode === 'automatic'
+                  ? 'otomatis sesuai jadwal'
+                  : 'membuka sesi sendiri'
+              }}
             </option>
           </select></label
         >

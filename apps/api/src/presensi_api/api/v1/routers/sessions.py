@@ -546,6 +546,8 @@ def get_session_roster(
             SessionStudent.full_name_snapshot,
             AttendanceRecord.status,
             AttendanceRecord.note,
+            AttendanceRecord.recorded_at,
+            AttendanceRecord.id,
         )
         .outerjoin(
             AttendanceRecord,
@@ -555,13 +557,40 @@ def get_session_roster(
         .where(SessionStudent.session_id == attendance_session.id)
         .order_by(SessionStudent.student_number_snapshot, SessionStudent.student_id)
     ).all()
-    return [
-        SessionRosterEntry(
-            student_id=student_id,
-            student_number=student_number,
-            full_name=full_name,
-            record_status=cast(AttendanceStatus | None, record_status),
-            record_note=record_note,
+    opened_at = attendance_session.opened_at
+    if opened_at is not None and opened_at.tzinfo is None:
+        from datetime import UTC as _UTC
+
+        opened_at = opened_at.replace(tzinfo=_UTC)
+    items: list[SessionRosterEntry] = []
+    for (
+        student_id,
+        student_number,
+        full_name,
+        record_status,
+        record_note,
+        recorded_at,
+        attendance_record_id,
+    ) in rows:
+        minutes_late: int | None = None
+        recorded_out = None
+        if recorded_at is not None:
+            from presensi_api.session_lifecycle import as_utc as _as_utc
+
+            recorded_out = _as_utc(recorded_at)
+            if record_status == "late" and opened_at is not None:
+                delta_s = (recorded_out - opened_at).total_seconds()
+                minutes_late = max(0, int(delta_s // 60))
+        items.append(
+            SessionRosterEntry(
+                student_id=student_id,
+                student_number=student_number,
+                full_name=full_name,
+                record_status=cast(AttendanceStatus | None, record_status),
+                record_note=record_note,
+                recorded_at=recorded_out,
+                minutes_late=minutes_late,
+                attendance_record_id=attendance_record_id,
+            )
         )
-        for student_id, student_number, full_name, record_status, record_note in rows
-    ]
+    return items

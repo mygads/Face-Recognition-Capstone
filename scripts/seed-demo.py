@@ -503,6 +503,85 @@ else:
     assert r.status_code in (200, 201), r.text[:200]
     check("sesi TKJ ditutup (2 absen otomatis)", True)
 
+
+# 9. Fitur baru: display PIN, penugasan laboran, hak opsional, mode guru, EWS, koreksi
+def _patch(path: str, headers: dict[str, str], body: dict[str, str]) -> None:
+    rr = c.patch(path, headers=headers, json=body)
+    assert rr.status_code in (200, 201), rr.text[:300]
+
+
+# display PIN per lab
+for lab in [lab_rpl, lab_fis]:
+    rp = c.post(
+        f"/api/v1/laboratories/{lab['id']}/display-pin", headers=A, json={"pin": "1234"}
+    )
+    assert rp.status_code in (200, 201), rp.text[:200]
+check("display PIN lab diatur", True)
+# laboran assignment Budi -> kedua lab
+for lab in [lab_rpl, lab_fis]:
+    ra = c.post(
+        f"/api/v1/accounts/{budi_id}/laborant-assignments",
+        headers=A,
+        json={"laboratory_id": lab["id"]},
+    )
+    assert ra.status_code in (200, 201), ra.text[:200]
+check("laboran ditugaskan ke 2 lab", True)
+# hak opsional laboran: beri session_operate + reports_read untuk demo
+for perm in ["session_operate", "reports_read", "schedule_read"]:
+    rg = c.post(
+        f"/api/v1/accounts/{budi_id}/permission-grants",
+        headers=A,
+        json={"permission": perm},
+    )
+    assert rg.status_code in (200, 201), rg.text[:200]
+check("hak opsional laboran diberikan (3)", True)
+# mode guru: Dewi otomatis, Agus manual
+_patch(f"/api/v1/accounts/{dewi_id}", A, {"opening_mode": "automatic"})
+_patch(f"/api/v1/accounts/{agus_id}", A, {"opening_mode": "manual"})
+check("mode pembukaan guru diatur (otomatis/manual)", True)
+# EWS follow-up untuk siswa pertama RPL
+r = c.post(
+    f"/api/v1/reports/attendance/at-risk/{sis_rpl[0]['id']}/follow-ups",
+    headers=A,
+    json={"note": "Panggil orang tua, bimbingan wali kelas."},
+)
+assert r.status_code in (200, 201), r.text[:200]
+check("EWS tindak lanjut dibuat", True)
+# Koreksi: ajukan untuk record pertama sesi RPL (jika ada), lalu setujui sebagian
+try:
+    rr = c.get(
+        "/api/v1/attendance", headers=A, params={"session_id": sess_a["id"], "limit": 1}
+    )
+    if rr.status_code == 200 and rr.json().get("items"):
+        rec = rr.json()["items"][0]
+        rk = c.post(
+            "/api/v1/attendance/corrections",
+            headers=T_DEWI,
+            json={
+                "attendance_record_id": rec["id"],
+                "corrected_status": "late",
+                "reason": "Seed: koreksi contoh - seharusnya terlambat",
+            },
+        )
+        if rk.status_code in (200, 201):
+            cid = rk.json()["id"]
+            rd = c.post(
+                f"/api/v1/attendance/corrections/{cid}/decision",
+                headers=A,
+                json={
+                    "decision": "approved",
+                    "decision_note": "Seed: disetujui contoh",
+                },
+            )
+            assert rd.status_code in (200, 201), rd.text[:200]
+            check("koreksi diajukan + disetujui (contoh)", True)
+        else:
+            print("INFO koreksi seed dilewati:", rk.status_code, rk.text[:150])
+    else:
+        print("INFO tidak ada record untuk koreksi seed")
+except Exception as e:
+    print("INFO koreksi seed dilewati:", e)
+
 print(f"\nSEED DEMO LULUS: {len(passed)} checks")
 print(
     "Akun: admin@local.test / DemoAdmin2026!x | dewi.guru@sekolah.test / GuruDemo2026!x"

@@ -9,6 +9,7 @@ from presensi_api.api.v1.routers import (
     enrollment_templates,
     health,
     laboratories_devices,
+    public_display,
     reports,
     schedules,
     session_dashboard,
@@ -30,6 +31,7 @@ api_v1_router.include_router(laboratories_devices.router)
 api_v1_router.include_router(device_runtime.router)
 api_v1_router.include_router(schedules.router)
 api_v1_router.include_router(sessions.router)
+api_v1_router.include_router(public_display.router)
 api_v1_router.include_router(session_dashboard.router)
 api_v1_router.include_router(enrollment_templates.router)
 api_v1_router.include_router(attendance.router)

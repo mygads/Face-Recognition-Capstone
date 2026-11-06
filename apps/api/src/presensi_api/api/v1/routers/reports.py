@@ -29,15 +29,20 @@ from presensi_api.api.v1.schemas.reports import (
     AttendanceReportQuery,
     AttendanceReportResponse,
     AttendanceReportRow,
+    EwsFollowUpCreateRequest,
+    EwsFollowUpResponse,
     ReportStatus,
 )
 from presensi_api.db.models import (
     AttendanceRecord,
     AttendanceSession,
+    AuditLog,
+    EwsFollowUp,
     Laboratory,
     PracticumSchedule,
     SchoolClass,
     SessionStudent,
+    Student,
     User,
 )
 from presensi_api.db.session import get_db_session
@@ -575,4 +580,87 @@ def export_attendance_report(
         content=output.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": disposition},
+    )
+
+
+@router.get(
+    "/attendance/at-risk/{student_id}/follow-ups",
+    response_model=list[EwsFollowUpResponse],
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="List EWS follow-up notes for a student",
+    description="Catatan tindak lanjut guru atas siswa watchlist.",
+)
+def list_ews_follow_ups(
+    student_id: UUID,
+    principal: ReportReader,
+    db: DbSession,
+) -> list[EwsFollowUpResponse]:
+    student = db.get(Student, student_id)
+    if student is None:
+        raise ApiProblem(404, "student_not_found", "Siswa tidak ditemukan.")
+    rows = db.scalars(
+        select(EwsFollowUp)
+        .where(EwsFollowUp.student_id == student_id)
+        .order_by(EwsFollowUp.created_at.desc(), EwsFollowUp.id.desc())
+        .limit(100)
+    ).all()
+    out: list[EwsFollowUpResponse] = []
+    for row in rows:
+        author = db.get(User, row.author_user_id)
+        out.append(
+            EwsFollowUpResponse(
+                id=row.id,
+                student_id=row.student_id,
+                author_user_id=row.author_user_id,
+                author_name=author.full_name if author else None,
+                note=row.note,
+                created_at=row.created_at
+                if row.created_at.tzinfo is not None
+                else row.created_at.replace(tzinfo=UTC),
+            )
+        )
+    return out
+
+
+@router.post(
+    "/attendance/at-risk/{student_id}/follow-ups",
+    response_model=EwsFollowUpResponse,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Add an EWS follow-up note",
+)
+def create_ews_follow_up(
+    student_id: UUID,
+    request: EwsFollowUpCreateRequest,
+    principal: ReportReader,
+    db: DbSession,
+) -> EwsFollowUpResponse:
+    student = db.get(Student, student_id)
+    if student is None:
+        raise ApiProblem(404, "student_not_found", "Siswa tidak ditemukan.")
+    note = request.note.strip()
+    if not note:
+        raise ApiProblem(422, "empty_note", "Catatan tidak boleh kosong.")
+    row = EwsFollowUp(student_id=student_id, author_user_id=principal.id, note=note)
+    db.add(row)
+    db.flush()
+    db.add(
+        AuditLog(
+            action="ews.follow_up_created",
+            actor_user_id=principal.id,
+            entity_type="ews_follow_up",
+            entity_id=row.id,
+            after_state={"student_id": str(student_id)},
+        )
+    )
+    db.commit()
+    db.refresh(row)
+    return EwsFollowUpResponse(
+        id=row.id,
+        student_id=row.student_id,
+        author_user_id=row.author_user_id,
+        author_name=principal.full_name,
+        note=row.note,
+        created_at=row.created_at
+        if row.created_at.tzinfo is not None
+        else row.created_at.replace(tzinfo=UTC),
     )

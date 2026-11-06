@@ -132,7 +132,7 @@ export const routes: RouteRecordRaw[] = [
         meta: {
           title: 'Laporan kehadiran',
           description: 'Tinjau kehadiran berdasarkan siswa, kelas, lab, sesi, dan periode.',
-          requiredRoles: ['ADMIN', 'TEACHER'],
+          requiredRoles: ['ADMIN', 'TEACHER', 'LABORANT'],
         },
       },
       {
@@ -142,7 +142,7 @@ export const routes: RouteRecordRaw[] = [
         meta: {
           title: 'Jadwal praktikum',
           description: 'Atur kelas, laboratorium, guru, dan waktu praktikum.',
-          requiredRoles: ['ADMIN', 'TEACHER'],
+          requiredRoles: ['ADMIN', 'TEACHER', 'LABORANT'],
         },
       },
       {
@@ -160,8 +160,9 @@ export const routes: RouteRecordRaw[] = [
         name: 'enrollment',
         component: EnrollmentView,
         meta: {
-          title: 'Pendaftaran siswa',
-          description: 'Daftarkan atau perbarui template wajah siswa dengan bantuan kamera.',
+          title: 'Pendaftaran wajah',
+          description:
+            'Buat atau perbarui data acuan wajah siswa (berbeda dari data master identitas & keanggotaan kelas).',
           requiredRoles: ['ADMIN', 'LABORANT'],
         },
       },
@@ -175,6 +176,16 @@ export const routes: RouteRecordRaw[] = [
         },
       },
     ],
+  },
+  {
+    path: '/display',
+    name: 'display',
+    component: () => import('../views/DisplayView.vue'),
+    meta: {
+      layout: 'auth',
+      title: 'Layar presensi',
+      description: 'Tampilan fullscreen untuk siswa.',
+    },
   },
   {
     path: '/:pathMatch(.*)*',

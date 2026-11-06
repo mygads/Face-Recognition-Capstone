@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { fetchWithPreviewTimeout } from '../utils/previewFetch'
 import { useAuthStore } from '../stores/auth'
+import { listDevices, listLaboratories, type Device, type Laboratory } from '../api/client'
 
 type PreviewStatus = {
   camera_open: boolean
@@ -71,6 +72,43 @@ type DiagnosticCandidate = {
 
 const auth = useAuthStore()
 const previewToken = ref<string | null>(null)
+const devices = ref<Device[]>([])
+const laboratories = ref<Laboratory[]>([])
+const selectedDeviceId = ref('')
+const selectedLabId = ref('')
+const deviceLoadError = ref<string | null>(null)
+
+async function loadDevicesAndLabs(): Promise<void> {
+  try {
+    const [devicePage, labPage] = await Promise.all([
+      listDevices({ limit: 100, offset: 0 }),
+      listLaboratories({ limit: 100, offset: 0 }),
+    ])
+    devices.value = devicePage.items
+    laboratories.value = labPage.items
+    if (!selectedDeviceId.value && devices.value.length)
+      selectedDeviceId.value = devices.value[0].device_id
+    const firstLab = devices.value[0]?.laboratory_id ?? laboratories.value[0]?.id
+    if (!selectedLabId.value && firstLab) selectedLabId.value = firstLab
+  } catch (err) {
+    deviceLoadError.value =
+      err instanceof Error ? err.message : 'Daftar perangkat tidak dapat dimuat.'
+  }
+}
+
+function onDeviceChange(event: Event): void {
+  const el = event.target
+  if (el instanceof HTMLSelectElement) {
+    selectedDeviceId.value = el.value
+    const dev = devices.value.find((d) => d.device_id === el.value)
+    if (dev) selectedLabId.value = dev.laboratory_id
+  }
+}
+
+function onLabChange(event: Event): void {
+  const el = event.target
+  if (el instanceof HTMLSelectElement) selectedLabId.value = el.value
+}
 const frameUrl = ref<string | null>(null)
 const previewStatus = ref<PreviewStatus | null>(null)
 const cameraObservation = computed(() => previewStatus.value?.camera_observation ?? null)
@@ -465,6 +503,7 @@ async function pollStatus(): Promise<void> {
 
 onMounted(async () => {
   document.addEventListener('fullscreenchange', syncFullscreenState)
+  void loadDevicesAndLabs()
   try {
     previewToken.value = await openPreviewSession()
     if (stopped) return
@@ -499,10 +538,43 @@ onBeforeUnmount(() => {
   <section class="camera-preview-view" aria-label="Preview kamera AI_EDGE">
     <div class="camera-preview-view__intro">
       <div>
-        <p class="master-data__eyebrow">AI_EDGE · satu kamera</p>
+        <p class="master-data__eyebrow">AI_EDGE · pilih perangkat &amp; lab</p>
         <h2>Preview kamera presensi</h2>
         <p>
-          Preview menggunakan stream yang sama dengan agent; halaman ini tidak membuka webcam kedua.
+          Preview menggunakan stream yang sama dengan agent di PC lab ini; halaman ini tidak membuka
+          webcam kedua. Bila ada 2 kamera / 2 lab, pilih perangkat di bawah untuk melihat konteks
+          jadwal &amp; statusnya — video tetap dari kamera PC ini.
+        </p>
+        <div class="camera-preview-view__selectors">
+          <label>
+            Perangkat
+            <select
+              :value="selectedDeviceId"
+              aria-label="Pilih perangkat kamera"
+              data-testid="preview-device-select"
+              @change="onDeviceChange"
+            >
+              <option v-for="d in devices" :key="d.device_id" :value="d.device_id">
+                {{ d.name }} · {{ d.laboratory_name }} · {{ d.health_status }}
+              </option>
+            </select>
+          </label>
+          <label>
+            Laboratorium
+            <select
+              :value="selectedLabId"
+              aria-label="Pilih laboratorium"
+              data-testid="preview-lab-select"
+              @change="onLabChange"
+            >
+              <option v-for="lab in laboratories" :key="lab.id" :value="lab.id">
+                {{ lab.code }} — {{ lab.name }}
+              </option>
+            </select>
+          </label>
+        </div>
+        <p v-if="deviceLoadError" class="master-data__alert" role="alert">
+          {{ deviceLoadError }}
         </p>
       </div>
       <span

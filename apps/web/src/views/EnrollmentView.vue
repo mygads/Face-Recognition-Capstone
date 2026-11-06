@@ -317,8 +317,12 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
     <section class="master-data__panel" aria-labelledby="enrollment-roster-title">
       <div class="master-data__panel-heading">
         <div>
-          <p class="master-data__eyebrow">Pendaftaran siswa</p>
+          <p class="master-data__eyebrow">Pendaftaran wajah — data acuan wajah</p>
           <h2 id="enrollment-roster-title">Pilih kelas dan siswa</h2>
+          <p class="accounts-view__hint">
+            1. Data master siswa = identitas &amp; keanggotaan kelas (di Data master).<br />
+            2. Pendaftaran wajah = membuat / memperbarui data acuan wajah untuk presensi.
+          </p>
         </div>
         <label class="enrollment-view__class-picker">
           Kelas

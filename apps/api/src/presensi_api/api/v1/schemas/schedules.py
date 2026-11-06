@@ -74,6 +74,7 @@ class ScheduleUpdateRequest(ApiSchema):
 class ScheduleTeacherResponse(ApiSchema):
     id: UUID
     full_name: str
+    opening_mode: str | None = None
 
 
 class ScheduleResponse(ApiSchema):

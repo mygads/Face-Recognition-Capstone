@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from presensi_api.api.errors import OPENAPI_ERROR_RESPONSES, ApiProblem
 from presensi_api.api.security.dependencies import require_permissions
+from presensi_api.api.security.passwords import hash_password
 from presensi_api.api.security.roles import AuthenticatedUser, Permission
 from presensi_api.api.v1.routers.device_runtime import apply_heartbeat_request
 from presensi_api.api.v1.schemas.common import PageResponse, Pagination
@@ -24,6 +25,7 @@ from presensi_api.api.v1.schemas.laboratories import (
     DeviceResponse,
     DeviceUpdateRequest,
     LaboratoryCreateRequest,
+    LaboratoryDisplayPinRequest,
     LaboratoryResponse,
     LaboratoryUpdateRequest,
 )
@@ -49,6 +51,7 @@ def _laboratory_response(laboratory: Laboratory) -> LaboratoryResponse:
         is_active=laboratory.is_active,
         created_at=_timestamp(laboratory.created_at),
         updated_at=_timestamp(laboratory.updated_at),
+        has_display_pin=bool(getattr(laboratory, "display_pin_hash", None)),
     )
 
 
@@ -530,3 +533,61 @@ def device_heartbeat(
         apply_heartbeat_request(device, request, now=now)
     session.commit()
     return DeviceHeartbeatResponse(device_id=device.id, last_seen_at=now)
+
+
+@router.post(
+    "/laboratories/{laboratory_id}/display-pin",
+    response_model=LaboratoryResponse,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Set display PIN for public fullscreen view",
+    dependencies=[Depends(require_permissions(Permission.MANAGE_MASTER_DATA))],
+)
+def set_laboratory_display_pin(
+    laboratory_id: UUID, request: LaboratoryDisplayPinRequest, session: DbSession
+) -> LaboratoryResponse:
+    laboratory = session.get(Laboratory, laboratory_id)
+    if laboratory is None:
+        raise _not_found("Laboratory")
+    pin = request.pin.strip()
+    if len(pin) < 4:
+        raise ApiProblem(422, "invalid_pin", "PIN minimal 4 karakter.")
+    laboratory.display_pin_hash = hash_password(pin)
+    laboratory.display_pin_updated_at = datetime.now(UTC)
+    session.add(
+        AuditLog(
+            action="laboratory.display_pin_set",
+            entity_type="laboratory",
+            entity_id=laboratory.id,
+            after_state={"has_display_pin": True},
+        )
+    )
+    session.commit()
+    session.refresh(laboratory)
+    return _laboratory_response(laboratory)
+
+
+@router.get(
+    "/laboratories/{laboratory_id}/laborant-assignments",
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="List laborants assigned to a laboratory",
+    dependencies=[Depends(require_permissions(Permission.MANAGE_ACCOUNTS))],
+)
+def list_lab_laborants(laboratory_id: UUID, session: DbSession) -> dict[str, object]:
+    from presensi_api.db.models import LaborantLabAssignment, User
+
+    rows = session.scalars(
+        select(LaborantLabAssignment).where(
+            LaborantLabAssignment.laboratory_id == laboratory_id
+        )
+    ).all()
+    items = []
+    for row in rows:
+        user = session.get(User, row.user_id)
+        items.append(
+            {
+                "user_id": str(row.user_id),
+                "full_name": user.full_name if user else None,
+                "email": user.email if user else None,
+            }
+        )
+    return {"items": items}

@@ -294,6 +294,7 @@ def get_me(
         full_name=principal.full_name,
         roles=sorted(role.value for role in principal.roles),
         must_change_password=principal.must_change_password,
+        permissions=sorted(permission.value for permission in principal.permissions),
     )
 
 

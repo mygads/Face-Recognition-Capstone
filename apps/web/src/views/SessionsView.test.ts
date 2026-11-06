@@ -83,6 +83,7 @@ function teacherPinia() {
       full_name: 'Test Teacher',
       roles: ['TEACHER'],
       must_change_password: false,
+      permissions: [],
     },
   })
   return pinia
