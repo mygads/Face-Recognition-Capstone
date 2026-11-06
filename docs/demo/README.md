@@ -2,7 +2,7 @@
 
 Bukti visual: `/tmp/shots/` (23 PNG desktop 1440px: 2 publik + 8 admin +
 4 guru + 6 laboran + 3 master-tab) + `rekap.csv` / `rekap.xlsx` (hasil unduh
-laporan asli). UAT browser **5/5 HIJAU** + `seed-demo` **24–25/24–25 HIJAU** (25 bila koreksi contoh baru dibuat)
+laporan asli). UAT browser **5/5 HIJAU** + `seed-demo` **24–25 checks HIJAU** (25 bila koreksi contoh baru dibuat)
 (Playwright Chromium). Arsip lama per halaman tetap di `screenshots/` (40 PNG
 + 2 tablet).
 
