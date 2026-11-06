@@ -633,10 +633,10 @@ class AttendanceCorrection(UUIDPrimaryKey, TimestampMixin, Base):
 
 class LaborantLabAssignment(TimestampMixin, Base):
     __tablename__ = "laborant_lab_assignments"
-    __table_args__ = (
-        UniqueConstraint("user_id", "laboratory_id", name="uq_laborant_lab_user_lab"),
-        Index("ix_laborant_lab_lab_id", "laboratory_id"),
-    )
+    # Unik per (user, lab) dijamin composite PK; UniqueConstraint terpisah
+    # sengaja tidak dipakai (DDL Postgres mengabaikannya bila identik PK,
+    # tetapi `alembic check` tetap mendeteksi drift).
+    __table_args__ = (Index("ix_laborant_lab_lab_id", "laboratory_id"),)
 
     user_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True),
@@ -655,10 +655,8 @@ class LaborantLabAssignment(TimestampMixin, Base):
 
 class UserPermissionGrant(TimestampMixin, Base):
     __tablename__ = "user_permission_grants"
-    __table_args__ = (
-        UniqueConstraint("user_id", "permission", name="uq_user_permission_grant"),
-        Index("ix_user_permission_grant_user", "user_id"),
-    )
+    # Unik per (user, permission) dijamin composite PK (lihat komentar di atas).
+    __table_args__ = (Index("ix_user_permission_grant_user", "user_id"),)
 
     user_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True),
