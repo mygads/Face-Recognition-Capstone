@@ -153,16 +153,35 @@ versi teramati (tanpa path/ID/token/embedding); catat digest image central
 terpisah. Tes no-hardware: `python -m pytest tests/deployment-benchmark
 apps/ai-service/tests libs/recognition-core/tests -q`.
 
-## Keterbatasan jam-batas suite
+## Batas-tengah-malam suite (sudah diperbaiki)
 
 Fixture API mengasumsikan satu hari lokal Asia/Jakarta selama satu run: sesi
-dibuka "N menit lalu" dengan jadwal 00:00–23:59:59 hari yang sama. Run yang
-melewati tengah malam lokal (00:00–00:30 WIB, yaitu 17:00–17:30 UTC)
-dapat menutup sesi fixture via `close_expired_sessions` sehingga sebagian
-tes `apps/api/tests` gagal (`session_inactive`). Ini flake pra-ada pada
-fixture, bukan regresi domain — jadwalkan CI di luar jendela tersebut atau
-rerun. Jangan "memperbaiki" dengan menggeser `opened_at` fixture: status
-present/late/grace pada tes terkait justru bergantung pada offset itu.
+dibuka "N menit lalu" dengan jadwal 00:00–23:59:59 hari yang sama, dan jam
+fixture dibekukan jam 12 siang agar run yang melewati tengah malam lokal
+(00:00–00:30 WIB) tidak lagi menutup sesi fixture via
+`close_expired_sessions` (perbaikan audit: produk benar, fixture yang rapuh).
+Suite hijau di semua jam. Jangan "memperbaiki" dengan menggeser `opened_at`
+fixture: status present/late/grace pada tes terkait justru bergantung pada
+offset itu.
+
+## UAT live (Postgres + API + web nyata, P2-2 TERBUKTI)
+
+Selain kontrak in-process, repo memiliki UAT ujung-ke-ujung reprodusibel
+tanpa mock (data sintetis saja): bootstrap login, ganti password, akun
+guru, lab/kelas/siswa/membership, jadwal, buka sesi, registrasi device +
+kredensial + heartbeat, recognition event → `attendance_recorded`,
+idempotensi event-UUID, snapshot dashboard, GZip on-the-wire, tutup sesi
+(25 checks). Playwright `attendance-live-parity.spec.ts` memverifikasi
+paritas API+web nyata. Sisa manual: kamera fisik + field test.
+
+```bash
+API_BASE=http://127.0.0.1:8017 python3 scripts/live-uat.py
+```
+
+Stack live memakai docker postgres:16 (`presensi-live-pg:5434`), `alembic
+upgrade head` single-head, dan seed roles+admin; API live di `:8017`, web
+live di `:4173`. Detail status: [backlog](backlog.md) baris P2-2. Panduan
+menjalankan ulang stack live ada di [deployment](deployment.md).
 
 ## Privasi pengujian
 

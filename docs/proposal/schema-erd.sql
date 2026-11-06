@@ -262,6 +262,7 @@ CREATE TABLE attendance_records (
   source                VARCHAR(24) NOT NULL   -- face_recognition|manual|system
                         CHECK (source IN ('face_recognition','manual','system')),
   recorded_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  note                  TEXT,                           -- catatan manual-mark guru (migrasi d4e5f6a7b8c9)
   created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (session_id, student_id),              -- anti penitipan/duplikat

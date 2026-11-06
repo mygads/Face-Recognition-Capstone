@@ -117,14 +117,15 @@ hardware target, atau benchmark deployment belum diukur di PC/STB nyata.
 ## 6. Roadmap singkat
 
 Sisa tugas manual (butuh hardware lab): **P0-5** kalibrasi threshold lokal ·
-**P2-1** field test + benchmark hardware · **P2-2** run Postgres/Playwright
-nyata (kontrak in-process + spec live gated sudah ada). Detail
-status/pemilik: [docs/backlog.md](docs/backlog.md).
+**P2-1** field test + benchmark hardware · **P2-2** sisa kamera fisik +
+field test (Postgres live + Playwright parity sudah TERBUKTI via
+`scripts/live-uat.py` 25 checks). Detail status/pemilik:
+[docs/backlog.md](docs/backlog.md).
 
 Catatan: `docs/final-audit.md` (2026-10-02) sudah basi dan dihapus saat
 konsolidasi docs; snapshot PASS-nya tercatat sebagai arsip di backlog, bukan
-klaim berlaku kini. Gate berjalan: 409 pytest, 65 Vitest, ruff/mypy/
-vue-tsc/eslint hijau.
+klaim berlaku kini. Gate berjalan: 469 pytest, 84 Vitest,
+ruff/format/mypy/eslint/prettier/vue-tsc/e2e-typecheck hijau.
 
 ## 7. Link docs detail
 

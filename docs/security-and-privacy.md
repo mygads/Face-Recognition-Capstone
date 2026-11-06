@@ -66,7 +66,13 @@ SaaS proposal is a stop-and-ask architecture change per AGENTS.md.
   disk files. Per-capture and aggregate enrollment limits remain in force.
 - `PRESENSI_DEVICE_API_REQUESTS_PER_MINUTE` defaults to 120 per authenticated
   device. `PRESENSI_ENROLLMENT_REQUESTS_PER_MINUTE` defaults to 10 per authorized
-  operator. AI Central also has per-device burst limiting. Core API limits are
+  operator. Login is guarded before Argon2/audit cost: at most
+  `PRESENSI_AUTH_LOGIN_EMAIL_ATTEMPTS_PER_MINUTE` (default 10) attempts/minute
+  per account email and `PRESENSI_AUTH_LOGIN_IP_ATTEMPTS_PER_MINUTE` (default
+  120) per client IP, answering 429 + `Retry-After: 60` with no audit row (a
+  flood must not bloat `audit_logs`); the 429 message is a specific Indonesian
+  throttle notice, distinct from the generic credential-failure message.
+  AI Central also has per-device burst limiting. Core API limits are
   process-local; deployments with multiple API replicas must enforce a shared
   rate limit at the trusted ingress/reverse proxy as well.
 - The API does not enable wildcard CORS. `PRESENSI_CORS_ALLOWED_ORIGINS` accepts

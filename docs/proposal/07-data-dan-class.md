@@ -175,6 +175,7 @@ classDiagram
     +String status
     +String source
     +DateTime recorded_at
+    +String note
   }
   class AttendanceCorrection {
     +UUID attendance_record_id

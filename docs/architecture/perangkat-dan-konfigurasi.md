@@ -146,7 +146,7 @@ detik; melaporkan revisi applied/error aman; menyimpan config terakhir valid
 (JSON non-biometrik) untuk restart saat API putus. AI Central pull ke endpoint
 internal Core API via `PRESENSI_AI_CONFIG_SYNC_TOKEN` (secret sama di kedua
 sisi, dari secret store; `scripts/dev.py` membuat lokal otomatis). Sync belum
-berhasil → runner nonaktif, readiness pending/degraded. Perubahan
+berhasil → runner nonaktif, readiness pending/degraded. Kegagalan apply yang valid-skema tapi ditolak worker central diteruskan sebagai `central_ai_config_sync_error_code` di `GET ai-readiness`. Perubahan
 quality/temporal/burst berlaku tanpa restart; URL, credential, file/versi
 model, kamera tetap dikelola provisioning host. Lihat
 [AI inferensi](ai-inferensi.md) dan `apps/edge-agent/README.md`.

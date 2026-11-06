@@ -16,7 +16,7 @@ memiliki tracking window, threshold match, ambiguity policy, dan frontal retry;
 agregat frame kualitas-terbaik per track ID stabil, reset evidence saat
 identitas pemenang berganti atau kualitas tak acceptable. Butuh N frame sepakat
 terkonfigurasi; tiap evidence frame dan rata-rata frame terpilih harus lolos
-cosine Top-1 dan margin Top-1−Top-2.
+cosine Top-1 dan margin Top-1−Top-2. Tiap burst central memakai track id baru sehingga konsensus wajib tercapai dalam SATU burst: `ceil(max_frames_per_burst/sample_every)` wajib menutupi `minimum_agreeing_frames` — kombinasi tak-tercapai ditolak saat startup AI service (bukan macet diam di "collecting"); sisi edge kontinu memakai rumus `ceil(ttl×fps/stride) >= minimum`, ditolak startup dan managed-config bila melanggar. Detail knob: [benchmark README](../../tests/ai-benchmark/README.md#menerapkan-hasil-kalibrasi-lokal--env-produksi).
 
 Margin ambigu → state domain `retry_frontal` / `NEED_FRONTAL_RETRY`, tidak
 pernah auto-accept. Kandidat satu identitas distinct
@@ -28,7 +28,7 @@ tetap otoritatif atas accept/reject pada set lebar. Gallery satu identitas
 genuin tetap fail-closed — guru menutup via presensi manual.
 
 Liveness eksplisit di `RecognitionPipeline`: disabled = skip anti-spoof;
-enabled butuh model + cutoff `min_live_score` terkalibrasi. Required=True
+enabled butuh model + cutoff `min_live_score` terkalibrasi. Skor non-finite (NaN/±inf) dari model liveness dipetakan ke None (observasional) agar event matched tetap tercatat, bukan hilang karena validasi outbox. Required=True
 memblokir accept saat skor missing/inconclusive/gagal (plus guard fail-closed
 kedua terhadap custom temporal engine); optional = observasional. Kandidat
 `anti-spoof-mn3` (ONNX Runtime) hanya evaluasi: lisensi/training-dataset
@@ -92,7 +92,7 @@ policy (termasuk threshold terkalibrasi) diterbitkan admin di **AI & kamera**;
 AI Central poll Core API via `PRESENSI_AI_CONFIG_SYNC_TOKEN`, validasi
 allowlist, rebuild runner, laporkan revisi di `/health`. Tanpa runner valid
 → degraded, tanpa recognition. Outage Core API sementara → policy terakhir
-tetap dipakai, sync dilaporkan unavailable; threshold kosong → tetap degraded
+tetap dipakai, sync dilaporkan unavailable; threshold kosong → tetap degraded (tidak fallback ke nilai tebak). Kegagalan apply yang valid-skema tapi ditolak worker central diteruskan sebagai `central_ai_config_sync_error_code` di `GET ai-readiness` agar panel AI & kamera menampilkan sebab, bukan sekadar revisi beda.
 (tidak fallback ke nilai tebak). `/health` = process check; `/metrics` =
 bounded count + p50/p95 latency burst (agregat, tanpa label student/device;
 akses dibatasi jaringan operasi). Liveness default disabled.
@@ -112,7 +112,7 @@ offline lokal = min(cache API, akhir sesi jadwal). Keputusan AI diteruskan ke
 Core API sebagai recognition-event allowlisted; hanya payload itu masuk outbox
 SQLite FIFO terurut (+ dead-letter; 401/403 TIDAK pernah di-retry — picu
 rotasi/dead-letter, tampilkan ke operator). Retry lain: backoff eksponensial
-untuk network/5xx/rate-limit. Frame burst gagal tidak disimpan; sampling kamera
+untuk network/5xx/rate-limit. Anti-spam sekaligus anti-hilang: match yang sama dalam 120 dtk tidak di-enqueue ulang (kehadiran pertama tetap mengalir idempoten); SATU kegagalan transient (mis. 503 slot sibuk) di-retry sekali ~1 dtk dengan track id lingkup-burst yang sama agar burst sekali-lewat tak hilang; dua gagal beruntun tetap drop (fail-fast). Guard duplikat hanya men-stamp SETELAH `outbox.enqueue` sukses — `OutboxFullError` return tanpa stamp sehingga frame/burst berikut me-retry; stamp gateway hanya untuk burst `matched`. Baris outbox korup (parse gagal) dikarantina jadi dead-letter tanpa isi payload (`event_queue_row_quarantined`) agar satu baris busuk tak memacetkan antrean; dead-letter dibatasi (default 5000, tertua dipangkas, `purge_dead_letter` manual). Outbox penuh = frame berikut retry, bukan event hilang. Frame burst gagal tidak disimpan; sampling kamera
 lanjut. Auth: bearer device high-entropy per device, provisioned sekali admin;
 renewal overlap 24 jam via `token_file` (Linux: replace atomik, owner-only;
 Windows service: ACL akun service).

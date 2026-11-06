@@ -43,10 +43,10 @@ bearer HS256 klaim `sub/iat/exp/jti/iss/token_use=access`, default 15 menit
 (5–60 via config). Vue menyimpan bearer di memori Pinia saja, tidak di
 storage/URL/log; reload menukar cookie sesi via `POST /api/v1/auth/refresh`.
 
-`JWT_SECRET` minimal 32 byte, di luar Git; `.env.example` mengosongkannya dan
+`JWT_SECRET` minimal 32 byte, di luar Git, dan divalidasi saat lifespan (tanpa secret yang valid API crash dengan pesan jelas, bukan serving 503 diam-diam); `.env.example` mengosongkannya dan
 task runner mengisi acak lokal. Login sukses/gagal menulis audit
 `auth.login.succeeded/failed` tanpa email, password, token, IP, atau biometrik.
-Login/ganti-password gagal berbagi satu pesan error generik.
+Login/ganti-password gagal berbagi satu pesan error generik. Rate-limit login berdiri SEBELUM verifikasi Argon2/audit: maks 10/mnt per akun email dan 120/mnt per IP, 429 + `Retry-After: 60` tanpa baris audit (khusus 429 pesannya spesifik Indonesia, bukan generik, agar operator tahu ini throttle bukan kredensial salah).
 
 Baseline role: `ADMIN` (semua permission), `TEACHER` (katalog baca, jadwal +
 sesi miliknya, presensi/laporan jadwalnya, ajukan koreksi), `LABORANT`
@@ -81,7 +81,7 @@ ubah tabel saat process startup). Mapping SQLAlchemy 2 di
 | Roster/jadwal | `students`, `classes`, `class_students`, `laboratories`, `devices`, `practicum_schedules` | Master + device dengan metadata health |
 | Operasi presensi | `attendance_sessions`, `session_students` | Sesi live + snapshot roster immutable |
 | Evidence | `face_templates`, `recognition_events` | Template versi-model + hasil mentah idempoten |
-| Final | `attendance_records`, `attendance_corrections` | Keputusan final + riwayat koreksi |
+| Final | `attendance_records`, `attendance_corrections` | Keputusan final + riwayat koreksi (`attendance_records.note` = catatan manual-mark guru, tampil di baris laporan/ekspor/UI) |
 | Audit | `audit_logs` | Actor/aksi/entity + before/after JSON (tanpa biometrik/secret) |
 
 Setiap entity mandiri memakai UUID dari aplikasi. Semua timestamp lifecycle

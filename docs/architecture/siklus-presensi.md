@@ -25,7 +25,10 @@ Membuka sesi membuat baris `attendance_sessions` + menyalin siswa aktif kelas
 ke `session_students` dalam satu transaksi (nomor/nama snapshot immutable;
 perubahan roster belakangan tidak mengubah snapshot). Grace period
 dikonfigurasi 0–1440 menit, default 15 menit. Satu sesi aktif per jadwal
-(partial unique index + respons konflik API).
+dijaga 3 lapis: SELECT-guard, `except IntegrityError → 409
+session_already_active` (pre-check saja tak menahan race konkuren), dan
+partial unique index di database; UI menangani 409 dengan pesan konflik
+(antar-klien yang membuka bersamaan, satu menang satu 409, tanpa sesi ganda).
 
 UI `/app/sessions`: daftar jadwal yang bisa dibuka hari ini, grace
 terkonfigurasi, status sesi, roster count, akhir terjadwal, aksi close manual.
@@ -60,9 +63,12 @@ adil. Tepat/pada batas = `present`, lewat = `late`.
 `event_id` adalah idempotency key: replay payload sama → keputusan/record asli;
 key sama isi beda → 409. Event baru untuk siswa yang sudah tercatat tetap
 disimpan dengan reason `attendance_already_recorded`; constraint UNIQUE
-database adalah penjaga akhir anti-duplikat. Insert record dibungkus savepoint:
-pelanggaran UNIQUE ditangkap, audit tetap commit, respons melaporkan reason
-duplikat bersih (bukan 500).
+database adalah penjaga akhir anti-duplikat. Insert event DAN insert record
+masing-masing dibungkus savepoint: duplikat `event_id` yang lolos pre-check
+(antar-sesi/tanpa row-lock) tidak meledak 500 — pemenang di-re-query dan
+respons me-replay keputusannya (`409 event_id_reused` bila isi beda);
+pelanggaran UNIQUE record ditangkap, audit tetap commit, respons melaporkan
+reason duplikat bersih.
 
 Presensi manual guru: `POST /attendance/sessions/{id}/manual-marks`
 (`SESSION_OPERATE` + kepemilikan jadwal guru; body `{student_id,
@@ -92,6 +98,8 @@ di summary, halaman, dan ekspor. Default 25 baris, maks 100; indeks B-tree
 `opened_at`. Ekspor `.../export?format=csv|xlsx` (maks 50.000 baris): CSV
 UTF-8 BOM, nilai berawalan penanda formula diberi apostrof anti-eksekusi.
 Ekspor hanya label presensi/jadwal — tanpa skor, embedding, image, kredensial.
+Kolom `Catatan` memuat `note` manual-mark guru (baris JSON + CSV/XLSX + UI
+laporan; record recognition tidak punya note).
 
 ## Peringatan dini kehadiran (daftar pantauan manusia)
 

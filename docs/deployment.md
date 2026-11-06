@@ -43,7 +43,7 @@ bukan pengganti autentikasi FastAPI atau RBAC (lihat Lampiran).
    **AI & kamera** (tanpa ini recognition degraded/nonaktif; jangan pakai
    nilai tebakan). Selesaikan school approval (tujuan, notice/dasar hukum
    minor, akses, retensi, fallback manual, koreksi, insiden).
-7. Jalankan acceptance checklist (Bagian 3/4) sebelum sesi siswa nyata.
+7. Jalankan acceptance checklist (Bagian 3/4) sebelum sesi siswa nyata, termasuk UAT live [scripts/live-uat.py](../scripts/live-uat.py) bila memakai stack live.
 
 Matriks siapa-mengatur-apa:
 
@@ -213,6 +213,17 @@ cocok. Upgrade: backup dulu, checkout rilis terreview, rebuild, migrasi via
 service `migrate`, verifikasi health + smoke sesi; rollback = symlink/rilis
 sebelumnya + restore dump bila skema berubah.
 
+### Acceptance live (server + API + web nyata, kedua profile)
+
+Jalankan UAT reprodusibel `scripts/live-uat.py` (25 checks: bootstrap→ganti
+sandi, guru, lab/kelas/siswa/membership, jadwal, buka sesi,
+device+kredensial+heartbeat, event matched→`attendance_recorded`, idempoten
+event-UUID, dashboard, GZip on-the-wire, tutup sesi) plus Playwright
+`apps/web/e2e/attendance-live-parity.spec.ts` (paritas API+web nyata).
+Stack live: docker postgres:16, `alembic upgrade head` single-head, seed
+roles+admin. Prosedur dan status: [pengujian](pengujian.md#uat-live-postgres--api--web-nyata-p2-2-terbukti)
+dan [backlog](backlog.md) baris P2-2.
+
 ## 4. Runbook AI_CENTRAL + STB_GATEWAY
 
 Topologi contoh (RFC1918, sesuaikan): server `192.168.40.10` (reservasi IP);
@@ -296,7 +307,7 @@ Acceptance (isi per board/kamera/lab; sesi uji + data sintetis/relawan
 dewasa; tanpa foto di form): fresh-install (image cocok, password diganti,
 DNS/NTP/TLS valid, 5432/8000/8001 tak terjangkau dari STB, 100 frame lolos,
 UUID/lab/profile cocok, token 0600, unit active, dashboard Online ≤60 dtk,
-alur camera→STB→AI→API tanpa duplikat, tanpa frame/embedding di disk/log);
+alur camera→STB→AI→API tanpa duplikat, tanpa frame/embedding di disk/log; UAT live + parity spec wajib lolos, lihat Acceptance live di atas);
 reboot (IP reserved + NTP, service otomatis, heartbeat ≤60 dtk, outbox utuh,
 sesi aktif ditemukan, satu transaksi uji tanpa duplikat); reconnect (agent
 hidup saat gagal, cache valid dipakai sampai expiry lalu fail-closed, event
