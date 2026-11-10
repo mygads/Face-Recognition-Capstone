@@ -55,7 +55,7 @@ defineProps<{ title: string; description?: string; eyebrow?: string }>()
     width: 100%;
   }
   .st-pagehead__actions > * {
-    flex: 1 1 auto;
+    flex: 1 1 100%;
     min-width: 0;
   }
 }

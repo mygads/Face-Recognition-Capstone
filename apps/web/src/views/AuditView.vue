@@ -83,7 +83,7 @@ onMounted(() => {
             <UiInput
               v-model="action"
               data-testid="audit-action"
-              placeholder="mis. attendance.correction.decided"
+              placeholder="cth. correction.decided"
             />
           </label>
           <label class="st-field"
@@ -91,7 +91,7 @@ onMounted(() => {
             <UiInput
               v-model="entityType"
               data-testid="audit-entity"
-              placeholder="mis. attendance_correction"
+              placeholder="cth. correction"
             />
           </label>
         </div>

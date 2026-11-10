@@ -1744,20 +1744,34 @@ form.accounts-view__pin-form {
   .app-topbar__logout {
     padding: 0 2px;
   }
-  /* Segmen filter/tab: bagi rata selebar kartu, tidak saling menempel */
+  /* Segmen filter/tab: geser horizontal bila sempit, label tidak terpotong */
   .st-scope {
     display: flex;
     width: 100%;
     max-width: 100%;
     gap: 3px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
   .st-scope button {
-    flex: 1 1 0;
-    min-width: 0;
-    padding: 8px 6px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+    padding: 8px 12px;
     font-size: 0.75rem;
     line-height: 1.3;
     text-align: center;
+  }
+  /* Baris daftar + aksi: susun vertikal bila sempit agar tombol tidak terpotong */
+  .st-listrow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .st-listrow > div {
+    min-width: 0;
+  }
+  .st-listrow .st-btn,
+  .st-listrow .st-badge {
+    align-self: flex-start;
   }
   /* Aksi berdampingan: lebar setara, melipat rapi bila sempit */
   .st-detailactions .st-btn {
