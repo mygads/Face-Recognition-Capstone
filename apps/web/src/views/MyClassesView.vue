@@ -437,43 +437,43 @@ onMounted(() => void loadClasses())
           </UiSelect>
         </form>
         <div class="st-tablewrap">
-        <table class="st-table">
-          <thead>
-            <tr>
-              <th scope="col">No</th>
-              <th scope="col">Nomor Siswa</th>
-              <th scope="col">Nama Siswa</th>
-              <th scope="col">Kelas</th>
-              <th scope="col">Status Keanggotaan</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(s, idx) in filteredStudents" :key="s.id">
-              <td>{{ idx + 1 }}</td>
-              <td class="st-table__mono">{{ s.student_number }}</td>
-              <td>
-                <span class="st-identity">
-                  <UiAvatar :name="s.full_name" />
-                  <span>{{ s.full_name }}</span>
-                </span>
-              </td>
-              <td>{{ detail.code }}</td>
-              <td>
-                <UiBadge :tone="s.is_active ? 'present' : 'neutral'">{{
-                  s.is_active ? 'Terdaftar Aktif' : 'Nonaktif'
-                }}</UiBadge>
-              </td>
-            </tr>
-            <tr v-if="!filteredStudents.length">
-              <td colspan="5">
-                <UiEmptyState
-                  title="Tidak ada siswa cocok"
-                  description="Ubah kata kunci atau filter status."
-                />
-              </td>
-            </tr>
-          </tbody>
-        </table>
+          <table class="st-table">
+            <thead>
+              <tr>
+                <th scope="col">No</th>
+                <th scope="col">Nomor Siswa</th>
+                <th scope="col">Nama Siswa</th>
+                <th scope="col">Kelas</th>
+                <th scope="col">Status Keanggotaan</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(s, idx) in filteredStudents" :key="s.id">
+                <td>{{ idx + 1 }}</td>
+                <td class="st-table__mono">{{ s.student_number }}</td>
+                <td>
+                  <span class="st-identity">
+                    <UiAvatar :name="s.full_name" />
+                    <span>{{ s.full_name }}</span>
+                  </span>
+                </td>
+                <td>{{ detail.code }}</td>
+                <td>
+                  <UiBadge :tone="s.is_active ? 'present' : 'neutral'">{{
+                    s.is_active ? 'Terdaftar Aktif' : 'Nonaktif'
+                  }}</UiBadge>
+                </td>
+              </tr>
+              <tr v-if="!filteredStudents.length">
+                <td colspan="5">
+                  <UiEmptyState
+                    title="Tidak ada siswa cocok"
+                    description="Ubah kata kunci atau filter status."
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </section>

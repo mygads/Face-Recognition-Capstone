@@ -750,6 +750,31 @@ export async function getPublicDisplay(token: string): Promise<PublicDisplay> {
   return unwrap(result)
 }
 
+export interface KioskLiveSpotlight {
+  full_name: string
+  status: string
+  recorded_at: string | null
+}
+
+export interface KioskLiveUpdate {
+  laboratory_id: string
+  laboratory_name: string
+  session_id: string | null
+  subject: string | null
+  status: string | null
+  opened_at: string | null
+  present_count: number
+  late_count: number
+  waiting_count: number
+  total_roster: number
+  spotlight: KioskLiveSpotlight | null
+  server_time: string
+}
+
+export function publicDisplayStreamUrl(token: string): string {
+  return `/api/v1/public/display/stream?token=${encodeURIComponent(token)}`
+}
+
 export async function getAttendanceReportSummary(
   query: AttendanceReportQuery,
 ): Promise<AttendanceReportSummary> {
@@ -1058,6 +1083,10 @@ export async function getKioskDisplay(token: string): Promise<PublicDisplay> {
     params: { query: { token } },
   })
   return unwrap(result)
+}
+
+export function kioskDisplayStreamUrl(token: string): string {
+  return `/api/v1/public/kiosk-display/stream?token=${encodeURIComponent(token)}`
 }
 
 export async function listAuditActivity(query: {

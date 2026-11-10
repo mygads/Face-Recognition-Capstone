@@ -7,12 +7,17 @@ polling GET berikutnya. PIN salah berulang mengunci sementara (lockout).
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import json
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from fastapi.responses import StreamingResponse
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from presensi_api.api.errors import OPENAPI_ERROR_RESPONSES, ApiProblem
@@ -35,7 +40,7 @@ from presensi_api.db.models import (
     PracticumSchedule,
     SessionStudent,
 )
-from presensi_api.db.session import get_db_session
+from presensi_api.db.session import get_db_session, get_session_factory
 from presensi_api.session_lifecycle import as_utc
 
 router = APIRouter(prefix="/public", tags=["public-display"])
@@ -68,6 +73,29 @@ class PublicDisplayResponse(ApiSchema):
     late_count: int = 0
     total_roster: int = 0
     students: list[PublicDisplayStudent] = []
+
+
+class KioskSpotlight(ApiSchema):
+    full_name: str
+    status: str
+    recorded_at: str | None = None
+
+
+class KioskLiveUpdate(ApiSchema):
+    """Payload ringan stream SSE kiosk: agregat + 1 sorotan, TANPA roster."""
+
+    laboratory_id: UUID
+    laboratory_name: str
+    session_id: UUID | None = None
+    subject: str | None = None
+    status: str | None = None
+    opened_at: str | None = None
+    present_count: int = 0
+    late_count: int = 0
+    waiting_count: int = 0
+    total_roster: int = 0
+    spotlight: KioskSpotlight | None = None
+    server_time: str
 
 
 class PublicKioskOption(ApiSchema):
@@ -157,27 +185,170 @@ def _check_kiosk_pin(kiosk: KioskScreen, pin: str) -> None:
     kiosk.pin_locked_until = None
 
 
-def _build_snapshot(lab: Laboratory, session: Session) -> PublicDisplayResponse:
+def _find_active_session(lab: Laboratory, session: Session) -> AttendanceSession | None:
     sched_ids = session.scalars(
         select(PracticumSchedule.id).where(
             PracticumSchedule.laboratory_id == lab.id,
             PracticumSchedule.is_active.is_(True),
         )
     ).all()
-    active = None
-    if sched_ids:
-        candidates = session.scalars(
-            select(AttendanceSession)
+    if not sched_ids:
+        return None
+    candidates = session.scalars(
+        select(AttendanceSession)
+        .where(
+            AttendanceSession.practicum_schedule_id.in_(sched_ids),
+            AttendanceSession.status.in_(["active", "manual_override"]),
+        )
+        .order_by(AttendanceSession.opened_at.desc())
+        .limit(2)
+    ).all()
+    # Satu sesi cocok -> siap; nol/lebih dari satu -> belum siap.
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
+
+
+def _build_live_update(lab: Laboratory, session: Session) -> KioskLiveUpdate:
+    """Agregat ringan untuk SSE: hitungan + 1 hasil terbaru, tanpa roster."""
+    active = _find_active_session(lab, session)
+    if active is None:
+        return KioskLiveUpdate(
+            laboratory_id=lab.id,
+            laboratory_name=lab.name,
+            server_time=datetime.now(UTC).isoformat(),
+        )
+    schedule = session.get(PracticumSchedule, active.practicum_schedule_id)
+    total = (
+        session.scalar(
+            select(func.count())
+            .select_from(SessionStudent)
+            .where(SessionStudent.session_id == active.id)
+        )
+        or 0
+    )
+    present = (
+        session.scalar(
+            select(func.count())
+            .select_from(AttendanceRecord)
             .where(
-                AttendanceSession.practicum_schedule_id.in_(sched_ids),
-                AttendanceSession.status.in_(["active", "manual_override"]),
+                AttendanceRecord.session_id == active.id,
+                AttendanceRecord.status == "present",
             )
-            .order_by(AttendanceSession.opened_at.desc())
-            .limit(2)
-        ).all()
-        # Satu sesi cocok -> siap; nol/lebih dari satu -> belum siap.
-        if len(candidates) == 1:
-            active = candidates[0]
+        )
+        or 0
+    )
+    late = (
+        session.scalar(
+            select(func.count())
+            .select_from(AttendanceRecord)
+            .where(
+                AttendanceRecord.session_id == active.id,
+                AttendanceRecord.status == "late",
+            )
+        )
+        or 0
+    )
+    latest = session.execute(
+        select(
+            SessionStudent.full_name_snapshot,
+            AttendanceRecord.status,
+            AttendanceRecord.recorded_at,
+        )
+        .join(
+            AttendanceRecord,
+            (AttendanceRecord.session_id == SessionStudent.session_id)
+            & (AttendanceRecord.student_id == SessionStudent.student_id),
+        )
+        .where(
+            SessionStudent.session_id == active.id,
+            AttendanceRecord.status.in_(["present", "late"]),
+        )
+        .order_by(AttendanceRecord.recorded_at.desc())
+        .limit(1)
+    ).first()
+    spotlight: KioskSpotlight | None = None
+    if latest is not None:
+        name, status, recorded_at = latest
+        spotlight = KioskSpotlight(
+            full_name=name,
+            status=status,
+            recorded_at=as_utc(recorded_at).isoformat() if recorded_at else None,
+        )
+    return KioskLiveUpdate(
+        laboratory_id=lab.id,
+        laboratory_name=lab.name,
+        session_id=active.id,
+        subject=schedule.subject if schedule else None,
+        status=active.status,
+        opened_at=as_utc(active.opened_at).isoformat(),
+        present_count=present,
+        late_count=late,
+        waiting_count=max(total - present - late, 0),
+        total_roster=total,
+        spotlight=spotlight,
+        server_time=datetime.now(UTC).isoformat(),
+    )
+
+
+async def _live_event_generator(
+    kind: str, subject_id: UUID, laboratory_id: UUID
+) -> AsyncGenerator[str, None]:
+    """Stream SSE: kirim snapshot ringan hanya saat berubah (hash), tick 1 dtk."""
+    last_digest = ""
+    ticks = 0
+    while True:
+        try:
+            with get_session_factory()() as db:
+                lab = db.get(Laboratory, laboratory_id)
+                if lab is None or not lab.is_active:
+                    yield 'event: error\ndata: {"code":"laboratory_not_found"}\n\n'
+                    return
+                if kind == "kiosk":
+                    device = db.get(Device, subject_id)
+                    if device is None or not device.is_active:
+                        yield 'event: error\ndata: {"code":"device_not_found"}\n\n'
+                        return
+                    kiosk = db.scalar(
+                        select(KioskScreen).where(
+                            KioskScreen.device_id == device.id,
+                            KioskScreen.laboratory_id == device.laboratory_id,
+                            KioskScreen.is_active.is_(True),
+                        )
+                    )
+                    if kiosk is None or laboratory_id != lab.id:
+                        yield 'event: error\ndata: {"code":"kiosk_not_found"}\n\n'
+                        return
+                update = _build_live_update(lab, db)
+            payload = update.model_dump(mode="json")
+            digest = _snapshot_digest(payload)
+            if digest != last_digest:
+                last_digest = digest
+                yield f"event: snapshot\ndata: {json.dumps(payload)}\n\n"
+            ticks += 1
+            if ticks % 15 == 0:
+                yield ": ping\n\n"
+            await asyncio.sleep(1)
+        except (asyncio.CancelledError, GeneratorExit):
+            break
+        except Exception:
+            yield 'event: error\ndata: {"code":"stream_unavailable"}\n\n'
+            return
+
+
+def _snapshot_digest(payload: dict[str, object]) -> str:
+    """Hash perubahan data; server_time dikecualikan agar idle tidak berisik."""
+    stable = {k: v for k, v in payload.items() if k != "server_time"}
+    return hashlib.sha256(
+        json.dumps(stable, sort_keys=True, default=str).encode()
+    ).hexdigest()
+
+
+SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+
+def _build_snapshot(lab: Laboratory, session: Session) -> PublicDisplayResponse:
+    active = _find_active_session(lab, session)
     if active is None:
         return PublicDisplayResponse(laboratory_id=lab.id, laboratory_name=lab.name)
     schedule = session.get(PracticumSchedule, active.practicum_schedule_id)
@@ -379,3 +550,80 @@ def list_public_kiosk_screens(
         )
         for r in rows
     ]
+
+
+def _require_lab_stream_target(
+    kind: str, claims_subject: UUID, claims_lab: UUID, session: Session
+) -> Laboratory:
+    lab = session.get(Laboratory, claims_lab)
+    if lab is None or not lab.is_active:
+        raise ApiProblem(404, "laboratory_not_found", "Laboratorium tidak ditemukan.")
+    if kind == "kiosk":
+        device = session.get(Device, claims_subject)
+        if device is None or not device.is_active:
+            raise ApiProblem(404, "device_not_found", "Perangkat tidak ditemukan.")
+        kiosk = session.scalar(
+            select(KioskScreen).where(
+                KioskScreen.device_id == device.id,
+                KioskScreen.laboratory_id == device.laboratory_id,
+                KioskScreen.is_active.is_(True),
+            )
+        )
+        if kiosk is None:
+            raise ApiProblem(404, "kiosk_not_found", "Layar kiosk tidak terdaftar.")
+        if kiosk.pin_locked_until is not None and datetime.now(UTC) < _as_aware(
+            kiosk.pin_locked_until
+        ):
+            raise ApiProblem(429, "display_pin_locked", "Layar dikunci sementara.")
+        if claims_lab != lab.id:
+            raise ApiProblem(401, "display_token_invalid", "Sesi layar tidak valid.")
+    return lab
+
+
+@router.get(
+    "/display/stream",
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="SSE live kiosk updates (lab token, no login)",
+)
+def stream_lab_display(
+    session: DbSession,
+    settings: AuthDep,
+    token: Annotated[str, Query(min_length=16, max_length=1024)],
+) -> StreamingResponse:
+    claims = decode_display_token(token, settings)
+    if claims is None or claims.kind != "lab":
+        raise ApiProblem(401, "display_token_invalid", "Sesi layar tidak valid.")
+    _require_lab_stream_target("lab", claims.subject_id, claims.laboratory_id, session)
+    # Stream tak berujung: kembalikan koneksi pool segera, generator buka sesi
+    # singkat per tick agar kiosk tidak menahan koneksi selama berjam-jam.
+    session.close()
+    return StreamingResponse(
+        _live_event_generator("lab", claims.subject_id, claims.laboratory_id),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )
+
+
+@router.get(
+    "/kiosk-display/stream",
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="SSE live kiosk updates (kiosk token, no login)",
+)
+def stream_kiosk_display(
+    session: DbSession,
+    settings: AuthDep,
+    token: Annotated[str, Query(min_length=16, max_length=1024)],
+) -> StreamingResponse:
+    claims = decode_display_token(token, settings)
+    if claims is None or claims.kind != "kiosk":
+        raise ApiProblem(401, "display_token_invalid", "Sesi layar tidak valid.")
+    _require_lab_stream_target(
+        "kiosk", claims.subject_id, claims.laboratory_id, session
+    )
+    # Lihat catatan penutupan sesi pada stream lab di atas.
+    session.close()
+    return StreamingResponse(
+        _live_event_generator("kiosk", claims.subject_id, claims.laboratory_id),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )

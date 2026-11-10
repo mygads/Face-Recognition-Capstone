@@ -293,3 +293,8 @@ langsung di host saat perangkat perlu diubah.
   contoh tetap nonaktif dan harus memakai kontrol sesi/fallback yang disetujui.
 - Gunakan relawan dewasa yang setuju untuk uji kamera; jangan menyimpan atau
   mengirim foto siswa sebagai bukti kalibrasi.
+
+## Kiosk realtime
+
+Untuk arsitektur kiosk (video lokal browser, push SSE, tanpa roster),
+lihat [kiosk-realtime.md](kiosk-realtime.md).

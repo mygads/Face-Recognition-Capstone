@@ -9,6 +9,8 @@ const api = vi.hoisted(() => ({
   listPublicLaboratories: vi.fn(async () => [{ id: 'lab-1', code: 'LAB-1', name: 'Lab Kimia 1' }]),
   openKioskDisplaySession: vi.fn(),
   openPublicDisplaySession: vi.fn(),
+  publicDisplayStreamUrl: (token: string) => `/api/v1/public/display/stream?token=${token}`,
+  kioskDisplayStreamUrl: (token: string) => `/api/v1/public/kiosk-display/stream?token=${token}`,
 }))
 
 vi.mock('../api/client', () => ({
@@ -61,5 +63,105 @@ describe('DisplayView ala Stitch', () => {
     expect(spotlight.exists()).toBe(true)
     expect(spotlight.text()).toContain('Raka P.')
     expect(spotlight.text()).toContain('TERLAMBAT')
+  })
+})
+
+describe('DisplayView realtime (SSE + video lokal)', () => {
+  class FakeEventSource {
+    static instances: FakeEventSource[] = []
+    url: string
+    handlers: Record<string, ((ev: { data: string }) => void)[]> = {}
+    onmessage: ((ev: { data: string }) => void) | null = null
+    onerror: (() => void) | null = null
+    closed = false
+    constructor(url: string) {
+      this.url = url
+      FakeEventSource.instances.push(this)
+    }
+    addEventListener(type: string, cb: (ev: { data: string }) => void): void {
+      this.handlers[type] = [...(this.handlers[type] ?? []), cb]
+    }
+    emit(type: string, data: unknown): void {
+      for (const cb of this.handlers[type] ?? []) cb({ data: JSON.stringify(data) })
+    }
+    fail(): void {
+      this.onerror?.()
+    }
+    close(): void {
+      this.closed = true
+    }
+  }
+
+  it('memakai stream SSE tanpa daftar roster dan menampilkan hasil push', async () => {
+    const g = globalThis as unknown as Record<string, unknown>
+    const realES = g['EventSource']
+    g['EventSource'] = FakeEventSource
+    FakeEventSource.instances = []
+    try {
+      api.openPublicDisplaySession.mockResolvedValueOnce({
+        display_token: 'tok-live',
+        snapshot,
+      })
+      const w = mount(DisplayView)
+      await flushPromises()
+      await w.find('[data-testid="display-pin-input"]').setValue('1234')
+      await w.find('form').trigger('submit.prevent')
+      await flushPromises()
+      expect(FakeEventSource.instances).toHaveLength(1)
+      expect(FakeEventSource.instances[0].url).toContain('/display/stream')
+      // roster tidak lagi dirender di layar kiosk
+      expect(w.find('[data-testid="display-board"]').text()).not.toContain('S-001')
+      // push snapshot ringan lewat SSE
+      FakeEventSource.instances[0].emit('snapshot', {
+        laboratory_id: 'lab-1',
+        laboratory_name: 'Lab Kimia 1',
+        session_id: 'ses-1',
+        subject: 'Uji Larutan',
+        status: 'active',
+        opened_at: null,
+        present_count: 2,
+        late_count: 0,
+        waiting_count: 1,
+        total_roster: 3,
+        spotlight: {
+          full_name: 'Sinta Anggraini',
+          status: 'present',
+          recorded_at: '2026-11-06T06:05:00+07:00',
+        },
+        server_time: '2026-11-06T06:06:00+07:00',
+      })
+      await flushPromises()
+      const board = w.find('[data-testid="display-board"]')
+      expect(board.text()).toContain('Sinta A.')
+      expect(board.text()).toContain('HADIR')
+      expect(board.text()).not.toContain('S-002')
+    } finally {
+      g['EventSource'] = realES
+    }
+  })
+
+  it('jatuh kembali ke polling saat SSE gagal', async () => {
+    const g = globalThis as unknown as Record<string, unknown>
+    const realES = g['EventSource']
+    g['EventSource'] = FakeEventSource
+    FakeEventSource.instances = []
+    try {
+      api.openPublicDisplaySession.mockResolvedValueOnce({
+        display_token: 'tok-fallback',
+        snapshot,
+      })
+      api.getPublicDisplay.mockResolvedValueOnce(snapshot)
+      const w = mount(DisplayView)
+      await flushPromises()
+      await w.find('[data-testid="display-pin-input"]').setValue('1234')
+      await w.find('form').trigger('submit.prevent')
+      await flushPromises()
+      FakeEventSource.instances[0].fail()
+      await flushPromises()
+      expect(w.find('[data-testid="display-board"]').exists()).toBe(true)
+      expect(w.find('[data-testid="display-board"]').text()).toContain('Raka P.')
+    } finally {
+      g['EventSource'] = realES
+    }
   })
 })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { UiBadge, UiButton, UiEmptyState, UiInput } from '../components/ui'
 import { shortDisplayName } from '../utils/displayName'
 import { timeFormatterFor } from '../utils/dateFormat'
@@ -7,10 +7,13 @@ import {
   ApiError,
   getKioskDisplay,
   getPublicDisplay,
+  kioskDisplayStreamUrl,
   listPublicKioskScreens,
   listPublicLaboratories,
   openKioskDisplaySession,
   openPublicDisplaySession,
+  publicDisplayStreamUrl,
+  type KioskLiveUpdate,
   type PublicDisplay,
   type PublicKioskOption,
   type PublicLaboratory,
@@ -22,12 +25,18 @@ const labId = ref('')
 const deviceId = ref('')
 const pin = ref('')
 const display = ref<PublicDisplay | null>(null)
+const live = ref<KioskLiveUpdate | null>(null)
 const displayToken = ref('')
 const error = ref<string | null>(null)
 const isLoadingLabs = ref(false)
 const isLoadingDisplay = ref(false)
 const isFullscreen = ref(false)
-let timer: ReturnType<typeof setInterval> | undefined
+const streamState = ref<'off' | 'sse' | 'polling'>('off')
+const cameraState = ref<'idle' | 'active' | 'unavailable' | 'insecure'>('idle')
+const localVideo = ref<HTMLVideoElement | null>(null)
+let pollTimer: ReturnType<typeof setInterval> | undefined
+let eventSource: EventSource | null = null
+let localStream: MediaStream | null = null
 
 const STATUS_GUIDE = [
   { key: 'waiting', label: 'Menunggu', hint: 'Silakan berdiri di dalam bingkai' },
@@ -73,30 +82,154 @@ async function loadKiosks(): Promise<void> {
   }
 }
 
+function toLive(snapshot: PublicDisplay): KioskLiveUpdate {
+  const rows = snapshot.students ?? []
+  const present = rows.filter((r) => r.status === 'present').length
+  const late = rows.filter((r) => r.status === 'late').length
+  const latest = [...rows]
+    .filter((r) => (r.status === 'present' || r.status === 'late') && r.recorded_at)
+    .sort((a, b) => String(b.recorded_at).localeCompare(String(a.recorded_at)))[0]
+  return {
+    laboratory_id: snapshot.laboratory_id,
+    laboratory_name: snapshot.laboratory_name,
+    session_id: snapshot.session_id ?? null,
+    subject: snapshot.subject ?? null,
+    status: snapshot.status ?? null,
+    opened_at: snapshot.opened_at ?? null,
+    present_count: snapshot.present_count ?? present,
+    late_count: snapshot.late_count ?? late,
+    waiting_count: Math.max((snapshot.total_roster ?? rows.length) - present - late, 0),
+    total_roster: snapshot.total_roster ?? rows.length,
+    spotlight: latest
+      ? {
+          full_name: latest.full_name,
+          status: latest.status,
+          recorded_at: latest.recorded_at ?? null,
+        }
+      : null,
+    server_time: new Date().toISOString(),
+  }
+}
+
+function applyPollSnapshot(snapshot: PublicDisplay): void {
+  display.value = { ...snapshot, students: [] }
+  live.value = toLive(snapshot)
+}
+
 async function loadDisplay(silent = false): Promise<void> {
   if (!displayToken.value) return
   if (!silent) isLoadingDisplay.value = true
   try {
-    display.value = deviceId.value
+    const snapshot = deviceId.value
       ? await getKioskDisplay(displayToken.value)
       : await getPublicDisplay(displayToken.value)
+    applyPollSnapshot(snapshot)
     error.value = null
   } catch (err) {
     if (!silent) error.value = formatError(err)
-    if (err instanceof ApiError && err.status === 401) stopPolling()
+    if (err instanceof ApiError && err.status === 401) stopLive()
   } finally {
     if (!silent) isLoadingDisplay.value = false
   }
 }
 
-function startPolling(): void {
-  stopPolling()
-  timer = setInterval(() => void loadDisplay(true), 5000)
+function disconnectStream(): void {
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
+  }
+  if (pollTimer) clearInterval(pollTimer)
+  pollTimer = undefined
 }
 
-function stopPolling(): void {
-  if (timer) clearInterval(timer)
-  timer = undefined
+function startPolling(): void {
+  disconnectStream()
+  streamState.value = 'polling'
+  pollTimer = setInterval(() => void loadDisplay(true), 5000)
+}
+
+function connectStream(): void {
+  disconnectStream()
+  if (!displayToken.value) return
+  if (typeof EventSource === 'undefined') {
+    startPolling()
+    return
+  }
+  try {
+    const url = deviceId.value
+      ? kioskDisplayStreamUrl(displayToken.value)
+      : publicDisplayStreamUrl(displayToken.value)
+    const src = new EventSource(url)
+    eventSource = src
+    streamState.value = 'sse'
+    src.addEventListener('snapshot', (ev) => {
+      try {
+        const update = JSON.parse((ev as MessageEvent).data) as KioskLiveUpdate
+        live.value = update
+        if (display.value) {
+          display.value = {
+            ...display.value,
+            laboratory_name: update.laboratory_name,
+            session_id: update.session_id,
+            subject: update.subject,
+            status: update.status,
+            opened_at: update.opened_at,
+            students: [],
+          }
+        }
+        error.value = null
+      } catch {
+        /* abaikan frame rusak */
+      }
+    })
+    src.onerror = () => {
+      if (eventSource === src) startPolling()
+    }
+  } catch {
+    startPolling()
+  }
+}
+
+function stopLive(): void {
+  disconnectStream()
+  streamState.value = 'off'
+}
+
+async function startLocalCamera(): Promise<void> {
+  cameraState.value = 'idle'
+  if (typeof window === 'undefined' || !window.isSecureContext) {
+    cameraState.value = 'insecure'
+    return
+  }
+  const media = window.navigator as Navigator & { mediaDevices?: MediaDevices }
+  if (!media.mediaDevices?.getUserMedia) {
+    cameraState.value = 'unavailable'
+    return
+  }
+  try {
+    await nextTick()
+    const stream = await media.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+      audio: false,
+    })
+    localStream = stream
+    if (localVideo.value) {
+      localVideo.value.srcObject = stream
+      await localVideo.value.play().catch(() => undefined)
+    }
+    cameraState.value = 'active'
+  } catch {
+    cameraState.value = 'unavailable'
+  }
+}
+
+function stopLocalCamera(): void {
+  if (localStream) {
+    localStream.getTracks().forEach((track) => track.stop())
+    localStream = null
+  }
+  if (localVideo.value) localVideo.value.srcObject = null
+  cameraState.value = 'idle'
 }
 
 async function submit(): Promise<void> {
@@ -108,9 +241,10 @@ async function submit(): Promise<void> {
       ? await openKioskDisplaySession(deviceId.value, pin.value)
       : await openPublicDisplaySession(labId.value, pin.value)
     displayToken.value = opened.display_token
-    display.value = opened.snapshot
+    applyPollSnapshot(opened.snapshot)
     pin.value = ''
-    startPolling()
+    connectStream()
+    void startLocalCamera()
   } catch (err) {
     error.value = formatError(err)
   } finally {
@@ -180,24 +314,11 @@ const terminalId = computed(() => {
   const code = (lab?.code ?? 'LAB').toUpperCase().replace(/[^A-Z0-9]+/g, '-')
   return `KIOSK-${code || 'LAB'}-01`
 })
-const waitingCount = computed(
-  () =>
-    (display.value?.students ?? []).filter((s) => s.status !== 'present' && s.status !== 'late')
-      .length,
-)
+const waitingCount = computed(() => live.value?.waiting_count ?? 0)
 
 const boardTitle = computed(() => display.value?.laboratory_name ?? 'Layar presensi')
 
-const spotlight = computed(() => {
-  const rows = (display.value?.students ?? []).filter(
-    (s) => (s.status === 'present' || s.status === 'late') && s.recorded_at,
-  )
-  if (!rows.length) return null
-  const sorted = [...rows].sort((a, b) =>
-    String(b.recorded_at).localeCompare(String(a.recorded_at)),
-  )
-  return sorted[0]
-})
+const spotlight = computed(() => live.value?.spotlight ?? null)
 
 function formatRecordedTime(value: string | null | undefined): string {
   if (!value) return '-'
@@ -209,9 +330,11 @@ function formatRecordedTime(value: string | null | undefined): string {
 }
 
 function resetSession(): void {
-  stopPolling()
+  stopLive()
+  stopLocalCamera()
   displayToken.value = ''
   display.value = null
+  live.value = null
 }
 
 watch(labId, () => {
@@ -227,7 +350,8 @@ onMounted(() => {
   }, 1000)
 })
 onBeforeUnmount(() => {
-  stopPolling()
+  stopLive()
+  stopLocalCamera()
   if (clockTimer) clearInterval(clockTimer)
 })
 </script>
@@ -363,18 +487,57 @@ onBeforeUnmount(() => {
       <div class="kiosk__stage">
         <div class="kiosk__camera" aria-label="Bingkai kamera">
           <p class="kiosk__camera-badge">
-            <span class="kiosk__dot kiosk__dot--live" aria-hidden="true" /> Kamera Siap
+            <span
+              class="kiosk__dot"
+              :class="{
+                'kiosk__dot--live': cameraState === 'active',
+                'kiosk__dot--idle': cameraState !== 'active',
+              }"
+              aria-hidden="true"
+            />
+            {{
+              cameraState === 'active'
+                ? 'Kamera Lokal Aktif'
+                : cameraState === 'insecure'
+                  ? 'Preview Lokal Butuh HTTPS'
+                  : cameraState === 'unavailable'
+                    ? 'Kamera Tidak Tersedia'
+                    : 'Menyiapkan Kamera…'
+            }}
           </p>
-          <div class="kiosk__frame" aria-hidden="true">
-            <span class="kiosk__frame-corner kiosk__frame-corner--tl" />
-            <span class="kiosk__frame-corner kiosk__frame-corner--tr" />
-            <span class="kiosk__frame-corner kiosk__frame-corner--bl" />
-            <span class="kiosk__frame-corner kiosk__frame-corner--br" />
-            <span class="kiosk__silhouette">Berdiri di dalam bingkai</span>
+          <div class="kiosk__frame">
+            <video
+              v-if="cameraState === 'active'"
+              ref="localVideo"
+              class="kiosk__video"
+              playsinline
+              autoplay
+              muted
+              aria-label="Preview kamera lokal kiosk"
+              data-testid="display-local-video"
+            />
+            <span v-else class="kiosk__silhouette" aria-hidden="true"
+              >Berdiri di dalam bingkai</span
+            >
+            <span class="kiosk__frame-corner kiosk__frame-corner--tl" aria-hidden="true" />
+            <span class="kiosk__frame-corner kiosk__frame-corner--tr" aria-hidden="true" />
+            <span class="kiosk__frame-corner kiosk__frame-corner--bl" aria-hidden="true" />
+            <span class="kiosk__frame-corner kiosk__frame-corner--br" aria-hidden="true" />
           </div>
           <p class="kiosk__camera-meta">
-            {{ boardTitle }} · Hadir {{ display.present_count }} · Terlambat
-            {{ display.late_count }} / {{ display.total_roster }} · Menunggu {{ waitingCount }}
+            {{ boardTitle }} · Hadir {{ live?.present_count ?? 0 }} · Terlambat
+            {{ live?.late_count ?? 0 }} / {{ live?.total_roster ?? 0 }} · Menunggu
+            {{ waitingCount }}
+          </p>
+          <p v-if="cameraState !== 'active'" class="kiosk__muted" role="note">
+            {{
+              cameraState === 'insecure'
+                ? 'Preview lokal butuh HTTPS atau localhost. Hasil presensi tetap tampil.'
+                : 'Kamera lokal belum tersedia. Hasil presensi tetap tampil.'
+            }}
+          </p>
+          <p v-if="streamState === 'polling'" class="kiosk__muted" role="note">
+            Mode polling 5 detik (stream realtime tidak tersedia).
           </p>
           <div class="kiosk__board-actions">
             <UiButton variant="secondary" type="button" @click="toggleFullscreen">
@@ -424,53 +587,11 @@ onBeforeUnmount(() => {
             <h2 v-if="display.subject">{{ display.subject }}</h2>
             <UiEmptyState v-else title="Presensi belum dibuka. Tunggu petugas membuka sesi." />
             <p v-if="display.subject" class="kiosk__muted">
-              {{ display.status }} · Hadir {{ display.present_count }} · Terlambat
-              {{ display.late_count }} / {{ display.total_roster }}
+              {{ display.status }} · Hadir {{ live?.present_count ?? 0 }} · Terlambat
+              {{ live?.late_count ?? 0 }} / {{ live?.total_roster ?? 0 }}
             </p>
             <p class="kiosk__muted">Silakan berdiri di dalam bingkai kamera.</p>
           </div>
-          <details class="kiosk__roster" open>
-            <summary>Daftar tunggu · {{ waitingCount }} belum masuk</summary>
-            <ul v-if="display.students.length" class="kiosk__chips">
-              <li
-                v-for="s in display.students"
-                :key="s.student_number"
-                class="kiosk__chip"
-                :class="{
-                  'kiosk__chip--present': s.status === 'present',
-                  'kiosk__chip--late': s.status === 'late',
-                }"
-                data-testid="display-student"
-                :title="
-                  s.status === 'present' || s.status === 'late'
-                    ? `Tercatat ${formatRecordedTime(s.recorded_at)}`
-                    : undefined
-                "
-              >
-                <strong>{{ shortDisplayName(s.full_name) }}</strong>
-                <UiBadge
-                  :tone="
-                    s.status === 'present'
-                      ? 'present'
-                      : s.status === 'late'
-                        ? 'late'
-                        : s.status === 'excused'
-                          ? 'excused'
-                          : 'neutral'
-                  "
-                  >{{
-                    s.status === 'present'
-                      ? 'SUDAH MASUK'
-                      : s.status === 'late'
-                        ? 'TERLAMBAT'
-                        : s.status === 'excused'
-                          ? 'IZIN'
-                          : 'BELUM MASUK'
-                  }}</UiBadge
-                >
-              </li>
-            </ul>
-          </details>
           <details class="kiosk__guide">
             <summary>Panduan status layar</summary>
             <ul>
@@ -748,13 +869,24 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
   background: radial-gradient(circle at 50% 35%, #14324a 0%, #0b2036 70%);
+}
+.kiosk__video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
 }
 .kiosk__frame-corner {
   position: absolute;
+  z-index: 2;
   width: 32px;
   height: 32px;
   border: 4px solid #fbbf24;
+  pointer-events: none;
 }
 .kiosk__frame-corner--tl {
   top: -2px;
@@ -877,7 +1009,6 @@ onBeforeUnmount(() => {
 .kiosk__result-card--waiting h2 {
   margin: 4px 0;
 }
-.kiosk__roster,
 .kiosk__guide {
   background: var(--st-primary-container);
   border: 1px solid #1e3a52;
@@ -885,36 +1016,10 @@ onBeforeUnmount(() => {
   padding: 12px 16px;
   color: #c6d4d3;
 }
-.kiosk__roster summary,
 .kiosk__guide summary {
   cursor: pointer;
   font-weight: 700;
   font-size: 0.85rem;
-}
-.kiosk__chips {
-  list-style: none;
-  margin: 12px 0 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 8px;
-}
-.kiosk__chip {
-  background: #0b2036;
-  border: 1px solid #1e3a52;
-  border-radius: 12px;
-  padding: 10px;
-  display: grid;
-  gap: 6px;
-  justify-items: center;
-  text-align: center;
-  font-size: 0.82rem;
-}
-.kiosk__chip--present {
-  border-color: var(--st-gold);
-}
-.kiosk__chip--late {
-  border-color: #fbbf24;
 }
 .kiosk__guide ul {
   margin: 8px 0 0;
