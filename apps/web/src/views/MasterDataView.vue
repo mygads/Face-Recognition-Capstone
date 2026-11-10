@@ -98,9 +98,9 @@ const importError = ref<string | null>(null)
 // detail siswa
 const studentDetail = ref<StudentDetails | null>(null)
 function displayShortDate(value: string | null | undefined): string {
-  if (!value) return '–'
+  if (!value) return '-'
   const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return '–'
+  if (Number.isNaN(d.getTime())) return '-'
   return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 

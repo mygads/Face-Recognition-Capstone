@@ -33,7 +33,7 @@ const exampleOpen = computed(() => {
   const fmt = (m: number): string => `${pad(Math.floor(m / 60))}.${pad(m % 60)}`
   const late = start + form.value.default_grace_period_minutes
   return (
-    `Contoh jadwal 13.00: sesi boleh dibuka ${fmt(start - before)}–${fmt(start + after)}; ` +
+    `Contoh jadwal 13.00: sesi boleh dibuka ${fmt(start - before)}-${fmt(start + after)}; ` +
     `terlambat setelah ${fmt(late)}; sesi ditutup otomatis pada jam akhir jadwal.`
   )
 })

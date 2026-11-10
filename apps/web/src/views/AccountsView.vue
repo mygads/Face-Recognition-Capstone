@@ -270,7 +270,7 @@ async function addClassLabMapping(): Promise<void> {
     await addClassLaboratory(selectedClassLabClass.value, selectedClassLabLab.value)
     const res = await listClassLaboratories()
     classLaboratories.value = res.items
-    manageMessage.value = 'Relasi kelas–lab diperbarui.'
+    manageMessage.value = 'Relasi kelas-lab diperbarui.'
   } catch (error) {
     detailError.value = formatError(error)
   }
@@ -281,7 +281,7 @@ async function removeClassLabMapping(classId: string, labId: string): Promise<vo
     await removeClassLaboratory(classId, labId)
     const res = await listClassLaboratories()
     classLaboratories.value = res.items
-    manageMessage.value = 'Relasi kelas–lab diperbarui.'
+    manageMessage.value = 'Relasi kelas-lab diperbarui.'
   } catch (error) {
     detailError.value = formatError(error)
   }
@@ -604,7 +604,7 @@ async function copyTemporaryPassword(): Promise<void> {
           </UiButton>
         </li>
         <li v-if="!classLaboratories.length" class="accounts-view__hint">
-          Belum ada relasi kelas–lab.
+          Belum ada relasi kelas-lab.
         </li>
       </ul>
       <form class="master-data__form" @submit.prevent="addClassLabMapping">

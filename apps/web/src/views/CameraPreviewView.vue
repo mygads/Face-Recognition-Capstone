@@ -181,7 +181,7 @@ const cameraFaceMetrics = computed(() => {
     const range =
       face.min_brightness === undefined || face.max_brightness === undefined
         ? ''
-        : ` · target ${Math.round(face.min_brightness)}–${Math.round(face.max_brightness)}`
+        : ` · target ${Math.round(face.min_brightness)}-${Math.round(face.max_brightness)}`
     metrics.push(`Cahaya ${face.brightness.toFixed(1)}${range}`)
   }
   return metrics

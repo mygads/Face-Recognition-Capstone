@@ -494,11 +494,11 @@ onMounted(async () => {
               </td>
               <td v-if="colVisible('late')" data-label="Terlambat">
                 <small v-if="minutesLate(row) != null">telat {{ minutesLate(row) }} mnt</small>
-                <span v-else class="st-table__muted">–</span>
+                <span v-else class="st-table__muted">-</span>
               </td>
               <td v-if="colVisible('note')" data-label="Catatan">
                 <small v-if="row.note">{{ row.note }}</small>
-                <span v-else class="st-table__muted">–</span>
+                <span v-else class="st-table__muted">-</span>
               </td>
               <td v-if="colVisible('recorded')" data-label="Waktu tercatat" class="st-table__mono">
                 {{ formatDate(row.recorded_at) }}
@@ -515,7 +515,7 @@ onMounted(async () => {
         <span class="st-table__muted">{{
           total === 0
             ? '0 baris'
-            : `${page * pageSize + 1}–${Math.min((page + 1) * pageSize, total)} dari ${total}`
+            : `${page * pageSize + 1}-${Math.min((page + 1) * pageSize, total)} dari ${total}`
         }}</span>
         <div style="display: flex; gap: 8px; align-items: center">
           <UiButton

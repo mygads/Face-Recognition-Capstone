@@ -1019,12 +1019,12 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
                   <span v-if="entry.recorded_at">{{
                     displayDateTime(entry.recorded_at, selected?.timezone_name ?? 'Asia/Jakarta')
                   }}</span>
-                  <span v-else class="st-table__muted">–</span>
+                  <span v-else class="st-table__muted">-</span>
                   <span v-if="entry.minutes_late != null">
                     · telat {{ entry.minutes_late }} mnt</span
                   >
                 </td>
-                <td class="st-table__muted">{{ entry.record_note ?? '–' }}</td>
+                <td class="st-table__muted">{{ entry.record_note ?? '-' }}</td>
                 <td>
                   <UiBadge
                     :tone="
@@ -1258,7 +1258,7 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
           <dt>Waktu</dt>
           <dd>
             {{ weekdayName(confirmOpenSchedule.weekday) }} ·
-            {{ displayTime(confirmOpenSchedule.start_time) }}–{{
+            {{ displayTime(confirmOpenSchedule.start_time) }}-{{
               displayTime(confirmOpenSchedule.end_time)
             }}
             WIB · grace {{ gracePeriodMinutes }} mnt

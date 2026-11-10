@@ -103,6 +103,6 @@ describe('reports view teacher notes', () => {
     const headers = table.findAll('thead th').map((th) => th.text())
     expect(headers).toContain('Catatan')
     expect(table.text()).toContain('Surat dokter dari TU')
-    expect(table.text()).toContain('–')
+    expect(table.text()).toContain('-')
   })
 })

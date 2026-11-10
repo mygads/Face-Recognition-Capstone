@@ -283,7 +283,7 @@ describe('session roster overview', () => {
     const rows = wrapper.findAll('[data-testid="roster-row"]')
     expect(rows).toHaveLength(2)
     expect(rows[0].text()).toContain('Surat dokter dari TU')
-    expect(rows[1].text()).toContain('–')
+    expect(rows[1].text()).toContain('-')
   })
 
   it('filters the roster by search text and status chips', async () => {

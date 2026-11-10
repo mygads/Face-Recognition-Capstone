@@ -15,7 +15,7 @@ const total = ref(0)
 const actorNames = ref<Record<string, string>>({})
 
 function actorLabel(id: string | null | undefined): string {
-  if (!id) return '—'
+  if (!id) return '-'
   return actorNames.value[id] ?? id
 }
 
@@ -126,7 +126,7 @@ onMounted(() => {
                 <td>
                   <strong>{{ actorLabel(a.actor_user_id).split(' · ')[0] }}</strong
                   ><br /><span class="st-table__muted st-table__mono">{{
-                    actorLabel(a.actor_user_id).split(' · ')[1] ?? a.actor_user_id ?? '—'
+                    actorLabel(a.actor_user_id).split(' · ')[1] ?? a.actor_user_id ?? '-'
                   }}</span>
                 </td>
                 <td class="st-table__actions">

@@ -354,8 +354,8 @@ function toggleGroup(key: string): void {
           class="app-sidebar__brand-logo"
           src="/logo-sekolah.png"
           alt="Logo SMA Cimahi"
-          width="52"
-          height="52"
+          width="60"
+          height="60"
         />
         <span class="app-sidebar__brand-name">
           Presensi Praktikum

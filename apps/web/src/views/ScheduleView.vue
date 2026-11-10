@@ -261,7 +261,7 @@ function goToPage(nextPage: number): void {
         <UiButton v-if="canManageSchedule" variant="primary" @click="openCreate"
           >+ Tambah Jadwal</UiButton
         >
-        <span v-else class="st-table__muted">Mode baca saja — membutuhkan izin Kelola Jadwal.</span>
+        <span v-else class="st-table__muted">Mode baca saja - membutuhkan izin Kelola Jadwal.</span>
       </template>
     </UiPageHeader>
 
@@ -382,7 +382,7 @@ function goToPage(nextPage: number): void {
         <div>
           <dt>Waktu</dt>
           <dd>
-            {{ weekdayName(selected.weekday) }}, {{ displayTime(selected.start_time) }}–{{
+            {{ weekdayName(selected.weekday) }}, {{ displayTime(selected.start_time) }}-{{
               displayTime(selected.end_time)
             }}
             · {{ selected.timezone_name }}
@@ -390,7 +390,7 @@ function goToPage(nextPage: number): void {
         </div>
         <div>
           <dt>Berlaku</dt>
-          <dd>{{ selected.effective_from }}–{{ selected.effective_through ?? 'seterusnya' }}</dd>
+          <dd>{{ selected.effective_from }}-{{ selected.effective_through ?? 'seterusnya' }}</dd>
         </div>
         <div>
           <dt>Status</dt>

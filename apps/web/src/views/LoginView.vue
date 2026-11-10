@@ -42,8 +42,8 @@ async function submitLogin(): Promise<void> {
         class="st-login__logo"
         src="/logo-sekolah.png"
         alt="Logo SMA Cimahi"
-        width="96"
-        height="96"
+        width="112"
+        height="112"
       />
       <div>
         <p class="st-login__school">Presensi Praktikum</p>
