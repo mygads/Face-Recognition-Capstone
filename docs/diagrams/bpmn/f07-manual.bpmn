@@ -18,8 +18,17 @@
 <task id="sv" name="Record manual + audit attendance.manual_marked"><incoming>F_dp_13</incoming><outgoing>F_sv_14</outgoing></task>
 <exclusiveGateway id="k" name="Ada kesalahan?" gatewayDirection="Exclusive"><incoming>F_sv_14</incoming><outgoing>F_k_15</outgoing><outgoing>F_k_16</outgoing></exclusiveGateway>
 <task id="post" name="POST koreksi + alasan wajib"><incoming>F_k_16</incoming><outgoing>F_post_17</outgoing></task>
-<task id="pe" name="pending + audit; record final tidak berubah"><incoming>F_post_17</incoming><outgoing>F_pe_18</outgoing></task>
-<endEvent id="w" name="Menunggu kebijakan approval; tanpa endpoint putusan"><incoming>F_pe_18</incoming></endEvent>
+<exclusiveGateway id="cs" name="Kasus?" gatewayDirection="Exclusive"><incoming>F_post_17</incoming><outgoing>F_cs_18</outgoing><outgoing>F_cs_19</outgoing><outgoing>F_cs_20</outgoing></exclusiveGateway>
+<task id="ca" name="Kasus a: record id + corrected_status"><incoming>F_cs_18</incoming><outgoing>F_ca_22</outgoing></task>
+<task id="cb" name="Kasus b: session + student; previous absen turunan"><incoming>F_cs_19</incoming><outgoing>F_cb_23</outgoing></task>
+<task id="rj" name="409 session_still_active: pakai tandai manual"><incoming>F_cs_20</incoming><outgoing>F_rj_21</outgoing></task>
+<endEvent id="erj" name="Selesai"><incoming>F_rj_21</incoming></endEvent>
+<task id="pe" name="pending + audit; record final tidak berubah"><incoming>F_ca_22</incoming><incoming>F_cb_23</incoming><outgoing>F_pe_24</outgoing></task>
+<exclusiveGateway id="w" name="Putusan ADMIN?" gatewayDirection="Exclusive"><incoming>F_pe_24</incoming><outgoing>F_w_25</outgoing><outgoing>F_w_26</outgoing><outgoing>F_w_27</outgoing></exclusiveGateway>
+<task id="ap" name="Setujui: lock target + terapkan atomik + audit"><incoming>F_w_25</incoming><outgoing>F_ap_28</outgoing></task>
+<task id="dn" name="Tolak + decision_note + audit; record tetap"><incoming>F_w_26</incoming><outgoing>F_dn_29</outgoing></task>
+<task id="r422" name="422 decision_note wajib"><incoming>F_w_27</incoming><outgoing>F_r422_30</outgoing></task>
+<endEvent id="e2" name="Selesai beraudit"><incoming>F_ap_28</incoming><incoming>F_dn_29</incoming><incoming>F_r422_30</incoming></endEvent>
 <endEvent id="e" name="Selesai"><incoming>F_k_15</incoming></endEvent>
 <sequenceFlow id="F_s_0" sourceRef="s" targetRef="pick"></sequenceFlow>
 <sequenceFlow id="F_pick_1" sourceRef="pick" targetRef="sc"></sequenceFlow>
@@ -38,8 +47,20 @@
 <sequenceFlow id="F_sv_14" sourceRef="sv" targetRef="k"></sequenceFlow>
 <sequenceFlow id="F_k_15" sourceRef="k" targetRef="e"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tidak]]></conditionExpression></sequenceFlow>
 <sequenceFlow id="F_k_16" sourceRef="k" targetRef="post"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ya]]></conditionExpression></sequenceFlow>
-<sequenceFlow id="F_post_17" sourceRef="post" targetRef="pe"></sequenceFlow>
-<sequenceFlow id="F_pe_18" sourceRef="pe" targetRef="w"></sequenceFlow>
+<sequenceFlow id="F_post_17" sourceRef="post" targetRef="cs"></sequenceFlow>
+<sequenceFlow id="F_cs_18" sourceRef="cs" targetRef="ca"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Ada record]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_cs_19" sourceRef="cs" targetRef="cb"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tanpa record, sesi tutup]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_cs_20" sourceRef="cs" targetRef="rj"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tanpa record, sesi aktif]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_rj_21" sourceRef="rj" targetRef="erj"></sequenceFlow>
+<sequenceFlow id="F_ca_22" sourceRef="ca" targetRef="pe"></sequenceFlow>
+<sequenceFlow id="F_cb_23" sourceRef="cb" targetRef="pe"></sequenceFlow>
+<sequenceFlow id="F_pe_24" sourceRef="pe" targetRef="w"></sequenceFlow>
+<sequenceFlow id="F_w_25" sourceRef="w" targetRef="ap"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Setujui]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_w_26" sourceRef="w" targetRef="dn"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tolak + note]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_w_27" sourceRef="w" targetRef="r422"><conditionExpression xsi:type="tFormalExpression"><![CDATA[Tolak tanpa note]]></conditionExpression></sequenceFlow>
+<sequenceFlow id="F_ap_28" sourceRef="ap" targetRef="e2"></sequenceFlow>
+<sequenceFlow id="F_dn_29" sourceRef="dn" targetRef="e2"></sequenceFlow>
+<sequenceFlow id="F_r422_30" sourceRef="r422" targetRef="e2"></sequenceFlow>
 </process>
 <bpmndi:BPMNDiagram id="DG_f07-manual"><bpmndi:BPMNPlane id="PL_f07-manual" bpmnElement="P_f07-manual">
 <bpmndi:BPMNShape id="S_s" bpmnElement="s"><dc:Bounds x="30" y="30" width="36" height="36" /></bpmndi:BPMNShape>
@@ -59,8 +80,17 @@
 <bpmndi:BPMNShape id="S_sv" bpmnElement="sv"><dc:Bounds x="1290" y="1710" width="140" height="70" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_k" bpmnElement="k"><dc:Bounds x="1500" y="1830" width="60" height="60" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_post" bpmnElement="post"><dc:Bounds x="1710" y="2070" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_pe" bpmnElement="pe"><dc:Bounds x="1920" y="2190" width="140" height="70" /></bpmndi:BPMNShape>
-<bpmndi:BPMNShape id="S_w" bpmnElement="w"><dc:Bounds x="2130" y="2310" width="36" height="36" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_cs" bpmnElement="cs"><dc:Bounds x="1920" y="2190" width="60" height="60" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_ca" bpmnElement="ca"><dc:Bounds x="2130" y="2310" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_cb" bpmnElement="cb"><dc:Bounds x="2130" y="3150" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_rj" bpmnElement="rj"><dc:Bounds x="2130" y="3270" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_erj" bpmnElement="erj"><dc:Bounds x="2340" y="3390" width="36" height="36" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_pe" bpmnElement="pe"><dc:Bounds x="2340" y="2430" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_w" bpmnElement="w"><dc:Bounds x="2550" y="2550" width="60" height="60" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_ap" bpmnElement="ap"><dc:Bounds x="2760" y="2670" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_dn" bpmnElement="dn"><dc:Bounds x="2760" y="2910" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_r422" bpmnElement="r422"><dc:Bounds x="2760" y="3030" width="140" height="70" /></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="S_e2" bpmnElement="e2"><dc:Bounds x="2970" y="2790" width="36" height="36" /></bpmndi:BPMNShape>
 <bpmndi:BPMNShape id="S_e" bpmnElement="e"><dc:Bounds x="1710" y="1950" width="36" height="36" /></bpmndi:BPMNShape>
 <bpmndi:BPMNEdge id="E_F_s_0" bpmnElement="F_s_0"><di:waypoint xsi:type="dc:Point" x="66" y="48" /><di:waypoint xsi:type="dc:Point" x="240" y="185" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_pick_1" bpmnElement="F_pick_1"><di:waypoint xsi:type="dc:Point" x="380" y="185" /><di:waypoint xsi:type="dc:Point" x="450" y="300" /></bpmndi:BPMNEdge>
@@ -79,6 +109,18 @@
 <bpmndi:BPMNEdge id="E_F_sv_14" bpmnElement="F_sv_14"><di:waypoint xsi:type="dc:Point" x="1430" y="1745" /><di:waypoint xsi:type="dc:Point" x="1500" y="1860" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_k_15" bpmnElement="F_k_15"><di:waypoint xsi:type="dc:Point" x="1560" y="1860" /><di:waypoint xsi:type="dc:Point" x="1710" y="1968" /></bpmndi:BPMNEdge>
 <bpmndi:BPMNEdge id="E_F_k_16" bpmnElement="F_k_16"><di:waypoint xsi:type="dc:Point" x="1560" y="1860" /><di:waypoint xsi:type="dc:Point" x="1710" y="2105" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_post_17" bpmnElement="F_post_17"><di:waypoint xsi:type="dc:Point" x="1850" y="2105" /><di:waypoint xsi:type="dc:Point" x="1920" y="2225" /></bpmndi:BPMNEdge>
-<bpmndi:BPMNEdge id="E_F_pe_18" bpmnElement="F_pe_18"><di:waypoint xsi:type="dc:Point" x="2060" y="2225" /><di:waypoint xsi:type="dc:Point" x="2130" y="2328" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_post_17" bpmnElement="F_post_17"><di:waypoint xsi:type="dc:Point" x="1850" y="2105" /><di:waypoint xsi:type="dc:Point" x="1920" y="2220" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_cs_18" bpmnElement="F_cs_18"><di:waypoint xsi:type="dc:Point" x="1980" y="2220" /><di:waypoint xsi:type="dc:Point" x="2130" y="2345" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_cs_19" bpmnElement="F_cs_19"><di:waypoint xsi:type="dc:Point" x="1980" y="2220" /><di:waypoint xsi:type="dc:Point" x="2130" y="3185" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_cs_20" bpmnElement="F_cs_20"><di:waypoint xsi:type="dc:Point" x="1980" y="2220" /><di:waypoint xsi:type="dc:Point" x="2130" y="3305" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_rj_21" bpmnElement="F_rj_21"><di:waypoint xsi:type="dc:Point" x="2270" y="3305" /><di:waypoint xsi:type="dc:Point" x="2340" y="3408" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_ca_22" bpmnElement="F_ca_22"><di:waypoint xsi:type="dc:Point" x="2270" y="2345" /><di:waypoint xsi:type="dc:Point" x="2340" y="2465" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_cb_23" bpmnElement="F_cb_23"><di:waypoint xsi:type="dc:Point" x="2270" y="3185" /><di:waypoint xsi:type="dc:Point" x="2340" y="2465" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_pe_24" bpmnElement="F_pe_24"><di:waypoint xsi:type="dc:Point" x="2480" y="2465" /><di:waypoint xsi:type="dc:Point" x="2550" y="2580" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_w_25" bpmnElement="F_w_25"><di:waypoint xsi:type="dc:Point" x="2610" y="2580" /><di:waypoint xsi:type="dc:Point" x="2760" y="2705" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_w_26" bpmnElement="F_w_26"><di:waypoint xsi:type="dc:Point" x="2610" y="2580" /><di:waypoint xsi:type="dc:Point" x="2760" y="2945" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_w_27" bpmnElement="F_w_27"><di:waypoint xsi:type="dc:Point" x="2610" y="2580" /><di:waypoint xsi:type="dc:Point" x="2760" y="3065" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_ap_28" bpmnElement="F_ap_28"><di:waypoint xsi:type="dc:Point" x="2900" y="2705" /><di:waypoint xsi:type="dc:Point" x="2970" y="2808" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_dn_29" bpmnElement="F_dn_29"><di:waypoint xsi:type="dc:Point" x="2900" y="2945" /><di:waypoint xsi:type="dc:Point" x="2970" y="2808" /></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="E_F_r422_30" bpmnElement="F_r422_30"><di:waypoint xsi:type="dc:Point" x="2900" y="3065" /><di:waypoint xsi:type="dc:Point" x="2970" y="2808" /></bpmndi:BPMNEdge>
 </bpmndi:BPMNPlane></bpmndi:BPMNDiagram></definitions>

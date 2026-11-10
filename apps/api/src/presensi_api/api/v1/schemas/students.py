@@ -37,15 +37,6 @@ class StudentUpdateRequest(ApiSchema):
         return self
 
 
-class StudentResponse(ApiSchema):
-    id: UUID
-    student_number: str
-    full_name: str
-    is_active: bool
-    created_at: AwareDatetime
-    updated_at: AwareDatetime
-
-
 class StudentClassResponse(ApiSchema):
     id: UUID
     code: str
@@ -53,8 +44,18 @@ class StudentClassResponse(ApiSchema):
     academic_year: str
 
 
+class StudentResponse(ApiSchema):
+    id: UUID
+    student_number: str
+    full_name: str
+    is_active: bool
+    created_at: AwareDatetime
+    updated_at: AwareDatetime
+    classes: list[StudentClassResponse] = []
+
+
 class StudentDetailResponse(StudentResponse):
-    classes: list[StudentClassResponse]
+    pass
 
 
 class StudentImportRowResponse(ApiSchema):

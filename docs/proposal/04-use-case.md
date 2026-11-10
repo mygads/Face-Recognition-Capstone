@@ -53,7 +53,7 @@ flowchart LR
   end
   ADM --- UC1 & UC2 & UC3 & UC4 & UC5 & UC6 & UC8 & UC9 & UC10 & UC11 & UC12 & UC13 & UC14 & UC15
   TCH --- UC1 & UC5 & UC6 & UC8 & UC9 & UC10 & UC11 & UC12
-  LAB --- UC1 & UC4 & UC6 & UC8 & UC10 & UC11 & UC12 & UC14 & UC15
+  LAB --- UC1 & UC4 & UC5 & UC6 & UC8 & UC9 & UC10 & UC11 & UC12 & UC14 & UC15
   DEV --- UC7
   UC1 -. <<include>> .-> UC16
   WP -. <<extend>> .-> UC1
@@ -83,8 +83,11 @@ flowchart LR
 ```
 
 > UC7 hanya milik DEVICE. UC16 milik sistem otomatis: tanpa asosiasi aktor
-> manusia, write-only. U-02/U-03/U-04 hanya usulan Tahap 2 (extend), bukan
-> perilaku jalan. LABORANT memakai UC11/UC12 via API tanpa menu UI.
+> manusia; dibaca ADMIN via `GET /api/v1/audit/activity` + halaman `/app/audit`.
+> U-02 tindak lanjut SUDAH jalan (F-10); U-03/U-04 hanya usulan Tahap 2 (extend).
+> Asosiasi LABORANT ke UC5/UC6/UC8/UC9/UC11/UC12 bersyarat grant per akun
+> (tanpa grant → guard router ke `/app/forbidden` + backend 403); dengan grant,
+> menu otomatis muncul (sidebar dirender dari permission).
 
 ## 4.2 UC ADMIN
 
@@ -182,14 +185,17 @@ flowchart LR
   LAB([LABORANT])
   UC1((Login dan ganti password))
   UC4((Enrollment wajah))
+  UC5((Lihat jadwal labnya))
   UC6((Buka sesi operasional))
   UC8((Presensi manual))
+  UC9((Ajukan koreksi))
   UC10((Pantau dashboard live))
-  UC11((Laporan dan ekspor via API))
-  UC12((Lihat daftar at-risk via API))
+  UC11((Laporan dan ekspor))
+  UC12((Lihat daftar at-risk))
   UC14((Operasikan perangkat))
   UC15((Preview kamera pra-sesi))
   UC16((Audit tercatat otomatis))
+  CB((Cek bentrok jadwal))
   QG((Quality gate capture))
   RB((Revoke batch dulu))
   SR((Snapshot roster))
@@ -197,23 +203,28 @@ flowchart LR
   WP((Wajib ganti password))
   SC((Terapkan scope akses))
   AG((Agregat kehadiran))
-  LAB --- UC1 & UC4 & UC6 & UC8 & UC10 & UC11 & UC12 & UC14 & UC15
+  LAB --- UC1 & UC4 & UC5 & UC6 & UC8 & UC9 & UC10 & UC11 & UC12 & UC14 & UC15
   UC1 -. <<include>> .-> UC16
   WP -. <<extend>> .-> UC1
   UC4 -. <<include>> .-> QG
   UC4 -. <<include>> .-> UC16
   RB -. <<extend>> .-> UC4
+  UC5 -. <<include>> .-> CB
   UC6 -. <<include>> .-> SR
   UC6 -. <<include>> .-> UC16
   MO -. <<extend>> .-> UC6
   UC8 -. <<include>> .-> UC16
+  UC9 -. <<include>> .-> UC16
   UC11 -. <<include>> .-> SC
   UC12 -. <<include>> .-> AG
   UC14 -. <<include>> .-> UC16
 ```
 
-> LABORANT memakai UC11/UC12 via API tanpa menu UI (menu Laporan hanya
-> untuk ADMIN/TEACHER). LABORANT tidak punya UC2, UC3, UC5, UC9, UC13.
+> Asosiasi LABORANT ke UC5/UC6/UC8/UC9/UC11/UC12 bersyarat grant per akun
+> (`schedule_read`, `session_view`/`session_operate`, `attendance_manual`,
+> `attendance_correct`, `reports_read`/`reports_export`, `ews_read`/
+> `ews_follow_up` + penugasan lab); tanpa grant → `/app/forbidden` + 403.
+> LABORANT tidak punya UC2, UC3, UC13 (tidak dapat didelegasikan).
 
 ## 4.5 UC DEVICE + inti recognition
 
@@ -253,11 +264,12 @@ flowchart LR
   U4 -. <<extend>> .-> UC12
 ```
 
-> U-02/U-03/U-04 hanya extend usulan Tahap 2; perilaku jalan Tahap 1
-> (UC12 + agregat) tidak berubah. Diagram ini memakai TEACHER sebagai aktor
-> fungsional guru/BK untuk tahap berjalan; eskalasi ke wali kelas/BK adalah
-> bagian usulan U-04. Akses UC12 mengikuti scope 4.1:
-> ADMIN semua, TEACHER miliknya/kelasnya, LABORANT via API tanpa menu UI.
+> U-02 tindak lanjut SUDAH jalan (tabel `ews_follow_ups` + endpoint
+> follow-ups + drawer EWS); U-03/U-04 hanya extend usulan Tahap 2. Diagram ini
+> memakai TEACHER sebagai aktor fungsional guru/BK untuk tahap berjalan;
+> eskalasi ke wali kelas/BK adalah bagian usulan U-04. Akses UC12 mengikuti
+> scope 4.1: ADMIN semua, TEACHER miliknya/kelasnya, LABORANT dengan grant
+> `ews_read` (+ menu otomatis).
 
 ## 4.7 Spesifikasi per use case
 
@@ -271,18 +283,20 @@ flowchart LR
 | UC6 | ADMIN semua; TEACHER miliknya; LABORANT operasional | Jadwal eligible hari ini | Sesi + snapshot roster; auto-close worker akhir jadwal → `closed` beraudit; auto-open worker melewati roster kosong tanpa membuat sesi | Di luar jendela → extend manual_override; guru automatic → extend auto-open worker; UC6 include snapshot roster dan UC16; publikasi policy pembukaan sesi oleh ADMIN (`MANAGE_SETTINGS`) beraudit |
 | UC7 | DEVICE | Sesi aktif + gallery | Frame/burst → decision → event → record bila 5 syarat lolos | Ambigu → extend retry_frontal; invalid → event saja; replay idempoten via event UUID; UC7 include discovery gallery, pipeline inti, simpan event |
 | UC8 | Pemegang `SESSION_OPERATE` (ADMIN semua; TEACHER/LABORANT sesuai scope) | Sesi berjalan + di roster + belum ada record | Record manual + audit | Menimpa record FR → ditolak; TEACHER di luar scope → 404; UC8 include UC16 |
-| UC9 | ADMIN/TEACHER | Record ada + alasan wajib | Koreksi **pending** beraudit (belum ada endpoint putusan) | Tanpa alasan → 422; UC9 include UC16 |
+| UC9 | ADMIN semua; TEACHER/LABORANT sesuai scope+grant | Kasus (a) record ada + `corrected_status`, atau kasus (b) `session_id`+`student_id` tanpa record (hanya sesi tutup; sesi aktif → 409 pakai tandai manual); alasan wajib | `pending` beraudit → putusan ADMIN (`POST …/corrections/{id}/decision`: setujui/tolak; tolak wajib `decision_note`); approve kasus (b) membuat `AttendanceRecord(manual)`; satu pending aktif per target; pending tidak mengubah rekap/laporan/EWS sampai `approved` | Tanpa alasan → 422; tolak tanpa `decision_note` → 422; UC9 include UC16 |
 | UC10 | Semua login | Sesi ada | Snapshot + WS per 2 dtk | Token mati → 4401; tanpa hak `SESSION_OPERATE` → 4403; sesi tak ada → 4404 |
-| UC11 | ADMIN semua; TEACHER miliknya; LABORANT via API tanpa menu UI | — | Tabel agregat + baris + ekspor ≤50.000 | Guru difilter miliknya (include scope); tanpa record: open→not_recorded, closed→absent |
-| UC12 | ADMIN semua; TEACHER miliknya/kelasnya; LABORANT via API tanpa menu UI | Policy ada | Daftar flag + reasons + ambang efektif + revisi policy | Sesi open tak dihitung absen; `excused` ≠ absen |
+| UC11 | ADMIN semua; TEACHER miliknya; LABORANT lab penugasan + grant `reports_read`/`reports_export` (menu otomatis) | — | Tabel agregat + baris + ekspor ≤50.000 | Guru difilter miliknya (include scope); tanpa record: open→not_recorded, closed→absent |
+| UC12 | ADMIN semua; TEACHER miliknya/kelasnya; LABORANT lab penugasan + grant `ews_read` (menu otomatis; catat + `ews_follow_up`) | Policy ada | Daftar flag + reasons + ambang efektif + revisi policy | Sesi open tak dihitung absen; `excused` ≠ absen |
 | UC13 | ADMIN (publikasi); baca: pemegang `SESSION_OPERATE` | — | Ambang + revisi tersimpan beraudit | Di luar rentang → 422; UC13 include UC16 |
 | UC14 | ADMIN penuh; LABORANT operasi/status | Device terdaftar di lab | Provision/rotate/renew bearer beraudit; heartbeat; pause kamera beraudit (ADMIN, `MANAGE_SETTINGS`) | Sync token tak cocok → 401; AI service tanpa device_tokens → 503 `auth_misconfigured`; device nonaktif → 409; UC14 include UC16 |
 | UC15 | ADMIN/LABORANT | ≤15 mnt sebelum mulai | Loopback 127.0.0.1:8765: overlay wajah + nama kandidat, tanpa event/audit | Di luar jendela → ditolak; bila sesi aktif → 409 dan gunakan roster snapshot sesi berjalan |
-| UC16 | Sistem (otomatis), tanpa asosiasi aktor manusia | Aksi perubahan terjadi | Tulis `audit_logs`; write-only, dibaca via DB (tanpa endpoint/UI) | Di-include UC1/UC3/UC4/UC6/UC8/UC9/UC13/UC14 |
+| UC16 | Sistem (otomatis), tanpa asosiasi aktor manusia; dibaca ADMIN | Aksi perubahan terjadi | Tulis `audit_logs`; dibaca via `GET /api/v1/audit/activity` + halaman `/app/audit` (ADMIN, `MANAGE_SETTINGS`; token/PIN/gambar/embedding disensor) | Di-include UC1/UC3/UC4/UC6/UC8/UC9/UC13/UC14 |
 
-> Peta audit lengkap: login/ganti password (`auth.*`), akun (`account.created`),
-> enrollment/revoke (`face_template.*`), buka/tutup sesi (`attendance_session.*`,
-> termasuk worker otomatis), manual (`attendance.manual_marked`), koreksi
-> (`attendance.correction.requested`), publikasi policy
-> (`runtime_configuration.published`), kredensial/registry/kamera device
-> (`device.*`). Jadwal (UC5) dan commit import (UC2) tidak menulis audit.
+> Peta audit lengkap: login/ganti password (`auth.*`), akun (`account.*`,
+> termasuk grant/penugasan lab/kelas, reset sandi, penonaktifan), enrollment/revoke
+> (`face_template.*`), buka/tutup sesi (`attendance_session.*`, termasuk worker
+> otomatis), manual (`attendance.manual_marked`), koreksi
+> (`attendance.correction.requested/decided`), publikasi policy sesi/EWS/AI
+> (`session_policy.*`, `runtime_configuration.published`),
+> kredensial/registry/kamera/PIN device (`device.*`, `laboratory.display_pin_set`,
+> `kiosk.*`). Jadwal (UC5) dan commit import (UC2) tidak menulis audit.

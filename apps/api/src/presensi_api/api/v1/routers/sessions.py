@@ -11,6 +11,12 @@ from sqlalchemy.orm import Session
 from presensi_api.api.errors import OPENAPI_ERROR_RESPONSES, ApiProblem
 from presensi_api.api.security.dependencies import require_permissions
 from presensi_api.api.security.roles import AuthenticatedUser, Permission, RoleCode
+from presensi_api.api.security.scope import (
+    ensure_schedule_operate,
+    ensure_session_read,
+    laborant_lab_ids,
+    teacher_class_ids,
+)
 from presensi_api.api.v1.schemas.attendance import AttendanceStatus
 from presensi_api.api.v1.schemas.common import PageResponse, Pagination
 from presensi_api.api.v1.schemas.sessions import (
@@ -55,6 +61,9 @@ DbSession = Annotated[Session, Depends(get_db_session)]
 SessionOperator = Annotated[
     AuthenticatedUser, Depends(require_permissions(Permission.SESSION_OPERATE))
 ]
+SessionViewer = Annotated[
+    AuthenticatedUser, Depends(require_permissions(Permission.SESSION_VIEW))
+]
 SessionPolicyManager = Annotated[
     AuthenticatedUser, Depends(require_permissions(Permission.MANAGE_SETTINGS))
 ]
@@ -64,22 +73,23 @@ SessionStatus = Literal["active", "manual_override", "closed", "cancelled"]
 def _teacher_scope_allows(
     principal: AuthenticatedUser, schedule: PracticumSchedule
 ) -> bool:
-    return RoleCode.ADMIN in principal.roles or (
-        RoleCode.TEACHER not in principal.roles
-        or schedule.teacher_user_id == principal.id
-    )
+    # Kompatibilitas panggil lama tanpa DbSession: guru jadwal selalu lolos,
+    # non-guru lolos (pengecekan penugasan dilakukan di ensure_* bila ada DB).
+    # Jangan dipakai untuk keputusan akhir penulisan.
+    if RoleCode.ADMIN in principal.roles:
+        return True
+    if RoleCode.TEACHER in principal.roles:
+        return schedule.teacher_user_id == principal.id
+    return True
 
 
 def _schedule_for_open(
     session: Session, schedule_id: UUID, principal: AuthenticatedUser
 ) -> PracticumSchedule:
     schedule = session.get(PracticumSchedule, schedule_id)
-    if (
-        schedule is None
-        or not schedule.is_active
-        or not _teacher_scope_allows(principal, schedule)
-    ):
+    if schedule is None or not schedule.is_active:
         raise ApiProblem(404, "schedule_not_found", "Jadwal aktif tidak ditemukan.")
+    ensure_schedule_operate(session, principal, schedule)
     school_class = session.get(SchoolClass, schedule.class_id)
     laboratory = session.get(Laboratory, schedule.laboratory_id)
     teacher = session.get(User, schedule.teacher_user_id)
@@ -177,7 +187,7 @@ def _openable_schedule_response(
     summary="List schedules that can open a session today",
 )
 def list_openable_schedules(
-    principal: SessionOperator,
+    principal: SessionViewer,
     session: DbSession,
 ) -> list[OpenableScheduleResponse]:
     # Manual open is always available as the override path, regardless of any
@@ -195,8 +205,22 @@ def list_openable_schedules(
             User.is_active.is_(True),
         )
     )
-    if RoleCode.TEACHER in principal.roles and RoleCode.ADMIN not in principal.roles:
-        query = query.where(PracticumSchedule.teacher_user_id == principal.id)
+    if RoleCode.ADMIN not in principal.roles:
+        if RoleCode.TEACHER in principal.roles:
+            classes = teacher_class_ids(session, principal.id)
+            if classes:
+                query = query.where(
+                    (PracticumSchedule.class_id.in_(classes))
+                    | (PracticumSchedule.teacher_user_id == principal.id)
+                )
+            else:
+                query = query.where(PracticumSchedule.teacher_user_id == principal.id)
+        elif RoleCode.LABORANT in principal.roles:
+            labs = laborant_lab_ids(session, principal.id)
+            if labs:
+                query = query.where(PracticumSchedule.laboratory_id.in_(labs))
+            else:
+                query = query.where(PracticumSchedule.id.is_(None))
     running_schedule_ids = set(
         session.scalars(
             select(AttendanceSession.practicum_schedule_id).where(
@@ -224,7 +248,7 @@ def list_openable_schedules(
     summary="List attendance sessions",
 )
 def list_sessions(
-    principal: SessionOperator,
+    principal: SessionViewer,
     session: DbSession,
     session_status: Annotated[SessionStatus | None, Query(alias="status")] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
@@ -235,8 +259,22 @@ def list_sessions(
         PracticumSchedule,
         PracticumSchedule.id == AttendanceSession.practicum_schedule_id,
     )
-    if RoleCode.TEACHER in principal.roles and RoleCode.ADMIN not in principal.roles:
-        query = query.where(PracticumSchedule.teacher_user_id == principal.id)
+    if RoleCode.ADMIN not in principal.roles:
+        if RoleCode.TEACHER in principal.roles:
+            classes = teacher_class_ids(session, principal.id)
+            if classes:
+                query = query.where(
+                    (PracticumSchedule.class_id.in_(classes))
+                    | (PracticumSchedule.teacher_user_id == principal.id)
+                )
+            else:
+                query = query.where(PracticumSchedule.teacher_user_id == principal.id)
+        elif RoleCode.LABORANT in principal.roles:
+            labs = laborant_lab_ids(session, principal.id)
+            if labs:
+                query = query.where(PracticumSchedule.laboratory_id.in_(labs))
+            else:
+                query = query.where(PracticumSchedule.id.is_(None))
     if session_status is not None:
         query = query.where(AttendanceSession.status == session_status)
     total = session.scalar(select(func.count()).select_from(query.subquery())) or 0
@@ -258,7 +296,7 @@ def list_sessions(
     summary="Read the attendance session opening policy",
 )
 def get_session_policy(
-    principal: SessionOperator,
+    principal: SessionViewer,
     session: DbSession,
 ) -> SessionOpeningPolicyResponse:
     revision, policy, updated_at = session_opening_policy(session)
@@ -280,14 +318,20 @@ def put_session_policy(
     session: DbSession,
     actor: SessionPolicyManager,
 ) -> SessionOpeningPolicyResponse:
+    # Mode global dipertahankan hanya untuk kompatibilitas baca dan
+    # diabaikan sebagai penentu: worker memakai opening_mode per guru.
+    # PUT hanya menyimpan parameter efektif (jendela + toleransi).
+    _rev, current, _upd = session_opening_policy(session)
+    effective = request.model_dump(mode="json")
+    effective["mode"] = current.get("mode", "manual")
     version = save_configuration(
         session,
         scope_key=SESSION_OPENING_POLICY_SCOPE,
-        settings=request.model_dump(mode="json"),
+        settings=effective,
         actor=actor,
     )
     return SessionOpeningPolicyResponse(
-        **request.model_dump(),
+        **effective,
         revision=version.revision,
         updated_at=as_utc(version.created_at),
     )
@@ -416,9 +460,16 @@ def open_session(
     summary="Read the caller's own session opening mode",
 )
 def get_opening_preference(
-    principal: SessionOperator,
+    principal: SessionViewer,
     session: DbSession,
 ) -> TeacherOpeningPreferenceResponse:
+    if (
+        RoleCode.TEACHER not in principal.roles
+        and RoleCode.ADMIN not in principal.roles
+    ):
+        raise ApiProblem(
+            403, "opening_preference_forbidden", "Preferensi hanya untuk guru."
+        )
     user = session.get(User, principal.id)
     if user is None:
         raise ApiProblem(404, "user_not_found", "Pengguna tidak ditemukan.")
@@ -436,9 +487,16 @@ def get_opening_preference(
 )
 def put_opening_preference(
     request: TeacherOpeningPreference,
-    principal: SessionOperator,
+    principal: SessionViewer,
     session: DbSession,
 ) -> TeacherOpeningPreferenceResponse:
+    if (
+        RoleCode.TEACHER not in principal.roles
+        and RoleCode.ADMIN not in principal.roles
+    ):
+        raise ApiProblem(
+            403, "opening_preference_forbidden", "Preferensi hanya untuk guru."
+        )
     user = session.get(User, principal.id)
     if user is None:
         raise ApiProblem(404, "user_not_found", "Pengguna tidak ditemukan.")
@@ -470,7 +528,7 @@ def put_opening_preference(
 )
 def get_session(
     session_id: UUID,
-    principal: SessionOperator,
+    principal: SessionViewer,
     session: DbSession,
 ) -> AttendanceSessionResponse:
     close_expired_sessions(session, session_id=session_id)
@@ -478,8 +536,9 @@ def get_session(
     if attendance_session is None:
         raise ApiProblem(404, "session_not_found", "Sesi presensi tidak ditemukan.")
     schedule = session.get(PracticumSchedule, attendance_session.practicum_schedule_id)
-    if schedule is None or not _teacher_scope_allows(principal, schedule):
+    if schedule is None:
         raise ApiProblem(404, "session_not_found", "Sesi presensi tidak ditemukan.")
+    ensure_session_read(session, principal, schedule)
     return _session_response(session, attendance_session)
 
 
@@ -500,8 +559,9 @@ def close_session(
     if attendance_session is None:
         raise ApiProblem(404, "session_not_found", "Sesi presensi tidak ditemukan.")
     schedule = session.get(PracticumSchedule, attendance_session.practicum_schedule_id)
-    if schedule is None or not _teacher_scope_allows(principal, schedule):
+    if schedule is None:
         raise ApiProblem(404, "session_not_found", "Sesi presensi tidak ditemukan.")
+    ensure_schedule_operate(session, principal, schedule)
     if attendance_session.status in RUNNING_SESSION_STATUSES:
         before_status = attendance_session.status
         attendance_session.status = "closed"
@@ -529,7 +589,7 @@ def close_session(
 )
 def get_session_roster(
     session_id: UUID,
-    principal: SessionOperator,
+    principal: SessionViewer,
     session: DbSession,
 ) -> list[SessionRosterEntry]:
     close_expired_sessions(session, session_id=session_id)
@@ -537,8 +597,9 @@ def get_session_roster(
     if attendance_session is None:
         raise ApiProblem(404, "session_not_found", "Sesi presensi tidak ditemukan.")
     schedule = session.get(PracticumSchedule, attendance_session.practicum_schedule_id)
-    if schedule is None or not _teacher_scope_allows(principal, schedule):
+    if schedule is None:
         raise ApiProblem(404, "session_not_found", "Sesi presensi tidak ditemukan.")
+    ensure_session_read(session, principal, schedule)
     rows = session.execute(
         select(
             SessionStudent.student_id,

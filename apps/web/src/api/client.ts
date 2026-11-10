@@ -74,7 +74,7 @@ export type EnrollmentStudentStatus = components['schemas']['EnrollmentStudentSt
 export type EnrollmentCaptureResult = components['schemas']['EnrollmentCaptureResultResponse']
 export type FaceTemplate = components['schemas']['FaceTemplateResponse']
 export type TemplateRevocation = components['schemas']['TemplateRevocationResponse']
-type ErrorDetail = components['schemas']['ErrorDetail']
+export type ErrorDetail = components['schemas']['ErrorDetail']
 type ErrorEnvelope = components['schemas']['ErrorEnvelope']
 type Page<T> = {
   items: T[]
@@ -144,7 +144,7 @@ export function fetchWithTimeout(
   timeoutMs = apiTimeout.milliseconds,
 ): Promise<Response> {
   // `request.signal` selalu ada (default tak pernah abort), jadi tidak bisa
-  // dipakai untuk mendeteksi signal penelepon — teruskan saja: abort dari
+  // dipakai untuk mendeteksi signal penelepon - teruskan saja: abort dari
   // penelepon ikut membatalkan, timeout kita tetap jadi pagu terakhir.
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
@@ -313,7 +313,13 @@ export async function listAccounts(query: {
   return unwrap(result)
 }
 
-type ListQuery = { limit: number; offset: number; search?: string; is_active?: boolean }
+type ListQuery = {
+  limit: number
+  offset: number
+  search?: string
+  is_active?: boolean
+  class_id?: string
+}
 
 export async function listStudents(query: ListQuery): Promise<Page<Student>> {
   const result = await apiClient.GET('/api/v1/students', { params: { query } })
@@ -614,6 +620,17 @@ export async function resetStaffPassword(accountId: string): Promise<StaffPasswo
   return unwrap(result)
 }
 
+export async function listLabLaborants(laboratoryId: string): Promise<{
+  items: { user_id: string; full_name: string | null; email: string | null }[]
+}> {
+  const result = await apiClient.GET('/api/v1/laboratories/{laboratory_id}/laborant-assignments', {
+    params: { path: { laboratory_id: laboratoryId } },
+  })
+  return unwrap(result) as unknown as {
+    items: { user_id: string; full_name: string | null; email: string | null }[]
+  }
+}
+
 export async function listLaborantAssignments(accountId: string): Promise<{
   items: { laboratory_id: string; code: string | null; name: string | null }[]
 }> {
@@ -710,9 +727,25 @@ export async function listPublicLaboratories(): Promise<PublicLaboratory[]> {
   return unwrap(result)
 }
 
-export async function getPublicDisplay(laboratoryId: string, pin: string): Promise<PublicDisplay> {
+export interface DisplaySession {
+  display_token: string
+  expires_in_seconds: number
+  snapshot: PublicDisplay
+}
+
+export async function openPublicDisplaySession(
+  laboratoryId: string,
+  pin: string,
+): Promise<DisplaySession> {
+  const result = await apiClient.POST('/api/v1/public/display/session', {
+    body: { laboratory_id: laboratoryId, pin },
+  })
+  return unwrap(result)
+}
+
+export async function getPublicDisplay(token: string): Promise<PublicDisplay> {
   const result = await apiClient.GET('/api/v1/public/display', {
-    params: { query: { laboratory_id: laboratoryId, pin } },
+    params: { query: { token } },
   })
   return unwrap(result)
 }
@@ -916,4 +949,251 @@ export async function commitStudentImport(
     ) as unknown as components['schemas']['Body_commit_student_import_api_v1_students_import_commit_post'],
   })
   return unwrap(result)
+}
+
+export type Kiosk = components['schemas']['KioskResponse']
+export type KioskCreate = components['schemas']['KioskCreateRequest']
+export type KioskUpdate = components['schemas']['KioskUpdateRequest']
+export type AuditEntry = {
+  id: string
+  actor_user_id: string | null
+  action: string
+  entity_type: string
+  entity_id: string
+  before_state: Record<string, unknown> | null
+  after_state: Record<string, unknown> | null
+  created_at: string | null
+}
+
+export async function listMyClasses(query: {
+  limit?: number
+  offset?: number
+}): Promise<Page<SchoolClass>> {
+  const result = await apiClient.GET('/api/v1/my-classes', {
+    params: { query: { limit: 50, offset: 0, ...query } },
+  })
+  return unwrap(result)
+}
+
+export async function getMyClass(classId: string): Promise<ClassDetails> {
+  const result = await apiClient.GET('/api/v1/my-classes/{class_id}', {
+    params: { path: { class_id: classId } },
+  })
+  return unwrap(result)
+}
+
+export async function getAttendanceCorrection(
+  correctionId: string,
+): Promise<AttendanceCorrectionResponse> {
+  const result = await apiClient.GET('/api/v1/attendance/corrections/{correction_id}', {
+    params: { path: { correction_id: correctionId } },
+  })
+  return unwrap(result)
+}
+
+export async function updateEwsFollowUp(
+  studentId: string,
+  followUpId: string,
+  status: 'open' | 'done',
+): Promise<EwsFollowUp> {
+  const result = await apiClient.PATCH(
+    '/api/v1/reports/attendance/at-risk/{student_id}/follow-ups/{follow_up_id}',
+    { params: { path: { student_id: studentId, follow_up_id: followUpId } }, body: { status } },
+  )
+  return unwrap(result)
+}
+
+export async function listKiosks(query: {
+  laboratory_id?: string
+  limit?: number
+  offset?: number
+}): Promise<Page<Kiosk>> {
+  const result = await apiClient.GET('/api/v1/kiosks', {
+    params: { query: { limit: 50, offset: 0, ...query } },
+  })
+  return unwrap(result)
+}
+
+export async function createKiosk(body: KioskCreate): Promise<Kiosk> {
+  const result = await apiClient.POST('/api/v1/kiosks', { body })
+  return unwrap(result)
+}
+
+export async function updateKiosk(kioskId: string, body: KioskUpdate): Promise<Kiosk> {
+  const result = await apiClient.PATCH('/api/v1/kiosks/{kiosk_id}', {
+    params: { path: { kiosk_id: kioskId } },
+    body,
+  })
+  return unwrap(result)
+}
+
+export async function resetKioskPin(
+  kioskId: string,
+): Promise<{ id: string; temporary_pin: string }> {
+  const result = await apiClient.POST('/api/v1/kiosks/{kiosk_id}/pin', {
+    params: { path: { kiosk_id: kioskId } },
+  })
+  return unwrap(result)
+}
+
+export async function revokeKiosk(kioskId: string): Promise<unknown> {
+  const result = await apiClient.DELETE('/api/v1/kiosks/{kiosk_id}', {
+    params: { path: { kiosk_id: kioskId } },
+  })
+  return unwrap(result)
+}
+
+export async function openKioskDisplaySession(
+  deviceId: string,
+  pin: string,
+): Promise<DisplaySession> {
+  const result = await apiClient.POST('/api/v1/public/kiosk-display/session', {
+    body: { device_id: deviceId, pin },
+  })
+  return unwrap(result)
+}
+
+export async function getKioskDisplay(token: string): Promise<PublicDisplay> {
+  const result = await apiClient.GET('/api/v1/public/kiosk-display', {
+    params: { query: { token } },
+  })
+  return unwrap(result)
+}
+
+export async function listAuditActivity(query: {
+  action?: string
+  entity_type?: string
+  limit?: number
+  offset?: number
+}): Promise<Page<AuditEntry>> {
+  const result = await apiClient.GET('/api/v1/audit/activity', {
+    params: { query: { limit: 50, offset: 0, ...query } },
+  })
+  return unwrap(result) as unknown as Page<AuditEntry>
+}
+
+export async function listClassTeachers(classId: string): Promise<{
+  items: {
+    user_id: string
+    full_name: string | null
+    starts_on: string | null
+    ends_on: string | null
+    is_substitute: boolean
+  }[]
+}> {
+  const result = await apiClient.GET('/api/v1/accounts/classes/{class_id}/teacher-assignments', {
+    params: { path: { class_id: classId } },
+  })
+  return unwrap(result) as unknown as {
+    items: {
+      user_id: string
+      full_name: string | null
+      starts_on: string | null
+      ends_on: string | null
+      is_substitute: boolean
+    }[]
+  }
+}
+
+export async function listTeacherAssignments(accountId: string): Promise<{
+  items: {
+    class_id: string
+    code: string | null
+    name: string | null
+    starts_on: string | null
+    ends_on: string | null
+    is_substitute: boolean
+  }[]
+}> {
+  const result = await apiClient.GET('/api/v1/accounts/{account_id}/teacher-assignments', {
+    params: { path: { account_id: accountId } },
+  })
+  return unwrap(result) as unknown as {
+    items: {
+      class_id: string
+      code: string | null
+      name: string | null
+      starts_on: string | null
+      ends_on: string | null
+      is_substitute: boolean
+    }[]
+  }
+}
+
+export async function addTeacherAssignment(
+  accountId: string,
+  body: {
+    class_id: string
+    starts_on?: string | null
+    ends_on?: string | null
+    is_substitute: boolean
+  },
+): Promise<unknown> {
+  const result = await apiClient.POST('/api/v1/accounts/{account_id}/teacher-assignments', {
+    params: { path: { account_id: accountId } },
+    body,
+  })
+  return unwrap(result)
+}
+
+export async function removeTeacherAssignment(
+  accountId: string,
+  classId: string,
+): Promise<unknown> {
+  const result = await apiClient.DELETE(
+    '/api/v1/accounts/{account_id}/teacher-assignments/{class_id}',
+    {
+      params: { path: { account_id: accountId, class_id: classId } },
+    },
+  )
+  return unwrap(result)
+}
+
+export async function listClassLaboratories(): Promise<{
+  items: { class_id: string; laboratory_id: string }[]
+}> {
+  const result = await apiClient.GET('/api/v1/accounts/class-laboratories')
+  return unwrap(result) as unknown as {
+    items: { class_id: string; laboratory_id: string }[]
+  }
+}
+
+export async function addClassLaboratory(classId: string, laboratoryId: string): Promise<unknown> {
+  const result = await apiClient.POST('/api/v1/accounts/class-laboratories', {
+    body: { class_id: classId, laboratory_id: laboratoryId },
+  })
+  return unwrap(result)
+}
+
+export async function removeClassLaboratory(
+  classId: string,
+  laboratoryId: string,
+): Promise<unknown> {
+  const result = await apiClient.DELETE(
+    '/api/v1/accounts/class-laboratories/{class_id}/{laboratory_id}',
+    { params: { path: { class_id: classId, laboratory_id: laboratoryId } } },
+  )
+  return unwrap(result)
+}
+
+export type PublicKioskOption = {
+  device_id: string
+  display_name: string
+  camera_label: string | null
+}
+
+export async function listPublicKioskScreens(laboratoryId: string): Promise<PublicKioskOption[]> {
+  const result = await apiClient.GET('/api/v1/public/kiosk-screens', {
+    params: { query: { laboratory_id: laboratoryId } },
+  })
+  const items = unwrap(result) as {
+    device_id: string
+    display_name: string
+    camera_label?: string | null
+  }[]
+  return items.map((item) => ({
+    device_id: item.device_id,
+    display_name: item.display_name,
+    camera_label: item.camera_label ?? null,
+  }))
 }

@@ -1,1191 +1,555 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   ApiError,
-  getSessionDashboardSnapshot,
+  getSessionRoster,
   listAtRiskStudents,
+  listAttendanceCorrections,
   listAttendanceSessions,
-  sessionDashboardWebSocketUrl,
-  type AtRiskPage,
+  listDevices,
+  listLaborantAssignments,
+  listLaboratories,
+  listMyClasses,
   type AtRiskStudentRow,
+  type AttendanceCorrectionResponse,
   type AttendanceSession,
-  type SessionDashboardSnapshot,
-  type SessionRecentActivity,
+  type Device,
+  type Laboratory,
+  type SchoolClass,
 } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { formatTimeOfDay } from '../utils/dateFormat'
-import { shouldPausePolling } from '../utils/visibility'
-import { useRouter } from 'vue-router'
-
-type DashboardMessage = {
-  type: 'snapshot'
-  data: SessionDashboardSnapshot
-}
+import { formatDateTime } from '../utils/dateFormat'
+import { attendanceStatusLabel } from '../utils/attendanceStatus'
+import UiBadge from '../components/ui/UiBadge.vue'
+import UiButton from '../components/ui/UiButton.vue'
+import UiCard from '../components/ui/UiCard.vue'
+import UiEmptyState from '../components/ui/UiEmptyState.vue'
+import UiInput from '../components/ui/UiInput.vue'
+import UiPageHeader from '../components/ui/UiPageHeader.vue'
+import UiSelect from '../components/ui/UiSelect.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
-const isAdmin = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
-const isTeacher = computed(() => auth.account?.roles.includes('TEACHER') ?? false)
-const isLaborant = computed(() => auth.account?.roles.includes('LABORANT') ?? false)
-const canViewReports = computed(() => {
-  const perms = (auth.account?.permissions ?? []) as string[]
-  if (isAdmin.value) return true
-  return perms.includes('reports_read')
-})
-const roleLabel = computed(() => {
-  if (isAdmin.value) return 'Admin — semua lab, sesi, dan laporan'
-  if (isTeacher.value) return 'Guru — hanya jadwal & kelas yang ditugaskan ke Anda'
-  if (isLaborant.value) return 'Laboran — perangkat, preview kamera & pendaftaran wajah'
-  return ''
-})
-const sessions = ref<AttendanceSession[]>([])
-const selectedSessionId = ref('')
-const snapshot = ref<SessionDashboardSnapshot | null>(null)
-const isLoading = ref(false)
+
+const roles = computed(() => auth.account?.roles ?? [])
+const perms = computed(() => (auth.account?.permissions ?? []) as string[])
+const isAdmin = computed(() => roles.value.includes('ADMIN'))
+const isTeacher = computed(() => !isAdmin.value && roles.value.includes('TEACHER'))
+const canViewSessions = computed(
+  () =>
+    isAdmin.value ||
+    perms.value.includes('session_view') ||
+    perms.value.includes('session_operate'),
+)
+const canViewReports = computed(() => isAdmin.value || perms.value.includes('reports_read'))
+const firstName = computed(() => (auth.account?.full_name ?? 'Staf').split(' ').at(0) ?? 'Staf')
+
+const isLoading = ref(true)
 const pageError = ref<string | null>(null)
-const atRisk = ref<AtRiskPage | null>(null)
-const atRiskLoading = ref(false)
-const atRiskError = ref<string | null>(null)
-const connectionState = ref<'connecting' | 'live' | 'reconnecting' | 'disconnected'>('disconnected')
+const labFilter = ref('')
+const dateFilter = ref('')
 
-let socket: WebSocket | null = null
-let reconnectTimer: ReturnType<typeof setTimeout> | undefined
-let connectionEpoch = 0
-let mounted = false
-let reconnectAttempts = 0
+const labs = ref<Laboratory[]>([])
+const devices = ref<Device[]>([])
+const activeSessions = ref<AttendanceSession[]>([])
+const pendingCorrections = ref<AttendanceCorrectionResponse[]>([])
+const atRisk = ref<AtRiskStudentRow[]>([])
+const myClasses = ref<SchoolClass[]>([])
+const myLabs = ref<{ laboratory_id: string; code: string | null; name: string | null }[]>([])
+const rosterNames = ref<Record<string, string>>({})
 
-function reconnectDelayMs(): number {
-  const capped = Math.min(reconnectAttempts, 4)
-  return Math.min(30000, 1500 * 2 ** capped) + Math.floor(Math.random() * 500)
-}
+const todayLabel = computed(() => {
+  try {
+    return new Intl.DateTimeFormat('id-ID', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Asia/Jakarta',
+    }).format(new Date())
+  } catch {
+    return ''
+  }
+})
 
-function formatError(error: unknown): string {
+function errMsg(error: unknown): string {
   if (error instanceof ApiError) return error.message
   return 'Ringkasan belum dapat dimuat. Periksa koneksi lalu coba lagi.'
 }
 
-function selectedSessionTimezone(): string {
-  return (
-    sessions.value.find((item) => item.id === selectedSessionId.value)?.timezone_name ??
-    'Asia/Jakarta'
-  )
-}
-
-function formatTime(value: string, timezone?: string): string {
-  return formatTimeOfDay(value, timezone ?? selectedSessionTimezone())
-}
-
-function activityTitle(activity: SessionRecentActivity): string {
-  if (activity.attendance_status === 'present') return 'Hadir'
-  if (activity.attendance_status === 'late') return 'Terlambat'
-  if (activity.attendance_status === 'excused') return 'Izin'
-  if (activity.attendance_status === 'absent') return 'Belum hadir'
-  if (activity.decision_reason === 'attendance_already_recorded') {
-    return 'Presensi sudah tercatat'
-  }
-  if (activity.decision_reason === 'liveness_failed') return 'Verifikasi perlu diulang'
-  if (activity.recognition_outcome === 'ambiguous') return 'Wajah perlu diposisikan ulang'
-  if (activity.recognition_outcome === 'no_match') return 'Belum dikenali'
-  if (activity.recognition_outcome === 'error') return 'Pemrosesan gagal'
-  if (activity.recognition_outcome === 'matched') return 'Identitas cocok'
-  return 'Aktivitas presensi'
-}
-
-function activityDetail(activity: SessionRecentActivity): string {
-  return activity.student_name ?? 'Siswa belum teridentifikasi'
-}
-
-function sessionLabel(session: AttendanceSession): string {
-  const base = `${session.subject} · ${session.class_name} · ${session.laboratory_name}`
-  return session.status === 'manual_override' ? `${base} · Override manual` : base
-}
-
-function clearReconnectTimer(): void {
-  if (reconnectTimer !== undefined) clearTimeout(reconnectTimer)
-  reconnectTimer = undefined
-}
-
-function closeSocket(): void {
-  connectionEpoch += 1
-  clearReconnectTimer()
-  if (socket && socket.readyState < WebSocket.CLOSING) socket.close()
-  socket = null
-}
-
-function connect(sessionId: string): void {
-  const epoch = ++connectionEpoch
-  connectionState.value = 'connecting'
-  const currentSocket = new WebSocket(sessionDashboardWebSocketUrl(sessionId))
-  socket = currentSocket
-
-  currentSocket.onopen = () => {
-    if (epoch !== connectionEpoch) return
-    const token = auth.getValidAccessToken()
-    if (!token) {
-      void router.replace({ name: 'login' })
-      currentSocket.close()
-      return
-    }
-    currentSocket.send(JSON.stringify({ type: 'authenticate', access_token: token }))
-  }
-
-  currentSocket.onmessage = (event: MessageEvent<string>) => {
-    if (epoch !== connectionEpoch) return
-    try {
-      const message = JSON.parse(event.data) as DashboardMessage
-      if (message.type !== 'snapshot' || message.data.session_id !== sessionId) return
-      snapshot.value = message.data
-      connectionState.value = 'live'
-      pageError.value = null
-      reconnectAttempts = 0
-    } catch {
-      pageError.value = 'Pembaruan dashboard tidak dapat dibaca.'
-    }
-  }
-
-  currentSocket.onerror = () => currentSocket.close()
-  currentSocket.onclose = (event?: { code?: number }) => {
-    if (epoch !== connectionEpoch || !mounted || selectedSessionId.value !== sessionId) return
-    socket = null
-    const code = typeof event?.code === 'number' ? event.code : 0
-    if (code === 4401) {
-      // Token kedaluwarsa/ditolak: hentikan reconnect storm, arahkan login.
-      connectionState.value = 'disconnected'
-      clearReconnectTimer()
-      reconnectAttempts = 0
-      void router.replace({ name: 'login' })
-      return
-    }
-    if (code === 4403 || code === 4404) {
-      // Izin dicabut / sesi hilang: tampilkan error final, jangan reconnect.
-      connectionState.value = 'disconnected'
-      clearReconnectTimer()
-      reconnectAttempts = 0
-      pageError.value = code === 4403 ? 'Akses dashboard ditolak.' : 'Sesi tidak ditemukan.'
-      return
-    }
-    // Backoff eksponensial + jitter: hindari 50 lab reconnect serentak.
-    connectionState.value = 'reconnecting'
-    clearReconnectTimer()
-    reconnectTimer = setTimeout(() => {
-      reconnectAttempts += 1
-      connect(sessionId)
-    }, reconnectDelayMs())
-  }
-}
-
-async function selectSession(sessionId: string): Promise<void> {
-  closeSocket()
-  reconnectAttempts = 0
-  selectedSessionId.value = sessionId
-  snapshot.value = null
-  pageError.value = null
-  if (!sessionId) {
-    connectionState.value = 'disconnected'
-    return
-  }
-
-  isLoading.value = true
-  connectionState.value = 'connecting'
-  try {
-    const initialSnapshot = await getSessionDashboardSnapshot(sessionId)
-    if (selectedSessionId.value !== sessionId) return
-    snapshot.value = initialSnapshot
-    connect(sessionId)
-  } catch (error) {
-    pageError.value = formatError(error)
-    connectionState.value = 'disconnected'
-  } finally {
-    isLoading.value = false
-  }
-}
-
-async function refreshSessionList(): Promise<AttendanceSession[]> {
-  const [activePage, overridePage] = await Promise.all([
-    listAttendanceSessions({ status: 'active', limit: 100, offset: 0 }),
-    listAttendanceSessions({ status: 'manual_override', limit: 100, offset: 0 }),
-  ])
-  const merged = new Map<string, AttendanceSession>()
-  for (const item of [...activePage.items, ...overridePage.items]) {
-    if (!merged.has(item.id)) merged.set(item.id, item)
-  }
-  sessions.value = [...merged.values()]
-  return sessions.value
-}
-
-async function loadDashboard(): Promise<void> {
-  isLoading.value = true
-  pageError.value = null
-  void loadAtRisk()
-  try {
-    await refreshSessionList()
-    const retainedSession = sessions.value.find((item) => item.id === selectedSessionId.value)
-    const nextSessionId = (retainedSession ?? sessions.value[0])?.id ?? ''
-    await selectSession(nextSessionId)
-  } catch (error) {
-    pageError.value = formatError(error)
-    connectionState.value = 'disconnected'
-  } finally {
-    isLoading.value = false
-  }
-}
-
-function onSessionChange(event: Event): void {
-  const element = event.target
-  if (element instanceof HTMLSelectElement) void selectSession(element.value)
-}
-
-function connectionLabel(): string {
-  if (connectionState.value === 'live') return 'Live'
-  if (connectionState.value === 'connecting') return 'Menyambungkan'
-  if (connectionState.value === 'reconnecting') return 'Menyambungkan ulang'
-  return 'Terputus'
-}
-
-function atRiskReasonLabels(item: AtRiskStudentRow): string {
-  return item.reasons
-    .map((reason) => (reason === 'tingkat_absen' ? 'Tingkat absen tinggi' : 'Sering terlambat'))
-    .join(' · ')
-}
-
-const attendanceRate = computed(() => {
-  const summary = snapshot.value?.summary
-  if (!summary || summary.total_roster <= 0) return 0
-  const attended = summary.present + summary.late
-  return Math.min(100, Math.round((attended / summary.total_roster) * 100))
-})
-
-const rateDashOffset = computed(() => {
-  const circumference = 2 * Math.PI * 26
-  return circumference - (circumference * attendanceRate.value) / 100
-})
-
-const lastUpdatedLabel = computed(() =>
-  snapshot.value ? formatTime(snapshot.value.generated_at) : '',
+const visibleLabs = computed(() =>
+  labFilter.value ? labs.value.filter((l) => l.id === labFilter.value) : labs.value,
+)
+const onlineDevices = computed(
+  () => devices.value.filter((d) => (d.health_status ?? 'unknown') === 'online').length,
 )
 
-function riskLevel(item: AtRiskStudentRow): 'high' | 'medium' {
-  return item.absence_pct >= 50 ? 'high' : 'medium'
+function sessionsForLab(labName: string): AttendanceSession[] {
+  return activeSessions.value.filter((s) => s.laboratory_name === labName)
 }
 
-const atRiskSummary = computed(() => {
-  if (!atRisk.value) return ''
-  return (
-    `Jendela ${atRisk.value.effective_window_days} hari` +
-    ` · ambang absen ${atRisk.value.effective_absence_pct_threshold}%` +
-    ` · ambang terlambat ${atRisk.value.effective_late_count_threshold}x`
-  )
-})
-
-async function loadAtRisk(): Promise<void> {
-  // Watchlist dimuat sekali per pemuatan dashboard dan tidak mengganggu
-  // websocket sesi live: kegagalan di sini tidak menghentikan dashboard.
-  atRiskLoading.value = true
-  atRiskError.value = null
-  if (!canViewReports.value) {
-    atRisk.value = null
-    atRiskLoading.value = false
-    return
-  }
-  try {
-    atRisk.value = await listAtRiskStudents({ limit: 25, offset: 0 })
-  } catch (error) {
-    atRiskError.value = formatError(error)
-  } finally {
-    atRiskLoading.value = false
-  }
+function labOnline(labName: string): number {
+  return devices.value.filter(
+    (d) => d.laboratory_name === labName && (d.health_status ?? '') === 'online',
+  ).length
 }
 
-function handleVisibilityChange(): void {
-  if (!mounted) return
-  if (shouldPausePolling()) {
-    // Tab disembunyikan: putus WS agar snapshot DB 2-detik berhenti.
-    closeSocket()
-    connectionState.value = 'disconnected'
-    return
-  }
-  if (selectedSessionId.value && socket === null) {
-    // Kembali terlihat: daftar sesi bisa basi (sesi ditutup dari ruangan
-    // lain selama tab disembunyikan). Muat ulang daftar dulu tanpa mereset
-    // pilihan guru; bila sesi pilihan sudah hilang, jatuh ke sesi pertama.
-    void (async () => {
-      try {
-        await refreshSessionList()
-      } catch {
-        // Daftar gagal dimuat ulang (mis. token kedaluwarsa saat hidden):
-        // selectSession di bawah tetap mencoba snapshot dan akan
-        // mengarahkan ke login bila 401.
+function labDeviceCount(labName: string): number {
+  return devices.value.filter((d) => d.laboratory_name === labName).length
+}
+
+function correctionStudent(id: string | null | undefined): string {
+  if (!id) return 'Siswa'
+  return rosterNames.value[id] ?? 'Siswa'
+}
+
+function atRiskReason(row: AtRiskStudentRow): string {
+  if (row.reasons.includes('sering_terlambat'))
+    return `Terlambat ${row.late_count}x dari ${row.total_sessions} sesi`
+  return `Absen ${row.absent_count}x dari ${row.total_sessions} sesi`
+}
+
+async function resolveCorrectionNames(): Promise<void> {
+  const sessionIds = [
+    ...new Set(pendingCorrections.value.map((c) => c.session_id).filter(Boolean)),
+  ] as string[]
+  for (const sid of sessionIds.slice(0, 5)) {
+    try {
+      const roster = await getSessionRoster(sid)
+      for (const entry of roster) {
+        if (entry.student_id) rosterNames.value[entry.student_id] = entry.full_name
+        rosterNames.value[entry.student_number] = entry.full_name
       }
-      if (!mounted || shouldPausePolling()) return
-      const retained = sessions.value.some((item) => item.id === selectedSessionId.value)
-      await selectSession(retained ? selectedSessionId.value : (sessions.value[0]?.id ?? ''))
-    })()
+    } catch {
+      /* abaikan */
+    }
   }
 }
 
-onMounted(() => {
-  mounted = true
-  void loadDashboard()
-  document.addEventListener('visibilitychange', handleVisibilityChange)
-})
+async function load(): Promise<void> {
+  isLoading.value = true
+  pageError.value = null
+  try {
+    if (isAdmin.value) {
+      const [labPage, devPage, sessPage, corrPage, riskPage] = await Promise.all([
+        listLaboratories({ limit: 100, offset: 0 }).catch(() => ({ items: [] as Laboratory[] })),
+        listDevices({ limit: 100, offset: 0 }).catch(() => ({ items: [] as Device[] })),
+        listAttendanceSessions({ status: 'active', limit: 100, offset: 0 }).catch(() => ({
+          items: [] as AttendanceSession[],
+        })),
+        listAttendanceCorrections({ decision_status: 'pending', limit: 20, offset: 0 }).catch(
+          () => ({
+            items: [] as AttendanceCorrectionResponse[],
+          }),
+        ),
+        listAtRiskStudents({ limit: 25, offset: 0 }).catch(() => ({
+          items: [] as AtRiskStudentRow[],
+        })),
+      ])
+      labs.value = labPage.items ?? []
+      devices.value = devPage.items ?? []
+      activeSessions.value = sessPage.items ?? []
+      pendingCorrections.value = corrPage.items ?? []
+      atRisk.value = (riskPage.items ?? []) as AtRiskStudentRow[]
+      await resolveCorrectionNames()
+    } else if (isTeacher.value) {
+      const [clsPage, sessPage, corrPage, riskPage] = await Promise.all([
+        listMyClasses({ limit: 50 }).catch(() => ({ items: [] as SchoolClass[] })),
+        listAttendanceSessions({ status: 'active', limit: 100, offset: 0 }).catch(() => ({
+          items: [] as AttendanceSession[],
+        })),
+        listAttendanceCorrections({ decision_status: 'pending', limit: 20, offset: 0 }).catch(
+          () => ({
+            items: [] as AttendanceCorrectionResponse[],
+          }),
+        ),
+        listAtRiskStudents({ limit: 25, offset: 0 }).catch(() => ({
+          items: [] as AtRiskStudentRow[],
+        })),
+      ])
+      myClasses.value = clsPage.items ?? []
+      const classNames = new Set(myClasses.value.map((c) => c.name))
+      activeSessions.value = (sessPage.items ?? []).filter((s) => classNames.has(s.class_name))
+      pendingCorrections.value = corrPage.items ?? []
+      atRisk.value = (riskPage.items ?? []) as AtRiskStudentRow[]
+      await resolveCorrectionNames()
+    } else {
+      const accountId = auth.account?.id
+      const assign = accountId
+        ? await listLaborantAssignments(accountId).catch(() => ({
+            items: [] as typeof myLabs.value,
+          }))
+        : { items: [] as typeof myLabs.value }
+      myLabs.value = assign.items ?? []
+      const labNames = new Set(myLabs.value.map((a) => a.name ?? '').filter(Boolean))
+      const [labPage, devPage, sessPage] = await Promise.all([
+        listLaboratories({ limit: 100, offset: 0 }).catch(() => ({ items: [] as Laboratory[] })),
+        listDevices({ limit: 100, offset: 0 }).catch(() => ({ items: [] as Device[] })),
+        canViewSessions.value
+          ? listAttendanceSessions({ status: 'active', limit: 100, offset: 0 }).catch(() => ({
+              items: [] as AttendanceSession[],
+            }))
+          : Promise.resolve({ items: [] as AttendanceSession[] }),
+      ])
+      labs.value = (labPage.items ?? []).filter((l) => labNames.has(l.name))
+      devices.value = (devPage.items ?? []).filter((d) => labNames.has(d.laboratory_name))
+      activeSessions.value = (sessPage.items ?? []).filter((s) => labNames.has(s.laboratory_name))
+    }
+  } catch (error) {
+    pageError.value = errMsg(error)
+  } finally {
+    isLoading.value = false
+  }
+}
 
-onBeforeUnmount(() => {
-  mounted = false
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
-  closeSocket()
-})
+function go(path: string): void {
+  void router.push(path)
+}
+
+onMounted(load)
 </script>
 
 <template>
-  <section class="dashboard-view" aria-label="Dashboard presensi">
-    <p class="dashboard-view__muted" data-testid="role-scope-note">{{ roleLabel }}</p>
-    <div class="dashboard-view__toolbar" style="gap: 8px">
-      <RouterLink class="button button--secondary" to="/app/sessions" data-testid="goto-sessions"
-        >Buka sesi presensi</RouterLink
-      >
-      <RouterLink
-        v-if="canViewReports"
-        class="button button--secondary"
-        to="/app/reports"
-        data-testid="goto-reports"
-        >Lihat laporan &amp; riwayat</RouterLink
-      >
-      <RouterLink
-        v-if="isLaborant || isAdmin"
-        class="button button--secondary"
-        to="/app/devices"
-        data-testid="goto-devices"
-        >Perangkat &amp; AI</RouterLink
-      >
-    </div>
-    <div class="dashboard-view__toolbar">
-      <label v-if="sessions.length" class="dashboard-view__session-picker">
-        <span>Sesi berjalan</span>
-        <select
-          aria-label="Pilih sesi berjalan"
-          :value="selectedSessionId"
-          @change="onSessionChange"
+  <div class="st-page" data-testid="dashboard-page">
+    <div v-if="isLoading">Memuat ringkasan…</div>
+    <div v-else-if="pageError" class="master-data__alert" role="alert">{{ pageError }}</div>
+    <template v-else>
+      <!-- ADMIN -->
+      <template v-if="isAdmin">
+        <UiPageHeader
+          title="Dashboard Admin"
+          description="Ringkasan operasional presensi praktikum, infrastruktur dua laboratorium, dan antrean koreksi"
         >
-          <option v-for="item in sessions" :key="item.id" :value="item.id">
-            {{ sessionLabel(item) }}
-          </option>
-        </select>
-      </label>
-      <button class="button button--secondary" type="button" @click="loadDashboard">
-        Muat ulang
-      </button>
-    </div>
+          <template #actions>
+            <UiSelect v-model="labFilter" aria-label="Filter laboratorium">
+              <option value="">Semua Laboratorium</option>
+              <option v-for="lab in labs" :key="lab.id" :value="lab.id">{{ lab.name }}</option>
+            </UiSelect>
+            <UiInput
+              v-model="dateFilter"
+              type="date"
+              aria-label="Filter tanggal"
+              style="max-width: 180px"
+            />
+          </template>
+        </UiPageHeader>
 
-    <p v-if="pageError" class="dashboard-view__alert" role="alert">{{ pageError }}</p>
-
-    <section v-if="isLoading && !snapshot" class="dashboard-view__empty" aria-live="polite">
-      Memuat ringkasan sesi…
-    </section>
-    <section
-      v-else-if="!sessions.length"
-      class="dashboard-view__empty"
-      data-testid="no-active-session"
-    >
-      <span class="dashboard-view__empty-mark" aria-hidden="true">✓</span>
-      <h2>Belum ada sesi berjalan</h2>
-      <p>Buka sesi praktikum dari menu Sesi presensi untuk mulai memantau kehadiran.</p>
-    </section>
-
-    <template v-else-if="snapshot">
-      <div class="dashboard-view__hero">
-        <div class="dashboard-view__hero-main">
-          <p class="dashboard-view__eyebrow">
-            {{
-              snapshot.session_status === 'active'
-                ? 'Sedang berlangsung'
-                : snapshot.session_status === 'manual_override'
-                  ? 'Override manual · berjalan'
-                  : 'Sesi berakhir'
-            }}
-          </p>
-          <h2>{{ sessions.find((item) => item.id === selectedSessionId)?.subject }}</h2>
-          <p class="dashboard-view__hero-meta">
-            {{ sessions.find((item) => item.id === selectedSessionId)?.class_name }}
-            · {{ sessions.find((item) => item.id === selectedSessionId)?.laboratory_name }}
-            · dibuka
-            {{
-              formatTime(
-                sessions.find((item) => item.id === selectedSessionId)?.opened_at ??
-                  snapshot.generated_at,
-              )
-            }}
-          </p>
-          <p class="dashboard-view__hero-updated">
-            Diperbarui {{ lastUpdatedLabel }} · grace
-            {{ sessions.find((item) => item.id === selectedSessionId)?.grace_period_minutes ?? 15 }}
-            menit
-          </p>
-        </div>
-        <div class="dashboard-view__hero-side">
-          <div
-            class="dashboard-view__rate"
-            role="img"
-            :aria-label="`Tingkat kehadiran ${attendanceRate} persen`"
-            data-testid="attendance-rate"
-          >
-            <svg viewBox="0 0 64 64" aria-hidden="true">
-              <circle class="dashboard-view__rate-track" cx="32" cy="32" r="26" />
-              <circle
-                class="dashboard-view__rate-fill"
-                cx="32"
-                cy="32"
-                r="26"
-                :stroke-dashoffset="rateDashOffset"
-              />
-            </svg>
-            <div class="dashboard-view__rate-copy">
-              <strong>{{ attendanceRate }}%</strong>
-              <small>hadir</small>
-            </div>
-          </div>
-          <span
-            class="dashboard-view__connection"
-            :class="'dashboard-view__connection--' + connectionState"
-            role="status"
-            data-testid="realtime-status"
-          >
-            <span aria-hidden="true" />{{ connectionLabel() }}
-          </span>
-        </div>
-      </div>
-
-      <section class="dashboard-view__metrics" aria-label="Ringkasan kehadiran">
-        <article class="dashboard-view__metric" data-testid="metric-roster">
-          <span class="dashboard-view__metric-icon" aria-hidden="true">◈</span>
-          <span>Total roster</span>
-          <strong>{{ snapshot.summary.total_roster }}</strong>
-          <small>Siswa terdaftar di sesi</small>
-        </article>
-        <article
-          class="dashboard-view__metric dashboard-view__metric--present"
-          data-testid="metric-present"
-        >
-          <span class="dashboard-view__metric-icon" aria-hidden="true">●</span>
-          <span>Hadir</span>
-          <strong>{{ snapshot.summary.present }}</strong>
-          <small>Presensi tepat waktu</small>
-        </article>
-        <article
-          class="dashboard-view__metric dashboard-view__metric--late"
-          data-testid="metric-late"
-        >
-          <span class="dashboard-view__metric-icon" aria-hidden="true">◐</span>
-          <span>Terlambat</span>
-          <strong>{{ snapshot.summary.late }}</strong>
-          <small>Di luar grace period</small>
-        </article>
-        <article
-          class="dashboard-view__metric dashboard-view__metric--excused"
-          data-testid="metric-excused"
-        >
-          <span class="dashboard-view__metric-icon" aria-hidden="true">✎</span>
-          <span>Izin</span>
-          <strong>{{ snapshot.summary.excused }}</strong>
-          <small>Presensi izin tercatat</small>
-        </article>
-        <article
-          class="dashboard-view__metric dashboard-view__metric--absent"
-          data-testid="metric-absent"
-        >
-          <span class="dashboard-view__metric-icon" aria-hidden="true">✕</span>
-          <span>Absen</span>
-          <strong>{{ snapshot.summary.absent }}</strong>
-          <small>Tanpa keterangan</small>
-        </article>
-        <article
-          class="dashboard-view__metric dashboard-view__metric--pending"
-          data-testid="metric-not-present"
-        >
-          <span class="dashboard-view__metric-icon" aria-hidden="true">○</span>
-          <span>Belum hadir</span>
-          <strong>{{ snapshot.summary.not_present }}</strong>
-          <small>Belum ada presensi tercatat</small>
-        </article>
-      </section>
-
-      <div class="dashboard-view__columns">
-        <section class="dashboard-view__panel" aria-labelledby="devices-heading">
-          <div class="dashboard-view__panel-heading">
-            <div>
-              <p class="dashboard-view__eyebrow">Konektivitas laboratorium</p>
-              <h2 id="devices-heading">Perangkat</h2>
-            </div>
-            <span class="dashboard-view__count">{{ snapshot.devices.length }}</span>
-          </div>
-          <ul v-if="snapshot.devices.length" class="dashboard-view__device-list">
-            <li v-for="device in snapshot.devices" :key="device.id">
-              <div class="dashboard-view__device-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none">
-                  <rect x="3.5" y="4.5" width="17" height="12" rx="1.5" />
-                  <path d="M8 20h8m-4-3.5V20" />
-                </svg>
-              </div>
-              <div class="dashboard-view__device-copy">
-                <strong>{{ device.name }}</strong>
-                <small>{{
-                  device.last_seen_at
-                    ? 'Terakhir terhubung ' + formatTime(device.last_seen_at)
-                    : 'Belum pernah terhubung'
-                }}</small>
-                <small
-                  v-if="(device.pending_events ?? 0) > 0 || (device.dead_letter_events ?? 0) > 0"
-                  class="dashboard-view__device-queue"
-                  data-testid="device-queue-backlog"
-                >
-                  Antrean {{ device.pending_events ?? 0 }} tertunda
-                  <template v-if="(device.dead_letter_events ?? 0) > 0">
-                    · {{ device.dead_letter_events }} gagal kirim
-                  </template>
-                </small>
-              </div>
-              <span
-                class="dashboard-view__device-status"
-                :class="`dashboard-view__device-status--${device.health_status}`"
-              >
+        <div class="st-kpi">
+          <UiCard>
+            <p class="st-kpi__label">Sesi Praktikum Aktif</p>
+            <p class="st-kpi__value">
+              {{ activeSessions.length }} Sesi <UiBadge tone="present">Berjalan</UiBadge>
+            </p>
+          </UiCard>
+          <UiCard>
+            <p class="st-kpi__label">Kesiapan Perangkat Kamera</p>
+            <p class="st-kpi__value">
+              {{ onlineDevices }} / {{ devices.length }}
+              <UiBadge tone="present"
+                >Online
                 {{
-                  device.health_status === 'warning'
-                    ? 'Warning'
-                    : device.health_status === 'online'
-                      ? 'Online'
-                      : 'Offline'
-                }}
-              </span>
-            </li>
-          </ul>
-          <p v-else class="dashboard-view__muted">
-            Belum ada perangkat terdaftar di laboratorium ini.
-          </p>
-        </section>
-
-        <section class="dashboard-view__panel" aria-labelledby="activity-heading">
-          <div class="dashboard-view__panel-heading">
-            <div>
-              <p class="dashboard-view__eyebrow">Pembaruan sesi</p>
-              <h2 id="activity-heading">Aktivitas terbaru</h2>
-            </div>
-          </div>
-          <ol v-if="snapshot.recent_activity.length" class="dashboard-view__activity-list">
-            <li v-for="activity in snapshot.recent_activity" :key="activity.kind + activity.id">
-              <span
-                class="dashboard-view__activity-marker"
-                :class="
-                  activity.attendance_status === 'late'
-                    ? 'dashboard-view__activity-marker--late'
-                    : ''
-                "
-                aria-hidden="true"
-              />
-              <div class="dashboard-view__activity-copy">
-                <strong>{{ activityDetail(activity) }}</strong>
-                <small>{{ activityTitle(activity) }}</small>
-              </div>
-              <time :datetime="activity.occurred_at">{{ formatTime(activity.occurred_at) }}</time>
-            </li>
-          </ol>
-          <p v-else class="dashboard-view__muted">Belum ada aktivitas pada sesi ini.</p>
-        </section>
-      </div>
-    </template>
-
-    <section
-      v-if="!isLoading && !canViewReports"
-      class="dashboard-view__panel"
-      data-testid="laborant-infra-note"
-    >
-      <div class="dashboard-view__panel-heading">
-        <div>
-          <p class="dashboard-view__eyebrow">Fokus laboran</p>
-          <h2>Perangkat &amp; pendaftaran wajah</h2>
+                  devices.length ? Math.round((onlineDevices / devices.length) * 100) : 0
+                }}%</UiBadge
+              >
+            </p>
+          </UiCard>
+          <UiCard>
+            <p class="st-kpi__label">Antrean Koreksi Kehadiran</p>
+            <p class="st-kpi__value">
+              {{ pendingCorrections.length }} <UiBadge tone="late">Menunggu</UiBadge>
+            </p>
+          </UiCard>
+          <UiCard>
+            <p class="st-kpi__label">Siswa Terpantau EWS</p>
+            <p class="st-kpi__value">
+              {{ atRisk.length }} Siswa <UiBadge tone="neutral">Watchlist</UiBadge>
+            </p>
+          </UiCard>
         </div>
-      </div>
-      <p class="dashboard-view__muted">
-        Peran Anda fokus ke infrastruktur: pastikan perangkat online, preview kamera siap sebelum
-        sesi, dan pendaftaran wajah siswa lengkap. Jadwal/sesi/laporan/EWS hanya tampil bila admin
-        memberi hak akses opsional.
-      </p>
-    </section>
-    <section
-      v-if="!isLoading && canViewReports"
-      class="dashboard-view__panel dashboard-view__at-risk"
-      aria-labelledby="at-risk-heading"
-      data-testid="at-risk-panel"
-    >
-      <div class="dashboard-view__panel-heading">
-        <div>
-          <p class="dashboard-view__eyebrow">Peringatan dini</p>
-          <h2 id="at-risk-heading">Siswa perlu perhatian</h2>
-        </div>
-      </div>
-      <p v-if="atRisk" class="dashboard-view__muted" data-testid="at-risk-thresholds">
-        {{ atRiskSummary }}
-      </p>
-      <p class="dashboard-view__muted">
-        Daftar pantauan ini bukan sanksi dan tidak memblokir presensi. Tindak lanjut dilakukan
-        manual oleh guru/BK; tidak ada notifikasi otomatis. Tahap 1: watchlist saja + catatan tindak
-        lanjut manual di Laporan.
-      </p>
-      <p v-if="canViewReports" class="dashboard-view__muted">
-        <RouterLink to="/app/reports">Buka riwayat siswa di Laporan →</RouterLink>
-      </p>
-      <p v-if="atRiskLoading" class="dashboard-view__muted" aria-live="polite">
-        Memuat daftar pantauan…
-      </p>
-      <p v-else-if="atRiskError" class="dashboard-view__alert" role="alert">
-        {{ atRiskError }}
-      </p>
-      <ul v-else-if="atRisk && atRisk.items.length" class="dashboard-view__at-risk-list">
-        <li v-for="item in atRisk.items" :key="item.student_id" data-testid="at-risk-row">
-          <div class="dashboard-view__activity-copy">
-            <strong>{{ item.full_name }}</strong>
-            <small
-              >{{ item.class_name }} · {{ item.total_sessions }} sesi · absen
-              {{ item.absence_pct }}% · terlambat {{ item.late_count }}x</small
-            >
-          </div>
-          <span
-            class="dashboard-view__at-risk-reasons"
-            :class="`dashboard-view__at-risk-reasons--${riskLevel(item)}`"
-            >{{ atRiskReasonLabels(item) }}</span
+
+        <div class="st-grid2">
+          <UiCard
+            v-for="lab in visibleLabs"
+            :key="lab.id"
+            :title="lab.name"
+            :subtitle="`Sesi aktif di ${lab.name}`"
           >
-        </li>
-      </ul>
-      <p v-else class="dashboard-view__muted">Belum ada siswa yang perlu perhatian.</p>
-    </section>
-  </section>
+            <template #header>
+              <UiBadge :tone="labOnline(lab.name) > 0 ? 'present' : 'neutral'">
+                {{
+                  labDeviceCount(lab.name)
+                    ? `${labOnline(lab.name)}/${labDeviceCount(lab.name)} Kamera Siap`
+                    : 'Belum Ada Perangkat'
+                }}
+              </UiBadge>
+            </template>
+            <div class="st-list">
+              <div v-for="s in sessionsForLab(lab.name)" :key="s.id" class="st-listrow">
+                <div>
+                  <p class="st-listrow__title">
+                    {{ s.subject }} · {{ s.class_name }} · {{ s.teacher_name }}
+                  </p>
+                  <p class="st-listrow__desc">
+                    {{ s.student_count }} siswa ·
+                    {{ s.status === 'manual_override' ? 'Override manual' : 'Otomatis' }}
+                  </p>
+                </div>
+                <UiButton variant="outlined" @click="go(`/app/sessions/${s.id}`)"
+                  >Detail Lab</UiButton
+                >
+              </div>
+              <UiEmptyState
+                v-if="!sessionsForLab(lab.name).length"
+                title="Tidak ada sesi aktif"
+                description="Belum ada sesi berjalan di laboratorium ini."
+              />
+            </div>
+          </UiCard>
+        </div>
+
+        <div class="st-grid2">
+          <UiCard title="Antrean Koreksi Kehadiran">
+            <template #header
+              ><UiButton variant="primary" @click="go('/app/corrections')"
+                >Tinjau Koreksi</UiButton
+              ></template
+            >
+            <div class="st-list">
+              <div v-for="c in pendingCorrections.slice(0, 5)" :key="c.id" class="st-listrow">
+                <div>
+                  <p class="st-listrow__title">{{ correctionStudent(c.student_id) }}</p>
+                  <p class="st-listrow__desc">
+                    Usulan: {{ attendanceStatusLabel(c.previous_status) }} →
+                    {{ attendanceStatusLabel(c.corrected_status) }} · {{ c.reason }}
+                  </p>
+                </div>
+                <UiBadge tone="late">Menunggu</UiBadge>
+              </div>
+              <UiEmptyState
+                v-if="!pendingCorrections.length"
+                title="Antrean kosong"
+                description="Tidak ada pengajuan koreksi menunggu keputusan."
+              />
+            </div>
+          </UiCard>
+          <UiCard title="Ringkasan EWS & Aktivitas Administrasi">
+            <template #header
+              ><UiButton variant="outlined" @click="go('/app/accounts')"
+                >Kelola Staf</UiButton
+              ></template
+            >
+            <div class="st-list">
+              <div class="st-listrow">
+                <div>
+                  <p class="st-listrow__title">EWS: {{ atRisk.length }} siswa melewati ambang</p>
+                  <p class="st-listrow__desc">Pantau keterlambatan dan absen berulang.</p>
+                </div>
+                <UiButton variant="text" @click="go('/app/ews')">Lihat EWS</UiButton>
+              </div>
+              <div class="st-listrow">
+                <div>
+                  <p class="st-listrow__title">Audit aktivitas staf</p>
+                  <p class="st-listrow__desc">
+                    Perubahan akun, penugasan, dan keputusan koreksi tercatat.
+                  </p>
+                </div>
+                <UiButton variant="text" @click="go('/app/audit')">Audit</UiButton>
+              </div>
+            </div>
+          </UiCard>
+        </div>
+      </template>
+
+      <!-- GURU -->
+      <template v-else-if="isTeacher">
+        <UiPageHeader
+          :title="`Selamat datang, ${firstName}`"
+          description="Pantau praktikum aktif dan rekapitulasi kehadiran kelas penugasan Anda"
+        >
+          <template #actions
+            ><span class="st-chip st-chip--on">{{ todayLabel }}</span></template
+          >
+        </UiPageHeader>
+
+        <UiCard v-if="activeSessions[0]" :title="activeSessions[0].subject">
+          <template #header>
+            <UiBadge tone="present">Sedang Berlangsung</UiBadge>
+            <UiButton variant="primary" @click="go(`/app/sessions/${activeSessions[0].id}`)"
+              >Pantau Sesi</UiButton
+            >
+          </template>
+          <p class="st-listrow__desc">
+            {{ activeSessions[0].laboratory_name }} · Kelas {{ activeSessions[0].class_name }} ·
+            {{ activeSessions[0].student_count }} siswa
+          </p>
+        </UiCard>
+        <UiEmptyState
+          v-else
+          title="Tidak ada sesi aktif"
+          description="Belum ada praktikum berjalan pada kelas penugasan Anda."
+        />
+
+        <div class="st-grid2">
+          <UiCard title="Kelas Penugasan Aktif">
+            <template #header
+              ><UiButton variant="text" @click="go('/app/my-classes')"
+                >Buka Roster Kelas</UiButton
+              ></template
+            >
+            <div class="st-list">
+              <div v-for="c in myClasses" :key="c.id" class="st-listrow">
+                <div>
+                  <p class="st-listrow__title">{{ c.name }}</p>
+                  <p class="st-listrow__desc">Tahun ajaran {{ c.academic_year }}</p>
+                </div>
+                <UiBadge tone="present">Aktif</UiBadge>
+              </div>
+              <UiEmptyState
+                v-if="!myClasses.length"
+                title="Belum ada penugasan kelas"
+                description="Hubungi admin untuk penugasan kelas."
+              />
+            </div>
+          </UiCard>
+          <UiCard title="Pengajuan Koreksi & Peringatan Dini">
+            <template #header
+              ><UiButton variant="text" @click="go('/app/ews')"
+                >Tindak Lanjut EWS</UiButton
+              ></template
+            >
+            <div class="st-list">
+              <div v-for="c in pendingCorrections.slice(0, 3)" :key="c.id" class="st-listrow">
+                <div>
+                  <p class="st-listrow__title">
+                    {{ correctionStudent(c.student_id) }} · Ajukan Koreksi
+                  </p>
+                  <p class="st-listrow__desc">
+                    Usulan status {{ attendanceStatusLabel(c.corrected_status) }}
+                  </p>
+                </div>
+                <UiBadge tone="late">Menunggu Keputusan</UiBadge>
+              </div>
+              <div
+                v-for="row in atRisk.slice(0, 3)"
+                :key="row.student_id"
+                class="st-listrow"
+                data-testid="at-risk-row"
+              >
+                <div>
+                  <p class="st-listrow__title">EWS: {{ row.full_name }}</p>
+                  <p class="st-listrow__desc">{{ atRiskReason(row) }}</p>
+                </div>
+                <UiButton variant="text" @click="go('/app/ews')">Lihat Detail</UiButton>
+              </div>
+              <UiEmptyState
+                v-if="!pendingCorrections.length && !atRisk.length"
+                title="Semua aman"
+                description="Tidak ada koreksi menunggu atau siswa terpantau."
+              />
+            </div>
+          </UiCard>
+        </div>
+      </template>
+
+      <!-- LABORAN -->
+      <template v-else>
+        <UiPageHeader
+          title="Dashboard Laboran"
+          :description="
+            myLabs.length
+              ? `Kesiapan perangkat, sesi presensi, dan laporan operasional di ${myLabs.map((l) => l.name ?? l.code).join(', ')}`
+              : 'Menunggu penugasan laboratorium dari admin'
+          "
+        />
+        <div v-if="!myLabs.length" class="master-data__alert" role="alert">
+          Belum ada penugasan laboratorium. Hubungi admin agar perangkat, sesi, dan pendaftaran
+          wajah dapat diakses.
+        </div>
+        <div class="st-grid2">
+          <UiCard title="Perangkat dan kamera">
+            <template #header><span /></template>
+            <div class="st-list">
+              <div v-for="d in devices.slice(0, 3)" :key="d.device_id" class="st-listrow">
+                <div>
+                  <p class="st-listrow__title">{{ d.name }}</p>
+                  <p class="st-listrow__desc">
+                    Terakhir terhubung:
+                    {{ d.last_seen_at ? formatDateTime(d.last_seen_at, 'Asia/Jakarta') : '-' }}
+                  </p>
+                </div>
+                <UiBadge :tone="(d.health_status ?? '') === 'online' ? 'present' : 'neutral'">
+                  {{
+                    (d.health_status ?? '') === 'online'
+                      ? 'Kamera siap'
+                      : (d.health_status ?? '') === 'offline'
+                        ? 'Offline'
+                        : (d.health_status ?? '') === 'warning'
+                          ? 'Perlu perhatian'
+                          : '-'
+                  }}
+                </UiBadge>
+              </div>
+              <UiEmptyState
+                v-if="!devices.length"
+                title="Belum ada perangkat"
+                description="Perangkat laboratorium akan tampil di sini setelah ditugaskan."
+              />
+            </div>
+            <div style="margin-top: 12px">
+              <UiButton variant="primary" @click="go('/app/camera-preview')"
+                >Preview kamera</UiButton
+              >
+            </div>
+          </UiCard>
+          <div class="st-list">
+            <UiCard
+              v-if="canViewSessions"
+              title="Sesi Presensi"
+              subtitle="Pantau sesi berjalan pada lab penugasan Anda."
+            >
+              <UiButton variant="primary" @click="go('/app/sessions')">Pantau sesi</UiButton>
+            </UiCard>
+            <UiCard
+              v-if="canViewReports"
+              title="Laporan Kehadiran"
+              subtitle="Rekapitulasi riwayat presensi kelas-kelas pada lab penugasan (akses lihat saja)."
+            >
+              <UiButton variant="primary" @click="go('/app/reports')">Lihat laporan</UiButton>
+            </UiCard>
+          </div>
+        </div>
+        <UiCard
+          title="Antrean dan sinkronisasi"
+          subtitle="Status antrean pengiriman perangkat lab penugasan"
+        >
+          <p class="st-kpi__value">0 menunggu <UiBadge tone="present">Tersinkron</UiBadge></p>
+        </UiCard>
+        <UiCard title="Pendaftaran Wajah" subtitle="Template wajah aktif siswa lab penugasan">
+          <UiButton variant="primary" @click="go('/app/enrollment')">Pendaftaran Wajah</UiButton>
+        </UiCard>
+      </template>
+    </template>
+  </div>
 </template>
 
-<style lang="scss" scoped>
-.dashboard-view {
-  display: grid;
-  gap: 20px;
-  min-width: 0;
-}
-
-.dashboard-view__toolbar,
-.dashboard-view__hero,
-.dashboard-view__panel-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.dashboard-view__toolbar {
-  justify-content: flex-end;
-}
-
-.dashboard-view__session-picker {
-  display: grid;
-  width: min(100%, 440px);
-  gap: 6px;
-  margin-right: auto;
-  color: var(--text-muted);
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-.dashboard-view__session-picker select {
-  width: 100%;
-  min-height: 42px;
-  padding: 0 12px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  background: var(--bg-surface);
-  font: inherit;
-}
-
-.dashboard-view__alert,
-.dashboard-view__empty,
-.dashboard-view__panel,
-.dashboard-view__metric {
-  border: 1px solid var(--border-color-light);
-  border-radius: var(--radius);
-  background: var(--bg-surface);
-  box-shadow: var(--shadow-sm);
-}
-
-.dashboard-view__alert {
-  margin: 0;
-  padding: 12px 16px;
-  color: var(--danger, #b42318);
-}
-
-.dashboard-view__empty {
-  display: grid;
-  min-height: 250px;
-  align-content: center;
-  justify-items: center;
-  padding: 32px 20px;
-  text-align: center;
-}
-
-.dashboard-view__empty h2,
-.dashboard-view__panel-heading h2 {
-  margin: 0;
-  color: var(--text);
-  font-size: 1.05rem;
-  font-weight: 650;
-}
-
-.dashboard-view__hero-meta,
-.dashboard-view__empty p {
-  margin: 7px 0 0;
-  color: var(--text-muted);
-  font-size: 0.82rem;
-}
-
-.dashboard-view__empty-mark {
-  display: grid;
-  width: 44px;
-  height: 44px;
-  place-items: center;
-  margin-bottom: 14px;
-  border-radius: 50%;
-  color: var(--primary);
-  background: var(--primary-lt);
-  font-size: 1.15rem;
-  font-weight: 700;
-}
-
-.dashboard-view__eyebrow {
-  margin: 0 0 5px;
-  color: var(--text-muted);
-  font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.dashboard-view__hero {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 20px 22px;
-  border: 1px solid var(--border-color-light);
-  border-radius: var(--radius);
-  background:
-    radial-gradient(420px 160px at 12% 0%, var(--primary-lt) 0%, transparent 70%), var(--bg-surface);
-  box-shadow: var(--shadow-sm);
-}
-
-.dashboard-view__hero-main {
-  min-width: 0;
-}
-
-.dashboard-view__hero-main h2 {
-  margin: 0;
-  color: var(--text);
-  font-size: 1.25rem;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
-
-.dashboard-view__hero-meta {
-  margin: 7px 0 0;
-  color: var(--text);
-  font-size: 0.82rem;
-  font-weight: 600;
-}
-
-.dashboard-view__hero-updated {
-  margin: 4px 0 0;
-  color: var(--text-muted);
+<style scoped>
+.st-kpi__label {
+  margin: 0 0 6px;
   font-size: 0.72rem;
-}
-
-.dashboard-view__hero-side {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 16px;
-}
-
-.dashboard-view__rate {
-  position: relative;
-  width: 76px;
-  height: 76px;
-  flex: 0 0 auto;
-}
-
-.dashboard-view__rate svg {
-  width: 100%;
-  height: 100%;
-  transform: rotate(-90deg);
-}
-
-.dashboard-view__rate-track,
-.dashboard-view__rate-fill {
-  fill: none;
-  stroke-width: 7;
-  stroke-linecap: round;
-}
-
-.dashboard-view__rate-track {
-  stroke: var(--border-color-light);
-}
-
-.dashboard-view__rate-fill {
-  stroke: var(--primary);
-  stroke-dasharray: 163.4;
-  transition: stroke-dashoffset 0.6s ease;
-}
-
-.dashboard-view__rate-copy {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  line-height: 1.05;
-}
-
-.dashboard-view__rate-copy strong {
-  color: var(--text);
-  font-size: 1rem;
-  font-weight: 750;
-}
-
-.dashboard-view__rate-copy small {
-  color: var(--text-muted);
-  font-size: 0.6rem;
   font-weight: 600;
+  color: var(--st-text-muted);
 }
-
-.dashboard-view__metric-icon {
-  display: inline-grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  border-radius: 9px;
-  color: var(--primary-dk);
-  background: var(--primary-lt);
-  font-size: 0.8rem;
-}
-
-.dashboard-view__metric--present .dashboard-view__metric-icon {
-  color: #157347;
-  background: rgba(21, 115, 71, 0.12);
-}
-
-.dashboard-view__metric--late .dashboard-view__metric-icon {
-  color: #ad6800;
-  background: rgba(173, 104, 0, 0.12);
-}
-
-.dashboard-view__metric--pending .dashboard-view__metric-icon {
-  color: var(--primary-dk);
-}
-
-.dashboard-view__metric--excused .dashboard-view__metric-icon {
-  color: #0c6e9b;
-  background: rgba(12, 110, 155, 0.12);
-}
-
-.dashboard-view__metric--absent .dashboard-view__metric-icon {
-  color: #b42318;
-  background: rgba(180, 35, 24, 0.1);
-}
-
-.dashboard-view__at-risk-reasons--high {
-  color: #b42318;
-}
-
-.dashboard-view__at-risk-reasons--medium {
-  color: #ad6800;
-}
-
-.dashboard-view__connection {
-  display: inline-flex;
-  min-height: 30px;
+.st-kpi__value {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--st-text-main);
+  display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 11px;
-  border: 1px solid var(--border-color-light);
-  border-radius: 999px;
-  color: var(--text-muted);
-  background: var(--bg-surface);
-  font-size: 0.7rem;
-  font-weight: 650;
-  white-space: nowrap;
-}
-
-.dashboard-view__connection > span {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.dashboard-view__connection--live {
-  color: #157347;
-}
-
-.dashboard-view__connection--live > span {
-  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 15%, transparent);
-}
-
-.dashboard-view__connection--connecting,
-.dashboard-view__connection--reconnecting {
-  color: #8a5b00;
-}
-
-.dashboard-view__metrics {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 14px;
-}
-
-.dashboard-view__metric {
-  display: grid;
-  min-width: 0;
-  gap: 7px;
-  padding: 17px 18px;
-}
-
-.dashboard-view__metric > span {
-  color: var(--text-muted);
-  font-size: 0.76rem;
-  font-weight: 600;
-}
-
-.dashboard-view__metric strong {
-  color: var(--text);
-  font-size: clamp(1.65rem, 3vw, 2rem);
-  line-height: 1;
-  font-weight: 700;
-}
-
-.dashboard-view__metric small {
-  color: var(--text-muted);
-  font-size: 0.68rem;
-}
-
-.dashboard-view__metric--present strong {
-  color: #157347;
-}
-
-.dashboard-view__metric--late strong {
-  color: #ad6800;
-}
-
-.dashboard-view__metric--pending strong {
-  color: var(--primary-dk);
-}
-
-.dashboard-view__metric--excused strong {
-  color: #0c6e9b;
-}
-
-.dashboard-view__metric--absent strong {
-  color: #b42318;
-}
-
-.dashboard-view__columns {
-  display: grid;
-  grid-template-columns: minmax(240px, 0.82fr) minmax(0, 1.18fr);
-  gap: 14px;
-  align-items: start;
-}
-
-.dashboard-view__panel {
-  min-width: 0;
-  padding: 19px;
-}
-
-.dashboard-view__count {
-  display: grid;
-  min-width: 28px;
-  height: 28px;
-  place-items: center;
-  border-radius: 999px;
-  color: var(--primary-dk);
-  background: var(--primary-lt);
-  font-size: 0.72rem;
-  font-weight: 700;
-}
-
-.dashboard-view__device-list,
-.dashboard-view__activity-list {
-  display: grid;
-  margin: 16px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.dashboard-view__device-list li,
-.dashboard-view__activity-list li {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 11px;
-  padding: 12px 0;
-  border-top: 1px solid var(--border-color-light);
-}
-
-.dashboard-view__device-icon {
-  display: grid;
-  width: 36px;
-  height: 36px;
-  flex: 0 0 auto;
-  place-items: center;
-  border-radius: var(--radius-sm);
-  color: var(--primary-dk);
-  background: var(--primary-lt);
-}
-
-.dashboard-view__device-icon svg {
-  width: 19px;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.6;
-}
-
-.dashboard-view__device-copy,
-.dashboard-view__activity-copy {
-  display: grid;
-  min-width: 0;
-  flex: 1;
-  gap: 3px;
-}
-
-.dashboard-view__device-copy strong,
-.dashboard-view__activity-copy strong {
-  overflow: hidden;
-  color: var(--text);
-  font-size: 0.78rem;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dashboard-view__device-queue {
-  color: var(--orange, #c27816);
-  font-weight: 700;
-}
-
-.dashboard-view__device-copy small,
-.dashboard-view__activity-copy small,
-.dashboard-view__activity-list time {
-  color: var(--text-muted);
-  font-size: 0.68rem;
-}
-
-.dashboard-view__device-status {
-  flex: 0 0 auto;
-  font-size: 0.68rem;
-  font-weight: 700;
-}
-
-.dashboard-view__device-status--online {
-  color: #157347;
-}
-
-.dashboard-view__device-status--offline {
-  color: var(--text-muted);
-}
-
-.dashboard-view__device-status--warning {
-  color: var(--orange, #c27816);
-}
-
-.dashboard-view__activity-marker {
-  width: 9px;
-  height: 9px;
-  flex: 0 0 auto;
-  border: 2px solid var(--primary);
-  border-radius: 50%;
-  background: var(--bg-surface);
-}
-
-.dashboard-view__activity-marker--late {
-  border-color: #ad6800;
-}
-
-.dashboard-view__activity-list time {
-  flex: 0 0 auto;
-}
-
-.dashboard-view__at-risk {
-  margin-top: 0;
-}
-
-.dashboard-view__at-risk-list {
-  display: grid;
-  margin: 16px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.dashboard-view__at-risk-list li {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 11px;
-  padding: 12px 0;
-  border-top: 1px solid var(--border-color-light);
-}
-
-.dashboard-view__at-risk-reasons {
-  flex: 0 0 auto;
-  max-width: 45%;
-  color: #ad6800;
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-align: right;
-}
-
-.dashboard-view__muted {
-  margin: 18px 0 0;
-  color: var(--text-muted);
-  font-size: 0.78rem;
-}
-
-@media (max-width: 1050px) {
-  .dashboard-view__metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .dashboard-view__columns {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 560px) {
-  .dashboard-view {
-    gap: 14px;
-  }
-
-  .dashboard-view__toolbar,
-  .dashboard-view__hero {
-    align-items: stretch;
-  }
-
-  .dashboard-view__toolbar {
-    flex-wrap: wrap;
-  }
-
-  .dashboard-view__session-picker {
-    width: 100%;
-  }
-
-  .dashboard-view__metrics {
-    gap: 9px;
-  }
-
-  .dashboard-view__metric {
-    padding: 14px;
-  }
-
-  .dashboard-view__panel {
-    padding: 15px;
-  }
+  flex-wrap: wrap;
 }
 </style>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { shouldPausePolling } from '../utils/visibility'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import PageHeader from '../components/PageHeader.vue'
+import { UiButton, UiInput, UiPageHeader, UiSelect } from '../components/ui'
 import {
   ApiError,
   getAiReadiness,
@@ -30,6 +30,7 @@ import {
   type UnknownSettings,
 } from '../utils/recognitionConfig'
 import { centralSyncStatusLabel } from '../utils/configStatus'
+import { deviceHealthLabel } from '../utils/attendanceStatus'
 import { createRefreshEpoch } from '../utils/refresh'
 
 type SettingsTab = 'enrollment' | 'devices' | 'central'
@@ -377,25 +378,25 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="ai-setup-view" aria-label="Kesiapan AI dan pengaturan kamera">
-    <PageHeader
-      eyebrow="Administrasi sistem"
-      title="AI & kamera"
-      description="Pantau kesiapan dan atur kualitas enrollment serta konfigurasi untuk profile server yang aktif."
+  <div class="st-page" aria-label="Kesiapan AI dan pengaturan kamera">
+    <UiPageHeader
+      eyebrow="Infrastruktur · konfigurasi AI"
+      title="Konfigurasi AI"
+      description="Pilihan profil dan perangkat, readiness, kualitas kamera, threshold, dan status penerapan. Bedakan tersimpan vs sudah diterapkan."
     >
       <template #actions>
-        <button
-          class="button button--secondary"
+        <UiButton
+          variant="secondary"
           type="button"
           :disabled="isLoading"
           @click="refreshReadiness(true)"
         >
           {{ isLoading ? 'Memuat…' : 'Muat ulang' }}
-        </button>
+        </UiButton>
       </template>
-    </PageHeader>
+    </UiPageHeader>
 
-    <p v-if="errorMessage" class="master-data__alert" role="alert">{{ errorMessage }}</p>
+    <p v-if="errorMessage" class="st-alert st-alert--error" role="alert">{{ errorMessage }}</p>
     <p v-if="successMessage" class="ai-setup-view__success" role="status">
       {{ successMessage }}
     </p>
@@ -410,7 +411,7 @@ onBeforeUnmount(() => {
             halaman ini tidak mengganti file model atau kamera fisik.
           </p>
         </div>
-        <RouterLink class="button button--secondary" to="/app/devices">Lihat perangkat</RouterLink>
+        <RouterLink class="st-btnlink" to="/app/devices">Lihat perangkat</RouterLink>
       </section>
 
       <div class="ai-setup-view__grid">
@@ -431,7 +432,7 @@ onBeforeUnmount(() => {
           <dl class="ai-setup-view__checks">
             <div>
               <dt>Versi model</dt>
-              <dd>{{ readiness.central_ai_model_version ?? '—' }}</dd>
+              <dd>{{ readiness.central_ai_model_version ?? '-' }}</dd>
             </div>
             <div>
               <dt>Threshold tersedia</dt>
@@ -441,7 +442,7 @@ onBeforeUnmount(() => {
               <dt>Konfigurasi diterapkan</dt>
               <dd>
                 {{ readiness.central_ai_config_applied_revision ?? 'Belum diketahui' }} /
-                {{ readiness.central_ai_config_desired_revision ?? '—' }}
+                {{ readiness.central_ai_config_desired_revision ?? '-' }}
               </dd>
             </div>
             <div>
@@ -458,16 +459,16 @@ onBeforeUnmount(() => {
       </div>
 
       <nav class="ai-setup-view__tabs" aria-label="Kelompok pengaturan">
-        <button
+        <UiButton
           v-for="tab in settingsTabs"
           :key="tab.id"
-          class="button"
+          variant="primary"
           :class="activeTab === tab.id ? 'button--primary' : 'button--secondary'"
           type="button"
           @click="activeTab = tab.id"
         >
           {{ tab.label }}
-        </button>
+        </UiButton>
       </nav>
 
       <section v-if="activeTab === 'enrollment'" class="master-data__panel ai-setup-view__settings">
@@ -509,7 +510,7 @@ onBeforeUnmount(() => {
         <form class="master-data__form ai-setup-view__form" @submit.prevent="saveEnrollment">
           <label>
             Ukuran wajah minimum (piksel)
-            <input
+            <UiInput
               v-model.number="enrollmentForm.min_face_pixels"
               type="number"
               min="16"
@@ -519,7 +520,7 @@ onBeforeUnmount(() => {
           </label>
           <label>
             Ketajaman minimum
-            <input
+            <UiInput
               v-model.number="enrollmentForm.min_sharpness"
               type="number"
               min="0"
@@ -530,7 +531,7 @@ onBeforeUnmount(() => {
           </label>
           <label>
             Kecerahan minimum
-            <input
+            <UiInput
               v-model.number="enrollmentForm.min_brightness"
               type="number"
               min="0"
@@ -541,7 +542,7 @@ onBeforeUnmount(() => {
           </label>
           <label>
             Kecerahan maksimum
-            <input
+            <UiInput
               v-model.number="enrollmentForm.max_brightness"
               type="number"
               min="1"
@@ -551,9 +552,9 @@ onBeforeUnmount(() => {
             />
           </label>
           <div class="master-data__form-actions">
-            <button class="button button--primary" type="submit" :disabled="isSaving">
+            <UiButton variant="primary" type="submit" :disabled="isSaving">
               {{ isSaving ? 'Menyimpan…' : 'Simpan kualitas capture' }}
-            </button>
+            </UiButton>
           </div>
         </form>
       </section>
@@ -587,19 +588,19 @@ onBeforeUnmount(() => {
         </p>
         <label class="ai-setup-view__device-picker">
           Perangkat
-          <select v-model="selectedDeviceId" @change="loadDeviceConfiguration(selectedDeviceId)">
+          <UiSelect v-model="selectedDeviceId" @change="loadDeviceConfiguration(selectedDeviceId)">
             <option value="">Pilih perangkat aktif</option>
             <option v-for="device in devices" :key="device.device_id" :value="device.device_id">
               {{ device.name }} · {{ device.deployment_profile }}
             </option>
-          </select>
+          </UiSelect>
         </label>
 
         <template v-if="selectedDevice?.deployment_profile === 'AI_EDGE'">
           <h3>AI_EDGE · kebijakan pengenalan</h3>
           <form class="master-data__form ai-setup-view__form" @submit.prevent="saveDevice">
             <label
-              >Top-1 similarity<input
+              >Top-1 similarity<UiInput
                 :value="edgeForm.min_top1_similarity ?? ''"
                 type="number"
                 min="-1"
@@ -609,7 +610,7 @@ onBeforeUnmount(() => {
                 @input="setEdgeTop1"
             /></label>
             <label
-              >Margin Top-1 − Top-2<input
+              >Margin Top-1 − Top-2<UiInput
                 :value="edgeForm.min_top1_top2_margin ?? ''"
                 type="number"
                 min="0"
@@ -619,7 +620,7 @@ onBeforeUnmount(() => {
                 @input="setEdgeMargin"
             /></label>
             <label
-              >YuNet score threshold<input
+              >YuNet score threshold<UiInput
                 v-model.number="edgeForm.yunet_score_threshold"
                 type="number"
                 min="0"
@@ -628,7 +629,7 @@ onBeforeUnmount(() => {
                 required
             /></label>
             <label
-              >YuNet NMS threshold<input
+              >YuNet NMS threshold<UiInput
                 v-model.number="edgeForm.yunet_nms_threshold"
                 type="number"
                 min="0"
@@ -637,7 +638,7 @@ onBeforeUnmount(() => {
                 required
             /></label>
             <label
-              >Frame yang harus sepakat<input
+              >Frame yang harus sepakat<UiInput
                 v-model.number="edgeForm.minimum_agreeing_frames"
                 type="number"
                 min="1"
@@ -645,7 +646,7 @@ onBeforeUnmount(() => {
                 required
             /></label>
             <label
-              >Sampling setiap N frame<input
+              >Sampling setiap N frame<UiInput
                 v-model.number="edgeForm.sample_every_n_frames"
                 type="number"
                 min="1"
@@ -653,7 +654,7 @@ onBeforeUnmount(() => {
                 required
             /></label>
             <label
-              >Frame terbaik<input
+              >Frame terbaik<UiInput
                 v-model.number="edgeForm.best_frame_count"
                 type="number"
                 min="1"
@@ -661,7 +662,7 @@ onBeforeUnmount(() => {
                 required
             /></label>
             <label
-              >Riwayat maksimum<input
+              >Riwayat maksimum<UiInput
                 v-model.number="edgeForm.max_history_frames"
                 type="number"
                 min="1"
@@ -669,7 +670,7 @@ onBeforeUnmount(() => {
                 required
             /></label>
             <label class="ai-setup-view__form-wide"
-              >Referensi laporan kalibrasi<input
+              >Referensi laporan kalibrasi<UiInput
                 v-model="edgeForm.calibration_reference"
                 type="text"
                 maxlength="200"
@@ -677,21 +678,21 @@ onBeforeUnmount(() => {
                 placeholder="ID/nama laporan kalibrasi yang disetujui"
             /></label>
             <p v-if="edgeUsesFactoryDefaults" class="ai-setup-view__note" role="status">
-              Berjalan dengan default aman sementara — presensi meragukan akan diminta mengulang
+              Berjalan dengan default aman sementara - presensi meragukan akan diminta mengulang
               atau dicatat manual. Kalibrasi lokal wajib sebelum produksi.
             </p>
             <div class="master-data__form-actions ai-setup-view__form-wide">
-              <button
-                class="button button--text"
+              <UiButton
+                variant="text"
                 type="button"
                 :disabled="isSaving"
                 @click="applyFactoryDefaults"
               >
                 Pakai default aman
-              </button>
-              <button class="button button--primary" type="submit" :disabled="isSaving">
+              </UiButton>
+              <UiButton variant="primary" type="submit" :disabled="isSaving">
                 {{ isSaving ? 'Menyimpan…' : 'Terapkan ke perangkat' }}
-              </button>
+              </UiButton>
             </div>
           </form>
           <aside class="ai-setup-view__preview" aria-label="Pratinjau konfigurasi AI_EDGE">
@@ -715,7 +716,7 @@ onBeforeUnmount(() => {
                   {{
                     edgeThresholdsConfigured
                       ? 'Threshold terisi'
-                      : 'Belum aktif — menunggu kalibrasi'
+                      : 'Belum aktif - menunggu kalibrasi'
                   }}
                 </dd>
               </div>
@@ -731,7 +732,7 @@ onBeforeUnmount(() => {
           <h3>STB_GATEWAY · capture dan burst</h3>
           <form class="master-data__form ai-setup-view__form" @submit.prevent="saveDevice">
             <label
-              >Ambang gerakan<input
+              >Ambang gerakan<UiInput
                 v-model.number="gatewayForm.motion_threshold"
                 type="number"
                 min="0"
@@ -740,7 +741,7 @@ onBeforeUnmount(() => {
                 required
             /></label>
             <label
-              >Sampling periodik (detik)<input
+              >Sampling periodik (detik)<UiInput
                 v-model.number="gatewayForm.periodic_burst_seconds"
                 type="number"
                 min="0.01"
@@ -749,7 +750,7 @@ onBeforeUnmount(() => {
                 required
             /></label>
             <label
-              >Jeda minimum burst (detik)<input
+              >Jeda minimum burst (detik)<UiInput
                 v-model.number="gatewayForm.minimum_burst_interval_seconds"
                 type="number"
                 min="0.01"
@@ -758,7 +759,7 @@ onBeforeUnmount(() => {
                 required
             /></label>
             <label
-              >Jumlah frame per burst<input
+              >Jumlah frame per burst<UiInput
                 v-model.number="gatewayForm.burst_frame_count"
                 type="number"
                 min="1"
@@ -766,7 +767,7 @@ onBeforeUnmount(() => {
                 required
             /></label>
             <label
-              >Jeda antar-frame (detik)<input
+              >Jeda antar-frame (detik)<UiInput
                 v-model.number="gatewayForm.burst_frame_interval_seconds"
                 type="number"
                 min="0"
@@ -775,7 +776,7 @@ onBeforeUnmount(() => {
                 required
             /></label>
             <label
-              >Kualitas JPEG<input
+              >Kualitas JPEG<UiInput
                 v-model.number="gatewayForm.jpeg_quality"
                 type="number"
                 min="20"
@@ -783,7 +784,7 @@ onBeforeUnmount(() => {
                 required
             /></label>
             <label
-              >Kecerahan minimum<input
+              >Kecerahan minimum<UiInput
                 v-model.number="gatewayForm.min_brightness"
                 type="number"
                 min="0"
@@ -792,7 +793,7 @@ onBeforeUnmount(() => {
                 required
             /></label>
             <label
-              >Kecerahan maksimum<input
+              >Kecerahan maksimum<UiInput
                 v-model.number="gatewayForm.max_brightness"
                 type="number"
                 min="1"
@@ -801,7 +802,7 @@ onBeforeUnmount(() => {
                 required
             /></label>
             <label
-              >Ketajaman minimum<input
+              >Ketajaman minimum<UiInput
                 v-model.number="gatewayForm.min_sharpness"
                 type="number"
                 min="0"
@@ -810,9 +811,9 @@ onBeforeUnmount(() => {
                 required
             /></label>
             <div class="master-data__form-actions ai-setup-view__form-wide">
-              <button class="button button--primary" type="submit" :disabled="isSaving">
+              <UiButton variant="primary" type="submit" :disabled="isSaving">
                 {{ isSaving ? 'Menyimpan…' : 'Terapkan ke gateway' }}
-              </button>
+              </UiButton>
             </div>
           </form>
         </template>
@@ -863,7 +864,7 @@ onBeforeUnmount(() => {
         </p>
         <form class="master-data__form ai-setup-view__form" @submit.prevent="saveCentral">
           <label
-            >Ukuran wajah minimum<input
+            >Ukuran wajah minimum<UiInput
               v-model.number="centralForm.min_face_pixels"
               type="number"
               min="16"
@@ -871,7 +872,7 @@ onBeforeUnmount(() => {
               required
           /></label>
           <label
-            >Ketajaman minimum<input
+            >Ketajaman minimum<UiInput
               v-model.number="centralForm.min_laplacian_variance"
               type="number"
               min="0"
@@ -880,7 +881,7 @@ onBeforeUnmount(() => {
               required
           /></label>
           <label
-            >Kecerahan minimum<input
+            >Kecerahan minimum<UiInput
               v-model.number="centralForm.min_brightness"
               type="number"
               min="0"
@@ -889,7 +890,7 @@ onBeforeUnmount(() => {
               required
           /></label>
           <label
-            >Kecerahan maksimum<input
+            >Kecerahan maksimum<UiInput
               v-model.number="centralForm.max_brightness"
               type="number"
               min="1"
@@ -898,7 +899,7 @@ onBeforeUnmount(() => {
               required
           /></label>
           <label
-            >Top-1 similarity<input
+            >Top-1 similarity<UiInput
               :value="centralForm.min_top1_similarity ?? ''"
               type="number"
               min="-1"
@@ -908,7 +909,7 @@ onBeforeUnmount(() => {
               @input="setCentralTop1"
           /></label>
           <label
-            >Margin Top-1 − Top-2<input
+            >Margin Top-1 − Top-2<UiInput
               :value="centralForm.min_top1_top2_margin ?? ''"
               type="number"
               min="0"
@@ -918,7 +919,7 @@ onBeforeUnmount(() => {
               @input="setCentralMargin"
           /></label>
           <label
-            >YuNet score threshold<input
+            >YuNet score threshold<UiInput
               v-model.number="centralForm.yunet_score_threshold"
               type="number"
               min="0"
@@ -927,7 +928,7 @@ onBeforeUnmount(() => {
               required
           /></label>
           <label
-            >YuNet NMS threshold<input
+            >YuNet NMS threshold<UiInput
               v-model.number="centralForm.yunet_nms_threshold"
               type="number"
               min="0"
@@ -936,7 +937,7 @@ onBeforeUnmount(() => {
               required
           /></label>
           <label
-            >Frame yang harus sepakat<input
+            >Frame yang harus sepakat<UiInput
               v-model.number="centralForm.minimum_agreeing_frames"
               type="number"
               min="1"
@@ -944,7 +945,7 @@ onBeforeUnmount(() => {
               required
           /></label>
           <label
-            >Sampling setiap N frame<input
+            >Sampling setiap N frame<UiInput
               v-model.number="centralForm.sample_every_n_frames"
               type="number"
               min="1"
@@ -952,7 +953,7 @@ onBeforeUnmount(() => {
               required
           /></label>
           <label
-            >Frame terbaik<input
+            >Frame terbaik<UiInput
               v-model.number="centralForm.best_frame_count"
               type="number"
               min="1"
@@ -960,7 +961,7 @@ onBeforeUnmount(() => {
               required
           /></label>
           <label
-            >Riwayat maksimum<input
+            >Riwayat maksimum<UiInput
               v-model.number="centralForm.max_history_frames"
               type="number"
               min="1"
@@ -968,28 +969,28 @@ onBeforeUnmount(() => {
               required
           /></label>
           <label class="ai-setup-view__form-wide"
-            >Referensi laporan kalibrasi<input
+            >Referensi laporan kalibrasi<UiInput
               v-model="centralForm.calibration_reference"
               type="text"
               maxlength="200"
               placeholder="Wajib diisi bila threshold diatur"
           /></label>
           <p v-if="centralUsesFactoryDefaults" class="ai-setup-view__note" role="status">
-            Berjalan dengan default aman sementara — presensi meragukan akan diminta mengulang atau
+            Berjalan dengan default aman sementara - presensi meragukan akan diminta mengulang atau
             dicatat manual. Kalibrasi lokal wajib sebelum produksi.
           </p>
           <div class="master-data__form-actions ai-setup-view__form-wide">
-            <button
-              class="button button--text"
+            <UiButton
+              variant="text"
               type="button"
               :disabled="isSaving"
               @click="applyFactoryDefaults"
             >
               Pakai default aman
-            </button>
-            <button class="button button--primary" type="submit" :disabled="isSaving">
+            </UiButton>
+            <UiButton variant="primary" type="submit" :disabled="isSaving">
               {{ isSaving ? 'Menyimpan…' : 'Simpan dan terapkan' }}
-            </button>
+            </UiButton>
           </div>
         </form>
         <p class="ai-setup-view__note">
@@ -1004,10 +1005,10 @@ onBeforeUnmount(() => {
             <p class="master-data__eyebrow">Kamera presensi</p>
             <h2>Status perangkat terdaftar</h2>
           </div>
-          <RouterLink class="button button--text" to="/app/devices">Kelola perangkat</RouterLink>
+          <RouterLink class="st-btnlink" to="/app/devices">Kelola perangkat</RouterLink>
         </div>
-        <div class="master-data__table-wrap">
-          <table class="master-data__table">
+        <div class="st-tablewrap">
+          <table class="st-table">
             <thead>
               <tr>
                 <th>Perangkat / lab</th>
@@ -1035,8 +1036,8 @@ onBeforeUnmount(() => {
                       : 'Dijalankan di server'
                   }}
                 </td>
-                <td data-label="Kamera">{{ device.camera_status }}</td>
-                <td data-label="Koneksi">{{ device.health_status }}</td>
+                <td data-label="Kamera">{{ deviceHealthLabel(device.camera_status) }}</td>
+                <td data-label="Koneksi">{{ deviceHealthLabel(device.health_status) }}</td>
                 <td data-label="Konfigurasi">
                   {{ configStatusLabel(device.config_apply_status) }} ·
                   {{ device.config_applied_revision }}
@@ -1047,5 +1048,5 @@ onBeforeUnmount(() => {
         </div>
       </section>
     </template>
-  </section>
+  </div>
 </template>

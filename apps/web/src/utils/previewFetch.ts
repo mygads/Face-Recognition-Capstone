@@ -37,6 +37,15 @@ export async function fetchWithPreviewTimeout(
         { cause: error },
       )
     }
+    if (error instanceof TypeError) {
+      // fetch melempar TypeError mentah ("Failed to fetch") saat agent
+      // tidak terjangkau (companion mati / host salah). Petakan ke pesan
+      // Indonesia agar operator lab langsung tahu yang perlu diperiksa.
+      throw new Error(
+        'Agent preview tidak terjangkau. Pastikan aplikasi companion berjalan di komputer lab yang dipilih.',
+        { cause: error },
+      )
+    }
     throw error
   }
 }

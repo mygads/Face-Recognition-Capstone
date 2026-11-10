@@ -111,9 +111,7 @@ describe('device installation setup', () => {
       .find((button) => button.text().trim() === 'Kredensial')
     expect(credentialButton).toBeDefined()
     await credentialButton!.trigger('click')
-    await wrapper
-      .get('[data-testid="device-credential-dialog"] button.button--primary')
-      .trigger('click')
+    await wrapper.get('[data-testid="device-credential-dialog"] .st-btn--primary').trigger('click')
     await flushPromises()
 
     expect(wrapper.get('[data-testid="device-install-command"]').text()).toContain(
@@ -141,7 +139,7 @@ describe('device installation setup', () => {
       'Data presensi dan audit lama tetap tersimpan',
     )
     expect(api.deleteDevice).not.toHaveBeenCalled()
-    await wrapper.get('[data-testid="device-delete-dialog"] .button--danger').trigger('click')
+    await wrapper.get('[data-testid="device-delete-dialog"] .st-btn--danger').trigger('click')
     await flushPromises()
 
     expect(api.deleteDevice).toHaveBeenCalledWith(device.device_id)
@@ -183,9 +181,7 @@ describe('device installation setup', () => {
       .find((button) => button.text().trim() === 'Kredensial')
     expect(credentialButton).toBeDefined()
     await credentialButton!.trigger('click')
-    await wrapper
-      .get('[data-testid="device-credential-dialog"] button.button--primary')
-      .trigger('click')
+    await wrapper.get('[data-testid="device-credential-dialog"] .st-btn--primary').trigger('click')
     await flushPromises()
 
     expect((wrapper.get('#device-install-platform').element as HTMLSelectElement).value).toBe(

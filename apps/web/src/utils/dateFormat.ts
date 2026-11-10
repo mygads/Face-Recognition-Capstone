@@ -53,7 +53,7 @@ export function formatTimeOfDay(value: string, timezone: string): string {
 let localDateTimeFormatter: Intl.DateTimeFormat | null = null
 
 export function formatDateTimeLocal(value: string | null): string {
-  if (!value) return '—'
+  if (!value) return '-'
   localDateTimeFormatter ??= new Intl.DateTimeFormat('id-ID', {
     dateStyle: 'medium',
     timeStyle: 'short',

@@ -2,6 +2,9 @@
 import { ref } from 'vue'
 import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import UiButton from './ui/UiButton.vue'
+import UiField from './ui/UiField.vue'
+import UiInput from './ui/UiInput.vue'
 
 defineOptions({ name: 'PasswordChangeForm' })
 
@@ -51,9 +54,8 @@ async function submit(): Promise<void> {
 
 <template>
   <form class="auth-card__form password-change-form" @submit.prevent="submit">
-    <div v-if="!firstLogin" class="auth-card__field">
-      <label for="profile-current-password">Kata sandi saat ini</label>
-      <input
+    <UiField :label="!firstLogin ? 'Kata sandi saat ini' : 'Kata sandi sementara'" required>
+      <UiInput
         id="profile-current-password"
         v-model="currentPassword"
         type="password"
@@ -61,22 +63,10 @@ async function submit(): Promise<void> {
         required
         :disabled="isSaving"
       />
-    </div>
-    <div v-else class="auth-card__field">
-      <label for="profile-current-password">Kata sandi sementara</label>
-      <input
-        id="profile-current-password"
-        v-model="currentPassword"
-        type="password"
-        autocomplete="current-password"
-        required
-        :disabled="isSaving"
-      />
-    </div>
+    </UiField>
 
-    <div class="auth-card__field">
-      <label for="profile-new-password">Kata sandi baru</label>
-      <input
+    <UiField label="Kata sandi baru" required hint="Minimal 12 karakter.">
+      <UiInput
         id="profile-new-password"
         v-model="newPassword"
         type="password"
@@ -86,11 +76,10 @@ async function submit(): Promise<void> {
         required
         :disabled="isSaving"
       />
-    </div>
+    </UiField>
 
-    <div class="auth-card__field">
-      <label for="profile-confirm-password">Ulangi kata sandi baru</label>
-      <input
+    <UiField label="Ulangi kata sandi baru" required>
+      <UiInput
         id="profile-confirm-password"
         v-model="confirmPassword"
         type="password"
@@ -100,12 +89,12 @@ async function submit(): Promise<void> {
         required
         :disabled="isSaving"
       />
-    </div>
+    </UiField>
 
     <p v-if="errorMessage" class="auth-card__error" role="alert">{{ errorMessage }}</p>
-    <button class="auth-card__submit" type="submit" :disabled="isSaving">
+    <UiButton type="submit" :disabled="isSaving">
       {{ isSaving ? 'Menyimpan…' : 'Simpan kata sandi baru' }}
-    </button>
+    </UiButton>
     <p class="profile-view__hint">
       Minimal 12 karakter. Anda akan diminta masuk kembali setelah perubahan.
     </p>

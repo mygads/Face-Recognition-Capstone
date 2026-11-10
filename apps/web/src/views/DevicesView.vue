@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { shouldPausePolling } from '../utils/visibility'
 import { useAuthStore } from '../stores/auth'
-import PageHeader from '../components/PageHeader.vue'
+import { UiButton, UiInput, UiPageHeader, UiSelect, UiStat } from '../components/ui'
 import {
   buildDeviceSetupCommand,
   type DeviceConnectionMode,
@@ -63,6 +63,8 @@ const pageSize = 10
 const searchText = ref('')
 const search = ref('')
 const statusFilter = ref<'all' | 'online' | 'offline' | 'warning'>('all')
+const onlineCount = computed(() => devices.value.filter((d) => d.health_status === 'online').length)
+const warnCount = computed(() => devices.value.filter((d) => d.health_status !== 'online').length)
 const includeInactive = ref(false)
 const isLoading = ref(false)
 const errorMessage = ref<string | null>(null)
@@ -809,11 +811,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="devices-view" aria-label="Registry perangkat">
-    <PageHeader
-      eyebrow="Operasional"
-      title="Registry perangkat"
-      description="Pantau koneksi kamera dan versi agent. Status diperbarui otomatis setiap 15 detik."
+  <div class="st-page" aria-label="Registry perangkat">
+    <UiPageHeader
+      eyebrow="Edge fleet monitoring"
+      title="Manajemen Perangkat & Kamera"
+      description="Monitoring status edge agent biometrik, kamera IP, dan sinkronisasi hardware presensi."
     >
       <template #actions>
         <RouterLink
@@ -823,16 +825,11 @@ onBeforeUnmount(() => {
         >
           Preview kamera
         </RouterLink>
-        <button
-          v-if="canRegisterDevice"
-          class="button button--primary"
-          type="button"
-          @click="openCreate"
-        >
+        <UiButton v-if="canRegisterDevice" variant="primary" type="button" @click="openCreate">
           Daftarkan perangkat
-        </button>
+        </UiButton>
       </template>
-    </PageHeader>
+    </UiPageHeader>
 
     <p v-if="errorMessage" class="master-data__alert" role="alert">{{ errorMessage }}</p>
     <p
@@ -843,6 +840,26 @@ onBeforeUnmount(() => {
       Profil AI_EDGE pada setup ini memakai satu PC kamera. Nonaktifkan perangkat lama sebelum
       mendaftarkan penggantinya.
     </p>
+
+    <div class="st-kpi" aria-label="Ringkasan armada">
+      <UiStat
+        label="Total perangkat"
+        :value="`${devices.length} unit`"
+        caption="Semua lab tercakup"
+      />
+      <UiStat
+        label="Kamera aktif"
+        :value="`${onlineCount} unit`"
+        caption="Online & siap deteksi"
+        tone="success"
+      />
+      <UiStat
+        label="Perlu perhatian"
+        :value="`${warnCount} unit`"
+        caption="Kamera offline / standby"
+        tone="warning"
+      />
+    </div>
 
     <section v-if="canManage" class="master-data__panel devices-view__form-panel">
       <div class="master-data__panel-heading">
@@ -866,8 +883,8 @@ onBeforeUnmount(() => {
             aria-label="Default jaringan device"
             @change="onDefaultConnectionModeChange"
           >
-            <option value="same-host">Komputer yang sama — localhost</option>
-            <option value="private-network">LAN/VPN sekolah — HTTPS</option>
+            <option value="same-host">Komputer yang sama - localhost</option>
+            <option value="private-network">LAN/VPN sekolah - HTTPS</option>
           </select>
         </label>
         <p v-else-if="activeProfile === 'AI_EDGE'" class="devices-view__profile-note">
@@ -876,7 +893,7 @@ onBeforeUnmount(() => {
         </p>
         <label>
           Default URL Core API
-          <input
+          <UiInput
             v-model="setupDefaults.coreApiUrl"
             type="url"
             autocomplete="url"
@@ -885,7 +902,7 @@ onBeforeUnmount(() => {
         </label>
         <label v-if="activeProfile === 'AI_CENTRAL'">
           Default URL AI Central (STB_GATEWAY)
-          <input
+          <UiInput
             v-model="setupDefaults.centralAiUrl"
             type="url"
             autocomplete="url"
@@ -894,7 +911,7 @@ onBeforeUnmount(() => {
         </label>
         <label v-if="activeProfile === 'AI_EDGE'">
           Versi model enrollment (terkunci)
-          <input
+          <UiInput
             id="device-default-model-version"
             :value="enrollmentModelVersion"
             readonly
@@ -917,9 +934,9 @@ onBeforeUnmount(() => {
           {{ setupDefaultsMessage }}
         </p>
         <div class="master-data__form-actions">
-          <button class="button button--primary" type="button" @click="saveSetupDefaults">
+          <UiButton variant="primary" type="button" @click="saveSetupDefaults">
             Simpan default di browser ini
-          </button>
+          </UiButton>
         </div>
       </div>
     </section>
@@ -927,22 +944,22 @@ onBeforeUnmount(() => {
     <div class="devices-view__toolbar">
       <form class="master-data__search" role="search" @submit.prevent="submitSearch">
         <label class="visually-hidden" for="device-search">Cari perangkat atau laboratorium</label>
-        <input
+        <UiInput
           id="device-search"
           v-model="searchText"
           type="search"
           placeholder="Cari perangkat atau laboratorium…"
         />
-        <button class="button button--secondary" type="submit">Cari</button>
+        <UiButton variant="secondary" type="submit">Cari</UiButton>
       </form>
       <label class="enrollment-view__class-picker">
         Status
-        <select v-model="statusFilter" aria-label="Filter status perangkat">
+        <UiSelect v-model="statusFilter" aria-label="Filter status perangkat">
           <option value="all">Semua status</option>
           <option value="online">Online</option>
           <option value="offline">Offline</option>
           <option value="warning">Warning</option>
-        </select>
+        </UiSelect>
       </label>
       <label v-if="canManage" class="master-data__checkbox">
         <input v-model="includeInactive" type="checkbox" /> Tampilkan perangkat nonaktif
@@ -953,7 +970,7 @@ onBeforeUnmount(() => {
       frame dan sampling dapat diatur di AI &amp; kamera. Resolusi/FPS diubah lewat wizard kamera di
       host perangkat.
     </p>
-    <section class="master-data__panel" data-testid="display-pin-panel">
+    <section v-if="canManage" class="master-data__panel" data-testid="display-pin-panel">
       <div class="master-data__panel-heading">
         <div>
           <p class="master-data__eyebrow">Layar publik</p>
@@ -969,23 +986,24 @@ onBeforeUnmount(() => {
       </p>
       <ul class="accounts-view__list">
         <li v-for="lab in laboratories" :key="lab.id" class="accounts-view__row">
-          <div>
-            <strong>{{ lab.code }}</strong>
-            <small
-              >{{ lab.name }} · PIN: {{ lab.has_display_pin ? 'sudah diatur' : 'belum' }}</small
-            >
-          </div>
-          <input
-            v-model="displayPinDrafts[lab.id]"
-            type="password"
-            minlength="4"
-            maxlength="32"
-            placeholder="PIN baru"
-            :aria-label="'PIN untuk ' + lab.name"
-          />
-          <button class="button button--secondary" type="button" @click="saveDisplayPin(lab.id)">
-            Simpan PIN
-          </button>
+          <form class="accounts-view__pin-form" @submit.prevent="saveDisplayPin(lab.id)">
+            <div>
+              <strong>{{ lab.code }}</strong>
+              <small
+                >{{ lab.name }} · PIN: {{ lab.has_display_pin ? 'sudah diatur' : 'belum' }}</small
+              >
+            </div>
+            <UiInput
+              v-model="displayPinDrafts[lab.id]"
+              type="password"
+              minlength="4"
+              maxlength="32"
+              placeholder="PIN baru"
+              autocomplete="new-password"
+              :aria-label="'PIN untuk ' + lab.name"
+            />
+            <UiButton variant="secondary" type="submit"> Simpan PIN </UiButton>
+          </form>
         </li>
       </ul>
     </section>
@@ -993,21 +1011,21 @@ onBeforeUnmount(() => {
     <section v-if="isFormOpen" class="master-data__panel devices-view__form-panel">
       <div class="master-data__panel-heading">
         <h2>{{ editingDeviceId ? 'Ubah perangkat' : 'Daftarkan perangkat' }}</h2>
-        <button class="button button--text" type="button" @click="isFormOpen = false">Tutup</button>
+        <UiButton variant="text" type="button" @click="isFormOpen = false">Tutup</UiButton>
       </div>
       <form class="master-data__form" @submit.prevent="submitForm">
         <label>
           Nama perangkat
-          <input v-model="form.name" required maxlength="120" autocomplete="off" />
+          <UiInput v-model="form.name" required maxlength="120" autocomplete="off" />
         </label>
         <label>
           Laboratorium
-          <select v-model="form.laboratory_id" required>
+          <UiSelect v-model="form.laboratory_id" required>
             <option value="" disabled>Pilih laboratorium</option>
             <option v-for="lab in laboratories" :key="lab.id" :value="lab.id">
               {{ lab.code }} · {{ lab.name }}
             </option>
-          </select>
+          </UiSelect>
         </label>
         <p class="devices-view__profile-note">
           Profil instalasi: {{ profileLabel(form.deployment_profile) }}
@@ -1019,18 +1037,16 @@ onBeforeUnmount(() => {
           {{ formError }}
         </p>
         <div class="master-data__form-actions">
-          <button class="button button--secondary" type="button" @click="isFormOpen = false">
-            Batal
-          </button>
-          <button class="button button--primary" type="submit" :disabled="isSaving">
+          <UiButton variant="secondary" type="button" @click="isFormOpen = false"> Batal </UiButton>
+          <UiButton variant="primary" type="submit" :disabled="isSaving">
             {{ isSaving ? 'Menyimpan…' : editingDeviceId ? 'Simpan perubahan' : 'Daftarkan' }}
-          </button>
+          </UiButton>
         </div>
       </form>
     </section>
 
-    <div class="master-data__table-wrap">
-      <table class="master-data__table devices-view__table">
+    <div class="st-tablewrap">
+      <table class="devices-view__table st-table">
         <thead>
           <tr>
             <th scope="col">Perangkat</th>
@@ -1065,7 +1081,7 @@ onBeforeUnmount(() => {
             <td data-label="Deployment">{{ profileLabel(device.deployment_profile) }}</td>
             <td data-label="Versi app / model">
               <strong>{{ device.app_version ?? 'Belum dilaporkan' }}</strong>
-              <small>Model: {{ device.model_version ?? '—' }}</small>
+              <small>Model: {{ device.model_version ?? '-' }}</small>
             </td>
             <td data-label="Kamera & kualitas">
               <strong>{{ cameraLabel(device) }}</strong>
@@ -1094,8 +1110,8 @@ onBeforeUnmount(() => {
               <small>Timeout {{ device.heartbeat_timeout_seconds }} detik</small>
             </td>
             <td data-label="Latency p50 / p95">
-              {{ device.latency_summary?.p50_ms ?? '—' }} /
-              {{ device.latency_summary?.p95_ms ?? '—' }} ms
+              {{ device.latency_summary?.p50_ms ?? '-' }} /
+              {{ device.latency_summary?.p95_ms ?? '-' }} ms
             </td>
             <td data-label="Status">
               <span
@@ -1108,20 +1124,18 @@ onBeforeUnmount(() => {
             </td>
             <td v-if="canManage" data-label="Aksi">
               <div class="devices-view__actions">
-                <button class="button button--text" type="button" @click="openEdit(device)">
-                  Ubah
-                </button>
-                <button
-                  class="button button--secondary"
+                <UiButton variant="text" type="button" @click="openEdit(device)"> Ubah </UiButton>
+                <UiButton
+                  variant="secondary"
                   type="button"
                   :disabled="!device.is_active"
                   :aria-label="device.camera_enabled ? 'Jeda kamera' : 'Aktifkan kamera'"
                   @click="requestCameraToggle(device)"
                 >
                   {{ device.camera_enabled ? 'Jeda kamera' : 'Aktifkan kamera' }}
-                </button>
-                <button
-                  class="button button--secondary"
+                </UiButton>
+                <UiButton
+                  variant="secondary"
                   type="button"
                   :disabled="!device.is_active"
                   :title="
@@ -1132,15 +1146,15 @@ onBeforeUnmount(() => {
                   @click="openCredential(device)"
                 >
                   Kredensial
-                </button>
-                <button
-                  class="button button--danger"
+                </UiButton>
+                <UiButton
+                  variant="danger"
                   type="button"
                   :disabled="!device.is_active"
                   @click="requestDeviceDeletion(device)"
                 >
                   Hapus
-                </button>
+                </UiButton>
               </div>
             </td>
           </tr>
@@ -1175,16 +1189,16 @@ onBeforeUnmount(() => {
           </template>
         </p>
         <div class="master-data__form-actions">
-          <button
-            class="button button--secondary"
+          <UiButton
+            variant="secondary"
             type="button"
             :disabled="isCameraControlSaving"
             @click="cameraControlTarget = null"
           >
             Batal
-          </button>
-          <button
-            class="button"
+          </UiButton>
+          <UiButton
+            variant="primary"
             :class="cameraControlTarget.camera_enabled ? 'button--danger' : 'button--primary'"
             type="button"
             :disabled="isCameraControlSaving"
@@ -1197,7 +1211,7 @@ onBeforeUnmount(() => {
                   ? 'Jeda kamera'
                   : 'Aktifkan kamera'
             }}
-          </button>
+          </UiButton>
         </div>
       </section>
     </div>
@@ -1205,17 +1219,17 @@ onBeforeUnmount(() => {
     <footer class="master-data__pagination">
       <span>{{ total }} perangkat</span>
       <div>
-        <button class="button button--secondary" :disabled="page === 0" @click="goToPage(page - 1)">
+        <UiButton variant="secondary" :disabled="page === 0" @click="goToPage(page - 1)">
           Sebelumnya
-        </button>
+        </UiButton>
         <span>Halaman {{ page + 1 }} dari {{ totalPages }}</span>
-        <button
-          class="button button--secondary"
+        <UiButton
+          variant="secondary"
           :disabled="page + 1 >= totalPages"
           @click="goToPage(page + 1)"
         >
           Berikutnya
-        </button>
+        </UiButton>
       </div>
     </footer>
 
@@ -1240,16 +1254,16 @@ onBeforeUnmount(() => {
             <h2 id="device-credential-title">{{ credentialDevice.name }}</h2>
             <small>{{ credentialDevice.device_id }}</small>
           </div>
-          <button
+          <UiButton
             v-if="!issuedCredential"
-            class="button button--text"
+            variant="text"
             type="button"
             aria-label="Tutup kredensial"
             :disabled="isCredentialLoading"
             @click="closeCredential"
           >
             Tutup
-          </button>
+          </UiButton>
         </header>
 
         <template v-if="issuedCredential">
@@ -1259,7 +1273,7 @@ onBeforeUnmount(() => {
           </p>
           <label class="devices-view__token-label" for="device-token">Token perangkat</label>
           <div class="devices-view__token-row">
-            <input
+            <UiInput
               id="device-token"
               :value="issuedCredential.token"
               type="text"
@@ -1269,12 +1283,10 @@ onBeforeUnmount(() => {
               aria-label="Token perangkat, hanya ditampilkan setelah dibuat"
               data-testid="device-token-value"
             />
-            <button class="button button--secondary" type="button" @click="copyCredential">
-              Salin
-            </button>
-            <button class="button button--secondary" type="button" @click="downloadCredential">
+            <UiButton variant="secondary" type="button" @click="copyCredential"> Salin </UiButton>
+            <UiButton variant="secondary" type="button" @click="downloadCredential">
               Unduh device.token
-            </button>
+            </UiButton>
           </div>
           <p v-if="credentialCopyMessage" class="devices-view__credential-status" role="status">
             {{ credentialCopyMessage }}
@@ -1287,7 +1299,7 @@ onBeforeUnmount(() => {
               ditaruh pada command.
             </p>
             <label for="device-install-platform">Sistem operasi perangkat</label>
-            <select id="device-install-platform" v-model="installPlatform">
+            <UiSelect id="device-install-platform" v-model="installPlatform">
               <option
                 value="windows"
                 :disabled="credentialDevice.deployment_profile === 'STB_GATEWAY'"
@@ -1303,7 +1315,7 @@ onBeforeUnmount(() => {
               <option value="armbian" :disabled="credentialDevice.deployment_profile === 'AI_EDGE'">
                 Armbian Linux (STB_GATEWAY)
               </option>
-            </select>
+            </UiSelect>
             <label
               v-if="credentialDevice.deployment_profile === 'STB_GATEWAY'"
               for="device-connection-mode"
@@ -1314,10 +1326,10 @@ onBeforeUnmount(() => {
                 :value="connectionMode"
                 @change="onConnectionModeChange"
               >
-                <option value="same-host">Komputer yang sama — localhost</option>
-                <option value="private-network">LAN/VPN sekolah — HTTPS privat</option>
-                <option value="public-domain">Domain publik — belum diaktifkan</option>
-                <option value="cloudflare-tunnel">Cloudflare Tunnel — belum diaktifkan</option>
+                <option value="same-host">Komputer yang sama - localhost</option>
+                <option value="private-network">LAN/VPN sekolah - HTTPS privat</option>
+                <option value="public-domain">Domain publik - belum diaktifkan</option>
+                <option value="cloudflare-tunnel">Cloudflare Tunnel - belum diaktifkan</option>
               </select>
             </label>
             <p v-else class="devices-view__profile-note">
@@ -1337,7 +1349,7 @@ onBeforeUnmount(() => {
               Cloudflare Access service identity belum didukung agent. Gunakan LAN/VPN privat.
             </p>
             <label for="device-core-api-url">URL Core API yang bisa dijangkau kamera</label>
-            <input
+            <UiInput
               id="device-core-api-url"
               v-model="coreApiUrl"
               type="url"
@@ -1361,7 +1373,7 @@ onBeforeUnmount(() => {
             >
               URL AI Central
             </label>
-            <input
+            <UiInput
               v-if="credentialDevice.deployment_profile === 'STB_GATEWAY'"
               id="device-central-ai-url"
               v-model="centralAiUrl"
@@ -1372,7 +1384,7 @@ onBeforeUnmount(() => {
             />
             <template v-if="credentialDevice.deployment_profile === 'AI_EDGE'">
               <label for="device-model-version">Versi model (terkunci)</label>
-              <input
+              <UiInput
                 id="device-model-version"
                 :value="enrollmentModelVersion"
                 readonly
@@ -1401,8 +1413,8 @@ onBeforeUnmount(() => {
               kamera. Jika browser menambahkan akhiran karena file lama sudah ada, pulihkan nama
               persis seperti di atas. File bundle adalah rahasia dan berlaku untuk satu device.
             </p>
-            <button
-              class="button button--secondary"
+            <UiButton
+              variant="secondary"
               type="button"
               :disabled="
                 !setupCommandState.command || !bundleMessage?.startsWith('Paket setup diunduh')
@@ -1410,15 +1422,15 @@ onBeforeUnmount(() => {
               @click="copyInstallCommand"
             >
               Salin perintah instalasi perangkat
-            </button>
-            <button
-              class="button button--primary"
+            </UiButton>
+            <UiButton
+              variant="primary"
               type="button"
               :disabled="!setupCommandState.command"
               @click="downloadSetupBundle"
             >
               Unduh paket setup perangkat
-            </button>
+            </UiButton>
           </section>
           <p class="devices-view__credential-instructions">
             Installer menyimpan token ke folder lokal terlindungi:
@@ -1440,9 +1452,9 @@ onBeforeUnmount(() => {
             resolusi, dan FPS. Pemasangan service setelah reboot mengikuti runbook production.
           </p>
           <div class="master-data__form-actions">
-            <button class="button button--primary" type="button" @click="closeCredential">
+            <UiButton variant="primary" type="button" @click="closeCredential">
               Saya sudah menyimpan token
-            </button>
+            </UiButton>
           </div>
         </template>
 
@@ -1455,20 +1467,20 @@ onBeforeUnmount(() => {
             {{ credentialError }}
           </p>
           <div class="devices-view__credential-actions">
-            <button
-              class="button button--primary"
+            <UiButton
+              variant="primary"
               type="button"
               :disabled="isCredentialLoading"
               @click="issueCredential('provision')"
             >
               {{ isCredentialLoading ? 'Membuat token…' : 'Buat token pertama' }}
-            </button>
+            </UiButton>
           </div>
           <details :open="isRotationOpen" class="devices-view__rotation" @toggle="onRotationToggle">
             <summary>Token pernah dibuat, hilang, atau perlu diganti?</summary>
             <form class="devices-view__rotation-form" @submit.prevent="issueCredential('rotate')">
               <label for="credential-rotation-reason">Alasan rotasi</label>
-              <input
+              <UiInput
                 id="credential-rotation-reason"
                 v-model="rotationReason"
                 required
@@ -1479,24 +1491,24 @@ onBeforeUnmount(() => {
                 Token lama dan baru memiliki masa tumpang tindih singkat agar agent dapat berpindah
                 dengan aman. Pasang file token baru segera.
               </p>
-              <button
-                class="button button--secondary"
+              <UiButton
+                variant="secondary"
                 type="submit"
                 :disabled="isCredentialLoading || !rotationReason.trim()"
               >
                 {{ isCredentialLoading ? 'Merotasi…' : 'Rotasi dan tampilkan token baru' }}
-              </button>
+              </UiButton>
             </form>
           </details>
           <div class="master-data__form-actions">
-            <button
-              class="button button--text"
+            <UiButton
+              variant="text"
               type="button"
               :disabled="isCredentialLoading"
               @click="closeCredential"
             >
               Batal
-            </button>
+            </UiButton>
           </div>
         </template>
       </section>
@@ -1528,24 +1540,24 @@ onBeforeUnmount(() => {
         </p>
         <p v-if="deleteError" class="master-data__alert" role="alert">{{ deleteError }}</p>
         <div class="master-data__form-actions">
-          <button
-            class="button button--secondary"
+          <UiButton
+            variant="secondary"
             type="button"
             :disabled="isDeletingDevice"
             @click="closeDeviceDeletion"
           >
             Batal
-          </button>
-          <button
-            class="button button--danger"
+          </UiButton>
+          <UiButton
+            variant="danger"
             type="button"
             :disabled="isDeletingDevice"
             @click="confirmDeviceDeletion"
           >
             {{ isDeletingDevice ? 'Menonaktifkan…' : 'Ya, hapus perangkat' }}
-          </button>
+          </UiButton>
         </div>
       </section>
     </div>
-  </section>
+  </div>
 </template>

@@ -85,7 +85,9 @@ sebagai absen dini.
 
 **Admin/laboran:** kelola akun staf, master data (siswa/kelas/lab + impor
 CSV/XLSX), enrollment wajah (4 frame per siswa, template terenkripsi),
-perangkat kamera (registrasi + kredensial satu kali + setup bundle), dan
+perangkat kamera (registrasi + kredensial satu kali + setup bundle),
+layar kiosk per lab (pairing device+lab + PIN sekali tampil di halaman
+**Layar Presensi**, dibuka siswa di route `/presensi`), dan
 kebijakan **AI & kamera** (kualitas, threshold terkalibrasi, burst STB).
 Halaman guru tidak menampilkan internals AI atau embedding — hanya status,
 nama roster, dan hasil final yang dikonfirmasi Core API.
@@ -124,7 +126,7 @@ field test (Postgres live + Playwright parity sudah TERBUKTI via
 
 Catatan: `docs/final-audit.md` (2026-10-02) sudah basi dan dihapus saat
 konsolidasi docs; snapshot PASS-nya tercatat sebagai arsip di backlog, bukan
-klaim berlaku kini. Gate berjalan: 469 pytest, 84 Vitest,
+klaim berlaku kini. Gate berjalan: 491 pytest, 103 Vitest (29 berkas),
 ruff/format/mypy/eslint/prettier/vue-tsc/e2e-typecheck hijau.
 
 ## 7. Link docs detail

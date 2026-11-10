@@ -143,3 +143,74 @@ def test_list_accounts_requires_authentication(
 ) -> None:
     response = request("GET", "/api/v1/accounts", authenticated=False)
     assert response.status_code == 401
+
+
+def _user_id(factory: sessionmaker[Session], email: str) -> UUID:
+    with factory() as session:
+        user = session.query(User).filter(User.email == email).one()
+        return user.id
+
+
+def test_laborant_can_read_own_lab_assignments(
+    api_database: sessionmaker[Session],
+) -> None:
+    laborant_id = _user_id(api_database, "laborant@example.test")
+    principal = AuthenticatedUser(
+        id=laborant_id,
+        email="laborant@example.test",
+        full_name="Test Laborant",
+        roles=frozenset({RoleCode.LABORANT}),
+    )
+    response = request(
+        "GET",
+        f"/api/v1/accounts/{laborant_id}/laborant-assignments",
+        principal=principal,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {"items": []}
+
+
+def test_laborant_cannot_read_other_lab_assignments(
+    api_database: sessionmaker[Session],
+) -> None:
+    laborant_id = _user_id(api_database, "laborant@example.test")
+    teacher_id = _user_id(api_database, "teacher@example.test")
+    principal = AuthenticatedUser(
+        id=laborant_id,
+        email="laborant@example.test",
+        full_name="Test Laborant",
+        roles=frozenset({RoleCode.LABORANT}),
+    )
+    response = request(
+        "GET",
+        f"/api/v1/accounts/{teacher_id}/laborant-assignments",
+        principal=principal,
+    )
+    assert response.status_code == 403
+
+
+def test_teacher_can_read_own_class_assignments(
+    api_database: sessionmaker[Session],
+) -> None:
+    teacher_id = _user_id(api_database, "teacher@example.test")
+    principal = AuthenticatedUser(
+        id=teacher_id,
+        email="teacher@example.test",
+        full_name="Test Teacher",
+        roles=frozenset({RoleCode.TEACHER}),
+    )
+    response = request(
+        "GET",
+        f"/api/v1/accounts/{teacher_id}/teacher-assignments",
+        principal=principal,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {"items": []}
+
+
+def test_class_laboratories_not_shadowed_by_account_id_route(
+    api_database: sessionmaker[Session],
+) -> None:
+    response = request("GET", "/api/v1/accounts/class-laboratories")
+    assert response.status_code == 200, response.text
+    assert response.json() == {"items": []}

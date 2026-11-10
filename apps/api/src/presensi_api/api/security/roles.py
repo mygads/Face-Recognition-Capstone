@@ -26,11 +26,16 @@ class Permission(StrEnum):
     DEVICE_OPERATE = "device_operate"
     SCHEDULE_READ = "schedule_read"
     SCHEDULE_MANAGE = "schedule_manage"
+    SESSION_VIEW = "session_view"
     SESSION_OPERATE = "session_operate"
+    ATTENDANCE_MANUAL = "attendance_manual"
     ENROLLMENT_MANAGE = "enrollment_manage"
     ATTENDANCE_READ = "attendance_read"
     ATTENDANCE_CORRECT = "attendance_correct"
     REPORTS_READ = "reports_read"
+    REPORTS_EXPORT = "reports_export"
+    EWS_READ = "ews_read"
+    EWS_FOLLOW_UP = "ews_follow_up"
 
 
 ROLE_PERMISSIONS: dict[RoleCode, FrozenSet[Permission]] = {
@@ -41,10 +46,15 @@ ROLE_PERMISSIONS: dict[RoleCode, FrozenSet[Permission]] = {
             Permission.LABORATORY_READ,
             Permission.SCHEDULE_READ,
             Permission.SCHEDULE_MANAGE,
+            Permission.SESSION_VIEW,
             Permission.SESSION_OPERATE,
+            Permission.ATTENDANCE_MANUAL,
             Permission.ATTENDANCE_READ,
             Permission.ATTENDANCE_CORRECT,
             Permission.REPORTS_READ,
+            Permission.REPORTS_EXPORT,
+            Permission.EWS_READ,
+            Permission.EWS_FOLLOW_UP,
         }
     ),
     RoleCode.LABORANT: frozenset(
@@ -61,13 +71,42 @@ ROLE_PERMISSIONS: dict[RoleCode, FrozenSet[Permission]] = {
 LABORANT_GRANTABLE_PERMISSIONS: frozenset[Permission] = frozenset(
     {
         Permission.SCHEDULE_READ,
-        Permission.SCHEDULE_MANAGE,
+        Permission.SESSION_VIEW,
         Permission.SESSION_OPERATE,
+        Permission.ATTENDANCE_MANUAL,
         Permission.ATTENDANCE_READ,
         Permission.ATTENDANCE_CORRECT,
         Permission.REPORTS_READ,
+        Permission.REPORTS_EXPORT,
+        Permission.EWS_READ,
+        Permission.EWS_FOLLOW_UP,
     }
 )
+
+# Prasyarat grant (pohon dependensi, 1 level):
+# - Operasikan Sesi & Tandai Manual butuh Pantau Sesi.
+# - Ajukan Koreksi butuh Pantau Sesi atau Lihat Laporan.
+# - Ekspor Laporan butuh Lihat Laporan.
+# - Catat Tindak Lanjut butuh Lihat EWS.
+PERMISSION_PREREQUISITES: dict[Permission, tuple[Permission, ...]] = {
+    Permission.SESSION_OPERATE: (Permission.SESSION_VIEW,),
+    Permission.ATTENDANCE_MANUAL: (Permission.SESSION_VIEW,),
+    Permission.ATTENDANCE_CORRECT: (
+        Permission.SESSION_VIEW,
+        Permission.REPORTS_READ,
+    ),
+    Permission.REPORTS_EXPORT: (Permission.REPORTS_READ,),
+    Permission.EWS_FOLLOW_UP: (Permission.EWS_READ,),
+}
+
+
+def missing_prerequisites(granted: FrozenSet[Permission]) -> dict[str, list[str]]:
+    """Kembalikan {permission: [prasyarat yang hilang]} untuk satu set grant."""
+    missing: dict[str, list[str]] = {}
+    for perm, prereqs in PERMISSION_PREREQUISITES.items():
+        if perm in granted and not any(pre in granted for pre in prereqs):
+            missing[perm.value] = [pre.value for pre in prereqs]
+    return missing
 
 
 @dataclass(frozen=True)

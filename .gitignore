@@ -24,6 +24,7 @@ dist/
 coverage/
 playwright-report/
 test-results/
+.playwright-cli/
 apps/web/playwright/.cache/
 
 # Local device and biometric data (never commit real student data)

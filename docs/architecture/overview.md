@@ -171,6 +171,14 @@ sebagai `presensi.theme` di local storage, fallback ke preferensi OS. Menu
 sidebar hanya memuat rute yang sudah diimplementasikan; atribusi dan lisensi
 MIT Gentelella dipertahankan (lihat `docs/licenses/`).
 
+Branding sekolah (reskin 2026-11-10, sumber Figma UI CAPSTONE node 47-1082):
+logo `apps/web/public/logo-sekolah.png` (180px; tampil 40px sidebar, 96px
+login, 48px kiosk) dipakai di sidebar, halaman login, dan layar kiosk publik;
+palet navy `#102A43` (sidebar/header/primer) + aksen emas `#D4A72C` + kanvas
+`#F8FAFC` sebagai token `--st-*` di `stitch-tokens.css` (`--st-gold*` tambahan;
+prefix `--st` agar tidak menabrak Gentelella); `theme-color` + favicon navy di
+`index.html`; font `Inter` + ikon `Material Symbols Outlined`.
+
 ## Status implementasi
 
 | Area | Status |

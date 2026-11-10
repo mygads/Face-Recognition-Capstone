@@ -18,8 +18,11 @@ from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
 from presensi_api.db.base import Base
 from presensi_api.db.models import (
     AuditLog,
+    ClassLaboratory,
     ClassStudent,
     FaceTemplate,
+    LaborantLabAssignment,
+    Laboratory,
     SchoolClass,
     Student,
     User,
@@ -128,7 +131,13 @@ def enrollment_runtime(
             ]
         )
         session.flush()
+        lab_id = UUID("11111111-1111-1111-1111-111111111111")
+        session.add(Laboratory(id=lab_id, code="LAB-SYN", name="Synthetic Lab"))
+        session.flush()
+        session.add(LaborantLabAssignment(user_id=OPERATOR_ID, laboratory_id=lab_id))
         session.add(ClassStudent(class_id=CLASS_ID, student_id=TARGET_STUDENT_ID))
+        session.add(ClassStudent(class_id=CLASS_ID, student_id=DUPLICATE_STUDENT_ID))
+        session.add(ClassLaboratory(class_id=CLASS_ID, laboratory_id=lab_id))
     try:
         yield factory, processor
     finally:

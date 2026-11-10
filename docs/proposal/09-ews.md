@@ -4,7 +4,10 @@
 
 Watchlist "Siswa perlu perhatian" — human watchlist, **bukan sanksi, tanpa
 notifikasi**. Bukti: `GET /reports/attendance/at-risk[/policy]`, panel
-`DashboardView` (`data-testid="at-risk-panel"`), 21 pytest + 8 vitest.
+`DashboardView` (`data-testid="at-risk-panel"`), endpoint tindak lanjut
+`GET/POST /reports/attendance/at-risk/{student_id}/follow-ups` (+ `PATCH
+…/follow-ups/{follow_up_id}`), drawer EWS di `EwsView`. Tindak lanjut
+(U-02) SUDAH menjadi bagian F-10 berjalan (bukan usulan).
 
 ```mermaid
 flowchart TD
@@ -28,7 +31,10 @@ berurutan); sesi open tanpa record = `not_recorded`, tidak dihitung absen;
 absence_pct desc → late desc → nama; paginasi in-memory; respons selalu
 menggemakan ambang efektif + revisi agar flag bisa dijelaskan.
 
-## 9.2 Usulan tahap 2 (U-01–U-04) — tanpa ubah arsitektur
+## 9.2 Usulan tahap 2 (U-01, U-03–U-04) — tanpa ubah arsitektur
+
+> U-02 (riwayat tindak lanjut) SUDAH jalan sebagai F-10 — tersisa U-01
+> (berita acara kalibrasi ambang), U-03 (notifikasi in-app), U-04 (eskalasi).
 
 ```mermaid
 flowchart TD
@@ -46,17 +52,19 @@ flowchart TD
   IN --> DONE
 ```
 
-Data baru (satu-satunya perubahan skema; via migrasi Alembic):
+Skema berjalan (`ews_follow_ups`, via migrasi Alembic; DDL penuh di
+`schema-erd.sql`):
 
 ```sql
 CREATE TABLE ews_follow_ups (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  student_id     UUID NOT NULL REFERENCES students(id) ON DELETE RESTRICT,
-  session_id     UUID REFERENCES attendance_sessions(id) ON DELETE SET NULL,
-  stage          VARCHAR(32) NOT NULL,  -- pemanggilan|konseling|surat|selesai
+  student_id     UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  author_user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  status         VARCHAR(16) NOT NULL DEFAULT 'open' CHECK (status IN ('open','done')),
+  resolved_at    TIMESTAMPTZ,
   note           TEXT NOT NULL,
-  created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
 

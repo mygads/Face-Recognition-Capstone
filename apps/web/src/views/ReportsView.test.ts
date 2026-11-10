@@ -1,6 +1,13 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { useAuthStore } from '../stores/auth'
 import ReportsView from './ReportsView.vue'
+
+vi.mock('vue-router', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('vue-router')>()
+  return { ...actual, useRoute: () => ({ query: {} }) }
+})
 
 const api = vi.hoisted(() => ({
   downloadAttendanceReport: vi.fn(),
@@ -70,9 +77,26 @@ beforeEach(() => {
   })
 })
 
+function adminPinia() {
+  const pinia = createPinia()
+  useAuthStore(pinia).$patch({
+    accessToken: 'unit-test-token',
+    expiresAt: Date.now() + 60_000,
+    account: {
+      id: 'admin-1',
+      email: 'admin@example.test',
+      full_name: 'Admin Uji',
+      roles: ['ADMIN'],
+      must_change_password: false,
+      permissions: [],
+    },
+  })
+  return pinia
+}
+
 describe('reports view teacher notes', () => {
   it('shows the manual-mark note in the recap table', async () => {
-    const wrapper = mount(ReportsView)
+    const wrapper = mount(ReportsView, { global: { plugins: [adminPinia()] } })
     await flushPromises()
     const table = wrapper.find('table.reports__table')
     expect(table.exists()).toBe(true)

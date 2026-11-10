@@ -1,5 +1,5 @@
 from datetime import UTC, date, datetime, time
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -108,6 +108,16 @@ def _validate_references(
             "schedule_teacher_scope",
             "Guru hanya dapat mengelola jadwalnya sendiri.",
         )
+    if RoleCode.TEACHER in principal.roles and RoleCode.ADMIN not in principal.roles:
+        from presensi_api.api.security.scope import teacher_class_ids as _vrtc
+
+        _assigned = _vrtc(session, principal.id)
+        if _assigned and class_id not in _assigned:
+            raise ApiProblem(
+                403,
+                "schedule_class_scope",
+                "Kelas belum ditugaskan ke akun guru ini.",
+            )
 
 
 def _validate_timezone(timezone_name: str) -> None:
@@ -220,9 +230,27 @@ def list_schedules(
     class_id: UUID | None = None,
     laboratory_id: UUID | None = None,
 ) -> PageResponse[ScheduleResponse]:
-    filters = []
+    filters: list[Any] = []
     if RoleCode.ADMIN not in principal.roles:
-        filters.append(PracticumSchedule.teacher_user_id == principal.id)
+        if RoleCode.TEACHER in principal.roles:
+            from presensi_api.api.security.scope import teacher_class_ids as _stc
+
+            _sc = _stc(session, principal.id)
+            if _sc:
+                filters.append(
+                    (PracticumSchedule.class_id.in_(_sc))
+                    | (PracticumSchedule.teacher_user_id == principal.id)
+                )
+            else:
+                filters.append(PracticumSchedule.teacher_user_id == principal.id)
+        elif RoleCode.LABORANT in principal.roles:
+            from presensi_api.api.security.scope import laborant_lab_ids as _sll
+
+            _sl = _sll(session, principal.id)
+            if _sl:
+                filters.append(PracticumSchedule.laboratory_id.in_(_sl))
+            else:
+                filters.append(PracticumSchedule.id.is_(None))
     if weekday is not None:
         filters.append(PracticumSchedule.weekday == weekday)
     if is_active is not None:
@@ -275,11 +303,11 @@ def get_schedule(
     session: Annotated[Session, Depends(get_db_session)],
 ) -> ScheduleResponse:
     schedule = session.get(PracticumSchedule, schedule_id)
-    if schedule is None or (
-        RoleCode.ADMIN not in principal.roles
-        and schedule.teacher_user_id != principal.id
-    ):
+    if schedule is None:
         raise ApiProblem(404, "schedule_not_found", "Jadwal tidak ditemukan.")
+    from presensi_api.api.security.scope import ensure_schedule_read as _esr
+
+    _esr(session, principal, schedule)
     return _response(session, schedule)
 
 
@@ -340,10 +368,13 @@ def update_schedule(
     session: Annotated[Session, Depends(get_db_session)],
 ) -> ScheduleResponse:
     schedule = session.get(PracticumSchedule, schedule_id)
-    if schedule is None or (
-        RoleCode.ADMIN not in principal.roles
-        and schedule.teacher_user_id != principal.id
-    ):
+    if schedule is None:
+        raise ApiProblem(404, "schedule_not_found", "Jadwal tidak ditemukan.")
+    from presensi_api.api.security.scope import ensure_schedule_operate as _eso
+
+    try:
+        _eso(session, principal, schedule)
+    except Exception:
         raise ApiProblem(404, "schedule_not_found", "Jadwal tidak ditemukan.")
     changes = request.model_dump(exclude_unset=True)
     candidate = {

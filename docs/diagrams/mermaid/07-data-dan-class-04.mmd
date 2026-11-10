@@ -36,9 +36,13 @@ classDiagram
     +String status
     +String source
     +DateTime recorded_at
+    +String note
   }
   class AttendanceCorrection {
     +UUID attendance_record_id
+    +UUID session_id
+    +UUID student_id
+    +UUID incident_ref
     +UUID requested_by_user_id
     +String previous_status
     +String corrected_status
@@ -64,4 +68,7 @@ classDiagram
   Student "1" -- "0..*" RecognitionEvent : dikenali (nullable)
   SessionStudent "1" -- "0..1" AttendanceRecord : FK roster
   RecognitionEvent "1" -- "0..1" AttendanceRecord : maks 1 record
-  AttendanceRecord "1" -- "*" AttendanceCorrection : pending saja
+  AttendanceRecord "1" -- "*" AttendanceCorrection : kasus a
+  AttendanceSession "1" -- "*" AttendanceCorrection : kasus b tanpa record
+  Student "1" -- "*" AttendanceCorrection : kasus b tanpa record
+  AttendanceCorrection "*" -- "0..1" AttendanceCorrection : salah-identitas via incident_ref

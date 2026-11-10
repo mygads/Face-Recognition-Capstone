@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, time, timedelta
 from io import BytesIO, StringIO
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Literal, cast
 from urllib.parse import quote
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -31,6 +31,7 @@ from presensi_api.api.v1.schemas.reports import (
     AttendanceReportRow,
     EwsFollowUpCreateRequest,
     EwsFollowUpResponse,
+    EwsFollowUpUpdateRequest,
     ReportStatus,
 )
 from presensi_api.db.models import (
@@ -56,6 +57,15 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 DbSession = Annotated[Session, Depends(get_db_session)]
 ReportReader = Annotated[
     AuthenticatedUser, Depends(require_permissions(Permission.REPORTS_READ))
+]
+ReportExporter = Annotated[
+    AuthenticatedUser, Depends(require_permissions(Permission.REPORTS_EXPORT))
+]
+EwsReader = Annotated[
+    AuthenticatedUser, Depends(require_permissions(Permission.EWS_READ))
+]
+EwsFollower = Annotated[
+    AuthenticatedUser, Depends(require_permissions(Permission.EWS_FOLLOW_UP))
 ]
 AtRiskPolicyManager = Annotated[
     AuthenticatedUser, Depends(require_permissions(Permission.MANAGE_SETTINGS))
@@ -100,7 +110,7 @@ def _date_bounds(query: AttendanceReportQuery) -> tuple[datetime, datetime]:
 
 
 def _statement(
-    query: AttendanceReportQuery, principal: AuthenticatedUser
+    query: AttendanceReportQuery, principal: AuthenticatedUser, db: Session
 ) -> Select[Any]:
     start_at, end_at = _date_bounds(query)
     report_status = _status_expression()
@@ -122,6 +132,7 @@ def _statement(
             report_status.label("status"),
             AttendanceRecord.source.label("source"),
             AttendanceSession.opened_at.label("session_opened_at"),
+            AttendanceRecord.occurred_at.label("occurred_at"),
             AttendanceRecord.recorded_at.label("recorded_at"),
             AttendanceRecord.note.label("note"),
         )
@@ -166,8 +177,28 @@ def _statement(
         statement = statement.where(AttendanceSession.id == query.session_id)
     if query.status is not None:
         statement = statement.where(report_status == query.status)
-    if RoleCode.TEACHER in principal.roles and RoleCode.ADMIN not in principal.roles:
-        statement = statement.where(PracticumSchedule.teacher_user_id == principal.id)
+    if RoleCode.ADMIN not in principal.roles:
+        if RoleCode.TEACHER in principal.roles:
+            from presensi_api.api.security.scope import teacher_class_ids as _rtc
+
+            _rc = _rtc(db, principal.id)
+            if _rc:
+                statement = statement.where(
+                    (PracticumSchedule.class_id.in_(_rc))
+                    | (PracticumSchedule.teacher_user_id == principal.id)
+                )
+            else:
+                statement = statement.where(
+                    PracticumSchedule.teacher_user_id == principal.id
+                )
+        elif RoleCode.LABORANT in principal.roles:
+            from presensi_api.api.security.scope import laborant_lab_ids as _rll
+
+            _rl = _rll(db, principal.id)
+            if _rl:
+                statement = statement.where(PracticumSchedule.laboratory_id.in_(_rl))
+            else:
+                statement = statement.where(PracticumSchedule.id.is_(None))
     return cast(Select[Any], statement)
 
 
@@ -180,6 +211,7 @@ def _as_utc(value: datetime | None) -> datetime | None:
 def _report_row(row: Row[Any]) -> AttendanceReportRow:
     data = dict(row._mapping)
     data["session_opened_at"] = _as_utc(data["session_opened_at"])
+    data["occurred_at"] = _as_utc(data.get("occurred_at"))
     data["recorded_at"] = _as_utc(data["recorded_at"])
     data["status"] = cast(ReportStatus, data["status"])
     return AttendanceReportRow.model_validate(data)
@@ -193,7 +225,7 @@ def _query_rows(
     page: bool,
     limit: int | None = None,
 ) -> list[AttendanceReportRow]:
-    statement = _statement(query, principal).order_by(
+    statement = _statement(query, principal, db).order_by(
         AttendanceSession.opened_at.desc(),
         AttendanceSession.id.desc(),
         SessionStudent.student_number_snapshot,
@@ -216,7 +248,7 @@ def get_attendance_report(
     principal: ReportReader,
     db: DbSession,
 ) -> AttendanceReportResponse:
-    filtered = _statement(query, principal).subquery()
+    filtered = _statement(query, principal, db).subquery()
     counts = {
         status: count
         for status, count in db.execute(
@@ -248,7 +280,7 @@ def get_attendance_report(
     summary="Read the attendance at-risk watchlist policy",
 )
 def get_at_risk_policy(
-    principal: ReportReader,
+    principal: EwsReader,
     db: DbSession,
 ) -> AtRiskPolicyResponse:
     """Return the stored watchlist thresholds (school-calibrated operational
@@ -302,6 +334,7 @@ def _at_risk_statement(
     principal: AuthenticatedUser,
     start: datetime,
     end: datetime,
+    db: Session,
 ) -> Select[Any]:
     statement = (
         select(
@@ -345,8 +378,28 @@ def _at_risk_statement(
         statement = statement.where(
             PracticumSchedule.laboratory_id == query.laboratory_id
         )
-    if RoleCode.TEACHER in principal.roles and RoleCode.ADMIN not in principal.roles:
-        statement = statement.where(PracticumSchedule.teacher_user_id == principal.id)
+    if RoleCode.ADMIN not in principal.roles:
+        if RoleCode.TEACHER in principal.roles:
+            from presensi_api.api.security.scope import teacher_class_ids as _atc
+
+            _ac = _atc(db, principal.id)
+            if _ac:
+                statement = statement.where(
+                    (PracticumSchedule.class_id.in_(_ac))
+                    | (PracticumSchedule.teacher_user_id == principal.id)
+                )
+            else:
+                statement = statement.where(
+                    PracticumSchedule.teacher_user_id == principal.id
+                )
+        elif RoleCode.LABORANT in principal.roles:
+            from presensi_api.api.security.scope import laborant_lab_ids as _all
+
+            _al = _all(db, principal.id)
+            if _al:
+                statement = statement.where(PracticumSchedule.laboratory_id.in_(_al))
+            else:
+                statement = statement.where(PracticumSchedule.id.is_(None))
     return cast(Select[Any], statement)
 
 
@@ -408,7 +461,7 @@ def _aggregate_at_risk_rows(rows: list[Row[Any]]) -> list[dict[str, Any]]:
 )
 def list_at_risk_students(
     query: Annotated[AtRiskQuery, Query()],
-    principal: ReportReader,
+    principal: EwsReader,
     db: DbSession,
 ) -> AtRiskPage:
     """Return students whose absence rate or lateness reaches the effective
@@ -435,7 +488,7 @@ def list_at_risk_students(
         else int(cast(int, policy["late_count_threshold"]))
     )
     start, end = _at_risk_window(effective_window, query.timezone_name)
-    statement = _at_risk_statement(query, principal, start, end)
+    statement = _at_risk_statement(query, principal, start, end, db)
     buckets = _aggregate_at_risk_rows(list(db.execute(statement).all()))
     flagged: list[AtRiskStudentRow] = []
     for bucket in buckets:
@@ -490,7 +543,7 @@ def list_attendance_report_records(
     principal: ReportReader,
     db: DbSession,
 ) -> AttendanceReportPage:
-    statement = _statement(query, principal)
+    statement = _statement(query, principal, db)
     total = db.scalar(select(func.count()).select_from(statement.subquery())) or 0
     rows = _query_rows(db, query, principal, page=True)
     return AttendanceReportPage(
@@ -545,7 +598,7 @@ def _spreadsheet_value(value: object) -> str | int | float | None:
 )
 def export_attendance_report(
     query: Annotated[AttendanceReportExportQuery, Query()],
-    principal: ReportReader,
+    principal: ReportExporter,
     db: DbSession,
 ) -> Response:
     rows = _export_rows(db, query, principal)
@@ -592,12 +645,15 @@ def export_attendance_report(
 )
 def list_ews_follow_ups(
     student_id: UUID,
-    principal: ReportReader,
+    principal: EwsReader,
     db: DbSession,
 ) -> list[EwsFollowUpResponse]:
     student = db.get(Student, student_id)
     if student is None:
         raise ApiProblem(404, "student_not_found", "Siswa tidak ditemukan.")
+    from presensi_api.api.security.scope import ensure_student_read as _esr
+
+    _esr(db, principal, student_id)
     rows = db.scalars(
         select(EwsFollowUp)
         .where(EwsFollowUp.student_id == student_id)
@@ -614,6 +670,7 @@ def list_ews_follow_ups(
                 author_user_id=row.author_user_id,
                 author_name=author.full_name if author else None,
                 note=row.note,
+                status=cast(Literal["open", "done"], row.status),
                 created_at=row.created_at
                 if row.created_at.tzinfo is not None
                 else row.created_at.replace(tzinfo=UTC),
@@ -631,12 +688,15 @@ def list_ews_follow_ups(
 def create_ews_follow_up(
     student_id: UUID,
     request: EwsFollowUpCreateRequest,
-    principal: ReportReader,
+    principal: EwsFollower,
     db: DbSession,
 ) -> EwsFollowUpResponse:
     student = db.get(Student, student_id)
     if student is None:
         raise ApiProblem(404, "student_not_found", "Siswa tidak ditemukan.")
+    from presensi_api.api.security.scope import ensure_student_read as _esr2
+
+    _esr2(db, principal, student_id)
     note = request.note.strip()
     if not note:
         raise ApiProblem(422, "empty_note", "Catatan tidak boleh kosong.")
@@ -663,4 +723,54 @@ def create_ews_follow_up(
         created_at=row.created_at
         if row.created_at.tzinfo is not None
         else row.created_at.replace(tzinfo=UTC),
+        status=cast(Literal["open", "done"], row.status),
+    )
+
+
+@router.patch(
+    "/attendance/at-risk/{student_id}/follow-ups/{follow_up_id}",
+    response_model=EwsFollowUpResponse,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Update an EWS follow-up status",
+)
+def update_ews_follow_up(
+    student_id: UUID,
+    follow_up_id: UUID,
+    request: EwsFollowUpUpdateRequest,
+    principal: EwsFollower,
+    db: DbSession,
+) -> EwsFollowUpResponse:
+    from datetime import UTC as _UTC
+
+    row = db.get(EwsFollowUp, follow_up_id)
+    if row is None or row.student_id != student_id:
+        raise ApiProblem(404, "follow_up_not_found", "Catatan tidak ditemukan.")
+    from presensi_api.api.security.scope import ensure_student_read as _esr3
+
+    _esr3(db, principal, student_id)
+    row.status = request.status
+    row.resolved_at = datetime.now(_UTC) if request.status == "done" else None
+    db.add(
+        AuditLog(
+            action="ews.follow_up_updated",
+            actor_user_id=principal.id,
+            entity_type="ews_follow_up",
+            entity_id=row.id,
+            after_state={"status": request.status},
+        )
+    )
+    db.commit()
+    db.refresh(row)
+    author = db.get(User, row.author_user_id)
+    created = row.created_at
+    return EwsFollowUpResponse(
+        id=row.id,
+        student_id=row.student_id,
+        author_user_id=row.author_user_id,
+        author_name=author.full_name if author else None,
+        note=row.note,
+        status=row.status,
+        created_at=created
+        if created.tzinfo is not None
+        else created.replace(tzinfo=UTC),
     )

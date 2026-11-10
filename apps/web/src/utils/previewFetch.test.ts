@@ -23,6 +23,16 @@ describe('preview fetch timeout', () => {
     )
   })
 
+  it('memetakan koneksi terputus ke pesan Indonesia', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))),
+    )
+    await expect(fetchWithPreviewTimeout('http://localhost/v1/status', {}, 1_000)).rejects.toThrow(
+      'tidak terjangkau',
+    )
+  })
+
   it('meloloskan respons cepat', async () => {
     const response = new Response('{}', { status: 200 })
     vi.stubGlobal(

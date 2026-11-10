@@ -14,12 +14,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from presensi_api.api.security.dependencies import get_current_user
-from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
+from presensi_api.api.security.roles import AuthenticatedUser, Permission, RoleCode
 from presensi_api.db.base import Base
 from presensi_api.db.models import (
     AttendanceSession,
     AuditLog,
     ClassStudent,
+    LaborantLabAssignment,
     Laboratory,
     PracticumSchedule,
     SchoolClass,
@@ -844,3 +845,93 @@ def test_concurrent_open_blocked_by_partial_unique_index(
         {"practicum_schedule_id": str(practicum_schedule_id)},
     )
     assert reopened.status_code == 201, reopened.text
+
+
+def _open_running_session(api_database: sessionmaker[Session]) -> str:
+    practicum_schedule_id = schedule_id(api_database)
+    local_now = datetime.now(ZoneInfo("Asia/Jakarta"))
+    midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    with api_database.begin() as session:
+        schedule = session.scalars(select(PracticumSchedule)).one()
+        schedule.start_time = max(midnight, local_now - timedelta(minutes=5)).time()
+        schedule.end_time = time(23, 59)
+    opened = request(
+        "POST",
+        "/api/v1/sessions",
+        {"practicum_schedule_id": str(practicum_schedule_id)},
+    )
+    assert opened.status_code == 201
+    return str(opened.json()["id"])
+
+
+def _set_principal(
+    user_id: UUID, roles: frozenset[RoleCode], extra: frozenset[Permission]
+) -> None:
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        id=user_id,
+        email=f"user{user_id.int}@example.test",
+        full_name="Test Principal",
+        roles=roles,
+        extra_permissions=extra,
+    )
+
+
+def test_laborant_monitor_role_can_read_session_detail_and_roster(
+    api_database: sessionmaker[Session],
+) -> None:
+    session_id = _open_running_session(api_database)
+    laboran_id = UUID(int=77)
+    with api_database.begin() as session:
+        laboratory = session.scalars(select(Laboratory)).one()
+        session.add(
+            User(
+                id=laboran_id,
+                email="laboran@example.test",
+                full_name="Test Laboran",
+                password_hash="unused-test-hash",
+            )
+        )
+        session.flush()
+        session.add(
+            LaborantLabAssignment(user_id=laboran_id, laboratory_id=laboratory.id)
+        )
+
+    _set_principal(
+        laboran_id, frozenset({RoleCode.LABORANT}), frozenset({Permission.SESSION_VIEW})
+    )
+    detail = request("GET", f"/api/v1/sessions/{session_id}")
+    assert detail.status_code == 200
+    roster = request("GET", f"/api/v1/sessions/{session_id}/roster")
+    assert roster.status_code == 200
+    assert len(roster.json()) == 2
+
+    _set_principal(laboran_id, frozenset({RoleCode.LABORANT}), frozenset())
+    assert request("GET", f"/api/v1/sessions/{session_id}").status_code == 403
+    assert request("GET", f"/api/v1/sessions/{session_id}/roster").status_code == 403
+
+
+def test_laborant_outside_lab_assignment_cannot_read_session(
+    api_database: sessionmaker[Session],
+) -> None:
+    session_id = _open_running_session(api_database)
+    laboran_id = UUID(int=78)
+    with api_database.begin() as session:
+        session.add(
+            User(
+                id=laboran_id,
+                email="laboran2@example.test",
+                full_name="Test Laboran Dua",
+                password_hash="unused-test-hash",
+            )
+        )
+        session.flush()
+        other_lab = Laboratory(code="LAB-99", name="Lab Lain")
+        session.add(other_lab)
+        session.flush()
+        session.add(
+            LaborantLabAssignment(user_id=laboran_id, laboratory_id=other_lab.id)
+        )
+    _set_principal(
+        laboran_id, frozenset({RoleCode.LABORANT}), frozenset({Permission.SESSION_VIEW})
+    )
+    assert request("GET", f"/api/v1/sessions/{session_id}").status_code == 404

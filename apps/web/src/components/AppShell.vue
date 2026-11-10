@@ -1,14 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import PageHeader from './PageHeader.vue'
 import Sidebar from './Sidebar.vue'
 import Topbar from './Topbar.vue'
 
 type Theme = 'light' | 'dark'
 
 const themeStorageKey = 'presensi.theme'
-const route = useRoute()
 const sidebarCollapsed = ref(false)
 const mobileDrawerOpen = ref(false)
 const mobileViewportQuery = window.matchMedia?.('(max-width: 900px)')
@@ -49,10 +46,6 @@ watch(
   { immediate: true },
 )
 
-const pageTitle = computed(() => String(route.meta.title ?? 'Ringkasan'))
-const pageDescription = computed(() =>
-  String(route.meta.description ?? 'Ruang kerja presensi praktikum.'),
-)
 const sidebarExpanded = computed(() => {
   return isMobileViewport.value ? mobileDrawerOpen.value : !sidebarCollapsed.value
 })
@@ -107,19 +100,8 @@ function toggleTheme() {
       />
 
       <main id="main-content" class="app-shell__main" tabindex="-1">
-        <PageHeader
-          v-if="!route.meta.pageHeaderInView"
-          eyebrow="Presensi praktikum"
-          :title="pageTitle"
-          :description="pageDescription"
-        />
         <RouterView />
       </main>
-
-      <footer class="app-shell__footer">
-        <span>Sistem presensi praktikum</span>
-        <span>Area internal sekolah</span>
-      </footer>
     </div>
   </div>
 </template>

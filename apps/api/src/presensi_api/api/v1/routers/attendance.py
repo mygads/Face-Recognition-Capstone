@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from presensi_api.api.errors import OPENAPI_ERROR_RESPONSES, ApiProblem
@@ -43,6 +44,12 @@ DbSession = Annotated[Session, Depends(get_db_session)]
 AttendanceOperator = Annotated[
     AuthenticatedUser, Depends(require_permissions(Permission.SESSION_OPERATE))
 ]
+ManualMarkOperator = Annotated[
+    AuthenticatedUser, Depends(require_permissions(Permission.ATTENDANCE_MANUAL))
+]
+CorrectionProposer = Annotated[
+    AuthenticatedUser, Depends(require_permissions(Permission.ATTENDANCE_CORRECT))
+]
 
 
 @router.post(
@@ -78,7 +85,7 @@ def ingest_recognition_event(
 def create_manual_mark(
     session_id: UUID,
     request: ManualMarkRequest,
-    principal: AttendanceOperator,
+    principal: ManualMarkOperator,
     session: DbSession,
 ) -> ManualMarkResponse:
     record = mark_manual_attendance(session, session_id, request, principal)
@@ -91,6 +98,10 @@ def create_manual_mark(
             source=cast(AttendanceSource, record.source),
             recognition_event_id=record.recognition_event_id,
             recorded_at=as_utc(record.recorded_at),
+            occurred_at=as_utc(record.occurred_at)
+            if record.occurred_at is not None
+            else None,
+            rule_version=record.rule_version,
             note=record.note,
         )
     )
@@ -128,8 +139,28 @@ def list_attendance(
             PracticumSchedule.id == AttendanceSession.practicum_schedule_id,
         )
     )
-    if RoleCode.TEACHER in principal.roles and RoleCode.ADMIN not in principal.roles:
-        query = query.where(PracticumSchedule.teacher_user_id == principal.id)
+    if RoleCode.ADMIN not in principal.roles:
+        if RoleCode.TEACHER in principal.roles:
+            from presensi_api.api.security.scope import (
+                teacher_class_ids as _tc,
+            )
+
+            _classes = _tc(session, principal.id)
+            if _classes:
+                query = query.where(
+                    (PracticumSchedule.class_id.in_(_classes))
+                    | (PracticumSchedule.teacher_user_id == principal.id)
+                )
+            else:
+                query = query.where(PracticumSchedule.teacher_user_id == principal.id)
+        elif RoleCode.LABORANT in principal.roles:
+            from presensi_api.api.security.scope import laborant_lab_ids as _ll
+
+            _labs = _ll(session, principal.id)
+            if _labs:
+                query = query.where(PracticumSchedule.laboratory_id.in_(_labs))
+            else:
+                query = query.where(PracticumSchedule.id.is_(None))
     if session_id is not None:
         query = query.where(AttendanceRecord.session_id == session_id)
     if student_id is not None:
@@ -150,6 +181,10 @@ def list_attendance(
                 source=cast(AttendanceSource, row.source),
                 recognition_event_id=row.recognition_event_id,
                 recorded_at=as_utc(row.recorded_at),
+                occurred_at=as_utc(row.occurred_at)
+                if row.occurred_at is not None
+                else None,
+                rule_version=row.rule_version,
                 note=row.note,
             )
             for row in rows
@@ -172,12 +207,100 @@ def list_attendance(
 )
 def request_attendance_correction(
     request: AttendanceCorrectionRequest,
-    principal: Annotated[
-        AuthenticatedUser, Depends(require_permissions(Permission.ATTENDANCE_CORRECT))
-    ],
+    principal: CorrectionProposer,
     session: DbSession,
 ) -> AttendanceCorrectionResponse:
+    from uuid import uuid4
+
+    from presensi_api.api.security.scope import (
+        laborant_lab_ids as _ll,
+    )
+    from presensi_api.api.security.scope import (
+        teacher_class_ids as _tc,
+    )
     from presensi_api.db.models import SessionStudent
+
+    def _scope_allows(schedule: PracticumSchedule) -> bool:
+        if RoleCode.ADMIN in principal.roles:
+            return True
+        if RoleCode.TEACHER in principal.roles:
+            if schedule.teacher_user_id == principal.id:
+                return True
+            if schedule.class_id in _tc(session, principal.id):
+                return True
+            return False
+        if RoleCode.LABORANT in principal.roles:
+            if schedule.laboratory_id in _ll(session, principal.id):
+                return True
+            return False
+        return True
+
+    def _pending_exists_for_record(record_id: UUID) -> bool:
+        return (
+            session.scalar(
+                select(AttendanceCorrection.id).where(
+                    AttendanceCorrection.attendance_record_id == record_id,
+                    AttendanceCorrection.decision_status == "pending",
+                )
+            )
+            is not None
+        )
+
+    def _pending_exists_for_missing(sid: UUID, stid: UUID) -> bool:
+        return (
+            session.scalar(
+                select(AttendanceCorrection.id).where(
+                    AttendanceCorrection.session_id == sid,
+                    AttendanceCorrection.student_id == stid,
+                    AttendanceCorrection.decision_status == "pending",
+                )
+            )
+            is not None
+        )
+
+    def _to_response(correction: AttendanceCorrection) -> AttendanceCorrectionResponse:
+        return AttendanceCorrectionResponse(
+            id=correction.id,
+            attendance_record_id=correction.attendance_record_id,
+            incident_ref=correction.incident_ref,
+            session_id=correction.session_id,
+            student_id=correction.student_id,
+            previous_status=cast(AttendanceStatus, correction.previous_status),
+            corrected_status=cast(AttendanceStatus, correction.corrected_status),
+            decision_status=cast(
+                Literal["pending", "approved", "rejected"],
+                correction.decision_status,
+            ),
+            reason=correction.reason,
+            created_at=as_utc(correction.created_at),
+            decided_at=(
+                as_utc(correction.decided_at)
+                if correction.decided_at is not None
+                else None
+            ),
+            decided_by_user_id=correction.decided_by_user_id,
+            decision_note=correction.decision_note,
+        )
+
+    def _resolve_incident(target_session_id: UUID) -> UUID:
+        # Kasus salah identitas: tautkan ke insiden pending pada sesi yang sama
+        # agar kedua koreksi diputus atomik. Tanpa tautan, buat insiden baru.
+        if request.incident_ref is None:
+            return uuid4()
+        anchor = session.scalars(
+            select(AttendanceCorrection).where(
+                AttendanceCorrection.incident_ref == request.incident_ref,
+                AttendanceCorrection.session_id == target_session_id,
+                AttendanceCorrection.decision_status == "pending",
+            )
+        ).first()
+        if anchor is None:
+            raise ApiProblem(
+                404,
+                "correction_incident_not_found",
+                "Insiden koreksi tidak ditemukan pada sesi ini.",
+            )
+        return anchor.incident_ref  # type: ignore[return-value]
 
     if request.attendance_record_id is not None:
         record = session.get(AttendanceRecord, request.attendance_record_id)
@@ -195,26 +318,36 @@ def request_attendance_correction(
             raise ApiProblem(
                 404, "attendance_record_not_found", "Presensi tidak ditemukan."
             )
-        if (
-            RoleCode.TEACHER in principal.roles
-            and RoleCode.ADMIN not in principal.roles
-            and schedule.teacher_user_id != principal.id
-        ):
+        if not _scope_allows(schedule):
             raise ApiProblem(
                 404, "attendance_record_not_found", "Presensi tidak ditemukan."
             )
-        correction = AttendanceCorrection(
-            attendance_record_id=record.id,
-            session_id=record.session_id,
-            student_id=record.student_id,
-            requested_by_user_id=principal.id,
-            previous_status=record.status,
-            corrected_status=request.corrected_status,
-            reason=request.reason,
-            decision_status="pending",
-        )
-        session.add(correction)
-        session.flush()
+        if _pending_exists_for_record(record.id):
+            raise ApiProblem(
+                409,
+                "correction_already_pending",
+                "Sudah ada pengajuan koreksi aktif untuk target ini.",
+            )
+        try:
+            correction = AttendanceCorrection(
+                attendance_record_id=record.id,
+                session_id=record.session_id,
+                student_id=record.student_id,
+                requested_by_user_id=principal.id,
+                incident_ref=_resolve_incident(record.session_id),
+                previous_status=record.status,
+                corrected_status=request.corrected_status,
+                reason=request.reason,
+                decision_status="pending",
+            )
+            session.add(correction)
+            session.flush()
+        except IntegrityError as exc:
+            raise ApiProblem(
+                409,
+                "correction_already_pending",
+                "Sudah ada pengajuan koreksi aktif untuk target ini.",
+            ) from exc
         session.add(
             AuditLog(
                 actor_user_id=principal.id,
@@ -223,6 +356,7 @@ def request_attendance_correction(
                 entity_id=correction.id,
                 after_state={
                     "attendance_record_id": str(record.id),
+                    "incident_ref": str(correction.incident_ref),
                     "previous_status": record.status,
                     "corrected_status": request.corrected_status,
                     "decision_status": "pending",
@@ -231,38 +365,30 @@ def request_attendance_correction(
         )
         session.commit()
         session.refresh(correction)
-        return AttendanceCorrectionResponse(
-            id=correction.id,
-            attendance_record_id=correction.attendance_record_id,
-            session_id=correction.session_id,
-            student_id=correction.student_id,
-            previous_status=cast(AttendanceStatus, correction.previous_status),
-            corrected_status=cast(AttendanceStatus, correction.corrected_status),
-            decision_status="pending",
-            reason=correction.reason,
-            created_at=as_utc(correction.created_at),
-            decided_at=(
-                as_utc(correction.decided_at)
-                if correction.decided_at is not None
-                else None
-            ),
-            decided_by_user_id=None,
-            decision_note=None,
-        )
+        return _to_response(correction)
     # Missing-record case: session closed, student has no record (dianggap absen).
     assert request.session_id is not None and request.student_id is not None
     attendance_session = session.get(AttendanceSession, request.session_id)
     if attendance_session is None:
         raise ApiProblem(404, "session_not_found", "Sesi tidak ditemukan.")
+    if attendance_session.status in ("active", "manual_override"):
+        raise ApiProblem(
+            409,
+            "session_still_active",
+            "Sesi masih berjalan; gunakan tandai manual. Koreksi tanpa record "
+            "hanya untuk sesi yang sudah ditutup.",
+        )
     schedule = session.get(PracticumSchedule, attendance_session.practicum_schedule_id)
     if schedule is None:
         raise ApiProblem(404, "session_not_found", "Sesi tidak ditemukan.")
-    if (
-        RoleCode.TEACHER in principal.roles
-        and RoleCode.ADMIN not in principal.roles
-        and schedule.teacher_user_id != principal.id
-    ):
+    if not _scope_allows(schedule):
         raise ApiProblem(404, "session_not_found", "Sesi tidak ditemukan.")
+    if _pending_exists_for_missing(request.session_id, request.student_id):
+        raise ApiProblem(
+            409,
+            "correction_already_pending",
+            "Sudah ada pengajuan koreksi aktif untuk target ini.",
+        )
     roster = session.get(SessionStudent, (request.session_id, request.student_id))
     if roster is None:
         raise ApiProblem(
@@ -280,18 +406,26 @@ def request_attendance_correction(
             "attendance_already_recorded",
             "Siswa sudah memiliki catatan presensi; gunakan koreksi record yang ada.",
         )
-    correction = AttendanceCorrection(
-        attendance_record_id=None,
-        session_id=request.session_id,
-        student_id=request.student_id,
-        requested_by_user_id=principal.id,
-        previous_status="absent",
-        corrected_status=request.corrected_status,
-        reason=request.reason,
-        decision_status="pending",
-    )
-    session.add(correction)
-    session.flush()
+    try:
+        correction = AttendanceCorrection(
+            attendance_record_id=None,
+            session_id=request.session_id,
+            student_id=request.student_id,
+            requested_by_user_id=principal.id,
+            incident_ref=_resolve_incident(request.session_id),
+            previous_status="absent",
+            corrected_status=request.corrected_status,
+            reason=request.reason,
+            decision_status="pending",
+        )
+        session.add(correction)
+        session.flush()
+    except IntegrityError as exc:
+        raise ApiProblem(
+            409,
+            "correction_already_pending",
+            "Sudah ada pengajuan koreksi aktif untuk target ini.",
+        ) from exc
     session.add(
         AuditLog(
             actor_user_id=principal.id,
@@ -301,6 +435,7 @@ def request_attendance_correction(
             after_state={
                 "session_id": str(request.session_id),
                 "student_id": str(request.student_id),
+                "incident_ref": str(correction.incident_ref),
                 "previous_status": "absent",
                 "corrected_status": request.corrected_status,
                 "decision_status": "pending",
@@ -309,20 +444,7 @@ def request_attendance_correction(
     )
     session.commit()
     session.refresh(correction)
-    return AttendanceCorrectionResponse(
-        id=correction.id,
-        attendance_record_id=None,
-        session_id=correction.session_id,
-        student_id=correction.student_id,
-        previous_status=cast(AttendanceStatus, correction.previous_status),
-        corrected_status=cast(AttendanceStatus, correction.corrected_status),
-        decision_status="pending",
-        reason=correction.reason,
-        created_at=as_utc(correction.created_at),
-        decided_at=None,
-        decided_by_user_id=None,
-        decision_note=None,
-    )
+    return _to_response(correction)
 
 
 @router.get(
@@ -361,11 +483,31 @@ def list_attendance_corrections(
             PracticumSchedule.id == AttendanceSession.practicum_schedule_id,
         )
     )
-    if RoleCode.TEACHER in principal.roles and RoleCode.ADMIN not in principal.roles:
-        query = query.where(
-            (PracticumSchedule.teacher_user_id == principal.id)
-            | (PracticumSchedule.teacher_user_id.is_(None))
-        )
+    if RoleCode.ADMIN not in principal.roles:
+        if RoleCode.TEACHER in principal.roles:
+            from presensi_api.api.security.scope import (
+                teacher_class_ids as _tc2,
+            )
+
+            _classes2 = _tc2(session, principal.id)
+            if _classes2:
+                query = query.where(
+                    (PracticumSchedule.class_id.in_(_classes2))
+                    | (PracticumSchedule.teacher_user_id == principal.id)
+                )
+            else:
+                query = query.where(
+                    (PracticumSchedule.teacher_user_id == principal.id)
+                    | (PracticumSchedule.teacher_user_id.is_(None))
+                )
+        elif RoleCode.LABORANT in principal.roles:
+            from presensi_api.api.security.scope import laborant_lab_ids as _ll2
+
+            _labs2 = _ll2(session, principal.id)
+            if _labs2:
+                query = query.where(PracticumSchedule.laboratory_id.in_(_labs2))
+            else:
+                query = query.where(PracticumSchedule.id.is_(None))
     if decision_status is not None:
         query = query.where(AttendanceCorrection.decision_status == decision_status)
     if session_id is not None:
@@ -386,6 +528,7 @@ def list_attendance_corrections(
             AttendanceCorrectionResponse(
                 id=row.id,
                 attendance_record_id=row.attendance_record_id,
+                incident_ref=row.incident_ref,
                 session_id=row.session_id,
                 student_id=row.student_id,
                 previous_status=cast(AttendanceStatus, row.previous_status),
@@ -404,6 +547,86 @@ def list_attendance_corrections(
             for row in rows
         ],
         pagination=Pagination(total=total, limit=limit, offset=offset),
+    )
+
+
+@router.get(
+    "/corrections/{correction_id}",
+    response_model=AttendanceCorrectionResponse,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Get an attendance correction request",
+)
+def get_attendance_correction(
+    correction_id: UUID,
+    principal: CorrectionProposer,
+    session: DbSession,
+) -> AttendanceCorrectionResponse:
+    correction = session.scalar(
+        select(AttendanceCorrection)
+        .where(AttendanceCorrection.id == correction_id)
+        .with_for_update()
+    )
+    if correction is None:
+        raise ApiProblem(
+            404, "attendance_correction_not_found", "Koreksi tidak ditemukan."
+        )
+    # Scope check: teacher/lab must see the underlying schedule.
+    record = (
+        session.get(AttendanceRecord, correction.attendance_record_id)
+        if correction.attendance_record_id is not None
+        else None
+    )
+    sid = record.session_id if record is not None else correction.session_id
+    if sid is not None and RoleCode.ADMIN not in principal.roles:
+        sched_session = session.get(AttendanceSession, sid)
+        sched = (
+            session.get(PracticumSchedule, sched_session.practicum_schedule_id)
+            if sched_session is not None
+            else None
+        )
+        if sched is not None:
+            from presensi_api.api.security.scope import (
+                laborant_lab_ids as _ll3,
+            )
+            from presensi_api.api.security.scope import (
+                teacher_class_ids as _tc3,
+            )
+
+            allowed = False
+            if RoleCode.TEACHER in principal.roles:
+                if sched.teacher_user_id == principal.id:
+                    allowed = True
+                elif sched.class_id in _tc3(session, principal.id):
+                    allowed = True
+            elif RoleCode.LABORANT in principal.roles:
+                if sched.laboratory_id in _ll3(session, principal.id):
+                    allowed = True
+            else:
+                allowed = True
+            if not allowed:
+                raise ApiProblem(
+                    404,
+                    "attendance_correction_not_found",
+                    "Koreksi tidak ditemukan.",
+                )
+    return AttendanceCorrectionResponse(
+        id=correction.id,
+        attendance_record_id=correction.attendance_record_id,
+        incident_ref=correction.incident_ref,
+        session_id=correction.session_id,
+        student_id=correction.student_id,
+        previous_status=cast(AttendanceStatus, correction.previous_status),
+        corrected_status=cast(AttendanceStatus, correction.corrected_status),
+        decision_status=cast(
+            Literal["pending", "approved", "rejected"], correction.decision_status
+        ),
+        reason=correction.reason,
+        created_at=as_utc(correction.created_at),
+        decided_at=(
+            as_utc(correction.decided_at) if correction.decided_at is not None else None
+        ),
+        decided_by_user_id=correction.decided_by_user_id,
+        decision_note=correction.decision_note,
     )
 
 
@@ -432,7 +655,11 @@ def decide_attendance_correction(
             "attendance_correction_forbidden",
             "Hanya ADMIN yang boleh memutuskan koreksi.",
         )
-    correction = session.get(AttendanceCorrection, correction_id)
+    correction = session.scalar(
+        select(AttendanceCorrection)
+        .where(AttendanceCorrection.id == correction_id)
+        .with_for_update()
+    )
     if correction is None:
         raise ApiProblem(
             404, "attendance_correction_not_found", "Koreksi tidak ditemukan."
@@ -483,6 +710,17 @@ def decide_attendance_correction(
     now = datetime.now(UTC)
     record_before: str | None = None
     created_record_id: str | None = None
+    siblings: list[AttendanceCorrection] = []
+    if correction.incident_ref is not None:
+        siblings = list(
+            session.scalars(
+                select(AttendanceCorrection).where(
+                    AttendanceCorrection.incident_ref == correction.incident_ref,
+                    AttendanceCorrection.id != correction.id,
+                    AttendanceCorrection.decision_status == "pending",
+                )
+            ).all()
+        )
     if request.decision == "approved" and record is not None:
         if record.status != correction.corrected_status:
             record_before = record.status
@@ -505,6 +743,56 @@ def decide_attendance_correction(
         created_record_id = str(record.id)
         record_before = "absent (tanpa record)"
 
+    for sibling in siblings:
+        if request.decision == "approved":
+            sib_record = (
+                session.get(AttendanceRecord, sibling.attendance_record_id)
+                if sibling.attendance_record_id is not None
+                else None
+            )
+            if sib_record is not None:
+                if sib_record.status == sibling.previous_status:
+                    sib_record.status = sibling.corrected_status
+            elif sibling.session_id is not None and sibling.student_id is not None:
+                sib_existing = session.scalar(
+                    select(AttendanceRecord).where(
+                        AttendanceRecord.session_id == sibling.session_id,
+                        AttendanceRecord.student_id == sibling.student_id,
+                    )
+                )
+                if sib_existing is None:
+                    sib_record = AttendanceRecord(
+                        session_id=sibling.session_id,
+                        student_id=sibling.student_id,
+                        status=sibling.corrected_status,
+                        source="manual",
+                        recognition_event_id=None,
+                        recorded_at=now,
+                        recorded_by_user_id=principal.id,
+                        note=(sibling.reason[:500] if sibling.reason else None),
+                    )
+                    session.add(sib_record)
+                    session.flush()
+                    sibling.attendance_record_id = sib_record.id
+        sibling.decision_status = request.decision
+        sibling.decided_by_user_id = principal.id
+        sibling.decided_at = now
+        if sibling.decision_note is None:
+            sibling.decision_note = request.decision_note
+        session.add(
+            AuditLog(
+                actor_user_id=principal.id,
+                action="attendance.correction.decided",
+                entity_type="attendance_correction",
+                entity_id=sibling.id,
+                before_state={"decision_status": "pending"},
+                after_state={
+                    "decision": request.decision,
+                    "incident_ref": str(correction.incident_ref),
+                    "applied_with": str(correction.id),
+                },
+            )
+        )
     correction.decision_status = request.decision
     correction.decided_by_user_id = principal.id
     correction.decided_at = now
@@ -543,6 +831,7 @@ def decide_attendance_correction(
     return AttendanceCorrectionResponse(
         id=correction.id,
         attendance_record_id=correction.attendance_record_id,
+        incident_ref=correction.incident_ref,
         session_id=correction.session_id,
         student_id=correction.student_id,
         previous_status=cast(AttendanceStatus, correction.previous_status),

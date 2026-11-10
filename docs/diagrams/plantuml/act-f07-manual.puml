@@ -25,8 +25,26 @@ else (Tidak)
 endif
 if (Ada kesalahan?) then (Ya)
   :POST koreksi + alasan wajib;
+  if (Kasus?) then (ada record)
+    :Kasus a: attendance_record_id + corrected_status;
+  elseif (tanpa record, sesi tutup) then (ya)
+    :Kasus b: session_id + student_id;
+    note right: previous = absen turunan
+  else (sesi aktif)
+    :409 session_still_active; pakai tandai manual;
+    stop
+  endif
   :pending + audit; record final tidak berubah;
-  :Menunggu kebijakan approval; tanpa endpoint putusan;
+  if (Putusan ADMIN?) then (Setujui)
+    :Lock target FOR UPDATE + cek ulang + terapkan atomik + audit;
+    note right: kasus b buat AttendanceRecord manual
+  elseif (Tolak + decision_note) then (ya)
+    :Rejected + audit; record final tetap;
+  else (tanpa note)
+    :422 decision_note wajib;
+    stop
+  endif
+  :Selesai beraudit;
   stop
 else (Tidak)
 endif
@@ -34,7 +52,7 @@ endif
 stop
 
 note right
-  Koreksi HANYA pending. Tidak ada keputusan
-  approve/reject di sistem berjalan.
+  Satu pending aktif per target.
+  Pending tak ubah rekap/laporan/EWS sampai approved.
 end note
 @enduml

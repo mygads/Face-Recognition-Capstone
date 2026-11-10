@@ -53,7 +53,7 @@ Keterangan siklus (yang membedakannya dari waterfall):
 | 2. Prototipe cepat | Dashboard Gentelella, CameraPreview loopback tanpa event, panel "Siswa perlu perhatian" |
 | 3. Uji coba pengguna | Guru buka sesi manual/override; laboran enrollment + preview |
 | 4. Review | Backlog P1-1…P2-2; ADR-001…ADR-003 sebagai catatan keputusan |
-| 5–6. Final + pengujian | `scripts/check.py` (ruff, format, mypy, pytest, eslint, prettier, vue-tsc, vitest); 17 migrasi Alembic; 21 pytest + 8 vitest untuk EWS |
+| 5–6. Final + pengujian | `scripts/check.py` (ruff, format, mypy, pytest, eslint, prettier, vue-tsc, vitest); 24 migrasi Alembic; gate penuh 491 pytest + 103 vitest (termasuk EWS at-risk + follow-up) |
 | 7–8. Deployment + evaluasi | Profil AI_EDGE default vs AI_CENTRAL; evaluasi melahirkan EWS tahap 2 |
 
 ## 2.4 Pintu kalibrasi (wajib sebelum klaim angka)

@@ -25,7 +25,8 @@ describe('application shell', () => {
 
     expect(wrapper.find('[data-testid="app-shell"]').exists()).toBe(true)
     expect(wrapper.find('[aria-label="Navigasi utama"]').exists()).toBe(true)
-    expect(wrapper.get('h1').text()).toBe('Ringkasan')
+    expect(wrapper.find('.app-topbar__breadcrumb-item--current').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="dashboard-page"]').exists()).toBe(true)
     wrapper.unmount()
   })
 
@@ -33,7 +34,7 @@ describe('application shell', () => {
     const wrapper = await mountAt('/auth/login')
 
     expect(wrapper.find('[data-testid="auth-layout"]').exists()).toBe(true)
-    expect(wrapper.get('h1').text()).toBe('Masuk ke akun')
+    expect(wrapper.text()).toContain('Portal Khusus Staf')
     wrapper.unmount()
   })
 

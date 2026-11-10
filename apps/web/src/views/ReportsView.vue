@@ -1,21 +1,31 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
+import {
+  UiBadge,
+  UiButton,
+  UiCard,
+  UiEmptyState,
+  UiInput,
+  UiPageHeader,
+  UiSearchInput,
+  UiSelect,
+  UiStat,
+} from '../components/ui'
+
+const route = useRoute()
 import {
   ApiError,
-  createEwsFollowUp,
   downloadAttendanceReport,
   getAttendanceReportSummary,
   listAttendanceReportRows,
-  listAtRiskStudents,
   listAttendanceSessions,
-  listEwsFollowUps,
   listSchedules,
   type AttendanceReportQuery,
   type AttendanceReportRow,
   type AttendanceReportSummary,
-  type AtRiskPage,
   type AttendanceSession,
-  type EwsFollowUp,
   type Schedule,
 } from '../api/client'
 import { triggerDownload } from '../utils/download'
@@ -33,49 +43,56 @@ const filters = reactive({
 })
 const schedules = ref<Schedule[]>([])
 const sessions = ref<AttendanceSession[]>([])
-const atRisk = ref<AtRiskPage | null>(null)
-const atRiskError = ref<string | null>(null)
-const followUps = ref<Record<string, EwsFollowUp[]>>({})
-const followUpDrafts = ref<Record<string, string>>({})
-const followUpError = ref<string | null>(null)
+const auth = useAuthStore()
+const canExport = computed(() => {
+  const roles = auth.account?.roles ?? []
+  if (roles.includes('ADMIN')) return true
+  return (auth.account?.permissions as string[] | undefined)?.includes('reports_export') ?? false
+})
+const scopeLabel = computed(() => {
+  const roles = auth.account?.roles ?? []
+  if (roles.includes('ADMIN')) return 'Cakupan: seluruh sekolah'
+  if (roles.includes('TEACHER')) return 'Cakupan: kelas yang ditugaskan kepada Anda'
+  return 'Cakupan: lab/kelas sesuai izin delegasi Anda'
+})
 function minutesLate(row: AttendanceReportRow): number | null {
-  if (row.status !== 'late' || !row.recorded_at) return null
+  // Durasi dihitung dari waktu kedatangan terverifikasi (occurred_at).
+  // Manual-mark tanpa jam datang yang diketahui tidak menampilkan durasi.
+  if (row.status !== 'late' || !row.occurred_at) return null
   const start = new Date(row.session_opened_at).getTime()
-  const rec = new Date(row.recorded_at).getTime()
+  const rec = new Date(row.occurred_at).getTime()
   if (Number.isNaN(start) || Number.isNaN(rec)) return null
   return Math.max(0, Math.round((rec - start) / 60000))
-}
-async function loadAtRisk(): Promise<void> {
-  try {
-    atRisk.value = await listAtRiskStudents({ limit: 25, offset: 0 })
-  } catch (error) {
-    atRiskError.value = formatError(error)
-  }
-}
-async function loadFollowUps(studentId: string): Promise<void> {
-  try {
-    followUps.value[studentId] = await listEwsFollowUps(studentId)
-  } catch (error) {
-    followUpError.value = formatError(error)
-  }
-}
-async function submitFollowUp(studentId: string): Promise<void> {
-  const note = (followUpDrafts.value[studentId] ?? '').trim()
-  if (!note) {
-    followUpError.value = 'Catatan tindak lanjut tidak boleh kosong.'
-    return
-  }
-  try {
-    const created = await createEwsFollowUp(studentId, note)
-    followUpDrafts.value[studentId] = ''
-    followUps.value[studentId] = [created, ...(followUps.value[studentId] ?? [])]
-  } catch (error) {
-    followUpError.value = formatError(error)
-  }
 }
 const summary = ref<AttendanceReportSummary | null>(null)
 const rows = ref<AttendanceReportRow[]>([])
 const total = ref(0)
+const tableSearch = ref('')
+const reportColumns = [
+  { key: 'session_time', label: 'Waktu sesi' },
+  { key: 'student', label: 'Siswa' },
+  { key: 'class', label: 'Kelas' },
+  { key: 'lab', label: 'Laboratorium' },
+  { key: 'subject', label: 'Praktikum' },
+  { key: 'teacher', label: 'Guru' },
+  { key: 'status', label: 'Status' },
+  { key: 'late', label: 'Terlambat' },
+  { key: 'note', label: 'Catatan' },
+  { key: 'recorded', label: 'Waktu tercatat' },
+] as const
+const hiddenCols = ref<string[]>([])
+function colVisible(key: string): boolean {
+  return !hiddenCols.value.includes(key)
+}
+const visibleColCount = computed(() => reportColumns.filter((c) => colVisible(c.key)).length || 1)
+const visibleRows = computed(() => {
+  const q = tableSearch.value.trim().toLowerCase()
+  if (!q) return rows.value
+  return rows.value.filter(
+    (row) =>
+      row.student_name.toLowerCase().includes(q) || row.student_number.toLowerCase().includes(q),
+  )
+})
 const page = ref(0)
 const appliedQuery = ref<AttendanceReportQuery | null>(null)
 const isLoading = ref(false)
@@ -181,6 +198,13 @@ async function exportReport(format: 'csv' | 'xlsx'): Promise<void> {
   }
 }
 
+function pct(part: number, whole: number): string {
+  if (!whole) return '0%'
+  return `${((part / whole) * 100).toFixed(1)}%`
+}
+function printSlip(): void {
+  window.print()
+}
 function statusLabel(status: AttendanceReportRow['status']): string {
   return {
     present: 'Hadir',
@@ -189,10 +213,6 @@ function statusLabel(status: AttendanceReportRow['status']): string {
     excused: 'Izin',
     not_recorded: 'Belum tercatat',
   }[status]
-}
-
-function statusClass(status: AttendanceReportRow['status']): string {
-  return `reports__status--${status}`
 }
 
 function formatDate(value: string | null): string {
@@ -230,280 +250,303 @@ async function loadOptions(): Promise<void> {
 }
 
 onMounted(async () => {
-  await Promise.all([loadOptions(), applyFilters(), loadAtRisk()])
+  // Filter dapat dipulihkan dari URL (mis. tautan EWS ?student_number=...).
+  const query = route.query
+  const pick = (key: string): string => {
+    const value = query[key]
+    return typeof value === 'string' ? value : ''
+  }
+  if (pick('student_number')) filters.student_number = pick('student_number')
+  if (pick('status')) filters.status = pick('status')
+  if (pick('class_id')) filters.class_id = pick('class_id')
+  if (pick('laboratory_id')) filters.laboratory_id = pick('laboratory_id')
+  if (pick('session_id')) filters.session_id = pick('session_id')
+  if (pick('starts_on')) filters.starts_on = pick('starts_on')
+  if (pick('ends_on')) filters.ends_on = pick('ends_on')
+  await Promise.all([loadOptions(), applyFilters()])
 })
 </script>
 
 <template>
-  <section class="master-data reports-view" aria-label="Laporan kehadiran">
-    <div class="reports__actions">
-      <p class="schedule-view__hint">
-        Filter data presensi per siswa dan sesi, lalu unduh rekap untuk dokumentasi.
-      </p>
-      <div>
-        <button
-          class="button button--secondary"
+  <div class="st-page" aria-label="Laporan kehadiran">
+    <UiPageHeader
+      eyebrow="Arsip & Rekapitulasi"
+      title="Laporan Kehadiran"
+      description="Rekapitulasi presensi praktikum laboratorium terintegrasi."
+    >
+      <template #actions>
+        <UiButton variant="secondary" type="button" @click="printSlip"
+          ><span class="st-material-icon" aria-hidden="true">print</span>Cetak Slip</UiButton
+        >
+        <UiButton
+          variant="primary"
           type="button"
-          :disabled="!summary || downloading !== null"
+          :disabled="!summary || downloading !== null || !canExport"
           data-testid="export-csv"
           @click="exportReport('csv')"
         >
-          {{ downloading === 'csv' ? 'Menyiapkan CSV…' : 'Unduh CSV' }}
-        </button>
-        <button
-          class="button button--primary"
+          {{ downloading === 'csv' ? 'Menyiapkan CSV…' : ''
+          }}<span v-if="downloading !== 'csv'" class="st-material-icon" aria-hidden="true"
+            >download</span
+          ><span v-if="downloading !== 'csv'">Ekspor Rekap (CSV)</span>
+        </UiButton>
+        <UiButton
+          variant="secondary"
           type="button"
-          :disabled="!summary || downloading !== null"
+          :disabled="!summary || downloading !== null || !canExport"
           data-testid="export-xlsx"
           @click="exportReport('xlsx')"
         >
-          {{ downloading === 'xlsx' ? 'Menyiapkan XLSX…' : 'Unduh XLSX' }}
-        </button>
-      </div>
-    </div>
+          {{ downloading === 'xlsx' ? 'Menyiapkan XLSX…' : 'XLSX' }}
+        </UiButton>
+      </template>
+    </UiPageHeader>
+    <p class="st-table__muted" data-testid="reports-scope">{{ scopeLabel }}</p>
+    <p v-if="!canExport" class="st-table__muted">
+      Ekspor membutuhkan izin “Ekspor Laporan”. Minta admin mengaktifkan delegasi bila perlu.
+    </p>
 
-    <form class="reports__filters" aria-label="Filter laporan" @submit.prevent="applyFilters">
-      <label>
-        <span>Mulai tanggal</span>
-        <input v-model="filters.starts_on" type="date" required />
-      </label>
-      <label>
-        <span>Sampai tanggal</span>
-        <input v-model="filters.ends_on" type="date" required :min="filters.starts_on" />
-      </label>
-      <label>
-        <span>Siswa · NIS/NISN</span>
-        <input
-          v-model="filters.student_number"
-          aria-label="Filter siswa"
-          type="search"
-          maxlength="32"
-          placeholder="Masukkan NIS/NISN"
-        />
-      </label>
-      <label>
-        <span>Kelas</span>
-        <select v-model="filters.class_id" aria-label="Filter kelas">
-          <option value="">Semua kelas</option>
-          <option
-            v-for="schedule in classOptions"
-            :key="schedule.class_id"
-            :value="schedule.class_id"
-          >
-            {{ schedule.class_name }}
-          </option>
-        </select>
-      </label>
-      <label>
-        <span>Laboratorium</span>
-        <select v-model="filters.laboratory_id" aria-label="Filter laboratorium">
-          <option value="">Semua laboratorium</option>
-          <option
-            v-for="schedule in laboratoryOptions"
-            :key="schedule.laboratory_id"
-            :value="schedule.laboratory_id"
-          >
-            {{ schedule.laboratory_name }}
-          </option>
-        </select>
-      </label>
-      <label>
-        <span>Sesi</span>
-        <select v-model="filters.session_id" aria-label="Filter sesi">
-          <option value="">Semua sesi</option>
-          <option v-for="session in sessions" :key="session.id" :value="session.id">
-            {{ sessionLabel(session) }}
-          </option>
-        </select>
-      </label>
-      <label>
-        <span>Status</span>
-        <select v-model="filters.status" aria-label="Filter status">
-          <option value="">Semua status</option>
-          <option value="present">Hadir</option>
-          <option value="late">Terlambat</option>
-          <option value="absent">Absen</option>
-          <option value="excused">Izin</option>
-          <option value="not_recorded">Belum tercatat</option>
-        </select>
-      </label>
-      <div class="reports__filter-actions">
-        <button class="button button--secondary" type="button" @click="resetFilters">
-          Atur ulang
-        </button>
-        <button class="button button--primary" type="submit" :disabled="isLoading">
-          {{ isLoading ? 'Memuat…' : 'Terapkan filter' }}
-        </button>
-      </div>
-    </form>
-
-    <p v-if="errorMessage" class="master-data__alert" role="alert">{{ errorMessage }}</p>
-
-    <section v-if="summary" class="reports__summary" aria-label="Ringkasan kehadiran">
-      <article class="reports__metric">
-        <span>Total siswa-sesi</span>
-        <strong>{{ summary.total_rows }}</strong>
-      </article>
-      <article class="reports__metric">
-        <span>Hadir</span>
-        <strong>{{ summary.present_count }}</strong>
-      </article>
-      <article class="reports__metric">
-        <span>Terlambat</span>
-        <strong>{{ summary.late_count }}</strong>
-      </article>
-      <article class="reports__metric">
-        <span>Absen</span>
-        <strong>{{ summary.absent_count }}</strong>
-      </article>
-      <article class="reports__metric">
-        <span>Belum tercatat</span>
-        <strong>{{ summary.not_recorded_count }}</strong>
-      </article>
-    </section>
-
-    <div class="master-data__table-wrap">
-      <table class="master-data__table reports__table">
-        <thead>
-          <tr>
-            <th scope="col">Waktu sesi</th>
-            <th scope="col">Siswa</th>
-            <th scope="col">Kelas</th>
-            <th scope="col">Laboratorium</th>
-            <th scope="col">Praktikum</th>
-            <th scope="col">Guru</th>
-            <th scope="col">Status</th>
-            <th scope="col">Terlambat</th>
-            <th scope="col">Catatan</th>
-            <th scope="col">Waktu tercatat</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="isLoading">
-            <td colspan="10" class="master-data__empty">Memuat laporan…</td>
-          </tr>
-          <tr v-else-if="rows.length === 0">
-            <td colspan="10" class="master-data__empty">Tidak ada data untuk filter ini.</td>
-          </tr>
-          <tr v-for="row in rows" v-else :key="`${row.session_id}-${row.student_id}`">
-            <td data-label="Waktu sesi">{{ formatDate(row.session_opened_at) }}</td>
-            <td data-label="Siswa">
-              <strong>{{ row.student_name }}</strong>
-              <small>{{ row.student_number }}</small>
-            </td>
-            <td data-label="Kelas">{{ row.class_name }}</td>
-            <td data-label="Laboratorium">{{ row.laboratory_name }}</td>
-            <td data-label="Praktikum">{{ row.subject }}</td>
-            <td data-label="Guru">{{ row.teacher_name }}</td>
-            <td data-label="Status">
-              <span class="reports__status" :class="statusClass(row.status)">
-                {{ statusLabel(row.status) }}
-              </span>
-              <span
-                v-if="row.status === 'late'"
-                class="reports__status reports__status--late"
-                data-testid="late-watermark"
-                >TERLAMBAT</span
+    <UiCard title="Filter Parameter Laporan">
+      <template #header>
+        <UiButton variant="secondary" type="button" @click="resetFilters">Reset Semua</UiButton>
+      </template>
+      <form aria-label="Filter laporan" @submit.prevent="applyFilters">
+        <div class="reports__filters">
+          <label class="st-field"
+            ><span>Mulai tanggal</span><UiInput v-model="filters.starts_on" type="date" required
+          /></label>
+          <label class="st-field"
+            ><span>Sampai tanggal</span
+            ><UiInput v-model="filters.ends_on" type="date" required :min="filters.starts_on"
+          /></label>
+          <label class="st-field"
+            ><span>Siswa · NIS/NISN</span
+            ><UiInput v-model="filters.student_number" type="text" placeholder="cth. 2401"
+          /></label>
+          <label class="st-field"
+            ><span>Laboratorium</span>
+            <UiSelect v-model="filters.laboratory_id">
+              <option value="">Semua laboratorium</option>
+              <option
+                v-for="lab in laboratoryOptions"
+                :key="lab.laboratory_id"
+                :value="lab.laboratory_id"
               >
-            </td>
-            <td data-label="Terlambat">
-              <small v-if="minutesLate(row) != null">telat {{ minutesLate(row) }} mnt</small>
-              <span v-else class="master-data__muted">–</span>
-            </td>
-            <td data-label="Catatan">
-              <small v-if="row.note">{{ row.note }}</small>
-              <span v-else class="master-data__muted">–</span>
-            </td>
-            <td data-label="Waktu tercatat">{{ formatDate(row.recorded_at) }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <section class="master-data__panel" aria-label="EWS tahap 1" data-testid="ews-panel">
-      <div class="master-data__panel-heading">
-        <div>
-          <p class="master-data__eyebrow">EWS tahap 1 · watchlist</p>
-          <h2>Siswa perlu perhatian + tindak lanjut</h2>
+                {{ lab.laboratory_name }}
+              </option>
+            </UiSelect>
+          </label>
+          <label class="st-field"
+            ><span>Kelas</span>
+            <UiSelect v-model="filters.class_id">
+              <option value="">Semua kelas</option>
+              <option v-for="cls in classOptions" :key="cls.class_id" :value="cls.class_id">
+                {{ cls.class_name }}
+              </option>
+            </UiSelect>
+          </label>
+          <label class="st-field"
+            ><span>Sesi Praktikum</span>
+            <UiSelect v-model="filters.session_id">
+              <option value="">Semua sesi</option>
+              <option v-for="session in sessions" :key="session.id" :value="session.id">
+                {{ sessionLabel(session) }}
+              </option>
+            </UiSelect>
+          </label>
+          <label class="st-field"
+            ><span>Status Kehadiran</span>
+            <UiSelect v-model="filters.status">
+              <option value="">Semua Status</option>
+              <option value="present">Hadir</option>
+              <option value="late">Terlambat</option>
+              <option value="absent">Absen</option>
+              <option value="excused">Izin</option>
+              <option value="not_recorded">Belum tercatat</option>
+            </UiSelect>
+          </label>
         </div>
-        <button class="button button--secondary" type="button" @click="loadAtRisk">
-          Muat ulang watchlist
-        </button>
-      </div>
-      <p class="accounts-view__hint">
-        Watchlist bukan sanksi dan tidak memblokir presensi. Klik siswa untuk melihat riwayat di
-        tabel di atas (filter NIS), lalu tulis catatan tindak lanjut. Tahap 1 tanpa notifikasi /
-        eskalasi otomatis.
-      </p>
-      <p v-if="atRiskError" class="master-data__alert" role="alert">{{ atRiskError }}</p>
-      <ul v-else-if="atRisk && atRisk.items.length" class="accounts-view__list">
-        <li
-          v-for="item in atRisk.items"
-          :key="item.student_id"
-          class="accounts-view__row"
-          data-testid="ews-row"
-        >
-          <div>
-            <strong>{{ item.full_name }}</strong>
-            <small
-              >{{ item.student_number }} · {{ item.class_name }} · absen {{ item.absence_pct }}% ·
-              terlambat {{ item.late_count }}x</small
-            >
-            <div>
-              <button
-                class="button button--text"
-                type="button"
-                @click="loadFollowUps(item.student_id)"
-              >
-                Lihat / tambah tindak lanjut
-              </button>
-            </div>
-            <ul v-if="followUps[item.student_id]?.length">
-              <li v-for="f in followUps[item.student_id]" :key="f.id">
-                <small>{{ f.created_at }} — {{ f.author_name }}: {{ f.note }}</small>
-              </li>
-            </ul>
-            <form @submit.prevent="submitFollowUp(item.student_id)">
-              <input
-                v-model="followUpDrafts[item.student_id]"
-                type="text"
-                maxlength="2000"
-                placeholder="Tulis tindak lanjut, mis. panggil orang tua / bimbingan"
-                :aria-label="'Tindak lanjut untuk ' + item.full_name"
-              />
-              <button class="button button--secondary" type="submit">Simpan catatan</button>
-            </form>
-          </div>
-        </li>
-      </ul>
-      <p v-else class="accounts-view__hint">Belum ada siswa yang perlu perhatian.</p>
-      <p v-if="followUpError" class="master-data__alert" role="alert">{{ followUpError }}</p>
-    </section>
-    <div class="master-data__pagination" aria-label="Navigasi halaman laporan">
-      <span>{{
-        total === 0
-          ? '0 baris'
-          : `${page * pageSize + 1}–${Math.min((page + 1) * pageSize, total)} dari ${total}`
-      }}</span>
-      <div>
-        <button
-          class="button button--secondary"
-          type="button"
-          :disabled="page === 0 || isLoading"
-          @click="goToPage(page - 1)"
-        >
-          Sebelumnya
-        </button>
-        <span>Halaman {{ page + 1 }} dari {{ Math.max(1, Math.ceil(total / pageSize)) }}</span>
-        <button
-          class="button button--secondary"
-          type="button"
-          :disabled="page + 1 >= Math.max(1, Math.ceil(total / pageSize)) || isLoading"
-          @click="goToPage(page + 1)"
-        >
-          Berikutnya
-        </button>
-      </div>
+        <div style="display: flex; gap: 8px; margin-top: 12px">
+          <UiButton variant="primary" type="submit" :disabled="isLoading">{{
+            isLoading ? 'Memuat…' : 'Terapkan filter'
+          }}</UiButton>
+        </div>
+      </form>
+    </UiCard>
+
+    <p v-if="errorMessage" class="st-alert st-alert--error" role="alert">{{ errorMessage }}</p>
+
+    <div v-if="summary" class="st-kpi" aria-label="Ringkasan kehadiran">
+      <UiStat
+        label="Total terdaftar"
+        :value="summary.total_rows"
+        :caption="`${total} baris pada halaman ini`"
+        icon="groups"
+        :progress="100"
+      />
+      <UiStat
+        label="Hadir tepat"
+        :value="summary.present_count"
+        :caption="`${pct(summary.present_count, summary.total_rows)} dari total`"
+        tone="success"
+        icon="check_circle"
+        :progress="(summary.present_count / Math.max(1, summary.total_rows)) * 100"
+      />
+      <UiStat
+        label="Terlambat"
+        :value="summary.late_count"
+        :caption="`${pct(summary.late_count, summary.total_rows)} terdata terlambat`"
+        tone="warning"
+        icon="schedule"
+        :progress="(summary.late_count / Math.max(1, summary.total_rows)) * 100"
+      />
+      <UiStat
+        label="Absen"
+        :value="summary.absent_count"
+        :caption="`${pct(summary.absent_count, summary.total_rows)} belum verifikasi`"
+        tone="danger"
+        icon="cancel"
+        :progress="(summary.absent_count / Math.max(1, summary.total_rows)) * 100"
+      />
     </div>
-  </section>
+
+    <div v-if="summary && summary.absent_count > 0" class="st-notice st-notice--info" role="note">
+      <span class="st-material-icon st-notice__icon" aria-hidden="true">info</span>
+      <div class="st-notice__text">
+        <strong>Status Rekonsiliasi Kehadiran Praktikum</strong>
+        <p>{{ summary.absent_count }} siswa berstatus absen sebelum proses koreksi manual admin.</p>
+      </div>
+      <RouterLink class="st-btnlink" to="/app/corrections"
+        >Tinjau di Koreksi Kehadiran →</RouterLink
+      >
+    </div>
+
+    <UiCard title="Daftar Presensi Peserta Praktikum" :subtitle="`${total} entri`">
+      <template #header>
+        <div class="reports__tabletools">
+          <UiSearchInput
+            v-model="tableSearch"
+            placeholder="Cari NIS atau Nama Siswa…"
+            aria-label="Cari NIS atau nama siswa"
+          />
+          <details class="st-coltoggle">
+            <summary><span class="st-material-icon" aria-hidden="true">tune</span>Kolom</summary>
+            <div class="st-coltoggle__panel" role="group" aria-label="Visibilitas kolom">
+              <label v-for="c in reportColumns" :key="c.key">
+                <input v-model="hiddenCols" type="checkbox" :value="c.key" /> {{ c.label }}
+              </label>
+            </div>
+          </details>
+        </div>
+      </template>
+      <div class="st-tablewrap">
+        <table class="st-table reports__table">
+          <thead>
+            <tr>
+              <th v-if="colVisible('session_time')" scope="col">Waktu sesi</th>
+              <th v-if="colVisible('student')" scope="col">Siswa</th>
+              <th v-if="colVisible('class')" scope="col">Kelas</th>
+              <th v-if="colVisible('lab')" scope="col">Laboratorium</th>
+              <th v-if="colVisible('subject')" scope="col">Praktikum</th>
+              <th v-if="colVisible('teacher')" scope="col">Guru</th>
+              <th v-if="colVisible('status')" scope="col">Status</th>
+              <th v-if="colVisible('late')" scope="col">Terlambat</th>
+              <th v-if="colVisible('note')" scope="col">Catatan</th>
+              <th v-if="colVisible('recorded')" scope="col">Waktu tercatat</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="isLoading">
+              <td :colspan="visibleColCount"><UiEmptyState title="Memuat laporan…" /></td>
+            </tr>
+            <tr v-else-if="visibleRows.length === 0">
+              <td :colspan="visibleColCount">
+                <UiEmptyState title="Tidak ada data untuk filter ini." />
+              </td>
+            </tr>
+            <tr v-for="row in visibleRows" v-else :key="`${row.session_id}-${row.student_id}`">
+              <td v-if="colVisible('session_time')" data-label="Waktu sesi" class="st-table__mono">
+                {{ formatDate(row.session_opened_at) }}
+              </td>
+              <td v-if="colVisible('student')" data-label="Siswa">
+                <strong>{{ row.student_name }}</strong
+                ><span class="st-table__sub">{{ row.student_number }}</span>
+              </td>
+              <td v-if="colVisible('class')" data-label="Kelas">{{ row.class_name }}</td>
+              <td v-if="colVisible('lab')" data-label="Laboratorium">{{ row.laboratory_name }}</td>
+              <td v-if="colVisible('subject')" data-label="Praktikum">{{ row.subject }}</td>
+              <td v-if="colVisible('teacher')" data-label="Guru">{{ row.teacher_name }}</td>
+              <td v-if="colVisible('status')" data-label="Status">
+                <UiBadge
+                  :tone="
+                    row.status === 'present'
+                      ? 'present'
+                      : row.status === 'late'
+                        ? 'late'
+                        : row.status === 'absent'
+                          ? 'absent'
+                          : row.status === 'excused'
+                            ? 'excused'
+                            : 'neutral'
+                  "
+                  >{{ statusLabel(row.status) }}</UiBadge
+                >
+              </td>
+              <td v-if="colVisible('late')" data-label="Terlambat">
+                <small v-if="minutesLate(row) != null">telat {{ minutesLate(row) }} mnt</small>
+                <span v-else class="st-table__muted">–</span>
+              </td>
+              <td v-if="colVisible('note')" data-label="Catatan">
+                <small v-if="row.note">{{ row.note }}</small>
+                <span v-else class="st-table__muted">–</span>
+              </td>
+              <td v-if="colVisible('recorded')" data-label="Waktu tercatat" class="st-table__mono">
+                {{ formatDate(row.recorded_at) }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div
+        class="master-data__pagination"
+        aria-label="Navigasi halaman laporan"
+        style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px"
+      >
+        <span class="st-table__muted">{{
+          total === 0
+            ? '0 baris'
+            : `${page * pageSize + 1}–${Math.min((page + 1) * pageSize, total)} dari ${total}`
+        }}</span>
+        <div style="display: flex; gap: 8px; align-items: center">
+          <UiButton
+            variant="secondary"
+            type="button"
+            :disabled="page === 0 || isLoading"
+            @click="goToPage(page - 1)"
+            >Sebelumnya</UiButton
+          >
+          <span class="st-table__muted"
+            >Halaman {{ page + 1 }} dari {{ Math.max(1, Math.ceil(total / pageSize)) }}</span
+          >
+          <UiButton
+            variant="secondary"
+            type="button"
+            :disabled="page + 1 >= Math.max(1, Math.ceil(total / pageSize)) || isLoading"
+            @click="goToPage(page + 1)"
+            >Berikutnya</UiButton
+          >
+        </div>
+      </div>
+    </UiCard>
+
+    <UiCard
+      title="Siswa perlu perhatian"
+      subtitle="Watchlist dan catatan tindak lanjut dikelola di halaman Peringatan Dini."
+      data-testid="ews-panel"
+    >
+      <template #header>
+        <RouterLink class="st-btnlink" to="/app/ews">Buka Peringatan Dini</RouterLink>
+      </template>
+    </UiCard>
+  </div>
 </template>

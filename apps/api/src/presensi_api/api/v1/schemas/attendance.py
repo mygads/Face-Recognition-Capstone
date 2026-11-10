@@ -31,6 +31,8 @@ class AttendanceRecordResponse(ApiSchema):
     source: AttendanceSource
     recognition_event_id: UUID | None
     recorded_at: AwareDatetime
+    occurred_at: AwareDatetime | None = None
+    rule_version: int | None = None
     note: str | None = None
 
 
@@ -86,6 +88,11 @@ class AttendanceCorrectionRequest(ApiSchema):
     student_id: UUID | None = None
     corrected_status: AttendanceStatus
     reason: str = Field(min_length=1, max_length=2000)
+    incident_ref: UUID | None = Field(
+        default=None,
+        description="Opsional: tautkan ke insiden koreksi yang sudah ada "
+        "(kasus salah identitas: dua koreksi diputus atomik).",
+    )
 
     @field_validator("reason")
     @classmethod
@@ -120,10 +127,17 @@ class AttendanceCorrectionDecisionRequest(ApiSchema):
         cleaned = value.strip()
         return cleaned or None
 
+    @model_validator(mode="after")
+    def require_note_when_rejected(self) -> "AttendanceCorrectionDecisionRequest":
+        if self.decision == "rejected" and not self.decision_note:
+            raise ValueError("Alasan penolakan wajib diisi.")
+        return self
+
 
 class AttendanceCorrectionResponse(ApiSchema):
     id: UUID
     attendance_record_id: UUID | None
+    incident_ref: UUID | None = None
     session_id: UUID | None = None
     student_id: UUID | None = None
     previous_status: AttendanceStatus
@@ -139,6 +153,7 @@ class AttendanceCorrectionResponse(ApiSchema):
 class ManualMarkRequest(ApiSchema):
     student_id: UUID
     status: AttendanceStatus
+    occurred_at: AwareDatetime | None = None
     note: str | None = Field(default=None, max_length=500)
 
     @field_validator("note")

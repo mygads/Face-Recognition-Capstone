@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { fetchWithPreviewTimeout } from '../utils/previewFetch'
+import { deviceHealthLabel } from '../utils/attendanceStatus'
 import { useAuthStore } from '../stores/auth'
 import { listDevices, listLaboratories, type Device, type Laboratory } from '../api/client'
+import { UiBadge, UiButton, UiCard, UiPageHeader, UiSelect } from '../components/ui'
 
 type PreviewStatus = {
   camera_open: boolean
@@ -71,12 +74,25 @@ type DiagnosticCandidate = {
 }
 
 const auth = useAuthStore()
+const route = useRoute()
+const router = useRouter()
 const previewToken = ref<string | null>(null)
+const openedRemotely = ref(false)
 const devices = ref<Device[]>([])
 const laboratories = ref<Laboratory[]>([])
 const selectedDeviceId = ref('')
 const selectedLabId = ref('')
 const deviceLoadError = ref<string | null>(null)
+
+function syncSelectionToUrl(): void {
+  void router.replace({
+    query: {
+      ...route.query,
+      lab: selectedLabId.value || undefined,
+      device: selectedDeviceId.value || undefined,
+    },
+  })
+}
 
 async function loadDevicesAndLabs(): Promise<void> {
   try {
@@ -86,10 +102,19 @@ async function loadDevicesAndLabs(): Promise<void> {
     ])
     devices.value = devicePage.items
     laboratories.value = labPage.items
-    if (!selectedDeviceId.value && devices.value.length)
-      selectedDeviceId.value = devices.value[0].device_id
-    const firstLab = devices.value[0]?.laboratory_id ?? laboratories.value[0]?.id
-    if (!selectedLabId.value && firstLab) selectedLabId.value = firstLab
+    const queryLab = typeof route.query.lab === 'string' ? route.query.lab : ''
+    const queryDevice = typeof route.query.device === 'string' ? route.query.device : ''
+    if (queryDevice && devices.value.some((d) => d.device_id === queryDevice)) {
+      selectedDeviceId.value = queryDevice
+      const dev = devices.value.find((d) => d.device_id === queryDevice)
+      selectedLabId.value = queryLab || dev?.laboratory_id || ''
+    } else {
+      if (!selectedDeviceId.value && devices.value.length)
+        selectedDeviceId.value = devices.value[0].device_id
+      const firstLab = devices.value[0]?.laboratory_id ?? laboratories.value[0]?.id
+      if (!selectedLabId.value && firstLab) selectedLabId.value = firstLab
+      syncSelectionToUrl()
+    }
   } catch (err) {
     deviceLoadError.value =
       err instanceof Error ? err.message : 'Daftar perangkat tidak dapat dimuat.'
@@ -102,12 +127,24 @@ function onDeviceChange(event: Event): void {
     selectedDeviceId.value = el.value
     const dev = devices.value.find((d) => d.device_id === el.value)
     if (dev) selectedLabId.value = dev.laboratory_id
+    openedRemotely.value = false
+    syncSelectionToUrl()
   }
 }
 
 function onLabChange(event: Event): void {
   const el = event.target
-  if (el instanceof HTMLSelectElement) selectedLabId.value = el.value
+  if (el instanceof HTMLSelectElement) {
+    selectedLabId.value = el.value
+    openedRemotely.value = false
+    syncSelectionToUrl()
+  }
+}
+
+function openOnLabDevice(): void {
+  // Feed kamera hanya bisa dibuka dari PC lab yang dipasangi agent (loopback companion);
+  // tombol ini menandai admin sudah membuka halaman ini di perangkat lab tersebut.
+  openedRemotely.value = true
 }
 const frameUrl = ref<string | null>(null)
 const previewStatus = ref<PreviewStatus | null>(null)
@@ -535,67 +572,84 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="camera-preview-view" aria-label="Preview kamera AI_EDGE">
-    <div class="camera-preview-view__intro">
+  <div class="st-page" aria-label="Preview kamera AI_EDGE">
+    <UiPageHeader
+      eyebrow="AI_EDGE · pilih perangkat & lab"
+      title="Preview Kamera Presensi"
+      description="Preview menggunakan stream yang sama dengan agent di PC lab ini; halaman ini tidak membuka webcam kedua."
+    >
+      <template #actions>
+        <UiBadge :tone="previewStatus?.camera_open ? 'present' : 'neutral'">
+          {{
+            previewStatus?.camera_open
+              ? 'Kamera aktif'
+              : isStarting
+                ? 'Menghubungkan…'
+                : 'Menunggu kamera'
+          }}
+        </UiBadge>
+        <UiButton variant="secondary" type="button" @click="toggleFullscreen">
+          {{ isFullscreen ? 'Keluar layar penuh' : 'Tampilan depan kamera' }}
+        </UiButton>
+      </template>
+    </UiPageHeader>
+    <UiCard
+      title="Sumber preview"
+      subtitle="Lab → perangkat/kamera → hubungkan. Mengganti sumber melepas sambungan lama."
+    >
       <div>
-        <p class="master-data__eyebrow">AI_EDGE · pilih perangkat &amp; lab</p>
-        <h2>Preview kamera presensi</h2>
-        <p>
-          Preview menggunakan stream yang sama dengan agent di PC lab ini; halaman ini tidak membuka
-          webcam kedua. Bila ada 2 kamera / 2 lab, pilih perangkat di bawah untuk melihat konteks
-          jadwal &amp; statusnya — video tetap dari kamera PC ini.
+        <p class="st-table__muted">
+          Bila ada 2 kamera / 2 lab, pilih perangkat di bawah untuk melihat konteks jadwal &amp;
+          statusnya - video tetap dari kamera PC ini.
         </p>
-        <div class="camera-preview-view__selectors">
-          <label>
-            Perangkat
-            <select
-              :value="selectedDeviceId"
+        <div class="st-grid2">
+          <label class="st-field"
+            ><span>Perangkat</span>
+            <UiSelect
+              :model-value="selectedDeviceId"
               aria-label="Pilih perangkat kamera"
               data-testid="preview-device-select"
               @change="onDeviceChange"
             >
               <option v-for="d in devices" :key="d.device_id" :value="d.device_id">
-                {{ d.name }} · {{ d.laboratory_name }} · {{ d.health_status }}
+                {{ d.name }} · {{ d.laboratory_name }} · {{ deviceHealthLabel(d.health_status) }}
               </option>
-            </select>
+            </UiSelect>
           </label>
-          <label>
-            Laboratorium
-            <select
-              :value="selectedLabId"
+          <label class="st-field"
+            ><span>Laboratorium</span>
+            <UiSelect
+              :model-value="selectedLabId"
               aria-label="Pilih laboratorium"
               data-testid="preview-lab-select"
               @change="onLabChange"
             >
               <option v-for="lab in laboratories" :key="lab.id" :value="lab.id">
-                {{ lab.code }} — {{ lab.name }}
+                {{ lab.code }} - {{ lab.name }}
               </option>
-            </select>
+            </UiSelect>
           </label>
         </div>
-        <p v-if="deviceLoadError" class="master-data__alert" role="alert">
+        <p v-if="deviceLoadError" class="st-alert st-alert--error" role="alert">
           {{ deviceLoadError }}
         </p>
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
+          <UiButton
+            variant="secondary"
+            type="button"
+            data-testid="open-on-lab-device"
+            @click="openOnLabDevice"
+          >
+            Buka di perangkat lab
+          </UiButton>
+          <p v-if="openedRemotely" class="st-table__muted" role="status">
+            Dibuka dari perangkat lab: pastikan halaman ini dijalankan di PC lab yang memasang agent
+            agar feed kamera lokal tersedia.
+          </p>
+        </div>
       </div>
-      <span
-        class="camera-preview-view__badge"
-        :class="previewStatus?.camera_open ? 'is-online' : 'is-offline'"
-        role="status"
-      >
-        {{
-          previewStatus?.camera_open
-            ? 'Kamera aktif'
-            : isStarting
-              ? 'Menghubungkan…'
-              : 'Menunggu kamera'
-        }}
-      </span>
-      <button class="button button--secondary" type="button" @click="toggleFullscreen">
-        {{ isFullscreen ? 'Keluar layar penuh' : 'Tampilan depan kamera' }}
-      </button>
-    </div>
-
-    <p v-if="errorMessage" class="master-data__alert" role="alert">{{ errorMessage }}</p>
+    </UiCard>
+    <p v-if="errorMessage" class="st-alert st-alert--error" role="alert">{{ errorMessage }}</p>
 
     <section
       v-if="!isFullscreen"
@@ -610,8 +664,8 @@ onBeforeUnmount(() => {
         <span>FPS capture aktual</span>
         <strong>{{ cameraFpsLabel }}</strong>
         <small>
-          Target {{ cameraMetrics?.requested_fps ?? '—' }} FPS · driver
-          {{ cameraMetrics?.driver_fps ?? '—' }} FPS
+          Target {{ cameraMetrics?.requested_fps ?? '-' }} FPS · driver
+          {{ cameraMetrics?.driver_fps ?? '-' }} FPS
         </small>
       </div>
       <div>
@@ -785,5 +839,5 @@ onBeforeUnmount(() => {
         </p>
       </aside>
     </div>
-  </section>
+  </div>
 </template>

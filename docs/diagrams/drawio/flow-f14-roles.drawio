@@ -4,7 +4,7 @@
 <mxCell id="v2" value="Buka sesi miliknya: manual selalu, auto bila mode automatic" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="630" y="350" width="200" height="80" as="geometry"/></mxCell>
 <mxCell id="v3" value="Pantau live" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="930" y="510" width="200" height="80" as="geometry"/></mxCell>
 <mxCell id="v4" value="Manual bila perlu di sesi berjalan" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="1230" y="670" width="200" height="80" as="geometry"/></mxCell>
-<mxCell id="v5" value="Ajukan koreksi: pending tanpa putusan" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="1530" y="830" width="200" height="80" as="geometry"/></mxCell>
+<mxCell id="v5" value="Ajukan koreksi pending; putusan oleh admin" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="1530" y="830" width="200" height="80" as="geometry"/></mxCell>
 <mxCell id="v6" value="Laporan dan EWS kelasnya" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="1830" y="990" width="200" height="80" as="geometry"/></mxCell>
 <mxCell id="v7" value="Enrollment wajah" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="630" y="1470" width="200" height="80" as="geometry"/></mxCell>
 <mxCell id="v8" value="Operasikan device: heartbeat dan monitor" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="930" y="1630" width="200" height="80" as="geometry"/></mxCell>

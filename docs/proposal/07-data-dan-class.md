@@ -9,7 +9,7 @@
 > definisi penuh lihat diagram fiturnya. `created_at`/`updated_at` teknis
 > dihilangkan kecuali relevan secara domain (expiry, revoke, record, audit).
 > ERD lengkap: render
-> [schema-erd.sql](schema-erd.sql) (18 tabel, tanpa data).
+> [schema-erd.sql](schema-erd.sql) (24 tabel, tanpa data).
 
 ## 7.1 Akun dan otorisasi (F-01, F-13)
 
@@ -40,14 +40,22 @@ classDiagram
     +DateTime last_used_at
     +DateTime revoked_at
   }
+  class UserPermissionGrant {
+    +UUID user_id
+    +String permission
+    +UUID granted_by_user_id
+  }
   User "1" -- "*" UserRole : memiliki
   Role "1" -- "*" UserRole : dipakai
   User "1" -- "*" AuthSession : sesi login
+  User "1" -- "*" UserPermissionGrant : grant opsional
 ```
 
 `opening_mode` ∈ {manual, automatic} via CHECK (konsisten 03/F-05:
 worker auto-open vs guru manual). `granted_by_user_id` nullable
-(pemberi role boleh sistem).
+(pemberi role boleh sistem). `user_permission_grants` menyimpan subset
+`LABORANT_GRANTABLE_PERMISSIONS` (10) per akun; sidebar + guard router
+dirender dari permission gabungan.
 
 ## 7.2 Master siswa, kelas, lab (F-02, F-04)
 
@@ -91,16 +99,40 @@ classDiagram
     +UUID id
     +String full_name
   }
+  class TeacherClassAssignment {
+    +UUID user_id
+    +UUID class_id
+    +Date starts_on
+    +Date ends_on
+    +bool is_substitute
+  }
+  class LaborantLabAssignment {
+    +UUID user_id
+    +UUID laboratory_id
+  }
+  class ClassLaboratory {
+    +UUID class_id
+    +UUID laboratory_id
+  }
   SchoolClass "1" -- "*" ClassStudent : roster
   Student "1" -- "*" ClassStudent : anggota
   SchoolClass "1" -- "*" PracticumSchedule : dijadwalkan
   Laboratory "1" -- "*" PracticumSchedule : dipakai
   User "1" -- "*" PracticumSchedule : diajar guru
   User "1" -- "0..*" SchoolClass : wali kelas (nullable)
+  User "1" -- "*" TeacherClassAssignment : mengampu
+  SchoolClass "1" -- "*" TeacherClassAssignment : diampu
+  User "1" -- "*" LaborantLabAssignment : ditugaskan
+  Laboratory "1" -- "*" LaborantLabAssignment : dilayani
+  SchoolClass "1" -- "*" ClassLaboratory : dilayani lab
+  Laboratory "1" -- "*" ClassLaboratory : melayani kelas
 ```
 
 `homeroom_teacher_id` nullable → `users` (eskalasi wali kelas U-04,
-konsisten 03); `location` dan `effective_through` nullable.
+konsisten 03); `location` dan `effective_through` nullable. Penugasan
+guru→kelas berperiode (`starts_on/ends_on`, pengganti didukung);
+laboran→lab N lab per laboran (0 lab = empty state); relasi kelas↔lab
+untuk enrollment — ketiganya composite PK + dikelola admin atomik.
 
 ## 7.3 Enrollment wajah (F-03)
 
@@ -179,6 +211,9 @@ classDiagram
   }
   class AttendanceCorrection {
     +UUID attendance_record_id
+    +UUID session_id
+    +UUID student_id
+    +UUID incident_ref
     +UUID requested_by_user_id
     +String previous_status
     +String corrected_status
@@ -204,7 +239,10 @@ classDiagram
   Student "1" -- "0..*" RecognitionEvent : dikenali (nullable)
   SessionStudent "1" -- "0..1" AttendanceRecord : FK roster
   RecognitionEvent "1" -- "0..1" AttendanceRecord : maks 1 record
-  AttendanceRecord "1" -- "*" AttendanceCorrection : pending saja
+  AttendanceRecord "1" -- "*" AttendanceCorrection : kasus a
+  AttendanceSession "1" -- "*" AttendanceCorrection : kasus b tanpa record
+  Student "1" -- "*" AttendanceCorrection : kasus b tanpa record
+  AttendanceCorrection "*" -- "0..1" AttendanceCorrection : salah-identitas via incident_ref
 ```
 
 `opened_by_user_id` **nullable** — worker auto-open berjalan tanpa guru
@@ -244,11 +282,20 @@ classDiagram
     +String code
     +String name
   }
+  class KioskScreen {
+    +UUID device_id
+    +UUID laboratory_id
+    +String display_name
+    +String camera_label
+    +bool is_active
+  }
   class User {
     +UUID id
     +String full_name
   }
   Laboratory "1" -- "*" Device : terpasang
+  Laboratory "1" -- "*" KioskScreen : layar presensi
+  Device "1" -- "*" KioskScreen : pairing unik device+lab
   User "1" -- "0..*" RuntimeConfigurationVersion : menerbitkan (nullable)
 ```
 
@@ -256,7 +303,9 @@ classDiagram
 `deployment_profile` ∈ {AI_EDGE, STB_GATEWAY} via CHECK. Kredensial
 device tersimpan sebagai hash dan tidak dipajang; yang ditampilkan hanya
 `credential_expires_at` operasional. `config_error_code` nullable dan hanya
-terisi bila apply config gagal.
+terisi bila apply config gagal. `kiosk_screens` unik per (device, lab)
+dengan PIN hash per layar; `laboratories` menyimpan hash PIN layar +
+counter kunci 5x salah. PIN/hash tidak pernah dipajang ulang.
 
 ## 7.6 Laporan dan EWS (F-09, F-10, U-02)
 
@@ -278,10 +327,10 @@ classDiagram
   }
   class EwsFollowUp {
     +UUID student_id
-    +UUID session_id
-    +String stage
+    +UUID author_user_id
+    +String status
+    +DateTime resolved_at
     +String note
-    +UUID created_by_user_id
     +DateTime created_at
   }
   class AuditLog {
@@ -300,7 +349,8 @@ classDiagram
   }
   RuntimeConfigurationVersion "1" -- "0..1" AtRiskPolicy : scope attendance-at-risk-policy
   AtRiskPolicy ..> Student : menghitung flag
-  Student "1" -- "0..*" EwsFollowUp : U-02 usulan (belum tabel)
+  Student "1" -- "0..*" EwsFollowUp : tindak lanjut (F-10 jalan)
+  User "1" -- "0..*" EwsFollowUp : penulis
   User "1" -- "0..*" AuditLog : aktor (nullable)
 ```
 
@@ -311,30 +361,35 @@ classDiagram
   `late_count_threshold`) tersimpan di `settings` JSONB + `revision`
   beraudit (konsisten 09: default 30 hari + 20 persen + 3x bila policy
   belum tersimpan).
-- `EwsFollowUp` (U-02, tabel usulan `ews_follow_ups`) **belum ada di
-  database berjalan** — DDL masih komentar di `schema-erd.sql`, perlu
-  migrasi Alembic bila diimplementasikan (konsisten 03/U-02, 09).
+- `EwsFollowUp` (U-02, F-10) **tabel nyata berjalan**: `status` ∈
+  {open, done} + `resolved_at`; tindak lanjut dicatat via drawer EWS dan
+  dibaca guru/admin sesuai cakupan (konsisten 03/U-02, 09).
 - `actor_user_id` nullable (aksi sistem OK); `request_id`,
   `before_state`/`after_state` nullable.
 
-## 7.7 Ringkasan 18 tabel (untuk Bab "Perancangan Basis Data")
+## 7.7 Ringkasan 24 tabel (untuk Bab "Perancangan Basis Data")
 
 | Tabel | Peran |
 |---|---|
 | users, roles, user_roles, auth_sessions | Akun, role, sesi login |
+| user_permission_grants | Grant opsional laboran (subset 10 permission) |
 | students, classes, class_students | Master + roster kelas |
-| laboratories, devices | Lab + registry perangkat |
+| teacher_class_assignments, laborant_lab_assignments, class_laboratories | Penugasan guru→kelas (periode), laboran→lab, kelas↔lab |
+| laboratories, devices, kiosk_screens | Lab + registry perangkat + layar kiosk (PIN hash) |
 | runtime_configuration_versions | Policy berversi (AI config, ambang EWS) + penerbit |
 | practicum_schedules | Jadwal mingguan |
 | attendance_sessions, session_students | Sesi + snapshot roster immutable |
 | face_templates | Embedding terenkripsi + model name/version |
 | recognition_events | Bukti audit (matched/ambiguous/no_match/error/redacted) |
 | attendance_records | Keputusan final (present/late/absent/excused) |
-| attendance_corrections | Pengajuan koreksi pending |
-| audit_logs | Jejak aksi |
+| attendance_corrections | Koreksi 2 kasus + putusan ADMIN (kasus b tanpa record) |
+| ews_follow_ups | Tindak lanjut watchlist (`open`/`done`) |
+| audit_logs | Jejak aksi (dibaca via `/api/v1/audit/activity` + `/app/audit`) |
 
 Aturan keras: `attendance_records(session_id, student_id)` unik; record
 face_recognition wajib menunjuk event; record manual/system tidak boleh
 menunjuk event; satu event maksimal satu record; FK record →
-`session_students` menjamin siswa di snapshot. DDL usulan EWS
-(`ews_follow_ups`) tetap proposal di luar 18 tabel.
+`session_students` menjamin siswa di snapshot. Koreksi kasus (a)
+menunjuk record; kasus (b) menunjuk pasangan sesi+siswa; satu pending
+aktif per target (partial unique); `incident_ref` menggabungkan 2
+keputusan salah-identitas.

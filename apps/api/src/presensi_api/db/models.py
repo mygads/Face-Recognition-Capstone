@@ -199,6 +199,12 @@ class Laboratory(UUIDPrimaryKey, TimestampMixin, Base):
     display_pin_updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
+    display_pin_fail_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    display_pin_locked_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
 
 class Device(UUIDPrimaryKey, TimestampMixin, Base):
@@ -573,6 +579,8 @@ class AttendanceRecord(UUIDPrimaryKey, TimestampMixin, Base):
     recorded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rule_version: Mapped[int | None] = mapped_column(Integer)
     note: Mapped[str | None] = mapped_column(Text)
 
 
@@ -602,6 +610,22 @@ class AttendanceCorrection(UUIDPrimaryKey, TimestampMixin, Base):
         ),
         Index("ix_attendance_corrections_attendance_record_id", "attendance_record_id"),
         Index("ix_attendance_corrections_requested_by_user_id", "requested_by_user_id"),
+        Index("ix_attendance_corrections_incident_ref", "incident_ref"),
+        Index(
+            "uq_correction_pending_record",
+            "attendance_record_id",
+            unique=True,
+            postgresql_where=text("decision_status = 'pending'"),
+            sqlite_where=text("decision_status = 'pending'"),
+        ),
+        Index(
+            "uq_correction_pending_missing",
+            "session_id",
+            "student_id",
+            unique=True,
+            postgresql_where=text("decision_status = 'pending'"),
+            sqlite_where=text("decision_status = 'pending'"),
+        ),
     )
 
     attendance_record_id: Mapped[UUID | None] = mapped_column(
@@ -618,6 +642,7 @@ class AttendanceCorrection(UUIDPrimaryKey, TimestampMixin, Base):
     requested_by_user_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
+    incident_ref: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), default=uuid4)
     decided_by_user_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT")
     )
@@ -672,6 +697,10 @@ class UserPermissionGrant(TimestampMixin, Base):
 class EwsFollowUp(UUIDPrimaryKey, TimestampMixin, Base):
     __tablename__ = "ews_follow_ups"
     __table_args__ = (
+        CheckConstraint(
+            "status IN ('open', 'done')",
+            name="ews_follow_up_status",
+        ),
         Index("ix_ews_follow_ups_student_id", "student_id"),
         Index("ix_ews_follow_ups_created_at", "created_at"),
     )
@@ -684,7 +713,93 @@ class EwsFollowUp(UUIDPrimaryKey, TimestampMixin, Base):
     author_user_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="open", server_default=text("'open'")
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     note: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class TeacherClassAssignment(TimestampMixin, Base):
+    """Penugasan guru ke kelas (aktif per periode, bisa pengganti)."""
+
+    __tablename__ = "teacher_class_assignments"
+    __table_args__ = (Index("ix_teacher_class_class_id", "class_id"),)
+
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    class_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("classes.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    assigned_by_user_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    starts_on: Mapped[date | None] = mapped_column(Date)
+    ends_on: Mapped[date | None] = mapped_column(Date)
+    is_substitute: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+
+
+class ClassLaboratory(TimestampMixin, Base):
+    """Relasi kelas yang dilayani suatu laboratorium (untuk enrollment)."""
+
+    __tablename__ = "class_laboratories"
+    __table_args__ = (Index("ix_class_lab_laboratory_id", "laboratory_id"),)
+
+    class_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("classes.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    laboratory_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("laboratories.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    assigned_by_user_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+
+class KioskScreen(UUIDPrimaryKey, TimestampMixin, Base):
+    """Layar presensi (kiosk) per perangkat+lab dengan PIN sendiri."""
+
+    __tablename__ = "kiosk_screens"
+    __table_args__ = (
+        UniqueConstraint(
+            "device_id", "laboratory_id", name="uq_kiosk_screens_device_lab"
+        ),
+        Index("ix_kiosk_screens_device_id", "device_id"),
+        Index("ix_kiosk_screens_laboratory_id", "laboratory_id"),
+    )
+
+    device_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("devices.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    laboratory_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("laboratories.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    camera_label: Mapped[str | None] = mapped_column(String(120))
+    pin_hash: Mapped[str | None] = mapped_column(String(255))
+    pin_fail_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    pin_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AuditLog(UUIDPrimaryKey, Base):

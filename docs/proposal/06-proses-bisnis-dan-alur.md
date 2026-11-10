@@ -181,11 +181,11 @@ liveness `liveness_disabled`, `liveness_score_missing`,
 | matched + rantai validasi lolos | `present` (dalam grace) / `late` (lewat grace) |
 | ambiguous / no_match / error | Event audit saja, tanpa record; UI: `retry_frontal` untuk ambigu |
 
-Sepuluh reason resmi `attendance_decision`: `device_inactive`,
-`device_camera_disabled`, `device_laboratory_mismatch`, `session_inactive`,
-`student_not_found`, `student_not_in_session_roster`,
-`session_not_accessible`, `recognition_not_matched`, `liveness_failed`,
-`attendance_already_recorded`.
+Sepuluh reason resmi `attendance_decision` (urutan evaluasi sama dengan kode:
+akses dulu, lalu device/sesi/roster/match/duplikat): `session_not_accessible`,
+`device_inactive`, `device_camera_disabled`, `device_laboratory_mismatch`,
+`session_inactive`, `student_not_found`, `student_not_in_session_roster`,
+`recognition_not_matched`, `liveness_failed`, `attendance_already_recorded`.
 
 ## 6.7 Jaminan lintas alur
 

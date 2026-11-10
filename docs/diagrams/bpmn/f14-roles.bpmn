@@ -6,7 +6,7 @@
 <task id="g1" name="Buka sesi miliknya: manual selalu, auto bila mode automatic"><incoming>F_fork_1</incoming><outgoing>F_g1_2</outgoing></task>
 <task id="g2" name="Pantau live"><incoming>F_g1_2</incoming><outgoing>F_g2_3</outgoing></task>
 <task id="g3" name="Manual bila perlu di sesi berjalan"><incoming>F_g2_3</incoming><outgoing>F_g3_4</outgoing></task>
-<task id="g4" name="Ajukan koreksi: pending tanpa putusan"><incoming>F_g3_4</incoming><outgoing>F_g4_5</outgoing></task>
+<task id="g4" name="Ajukan koreksi pending; putusan oleh admin"><incoming>F_g3_4</incoming><outgoing>F_g4_5</outgoing></task>
 <task id="g5" name="Laporan dan EWS kelasnya"><incoming>F_g4_5</incoming><outgoing>F_g5_6</outgoing></task>
 <task id="l1" name="Enrollment wajah"><incoming>F_fork_7</incoming><outgoing>F_l1_8</outgoing></task>
 <task id="l2" name="Operasikan device: heartbeat dan monitor"><incoming>F_l1_8</incoming><outgoing>F_l2_9</outgoing></task>

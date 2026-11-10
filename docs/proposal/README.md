@@ -25,11 +25,11 @@
 |---|---|
 | [01-pendahuluan.md](01-pendahuluan.md) | Latar belakang, rumusan, batasan, tujuan, manfaat (Bab I) |
 | [02-metode-prototype.md](02-metode-prototype.md) | Metode Prototype + siklus review/uji-coba (Bab III) |
-| [03-fitur-dan-peran.md](03-fitur-dan-peran.md) | Daftar fitur F-01–F-14 + usulan U-01–U-04, aktor, matriks akses |
+| [03-fitur-dan-peran.md](03-fitur-dan-peran.md) | Daftar fitur F-01–F-24 + usulan U-01–U-04 (U-02 sudah jalan), aktor, matriks akses |
 | [04-use-case.md](04-use-case.md) | Use case per aktor + relasi `include`/`extend` |
 | [05-activity.md](05-activity.md) | Activity diagram per fitur + ringkasan per role |
 | [06-proses-bisnis-dan-alur.md](06-proses-bisnis-dan-alur.md) | Alur end-to-end, sequence, state machine, tabel keputusan |
-| [07-data-dan-class.md](07-data-dan-class.md) | Class diagram per fitur + ringkasan 18 tabel |
+| [07-data-dan-class.md](07-data-dan-class.md) | Class diagram per fitur + ringkasan 24 tabel |
 | [08-arsitektur.md](08-arsitektur.md) | Container, pipeline AI, keamanan wajah, ADR, batas hardware |
 | [09-ews.md](09-ews.md) | EWS tahap 1 (jalan) + tahap 2 (usulan): UC, activity, data |
 | [10-kesesuaian-bab1-3.md](10-kesesuaian-bab1-3.md) | Catatan penyelarasan draf Bab I–III |
@@ -45,12 +45,18 @@
    File ini BUKAN migrasi — perubahan skema tetap lewat Alembic.
 3. Setiap tabel `| Kode | ... |` bisa disalin langsung menjadi tabel Word.
 
-## Status kebenaran (hasil audit kode + docs, 2026-10-25)
+## Status kebenaran (hasil audit kode + docs, 2026-11-10)
 
-- Seluruh `docs/` dibaca (15 file). Dua fakta basi diperbaiki di tempat:
-  `siklus-presensi.md` (worker auto-close/open tiap **10 detik**, bukan 30;
-  grace auto-open dihitung dari **jam mulai jadwal**) dan `ADR-003`
-  (status implementasi **Selesai**, migrasi `f4e5d6c7b8a9`).
+- Audit penuh arsitektur vs kode berjalan: 21 halaman Vue (26 path `/app/*` guarded + 2 auth + 1 publik `/presensi`), 18 permission (TEACHER 13, LABORANT 4 + hingga 10 grant), 18 router backend, 24 migrasi Alembic, 24 tabel, 92 path OpenAPI (`schema.d.ts`), gate 491 pytest + 103 vitest.
+
+Fakta basi yang diperbaiki audit ini: 03 (13→18 permission, 15→21 halaman,
+  16→18 router, grant laboran 6→10, baca policy `SESSION_VIEW`, matriks audit
+  + menu grant), 04 (UC9 putusan ADMIN + UC16 endpoint/UI audit + UC5/UC9 laboran
+  bersyarat grant), 05 §5.7 (activity koreksi + putusan), 07 +
+  `schema-erd.sql` (18→24 tabel; koreksi 2 kasus, `ews_follow_ups` nyata,
+  grant/penugasan/kiosk), 01 (koreksi + putusan jalan), 02/10 (17→24 migrasi),
+  09 (U-02 SUDAH jalan sebagai F-10 + DDL nyata). Audit lama 2026-10-25
+  (worker 10 detik, grace auto-open dari jam jadwal, ADR-003 Selesai) tetap berlaku.
 - Semua angka di dokumen ini diverifikasi dari kode (`apps/api`,
   `apps/edge-agent`, `apps/ai-service`, `libs/recognition-core`,
   `apps/web`) — lihat catatan sumber per file.

@@ -25,12 +25,19 @@ class AuthSession {
   +DateTime last_used_at
   +DateTime revoked_at
 }
+class UserPermissionGrant {
+  +UUID user_id
+  +String permission
+  +UUID granted_by_user_id
+}
 User "1" -- "*" UserRole : memiliki
 Role "1" -- "*" UserRole : dipakai
 User "1" -- "*" AuthSession : sesi login
+User "1" -- "*" UserPermissionGrant : grant opsional
 
 note bottom of User
   opening_mode in {manual, automatic}.
   granted_by_user_id nullable (pemberi role boleh sistem).
+  user_permission_grants = subset LABORANT_GRANTABLE (10).
 end note
 @enduml

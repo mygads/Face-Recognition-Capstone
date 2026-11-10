@@ -387,3 +387,29 @@ def test_report_rows_and_exports_surface_teacher_note(
     csv_rows = list(csv.reader(StringIO(csv_response.text.lstrip("\ufeff"))))
     note_column = csv_rows[0].index("Catatan")
     assert any(row[note_column] == "'=1+1 catat hadir" for row in csv_rows[1:])
+
+
+def test_report_rows_expose_verified_arrival_time(
+    report_database: sessionmaker[Session],
+) -> None:
+    """occurred_at (jam datang terverifikasi) diteruskan ke baris laporan.
+
+    Manual-mark tanpa jam datang yang diketahui tetap null agar UI tidak
+    menampilkan durasi palsu.
+    """
+    admin = principal(RoleCode.ADMIN, ADMIN_ID)
+    with report_database.begin() as db:
+        record = db.scalar(
+            select(AttendanceRecord).where(
+                AttendanceRecord.session_id == SESSION_A_ID,
+                AttendanceRecord.student_id == STUDENT_A_ID,
+            )
+        )
+        assert record is not None
+        record.occurred_at = datetime(2026, 9, 15, 2, 5, tzinfo=UTC)
+    common = "starts_on=2026-09-01&ends_on=2026-09-30"
+    rows = request(f"/api/v1/reports/attendance/records?{common}", admin)
+    assert rows.status_code == 200, rows.text
+    by_student = {row["student_id"]: row for row in rows.json()["items"]}
+    assert by_student[str(STUDENT_A_ID)]["occurred_at"] == "2026-09-15T02:05:00Z"
+    assert by_student[str(STUDENT_C_ID)]["occurred_at"] is None

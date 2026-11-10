@@ -26,9 +26,18 @@ classDiagram
     +String code
     +String name
   }
+  class KioskScreen {
+    +UUID device_id
+    +UUID laboratory_id
+    +String display_name
+    +String camera_label
+    +bool is_active
+  }
   class User {
     +UUID id
     +String full_name
   }
   Laboratory "1" -- "*" Device : terpasang
+  Laboratory "1" -- "*" KioskScreen : layar presensi
+  Device "1" -- "*" KioskScreen : pairing unik device+lab
   User "1" -- "0..*" RuntimeConfigurationVersion : menerbitkan (nullable)

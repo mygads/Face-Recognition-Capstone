@@ -63,7 +63,7 @@ describe('route authorization', () => {
     expect(router.currentRoute.value.name).toBe('forbidden')
   })
 
-  it('allows teachers and laborants (grants enforced by API) into reports', async () => {
+  it('enforces report permissions: teacher passes, laborant needs a grant', async () => {
     const pinia = createPinia()
     const auth = useAuthStore(pinia)
     auth.$patch({
@@ -75,7 +75,7 @@ describe('route authorization', () => {
         full_name: 'Test Teacher',
         roles: ['TEACHER'],
         must_change_password: false,
-        permissions: [],
+        permissions: ['reports_read'],
       },
     })
     const router = createAppRouter(createMemoryHistory())
@@ -86,6 +86,11 @@ describe('route authorization', () => {
     expect(router.currentRoute.value.name).toBe('reports')
     await router.push('/app/dashboard')
     auth.account!.roles = ['LABORANT']
+    auth.account!.permissions = []
+    await router.push('/app/reports')
+    expect(router.currentRoute.value.name).toBe('forbidden')
+    await router.push('/app/dashboard')
+    auth.account!.permissions = ['reports_read']
     await router.push('/app/reports')
     expect(router.currentRoute.value.name).toBe('reports')
   })

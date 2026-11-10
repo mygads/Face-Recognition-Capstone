@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Literal, cast
+from typing import Annotated, Any, Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
@@ -132,6 +132,9 @@ def _commit(session: Session, code: str, message: str) -> None:
 )
 def list_laboratories(
     session: DbSession,
+    principal: Annotated[
+        AuthenticatedUser, Depends(require_permissions(Permission.LABORATORY_READ))
+    ],
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     search: Annotated[str | None, Query(max_length=200)] = None,
@@ -139,7 +142,17 @@ def list_laboratories(
 ) -> PageResponse[LaboratoryResponse]:
     query = select(Laboratory)
     count_query = select(func.count()).select_from(Laboratory)
-    filters = []
+    filters: list[Any] = []
+    from presensi_api.api.security.roles import RoleCode as _RC
+
+    if _RC.ADMIN not in principal.roles and _RC.LABORANT in principal.roles:
+        from presensi_api.api.security.scope import laborant_lab_ids as _ll
+
+        _labs = _ll(session, principal.id)
+        if _labs:
+            filters.append(Laboratory.id.in_(_labs))
+        else:
+            filters.append(Laboratory.id.is_(None))
     if search and search.strip():
         pattern = like_contains(search)
         filters.append(
@@ -224,6 +237,9 @@ def update_laboratory(
 )
 def list_devices(
     session: DbSession,
+    principal: Annotated[
+        AuthenticatedUser, Depends(require_permissions(Permission.DEVICE_OPERATE))
+    ],
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     search: Annotated[str | None, Query(max_length=200)] = None,
@@ -240,7 +256,17 @@ def list_devices(
         .select_from(Device)
         .join(Laboratory, Device.laboratory_id == Laboratory.id)
     )
-    filters = []
+    filters: list[Any] = []
+    from presensi_api.api.security.roles import RoleCode as _RC2
+
+    if _RC2.ADMIN not in principal.roles and _RC2.LABORANT in principal.roles:
+        from presensi_api.api.security.scope import laborant_lab_ids as _ll2
+
+        _labs2 = _ll2(session, principal.id)
+        if _labs2:
+            filters.append(Device.laboratory_id.in_(_labs2))
+        else:
+            filters.append(Device.laboratory_id.is_(None))
     now = datetime.now(UTC)
     cutoff = now - timedelta(seconds=heartbeat_timeout_seconds())
     if search and search.strip():

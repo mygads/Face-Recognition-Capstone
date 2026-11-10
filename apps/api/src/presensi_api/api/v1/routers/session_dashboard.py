@@ -17,7 +17,6 @@ from presensi_api.api.security.dependencies import require_permissions
 from presensi_api.api.security.roles import (
     AuthenticatedUser,
     Permission,
-    RoleCode,
     principal_for_user,
 )
 from presensi_api.api.v1.schemas.attendance import (
@@ -46,8 +45,8 @@ from presensi_api.session_lifecycle import as_utc, close_expired_sessions
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 DbSession = Annotated[Session, Depends(get_db_session)]
-SessionOperator = Annotated[
-    AuthenticatedUser, Depends(require_permissions(Permission.SESSION_OPERATE))
+SessionViewer = Annotated[
+    AuthenticatedUser, Depends(require_permissions(Permission.SESSION_VIEW))
 ]
 
 
@@ -59,12 +58,11 @@ def _session_for_principal(
     if attendance_session is None:
         raise ApiProblem(404, "session_not_found", "Sesi presensi tidak ditemukan.")
     schedule = db.get(PracticumSchedule, attendance_session.practicum_schedule_id)
-    if schedule is None or (
-        RoleCode.TEACHER in principal.roles
-        and RoleCode.ADMIN not in principal.roles
-        and schedule.teacher_user_id != principal.id
-    ):
+    if schedule is None:
         raise ApiProblem(404, "session_not_found", "Sesi presensi tidak ditemukan.")
+    from presensi_api.api.security.scope import ensure_session_read as _esr
+
+    _esr(db, principal, schedule)
     return attendance_session, schedule
 
 
@@ -315,7 +313,7 @@ def _principal_from_token(
 )
 def get_session_dashboard(
     session_id: UUID,
-    principal: SessionOperator,
+    principal: SessionViewer,
     db: DbSession,
 ) -> SessionDashboardSnapshot:
     attendance_session, schedule = _session_for_principal(db, session_id, principal)
@@ -350,7 +348,7 @@ async def stream_session_updates(
         await websocket.close(code=4401, reason="Authentication required")
         return
     principal, token_expires_at = authentication_result
-    if Permission.SESSION_OPERATE not in principal.permissions:
+    if Permission.SESSION_VIEW not in principal.permissions:
         await websocket.close(code=4403, reason="Permission denied")
         return
     try:
@@ -369,7 +367,7 @@ async def stream_session_updates(
                 await websocket.close(code=4401, reason="Authentication required")
                 return
             refreshed_principal, _ = refreshed_authentication
-            if Permission.SESSION_OPERATE not in refreshed_principal.permissions:
+            if Permission.SESSION_VIEW not in refreshed_principal.permissions:
                 await websocket.close(code=4403, reason="Permission denied")
                 return
             try:

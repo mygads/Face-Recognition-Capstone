@@ -14,7 +14,16 @@ from sqlalchemy.pool import StaticPool
 from presensi_api.api.security.dependencies import get_current_user
 from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
 from presensi_api.db.base import Base
-from presensi_api.db.models import ClassStudent, FaceTemplate, SchoolClass, Student
+from presensi_api.db.models import (
+    ClassLaboratory,
+    ClassStudent,
+    FaceTemplate,
+    LaborantLabAssignment,
+    Laboratory,
+    SchoolClass,
+    Student,
+    User,
+)
 from presensi_api.db.session import get_db_session
 from presensi_api.main import app
 
@@ -40,6 +49,18 @@ def enrollment_database() -> Generator[sessionmaker[Session], None, None]:
         full_name="Test Laborant",
         roles=frozenset({RoleCode.LABORANT}),
     )
+    with factory.begin() as seed:
+        seed.add(
+            User(
+                id=UUID(int=42),
+                email="laborant@example.test",
+                full_name="Test Laborant",
+                password_hash="test-hash",
+            )
+        )
+        seed.add(Laboratory(id=UUID(int=7), code="LAB-T", name="Lab T"))
+        seed.flush()
+        seed.add(LaborantLabAssignment(user_id=UUID(int=42), laboratory_id=UUID(int=7)))
     yield factory
     app.dependency_overrides.clear()
     engine.dispose()
@@ -77,6 +98,9 @@ def test_class_roster_returns_enrollment_status_without_face_payload(
                 ClassStudent(class_id=school_class.id, student_id=student.id)
                 for student in (not_enrolled, enrolled, needs_reenrollment)
             ]
+        )
+        session.add(
+            ClassLaboratory(class_id=school_class.id, laboratory_id=UUID(int=7))
         )
         session.add_all(
             [
@@ -121,3 +145,53 @@ def test_class_enrollment_status_returns_not_found_for_unknown_class(
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "class_not_found"
+
+
+def test_class_status_masked_outside_laborant_scope(
+    enrollment_database: sessionmaker[Session],
+) -> None:
+    with enrollment_database.begin() as session:
+        other_class = SchoolClass(
+            code="X-B",
+            name="Kelas X B",
+            grade=10,
+            academic_year="2026-2027",
+        )
+        session.add(other_class)
+        session.flush()
+        other_id = other_class.id
+    # Laboran (lab T) membuka kelas tanpa relasi ke labnya -> disamarkan 404.
+    response = request(f"/api/v1/enrollments/class-status?class_id={other_id}")
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "class_not_found"
+
+
+def test_class_status_allowed_for_admin(
+    enrollment_database: sessionmaker[Session],
+) -> None:
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        id=UUID(int=1),
+        email="admin@example.test",
+        full_name="Test Admin",
+        roles=frozenset({RoleCode.ADMIN}),
+    )
+    try:
+        with enrollment_database.begin() as session:
+            school_class = SchoolClass(
+                code="X-C",
+                name="Kelas X C",
+                grade=10,
+                academic_year="2026-2027",
+            )
+            session.add(school_class)
+            session.flush()
+            class_id = school_class.id
+        response = request(f"/api/v1/enrollments/class-status?class_id={class_id}")
+        assert response.status_code == 200
+    finally:
+        app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+            id=UUID(int=42),
+            email="laborant@example.test",
+            full_name="Test Laborant",
+            roles=frozenset({RoleCode.LABORANT}),
+        )

@@ -4,10 +4,12 @@ from presensi_api.api.v1.routers import (
     accounts,
     ai_configuration,
     attendance,
+    audit,
     auth,
     device_runtime,
     enrollment_templates,
     health,
+    kiosks,
     laboratories_devices,
     public_display,
     reports,
@@ -36,3 +38,5 @@ api_v1_router.include_router(session_dashboard.router)
 api_v1_router.include_router(enrollment_templates.router)
 api_v1_router.include_router(attendance.router)
 api_v1_router.include_router(reports.router)
+api_v1_router.include_router(kiosks.router)
+api_v1_router.include_router(audit.router)

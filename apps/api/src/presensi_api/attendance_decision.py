@@ -232,14 +232,26 @@ def decide_recognition_event(
     device.model_version = request.model_version
 
     reason: AttendanceDecisionReason | None = None
-    if (
-        principal is not None
-        and RoleCode.TEACHER in principal.roles
-        and RoleCode.ADMIN not in principal.roles
-        and schedule.teacher_user_id != principal.id
-    ):
-        reason = "session_not_accessible"
-    elif not device.is_active:
+    if principal is not None and RoleCode.ADMIN not in principal.roles:
+        from presensi_api.api.security.scope import (
+            laborant_lab_ids as _dll,
+        )
+        from presensi_api.api.security.scope import (
+            teacher_class_ids as _dtc,
+        )
+
+        _allowed = True
+        if RoleCode.TEACHER in principal.roles:
+            _allowed = schedule.teacher_user_id == principal.id or (
+                schedule.class_id in _dtc(db, principal.id)
+            )
+        elif RoleCode.LABORANT in principal.roles:
+            _allowed = schedule.laboratory_id in _dll(db, principal.id)
+        else:
+            _allowed = False
+        if not _allowed:
+            reason = "session_not_accessible"
+    if reason is None and not device.is_active:
         reason = "device_inactive"
     elif not device.camera_enabled:
         reason = "device_camera_disabled"
@@ -298,6 +310,8 @@ def decide_recognition_event(
                     recorded_by_user_id=None,
                     status=attendance_status,
                     source="face_recognition",
+                    occurred_at=request.occurred_at,
+                    rule_version=attendance_session.grace_period_minutes,
                 )
                 db.add(record)
                 db.flush()

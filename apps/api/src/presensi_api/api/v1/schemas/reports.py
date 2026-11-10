@@ -55,6 +55,7 @@ class AttendanceReportRow(ApiSchema):
     status: ReportStatus
     source: Literal["face_recognition", "manual", "system"] | None
     session_opened_at: AwareDatetime
+    occurred_at: AwareDatetime | None = None
     recorded_at: AwareDatetime | None
     note: str | None = None
 
@@ -142,10 +143,15 @@ class EwsFollowUpCreateRequest(ApiSchema):
     note: str = Field(min_length=2, max_length=2000)
 
 
+class EwsFollowUpUpdateRequest(ApiSchema):
+    status: Literal["open", "done"]
+
+
 class EwsFollowUpResponse(ApiSchema):
     id: UUID
     student_id: UUID
     author_user_id: UUID
     author_name: str | None = None
     note: str
+    status: Literal["open", "done"] = "open"
     created_at: AwareDatetime

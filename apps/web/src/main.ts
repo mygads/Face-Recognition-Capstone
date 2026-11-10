@@ -1,6 +1,8 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
+import './styles/stitch-tokens.css'
 import './style.scss'
+import './styles/stitch-shell.css'
 import App from './App.vue'
 import { configureApiAuth } from './api/client'
 import { useAuthStore } from './stores/auth'

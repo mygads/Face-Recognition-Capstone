@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
 defineOptions({ name: 'AppSidebar' })
@@ -12,21 +13,328 @@ defineProps<{
 const emit = defineEmits<{
   navigate: []
 }>()
+
+interface MenuChild {
+  label: string
+  to: string
+  testid?: string
+  activeWhen?: string[]
+}
+
+interface MenuEntry {
+  label: string
+  icon: string
+  to?: string
+  testid?: string
+  children?: MenuChild[]
+  activeWhen?: string[]
+  groupKey?: string
+}
+
+interface MenuGroup {
+  heading: string
+  entries: MenuEntry[]
+}
+
 const auth = useAuthStore()
+const route = useRoute()
+
+const expandedGroups = ref<Record<string, boolean>>({
+  'data-master': true,
+  'perangkat-ai': true,
+  pengaturan: true,
+})
+
 function hasPerm(...perms: string[]): boolean {
-  const permsSet = auth.account?.permissions ?? []
   const roles = auth.account?.roles ?? []
   if (roles.includes('ADMIN')) return true
-  return perms.some((perm) => (permsSet as string[]).includes(perm))
+  const permsSet = (auth.account?.permissions ?? []) as string[]
+  return perms.some((perm) => permsSet.includes(perm))
 }
-const canManageSchedules = computed(() => hasPerm('schedule_read', 'schedule_manage'))
-const canOperateSessions = computed(() => hasPerm('session_operate'))
-const canManageEnrollment = computed(() => hasPerm('enrollment_manage'))
-const canViewDevices = computed(() => hasPerm('device_operate', 'laboratory_read'))
-const canViewReports = computed(() => hasPerm('reports_read'))
-const canManageMasterData = computed(() => hasPerm('manage_master_data'))
-const canManageAccounts = computed(() => hasPerm('manage_accounts'))
-const canManageSettings = computed(() => hasPerm('manage_settings'))
+
+const isAdmin = computed(() => (auth.account?.roles ?? []).includes('ADMIN'))
+const isTeacher = computed(() => !isAdmin.value && (auth.account?.roles ?? []).includes('TEACHER'))
+const menuGroups = computed<MenuGroup[]>(() => {
+  if (isAdmin.value) {
+    return [
+      {
+        heading: 'Ruang kerja',
+        entries: [
+          {
+            label: 'Dashboard Admin',
+            icon: 'dashboard',
+            to: '/app/dashboard',
+            testid: 'dashboard-link',
+          },
+        ],
+      },
+      {
+        heading: 'Akademik',
+        entries: [
+          {
+            label: 'Data Master',
+            icon: 'database',
+            groupKey: 'data-master',
+            activeWhen: ['/app/master-data'],
+            children: [
+              { label: 'Siswa', to: '/app/master-data/students' },
+              { label: 'Kelas', to: '/app/master-data/classes' },
+              { label: 'Laboratorium', to: '/app/master-data/laboratories' },
+            ],
+          },
+          {
+            label: 'Jadwal Praktikum',
+            icon: 'calendar_month',
+            to: '/app/schedules',
+            testid: 'schedules-link',
+          },
+        ],
+      },
+      {
+        heading: 'Presensi',
+        entries: [
+          {
+            label: 'Sesi Presensi',
+            icon: 'schedule',
+            to: '/app/sessions',
+            testid: 'sessions-link',
+          },
+          {
+            label: 'Pendaftaran Wajah',
+            icon: 'face',
+            to: '/app/enrollment',
+            testid: 'enrollment-link',
+          },
+          {
+            label: 'Koreksi Kehadiran',
+            icon: 'edit_note',
+            to: '/app/corrections',
+            testid: 'corrections-link',
+          },
+        ],
+      },
+      {
+        heading: 'Pemantauan',
+        entries: [
+          {
+            label: 'Laporan Kehadiran',
+            icon: 'bar_chart',
+            to: '/app/reports',
+            testid: 'reports-link',
+          },
+          {
+            label: 'Peringatan Dini',
+            icon: 'warning',
+            to: '/app/ews',
+            testid: 'ews-link',
+          },
+        ],
+      },
+      {
+        heading: 'Infrastruktur',
+        entries: [
+          {
+            label: 'Perangkat & AI',
+            icon: 'devices',
+            groupKey: 'perangkat-ai',
+            activeWhen: ['/app/devices', '/app/camera-preview', '/app/kiosks', '/app/ai-setup'],
+            children: [
+              { label: 'Perangkat', to: '/app/devices', testid: 'devices-link' },
+              { label: 'Preview Kamera', to: '/app/camera-preview', testid: 'camera-preview-link' },
+              { label: 'Layar Presensi', to: '/app/kiosks', testid: 'kiosks-link' },
+              { label: 'Konfigurasi AI', to: '/app/ai-setup', testid: 'ai-setup-link' },
+            ],
+          },
+        ],
+      },
+      {
+        heading: 'Administrasi',
+        entries: [
+          {
+            label: 'Pengaturan',
+            icon: 'settings',
+            groupKey: 'pengaturan',
+            activeWhen: ['/app/accounts', '/app/attendance-policy', '/app/audit'],
+            children: [
+              { label: 'Akun Staf', to: '/app/accounts', testid: 'accounts-link' },
+              {
+                label: 'Kebijakan Presensi',
+                to: '/app/attendance-policy',
+                testid: 'attendance-policy-link',
+              },
+              { label: 'Audit Aktivitas', to: '/app/audit', testid: 'audit-link' },
+            ],
+          },
+        ],
+      },
+    ]
+  }
+  if (isTeacher.value) {
+    return [
+      {
+        heading: 'Ruang kerja',
+        entries: [
+          {
+            label: 'Dashboard Guru',
+            icon: 'dashboard',
+            to: '/app/dashboard',
+            testid: 'dashboard-link',
+          },
+        ],
+      },
+      {
+        heading: 'Akademik',
+        entries: [
+          {
+            label: 'Kelas Saya',
+            icon: 'groups',
+            to: '/app/my-classes',
+            testid: 'my-classes-link',
+          },
+          {
+            label: 'Jadwal Saya',
+            icon: 'calendar_month',
+            to: '/app/schedules',
+            testid: 'schedules-link',
+          },
+        ],
+      },
+      {
+        heading: 'Presensi',
+        entries: [
+          {
+            label: 'Sesi Presensi',
+            icon: 'schedule',
+            to: '/app/sessions',
+            testid: 'sessions-link',
+          },
+          {
+            label: 'Koreksi Saya',
+            icon: 'edit_note',
+            to: '/app/corrections',
+            testid: 'corrections-link',
+          },
+        ],
+      },
+      {
+        heading: 'Pemantauan',
+        entries: [
+          {
+            label: 'Laporan Kehadiran',
+            icon: 'bar_chart',
+            to: '/app/reports',
+            testid: 'reports-link',
+          },
+          {
+            label: 'Peringatan Dini',
+            icon: 'warning',
+            to: '/app/ews',
+            testid: 'ews-link',
+          },
+        ],
+      },
+    ]
+  }
+  const groups: MenuGroup[] = [
+    {
+      heading: 'Ruang kerja',
+      entries: [
+        {
+          label: 'Dashboard Laboran',
+          icon: 'dashboard',
+          to: '/app/dashboard',
+          testid: 'dashboard-link',
+        },
+      ],
+    },
+  ]
+  const presensi: MenuEntry[] = []
+  if (hasPerm('session_view', 'session_operate')) {
+    presensi.push({
+      label: 'Sesi Presensi',
+      icon: 'schedule',
+      to: '/app/sessions',
+      testid: 'sessions-link',
+    })
+  }
+  if (hasPerm('enrollment_manage')) {
+    presensi.push({
+      label: 'Pendaftaran Wajah',
+      icon: 'face',
+      to: '/app/enrollment',
+      testid: 'enrollment-link',
+    })
+  }
+  if (hasPerm('attendance_correct')) {
+    presensi.push({
+      label: 'Koreksi Saya',
+      icon: 'edit_note',
+      to: '/app/corrections',
+      testid: 'corrections-link',
+    })
+  }
+  if (presensi.length) groups.push({ heading: 'Presensi', entries: presensi })
+  const pemantauan: MenuEntry[] = []
+  if (hasPerm('reports_read', 'reports_export')) {
+    pemantauan.push({
+      label: 'Laporan Kehadiran',
+      icon: 'bar_chart',
+      to: '/app/reports',
+      testid: 'reports-link',
+    })
+  }
+  if (hasPerm('ews_read', 'ews_follow_up')) {
+    pemantauan.push({
+      label: 'Peringatan Dini',
+      icon: 'warning',
+      to: '/app/ews',
+      testid: 'ews-link',
+    })
+  }
+  if (pemantauan.length) groups.push({ heading: 'Pemantauan', entries: pemantauan })
+  const infra: MenuEntry[] = []
+  if (hasPerm('schedule_read', 'schedule_manage')) {
+    infra.push({
+      label: 'Jadwal Laboratorium',
+      icon: 'calendar_month',
+      to: '/app/schedules',
+      testid: 'schedules-link',
+    })
+  }
+  if (hasPerm('device_operate')) {
+    infra.push({
+      label: 'Perangkat',
+      icon: 'devices',
+      to: '/app/devices',
+      testid: 'devices-link',
+    })
+    infra.push({
+      label: 'Preview Kamera',
+      icon: 'videocam',
+      to: '/app/camera-preview',
+      testid: 'camera-preview-link',
+    })
+  }
+  if (infra.length) {
+    const akademikIdx = groups.findIndex((g) => g.heading === 'Presensi')
+    void akademikIdx
+    groups.push({ heading: 'Infrastruktur', entries: infra })
+  }
+  return groups
+})
+
+function isEntryActive(entry: Pick<MenuEntry, 'to' | 'activeWhen' | 'children'>): boolean {
+  const path = route.path
+  if (entry.to && (path === entry.to || path.startsWith(entry.to + '/'))) return true
+  if (entry.activeWhen?.some((prefix) => path.startsWith(prefix))) return true
+  if (entry.children?.some((child) => path === child.to || path.startsWith(child.to + '/')))
+    return true
+  return false
+}
+
+function toggleGroup(key: string): void {
+  expandedGroups.value[key] = !expandedGroups.value[key]
+}
 </script>
 
 <template>
@@ -41,177 +349,69 @@ const canManageSettings = computed(() => hasPerm('manage_settings'))
       :aria-label="collapsed ? 'Presensi Praktikum' : undefined"
       @click="emit('navigate')"
     >
-      <span class="app-sidebar__brand-mark" aria-hidden="true">P</span>
-      <span class="app-sidebar__brand-name">
-        Presensi
-        <small>Praktikum</small>
+      <span class="app-sidebar__brand-lockup">
+        <img
+          class="app-sidebar__brand-logo"
+          src="/logo-sekolah.png"
+          alt="Logo SMA Cimahi"
+          width="52"
+          height="52"
+        />
+        <span class="app-sidebar__brand-name">
+          Presensi Praktikum
+          <small>SMA Taruna Nusantara Kampus Cimahi</small>
+        </span>
       </span>
     </RouterLink>
 
     <nav class="app-sidebar__nav" aria-label="Navigasi utama">
-      <p class="app-sidebar__section-label">Ruang kerja</p>
-      <RouterLink
-        class="app-sidebar__link"
-        active-class="app-sidebar__link--active"
-        to="/app/dashboard"
-        :aria-label="collapsed ? 'Ringkasan' : undefined"
-        data-testid="dashboard-link"
-        @click="emit('navigate')"
-      >
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <rect x="3.5" y="3.5" width="7" height="7" rx="1.5" />
-          <rect x="13.5" y="3.5" width="7" height="7" rx="1.5" />
-          <rect x="3.5" y="13.5" width="7" height="7" rx="1.5" />
-          <rect x="13.5" y="13.5" width="7" height="7" rx="1.5" />
-        </svg>
-        <span class="app-sidebar__link-label">Ringkasan</span>
-      </RouterLink>
-      <RouterLink
-        v-if="canManageMasterData"
-        class="app-sidebar__link"
-        active-class="app-sidebar__link--active"
-        to="/app/master-data"
-        :aria-label="collapsed ? 'Data master' : undefined"
-        data-testid="master-data-link"
-        @click="emit('navigate')"
-      >
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M4 5.5h16v4H4zM4 14.5h7v4H4zM15 14.5h5v4h-5z" />
-          <path d="M8 9.5v5M17.5 9.5v5" />
-        </svg>
-        <span class="app-sidebar__link-label">Data master</span>
-      </RouterLink>
-      <RouterLink
-        v-if="canManageAccounts"
-        class="app-sidebar__link"
-        active-class="app-sidebar__link--active"
-        to="/app/accounts"
-        :aria-label="collapsed ? 'Kelola akun staf' : undefined"
-        data-testid="accounts-link"
-        @click="emit('navigate')"
-      >
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <circle cx="9" cy="8" r="3" />
-          <path d="M3.5 19c.5-3.2 2.3-5 5.5-5s5 1.8 5.5 5M17 8v6M14 11h6" />
-        </svg>
-        <span class="app-sidebar__link-label">Kelola akun staf</span>
-      </RouterLink>
-      <RouterLink
-        v-if="canManageSettings"
-        class="app-sidebar__link"
-        active-class="app-sidebar__link--active"
-        to="/app/ai-setup"
-        :aria-label="collapsed ? 'AI dan kamera' : undefined"
-        data-testid="ai-setup-link"
-        @click="emit('navigate')"
-      >
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M9 3.5h6M10 3.5v5l-5.5 9.3A2 2 0 0 0 6.2 21h11.6a2 2 0 0 0 1.7-3.2L14 8.5v-5" />
-          <path d="M7.5 15h9" />
-        </svg>
-        <span class="app-sidebar__link-label">AI & kamera</span>
-      </RouterLink>
-      <RouterLink
-        v-if="canManageSchedules"
-        class="app-sidebar__link"
-        active-class="app-sidebar__link--active"
-        to="/app/schedules"
-        :aria-label="collapsed ? 'Jadwal praktikum' : undefined"
-        data-testid="schedules-link"
-        @click="emit('navigate')"
-      >
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <rect x="3.5" y="5" width="17" height="15.5" rx="2" />
-          <path d="M7.5 3.5v3M16.5 3.5v3M3.5 9h17M7.5 12.5h3M13.5 12.5h3M7.5 16h3" />
-        </svg>
-        <span class="app-sidebar__link-label">Jadwal praktikum</span>
-      </RouterLink>
-      <RouterLink
-        v-if="canOperateSessions"
-        class="app-sidebar__link"
-        active-class="app-sidebar__link--active"
-        to="/app/sessions"
-        :aria-label="collapsed ? 'Sesi presensi' : undefined"
-        data-testid="sessions-link"
-        @click="emit('navigate')"
-      >
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <rect x="3.5" y="4" width="17" height="16" rx="2" />
-          <path d="M7.5 8h9M7.5 12h9M7.5 16h5" />
-          <circle cx="18" cy="16" r="2.5" />
-        </svg>
-        <span class="app-sidebar__link-label">Sesi presensi</span>
-      </RouterLink>
-      <RouterLink
-        v-if="canManageEnrollment"
-        class="app-sidebar__link"
-        active-class="app-sidebar__link--active"
-        to="/app/enrollment"
-        :aria-label="collapsed ? 'Pendaftaran wajah' : undefined"
-        data-testid="enrollment-link"
-        @click="emit('navigate')"
-      >
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <rect x="3" y="4" width="18" height="16" rx="2" />
-          <circle cx="9" cy="10" r="2.5" />
-          <path d="M5.5 17c.7-2 2-3 3.5-3s2.8 1 3.5 3M15 9h3M15 12h3M15 15h3" />
-        </svg>
-        <span class="app-sidebar__link-label">Pendaftaran wajah</span>
-      </RouterLink>
-      <p v-if="canViewDevices || canManageSettings" class="app-sidebar__section-label">
-        Perangkat &amp; AI
-      </p>
-      <RouterLink
-        v-if="canViewDevices"
-        class="app-sidebar__link"
-        active-class="app-sidebar__link--active"
-        to="/app/devices"
-        :aria-label="collapsed ? 'Perangkat' : undefined"
-        data-testid="devices-link"
-        @click="emit('navigate')"
-      >
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <rect x="3.5" y="5" width="17" height="13" rx="2" />
-          <path d="M8 21h8M12 18v3M7.5 9h9M7.5 13h4" />
-        </svg>
-        <span class="app-sidebar__link-label">Perangkat</span>
-      </RouterLink>
-      <RouterLink
-        v-if="canViewDevices"
-        class="app-sidebar__link"
-        active-class="app-sidebar__link--active"
-        to="/app/camera-preview"
-        :aria-label="collapsed ? 'Preview kamera' : undefined"
-        data-testid="camera-preview-link"
-        @click="emit('navigate')"
-      >
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <rect x="3" y="6" width="13" height="12" rx="2" />
-          <path d="m16 10 5-3v10l-5-3" />
-          <circle cx="9.5" cy="12" r="2.5" />
-        </svg>
-        <span class="app-sidebar__link-label">Preview kamera</span>
-      </RouterLink>
-      <RouterLink
-        v-if="canViewReports"
-        class="app-sidebar__link"
-        active-class="app-sidebar__link--active"
-        to="/app/reports"
-        :aria-label="collapsed ? 'Laporan kehadiran' : undefined"
-        data-testid="reports-link"
-        @click="emit('navigate')"
-      >
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M5 20V11M12 20V4M19 20v-7" />
-          <path d="M3 20.5h18" />
-        </svg>
-        <span class="app-sidebar__link-label">Laporan kehadiran</span>
-      </RouterLink>
+      <template v-for="group in menuGroups" :key="group.heading">
+        <p class="app-sidebar__section-label">{{ group.heading }}</p>
+        <template v-for="entry in group.entries" :key="entry.label">
+          <RouterLink
+            v-if="entry.to"
+            class="app-sidebar__link"
+            :class="{ 'app-sidebar__link--active': isEntryActive(entry) }"
+            :to="entry.to"
+            :data-testid="entry.testid"
+            @click="emit('navigate')"
+          >
+            <span class="st-material-icon" aria-hidden="true">{{ entry.icon }}</span>
+            <span class="app-sidebar__link-label">{{ entry.label }}</span>
+          </RouterLink>
+          <div v-else class="app-sidebar__group">
+            <button
+              class="app-sidebar__link app-sidebar__group-toggle"
+              :class="{ 'app-sidebar__link--active': isEntryActive(entry) }"
+              type="button"
+              :aria-expanded="entry.groupKey ? expandedGroups[entry.groupKey] : true"
+              @click="entry.groupKey && toggleGroup(entry.groupKey)"
+            >
+              <span class="st-material-icon" aria-hidden="true">{{ entry.icon }}</span>
+              <span class="app-sidebar__link-label">{{ entry.label }}</span>
+              <span class="st-material-icon app-sidebar__group-caret" aria-hidden="true"
+                >expand_more</span
+              >
+            </button>
+            <div
+              v-if="!entry.groupKey || expandedGroups[entry.groupKey]"
+              class="app-sidebar__group-children"
+            >
+              <RouterLink
+                v-for="child in entry.children"
+                :key="child.label"
+                class="app-sidebar__link app-sidebar__link--child"
+                :class="{ 'app-sidebar__link--active': isEntryActive(child) }"
+                :to="child.to"
+                :data-testid="child.testid"
+                @click="emit('navigate')"
+              >
+                <span class="app-sidebar__link-label">{{ child.label }}</span>
+              </RouterLink>
+            </div>
+          </div>
+        </template>
+      </template>
     </nav>
-
-    <div class="app-sidebar__footer">
-      <span class="app-sidebar__footer-mark" aria-hidden="true">S</span>
-      <span class="app-sidebar__footer-copy">Sistem internal sekolah</span>
-    </div>
   </aside>
 </template>

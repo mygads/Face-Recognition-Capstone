@@ -27,7 +27,7 @@
 1. Ganti bagan waterfall dengan siklus di [02](02-metode-prototype.md):
    observasi → prototipe → uji coba → review → revisi → final → kalibrasi →
    deployment → evaluasi → (kebutuhan baru memutar siklus baru).
-2. Instrumen uji: `scripts/check.py` (lint/type/test), 17 migrasi Alembic,
+2. Instrumen uji: `scripts/check.py` (lint/type/test), 24 migrasi Alembic,
    harness `tests/ai-benchmark`, protokol `docs/pengujian.md`.
 3. Sampel uji: minimal 5 lintasan/relawan per profil deployment, data
    pseudonim (tanpa wajah siswa nyata).

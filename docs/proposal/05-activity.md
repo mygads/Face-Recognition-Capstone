@@ -197,9 +197,21 @@ flowchart TD
   SV --> K{Ada kesalahan?}
   K -- Tidak --> E([Selesai])
   K -- Ya --> P[POST koreksi + alasan wajib]
-  P --> PE[pending + audit; record final tidak berubah]
-  PE --> W([Menunggu kebijakan approval; tanpa endpoint putusan])
-  NF --> E2([Selesai])
+  P --> V{Kasus?}
+  V -- Ada record --> CA[Kasus a: attendance_record_id + corrected_status]
+  V -- Tanpa record, sesi tutup --> CB[Kasus b: session_id + student_id; previous = absen turunan]
+  V -- Tanpa record, sesi aktif --> RJ[409 session_still_active: pakai tandai manual]
+  CA --> PE[pending + audit; record final tidak berubah]
+  CB --> PE
+  PE --> W{Putusan ADMIN?}
+  W -- Setujui --> AP[Lock target FOR UPDATE + cek ulang + terapkan atomik + audit; kasus b buat AttendanceRecord manual]
+  W -- Tolak + decision_note --> DN[Rejected + audit; record final tetap]
+  W -- Tolak tanpa note --> R422[422 decision_note wajib]
+  AP --> E2([Selesai beraudit])
+  DN --> E2
+  R422 --> E2
+  RJ --> E2
+  NF --> E2
   SI --> E2
   NR --> E2
   AR --> E2
@@ -213,10 +225,14 @@ flowchart TD
 > `system` juga tanpa event. Record FR tidak boleh ditimpa manual (dan
 > sebaliknya): duplikat sesi dan siswa, termasuk balapan konkuren lewat
 > savepoint, selalu 409 `attendance_already_recorded`.
-> Koreksi HANYA menghasilkan `pending` (+ audit
-> `attendance.correction.requested`). Tidak ada keputusan approve atau
-> reject di sistem berjalan — alur "Admin setujui" TIDAK BOLEH digambar
-> sebagai fitur jalan.
+> Koreksi menghasilkan `pending` (+ audit `attendance.correction.requested`)
+> lalu diputus ADMIN (`POST …/corrections/{id}/decision` + audit
+> `attendance.correction.decided`): setujui menerapkan perubahan atomik
+> (kasus b membuat `AttendanceRecord` manual baru); tolak wajib
+> `decision_note` (422 bila kosong). Satu pending aktif per target; idempoten
+> aman; pending tidak mengubah rekap/laporan/EWS sampai `approved`. Koreksi
+> hanya mengubah status — waktu datang tetap milik record asal (tanpa jam
+> tampil tanpa durasi).
 
 ## 5.8 Live dashboard (F-08)
 
@@ -372,7 +388,9 @@ flowchart LR
   end
 ```
 
-> Guru: tanpa operasi device dan enrollment; koreksi miliknya hanya
-> `pending`. Laboran: tanpa registrasi atau deaktivasi device, tanpa
-> rotate kredensial, tanpa camera-control, tanpa koreksi. Admin: satu-satunya
-> pemegang `MANAGE_MASTER_DATA` dan `MANAGE_SETTINGS`.
+> Guru: tanpa operasi device dan enrollment; koreksi miliknya diajukan
+> `pending`, diputus admin. Laboran: tanpa registrasi/deaktivasi device,
+> tanpa rotate kredensial, tanpa camera-control, tanpa putusan koreksi;
+> UC5/UC6/UC8/UC9/UC11/UC12 hanya dengan grant + lab penugasan (menu muncul
+> otomatis). Admin: satu-satunya pemegang `MANAGE_*` + `MANAGE_SETTINGS`
+> (akun, master data, AI config, policy EWS, audit, PIN kiosk).

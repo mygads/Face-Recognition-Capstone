@@ -39,6 +39,6 @@ describe('formatDateTimeLocal', () => {
       timeStyle: 'short',
     }).format(new Date(instant))
     expect(formatDateTimeLocal(instant)).toBe(expected)
-    expect(formatDateTimeLocal(null)).toBe('—')
+    expect(formatDateTimeLocal(null)).toBe('-')
   })
 })

@@ -12,9 +12,21 @@ flowchart TD
   SV --> K{Ada kesalahan?}
   K -- Tidak --> E([Selesai])
   K -- Ya --> P[POST koreksi + alasan wajib]
-  P --> PE[pending + audit; record final tidak berubah]
-  PE --> W([Menunggu kebijakan approval; tanpa endpoint putusan])
-  NF --> E2([Selesai])
+  P --> V{Kasus?}
+  V -- Ada record --> CA[Kasus a: attendance_record_id + corrected_status]
+  V -- Tanpa record, sesi tutup --> CB[Kasus b: session_id + student_id; previous = absen turunan]
+  V -- Tanpa record, sesi aktif --> RJ[409 session_still_active: pakai tandai manual]
+  CA --> PE[pending + audit; record final tidak berubah]
+  CB --> PE
+  PE --> W{Putusan ADMIN?}
+  W -- Setujui --> AP[Lock target FOR UPDATE + cek ulang + terapkan atomik + audit; kasus b buat AttendanceRecord manual]
+  W -- Tolak + decision_note --> DN[Rejected + audit; record final tetap]
+  W -- Tolak tanpa note --> R422[422 decision_note wajib]
+  AP --> E2([Selesai beraudit])
+  DN --> E2
+  R422 --> E2
+  RJ --> E2
+  NF --> E2
   SI --> E2
   NR --> E2
   AR --> E2

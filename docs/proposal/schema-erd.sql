@@ -98,6 +98,10 @@ CREATE TABLE laboratories (
   name       VARCHAR(120) NOT NULL,
   location   VARCHAR(200),
   is_active  BOOLEAN NOT NULL DEFAULT TRUE,
+  display_pin_hash        VARCHAR(255),           -- hash PIN layar kiosk (migrasi display-pin)
+  display_pin_updated_at  TIMESTAMPTZ,
+  display_pin_fail_count  INTEGER NOT NULL DEFAULT 0,
+  display_pin_locked_until TIMESTAMPTZ,           -- kunci 5 mnt setelah 5x salah (429)
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -262,6 +266,8 @@ CREATE TABLE attendance_records (
   source                VARCHAR(24) NOT NULL   -- face_recognition|manual|system
                         CHECK (source IN ('face_recognition','manual','system')),
   recorded_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  occurred_at           TIMESTAMPTZ,                    -- jam capture manual (opsional; null = tanpa durasi)
+  rule_version          INTEGER,                        -- versi aturan keputusan saat record dibuat
   note                  TEXT,                           -- catatan manual-mark guru (migrasi d4e5f6a7b8c9)
   created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -276,19 +282,31 @@ CREATE TABLE attendance_records (
 
 CREATE TABLE attendance_corrections (
   id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  attendance_record_id UUID NOT NULL REFERENCES attendance_records(id) ON DELETE RESTRICT,
+  attendance_record_id UUID REFERENCES attendance_records(id) ON DELETE RESTRICT,
+  session_id           UUID REFERENCES attendance_sessions(id) ON DELETE RESTRICT,
+  student_id           UUID REFERENCES students(id) ON DELETE RESTRICT,
   requested_by_user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  incident_ref         UUID,                             -- gabung 2 keputusan salah-identitas
   decided_by_user_id   UUID REFERENCES users(id) ON DELETE RESTRICT,
   previous_status      VARCHAR(16) NOT NULL CHECK (previous_status IN ('present','late','absent','excused')),
   corrected_status     VARCHAR(16) NOT NULL CHECK (corrected_status IN ('present','late','absent','excused')),
   reason               TEXT NOT NULL CHECK (length(trim(reason)) > 0),
   decision_status      VARCHAR(16) NOT NULL DEFAULT 'pending'
                        CHECK (decision_status IN ('pending','approved','rejected')),
-  decision_note        TEXT,
+  decision_note        TEXT,                             -- wajib bila rejected
   decided_at           TIMESTAMPTZ,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- kasus (a): record ada; kasus (b): session+student tanpa record (sesi tutup)
+  CHECK (
+    (decision_status = 'pending' AND decided_at IS NULL AND decided_by_user_id IS NULL) OR
+    (decision_status IN ('approved','rejected') AND decided_at IS NOT NULL AND decided_by_user_id IS NOT NULL)
+  )
 );
+-- Satu pending aktif per target (partial unique di model, bukan DDL polos):
+--   uq_correction_pending_record (attendance_record_id) WHERE decision_status='pending'
+--   uq_correction_pending_missing (session_id, student_id) WHERE decision_status='pending'
+CREATE INDEX ix_attendance_corrections_incident_ref ON attendance_corrections(incident_ref);
 
 CREATE TABLE audit_logs (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -303,14 +321,74 @@ CREATE TABLE audit_logs (
 );
 
 -- ----------------------------------------------------------------------------
--- USULAN EWS tahap 2 (belum diimplementasikan — perlu migrasi Alembic bila jadi)
+-- EWS tahap 1: tindak lanjut watchlist (F-10; tabel nyata, bukan usulan)
 -- ----------------------------------------------------------------------------
--- CREATE TABLE ews_follow_ups (
---   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
---   student_id     UUID NOT NULL REFERENCES students(id) ON DELETE RESTRICT,
---   session_id     UUID REFERENCES attendance_sessions(id) ON DELETE SET NULL,
---   stage          VARCHAR(32) NOT NULL,  -- pemanggilan|konseling|surat|selesai
---   note           TEXT NOT NULL,
---   created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
---   created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
--- );
+CREATE TABLE ews_follow_ups (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  student_id     UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  author_user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  status         VARCHAR(16) NOT NULL DEFAULT 'open' CHECK (status IN ('open','done')),
+  resolved_at    TIMESTAMPTZ,
+  note           TEXT NOT NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_ews_follow_ups_student_id ON ews_follow_ups(student_id);
+
+-- ----------------------------------------------------------------------------
+-- Penugasan + grant + relasi lab + kiosk (F-16, F-17, F-23, F-24, F-15)
+-- ----------------------------------------------------------------------------
+CREATE TABLE user_permission_grants (
+  user_id            UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  permission         VARCHAR(64) NOT NULL,   -- subset LABORANT_GRANTABLE (10)
+  granted_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, permission)
+);
+
+CREATE TABLE teacher_class_assignments (
+  user_id            UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  class_id           UUID NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+  assigned_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  starts_on          DATE,                          -- periode aktif (null = tak berbatas)
+  ends_on            DATE,
+  is_substitute      BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, class_id)
+);
+
+CREATE TABLE laborant_lab_assignments (
+  user_id            UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  laboratory_id      UUID NOT NULL REFERENCES laboratories(id) ON DELETE CASCADE,
+  assigned_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, laboratory_id)
+);
+
+CREATE TABLE class_laboratories (
+  class_id           UUID NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+  laboratory_id      UUID NOT NULL REFERENCES laboratories(id) ON DELETE CASCADE,
+  assigned_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (class_id, laboratory_id)
+);
+
+CREATE TABLE kiosk_screens (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id       UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  laboratory_id   UUID NOT NULL REFERENCES laboratories(id) ON DELETE CASCADE,
+  display_name    VARCHAR(120) NOT NULL,
+  camera_label    VARCHAR(120),
+  pin_hash        VARCHAR(255),                    -- PIN per layar, sekali tampil
+  pin_fail_count  INTEGER NOT NULL DEFAULT 0,
+  pin_locked_until TIMESTAMPTZ,
+  is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+  last_seen_at    TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (device_id, laboratory_id)
+);

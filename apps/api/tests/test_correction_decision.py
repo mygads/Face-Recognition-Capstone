@@ -16,6 +16,7 @@ from presensi_api.api.security.dependencies import get_current_user
 from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
 from presensi_api.db.base import Base
 from presensi_api.db.models import (
+    AttendanceCorrection,
     AttendanceRecord,
     AttendanceSession,
     AuditLog,
@@ -236,9 +237,30 @@ def test_approve_updates_record_and_audit(
     # Second decision must conflict.
     again = api_post(
         f"/api/v1/attendance/corrections/{correction_id}/decision",
-        {"decision": "rejected"},
+        {"decision": "rejected", "decision_note": "Upaya kedua"},
     )
     assert again.status_code == 409, again.text
+
+
+def test_reject_requires_decision_note(
+    correction_database: tuple[sessionmaker[Session], dict[str, UUID]],
+) -> None:
+    factory, ids = correction_database
+    with factory() as db:
+        record = db.scalar(select(AttendanceRecord))
+        assert record is not None
+        record_id = record.id
+    use_role(RoleCode.TEACHER, TEACHER_ID)
+    created = request_correction(record_id)
+    assert created.status_code == 201, created.text
+    correction_id = created.json()["id"]
+
+    use_role(RoleCode.ADMIN, ADMIN_ID)
+    denied = api_post(
+        f"/api/v1/attendance/corrections/{correction_id}/decision",
+        {"decision": "rejected"},
+    )
+    assert denied.status_code == 422, denied.text
 
 
 def test_reject_leaves_record_unchanged(
@@ -321,3 +343,142 @@ def test_list_corrections_scoped_to_owner(
     all_rows = api_get("/api/v1/attendance/corrections")
     assert all_rows.status_code == 200, all_rows.text
     assert all_rows.json()["pagination"]["total"] == 1
+
+
+def test_incident_link_decides_pair_atomically(
+    correction_database: tuple[sessionmaker[Session], dict[str, UUID]],
+) -> None:
+    """Kasus salah identitas: dua koreksi satu insiden diputus atomik."""
+    factory, ids = correction_database
+    with factory.begin() as db:
+        second = Student(student_number="C-002", full_name="Siswa Dua")
+        db.add(second)
+        db.flush()
+        opened = datetime.now(UTC)
+        # Roster disnapshot dulu (seperti saat sesi dibuka), record menyusul:
+        # flush terpisah — cermin alur produksi.
+        db.add(
+            SessionStudent(
+                session_id=ids["session"],
+                student_id=second.id,
+                student_number_snapshot=second.student_number,
+                full_name_snapshot=second.full_name,
+                snapshot_taken_at=opened,
+            )
+        )
+        db.flush()
+        db.add(
+            AttendanceRecord(
+                session_id=ids["session"],
+                student_id=second.id,
+                status="present",
+                source="manual",
+                recognition_event_id=None,
+                recorded_at=opened,
+                recorded_by_user_id=TEACHER_ID,
+            )
+        )
+        db.flush()
+        second_record_id = db.scalar(
+            select(AttendanceRecord.id).where(AttendanceRecord.student_id == second.id)
+        )
+    assert second_record_id is not None
+    with factory() as db:
+        first_record = db.scalar(
+            select(AttendanceRecord).where(
+                AttendanceRecord.student_id == ids["student"]
+            )
+        )
+        assert first_record is not None
+        first_record_id = first_record.id
+
+    use_role(RoleCode.TEACHER, TEACHER_ID)
+    first_created = request_correction(first_record_id)
+    assert first_created.status_code == 201, first_created.text
+    incident = first_created.json()["incident_ref"]
+    assert incident is not None
+    first_id = first_created.json()["id"]
+
+    linked = api_post(
+        "/api/v1/attendance/corrections",
+        {
+            "attendance_record_id": str(second_record_id),
+            "corrected_status": "excused",
+            "reason": "Siswa sebenarnya hadir, salah kenali",
+            "incident_ref": incident,
+        },
+    )
+    assert linked.status_code == 201, linked.text
+    assert linked.json()["incident_ref"] == incident
+
+    use_role(RoleCode.ADMIN, ADMIN_ID)
+    decided = api_post(
+        f"/api/v1/attendance/corrections/{first_id}/decision",
+        {"decision": "approved", "decision_note": "Satu perbaikan insiden"},
+    )
+    assert decided.status_code == 200, decided.text
+
+    with factory() as db:
+        sibling = db.scalar(
+            select(AttendanceCorrection).where(
+                AttendanceCorrection.id == UUID(linked.json()["id"])
+            )
+        )
+        assert sibling is not None
+        assert sibling.decision_status == "approved"
+        second_record = db.get(AttendanceRecord, second_record_id)
+        assert second_record is not None
+        assert second_record.status == "excused"
+
+
+def test_incident_link_rejects_unknown_incident(
+    correction_database: tuple[sessionmaker[Session], dict[str, UUID]],
+) -> None:
+    factory, ids = correction_database
+    with factory() as db:
+        record = db.scalar(select(AttendanceRecord))
+        assert record is not None
+        record_id = record.id
+    use_role(RoleCode.TEACHER, TEACHER_ID)
+    bad = api_post(
+        "/api/v1/attendance/corrections",
+        {
+            "attendance_record_id": str(record_id),
+            "corrected_status": "late",
+            "reason": "Tautan insiden asing",
+            "incident_ref": "12345678-1234-5678-1234-567812345678",
+        },
+    )
+    assert bad.status_code == 404, bad.text
+
+
+def test_missing_record_rejected_while_session_active(
+    correction_database: tuple[sessionmaker[Session], dict[str, UUID]],
+) -> None:
+    factory, ids = correction_database
+    with factory.begin() as db:
+        second = Student(student_number="C-002", full_name="Siswa Dua")
+        db.add(second)
+        db.flush()
+        db.add(
+            SessionStudent(
+                session_id=ids["session"],
+                student_id=second.id,
+                student_number_snapshot=second.student_number,
+                full_name_snapshot=second.full_name,
+                snapshot_taken_at=datetime.now(UTC),
+            )
+        )
+        second_id = second.id
+    use_role(RoleCode.TEACHER, TEACHER_ID)
+    created = api_post(
+        "/api/v1/attendance/corrections",
+        {
+            "session_id": str(ids["session"]),
+            "student_id": str(second_id),
+            "corrected_status": "excused",
+            "reason": "Sesi masih aktif, harusnya manual",
+        },
+    )
+    assert created.status_code == 409, created.text
+    assert created.json()["error"]["code"] == "session_still_active"

@@ -26,11 +26,20 @@ class Laboratory {
   +String code
   +String name
 }
+class KioskScreen {
+  +UUID device_id
+  +UUID laboratory_id
+  +String display_name
+  +String camera_label
+  +bool is_active
+}
 class User {
   +UUID id
   +String full_name
 }
 Laboratory "1" -- "*" Device : terpasang
+Laboratory "1" -- "*" KioskScreen : layar presensi
+Device "1" -- "*" KioskScreen : pairing unik device+lab
 User "1" -- "0..*" RuntimeConfigurationVersion : menerbitkan (nullable)
 
 note bottom of Device
@@ -38,5 +47,6 @@ note bottom of Device
   deployment_profile in {AI_EDGE, STB_GATEWAY}.
   Kredensial sebagai hash (tidak dipajang);
   config_error_code nullable (terisi bila apply gagal).
+  kiosk_screens unik per (device, lab); PIN hash per layar.
 end note
 @enduml

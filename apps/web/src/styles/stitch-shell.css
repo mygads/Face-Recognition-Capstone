@@ -1,0 +1,2022 @@
+/* Stitch shell — menyelaraskan Gentelella shell ke tampilan Stitch 1:1.
+   Hanya visual; logika permission/route di Vue tidak diubah. */
+body {
+  background: var(--st-canvas);
+  color: var(--st-text-main);
+  font-family: var(--st-font);
+}
+#app {
+  min-height: 100vh;
+}
+
+/* Sidebar — navy gelap + aksen emas mengikuti header Figma UI CAPSTONE. */
+.app-sidebar {
+  background: var(--st-primary-container);
+  color: #e2e8f0;
+  border-right: 1px solid var(--st-primary);
+}
+.app-sidebar__brand {
+  border-bottom: 1px solid var(--st-border);
+}
+.app-sidebar__brand-mark,
+.auth-card__mark {
+  background: var(--st-gold);
+  border-radius: var(--st-radius-sm);
+}
+.app-sidebar__brand-logo {
+  width: 52px;
+  height: 52px;
+  border-radius: 0;
+  flex-shrink: 0;
+  box-shadow: none;
+  background: none;
+  object-fit: contain;
+}
+.app-sidebar__brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.st-login__logo {
+  width: 96px;
+  height: 96px;
+  border-radius: 0;
+  box-shadow: none;
+  background: none;
+  object-fit: contain;
+}
+.app-sidebar__brand-name {
+  color: #ffffff;
+}
+.app-sidebar__brand-name small {
+  color: #a9bccd;
+}
+.app-sidebar__section-label {
+  color: #7d93aa;
+  font-family: var(--st-font);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.app-sidebar__nav {
+  background: transparent;
+}
+.app-sidebar__link {
+  color: #c3d2e0;
+  border-radius: var(--st-radius-sm);
+  font-family: var(--st-font);
+}
+.app-sidebar__link svg {
+  stroke: currentColor;
+}
+.app-sidebar__link:hover {
+  background: rgb(255 255 255 / 0.08);
+  color: #ffffff;
+}
+.app-sidebar__link--active {
+  background: var(--st-secondary);
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 var(--st-gold);
+}
+.app-sidebar__footer {
+  border-top: 1px solid rgb(255 255 255 / 0.12);
+}
+.app-sidebar__footer-copy {
+  color: #7d93aa;
+}
+.app-sidebar__group-children {
+  border-left-color: rgb(255 255 255 / 0.14);
+}
+
+/* Workspace + topbar */
+.app-shell__workspace {
+  background: var(--st-canvas);
+}
+.app-topbar {
+  background: var(--st-surface);
+  border-bottom: 1px solid var(--st-border);
+  height: 60px;
+}
+.app-topbar__context {
+  font-family: var(--st-font);
+  font-size: 0.82rem;
+  color: var(--st-text-muted);
+  font-weight: 600;
+}
+.app-topbar__environment {
+  background: var(--st-neutral-tint);
+  color: var(--st-neutral-pill);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.app-topbar__profile-link {
+  color: var(--st-primary-container);
+  font-weight: 700;
+  text-decoration: none;
+}
+.app-topbar__icon-button,
+.app-topbar__theme-button {
+  border: 1px solid var(--st-outline-variant);
+  border-radius: var(--st-radius-sm);
+  background: var(--st-surface);
+  color: var(--st-text-main);
+}
+.app-shell__main {
+  padding: 24px;
+}
+@media (max-width: 900px) {
+  .app-shell__main {
+    padding: 16px;
+  }
+}
+.app-shell__footer {
+  color: var(--st-text-muted);
+  font-size: 0.72rem;
+}
+
+/* Page header ala Stitch */
+.page-header__eyebrow {
+  color: var(--st-text-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0 0 4px;
+}
+.page-header__title {
+  font-size: 1.35rem;
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: var(--st-text-main);
+  font-family: var(--st-font);
+}
+.page-header__description {
+  color: var(--st-text-muted);
+  font-size: 0.86rem;
+  margin: 6px 0 0;
+}
+
+/* Kartu, tombol, tabel generik agar seluruh halaman mengikuti Stitch */
+.ui-card,
+section[class*='card'],
+div[class*='panel'] {
+  font-family: var(--st-font);
+}
+table {
+  font-family: var(--st-font);
+}
+button.button,
+.button {
+  font-family: var(--st-font);
+  border-radius: var(--st-radius-sm);
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 20px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.button--sm {
+  min-height: 36px;
+  padding: 0 14px;
+  font-size: 0.8125rem;
+}
+.button--primary {
+  background: var(--st-primary-container);
+  border-color: var(--st-primary-container);
+}
+input,
+select,
+textarea {
+  font-family: var(--st-font);
+  border-radius: var(--st-radius-sm);
+}
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 2px solid var(--st-primary-container);
+  outline-offset: 1px;
+  border-color: var(--st-primary-container);
+}
+
+/* Auth layout */
+.auth-card,
+.st-login :deep(.st-card) {
+  box-shadow: var(--st-shadow-md);
+  border: 1px solid var(--st-border);
+}
+
+/* Kiosk publik */
+.kiosk,
+.display-view {
+  font-family: var(--st-font);
+}
+
+/* Responsive: tablet + desktop sesuai aturan UI */
+@media (max-width: 1100px) {
+  .app-shell__main {
+    padding: 16px;
+  }
+}
+
+.app-topbar__user {
+  display: grid;
+  line-height: 1.1;
+  text-align: right;
+}
+.app-topbar__user strong {
+  font-size: 0.8rem;
+  color: var(--st-text-main);
+}
+.app-topbar__user small {
+  font-size: 0.7rem;
+  color: var(--st-text-muted);
+}
+.app-topbar__logout {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+}
+
+/* Remap variabel Gentelella -> Stitch (mode terang). Shell dimuat sesudah
+   style.scss sehingga blok :root ini menang. Mode gelap tidak diubah. */
+:root {
+  --sidebar-bg: #102a43;
+  --sidebar-hover: #1b4965;
+  --sidebar-active: #1b4965;
+  --sidebar-text: #c3d2e0;
+  --sidebar-text-hover: #ffffff;
+  --sidebar-text-active: #ffffff;
+  --sidebar-border: #0b2036;
+  --primary: #102a43;
+  --primary-lt: rgba(212, 167, 44, 0.16);
+  --primary-dk: #0b2036;
+  --body-bg: #f5f7f8;
+  --bg-surface: #ffffff;
+  --bg-surface-secondary: #eef2f3;
+  --border-color: #dce3e5;
+  --border-color-light: #e6f7f6;
+  --border-translucent: rgba(22, 37, 37, 0.08);
+  --text: #162525;
+  --text-secondary: #3f4946;
+  --text-muted: #526466;
+  --blue: #24536a;
+  --azure: #24536a;
+  --green: #155b43;
+  --yellow: #784700;
+  --orange: #6b3322;
+  --red: #9d2c32;
+  --green-lt: #e7f5ed;
+  --red-lt: #fceaec;
+  --yellow-lt: #fff3d5;
+  --blue-lt: #e8f1f6;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 16px;
+  --shadow: 0 1px 2px rgb(22 37 37 / 0.06), 0 1px 3px rgb(22 37 37 / 0.08);
+  --shadow-card: 0 1px 2px rgb(22 37 37 / 0.06), 0 1px 3px rgb(22 37 37 / 0.08);
+}
+
+/* Tombol generik */
+/* Primer navy solid + garis emas seperti tombol header Figma. */
+.button--primary {
+  background: var(--st-primary-container);
+  border-color: var(--st-gold);
+  color: #fff;
+}
+.button--primary:hover {
+  background: var(--st-primary);
+  border-color: var(--st-gold);
+}
+.button--secondary {
+  background: var(--st-surface);
+  border-color: var(--st-outline-variant);
+  color: var(--st-text-main);
+}
+.button--secondary:hover {
+  border-color: var(--st-primary-container);
+  color: var(--st-primary-container);
+}
+.button--danger {
+  background: var(--st-danger);
+  border-color: var(--st-danger);
+  color: #fff;
+}
+.button--text {
+  color: var(--st-primary-container);
+}
+
+/* Badge status generik */
+.status-badge {
+  font-family: var(--st-font);
+  border-radius: 999px;
+  font-weight: 600;
+}
+.status-badge--active {
+  background: var(--st-success-tint);
+  color: var(--st-success);
+}
+.status-badge--warning {
+  background: var(--st-warning-tint);
+  color: var(--st-warning);
+}
+.status-badge--danger {
+  background: var(--st-danger-tint);
+  color: var(--st-danger);
+}
+.status-badge--info {
+  background: var(--st-info-tint);
+  color: var(--st-info);
+}
+.status-badge--muted {
+  background: var(--st-neutral-tint);
+  color: var(--st-neutral-pill);
+}
+
+/* Panel/kartu generik seluruh master-data & akun */
+.master-data__panel,
+.accounts-view__row,
+.ai-setup-view__card,
+.devices-view__form-panel,
+.enrollment-view__camera,
+.kiosks-view__card {
+  background: var(--st-surface);
+  border: 1px solid var(--st-border);
+  border-radius: var(--st-radius-lg);
+  box-shadow: var(--st-shadow-sm);
+}
+.master-data__eyebrow,
+.accounts-view__hint {
+  color: var(--st-text-muted);
+  font-family: var(--st-font);
+}
+.master-data__alert,
+.dashboard-view__alert {
+  background: var(--st-danger-tint);
+  color: var(--st-danger);
+  border-radius: var(--st-radius-sm);
+}
+.master-data__success,
+.ai-setup-view__success {
+  background: var(--st-success-tint);
+  color: var(--st-success);
+  border-radius: var(--st-radius-sm);
+}
+
+/* Dashboard */
+.dashboard-view__hero,
+.dashboard-view__empty,
+.dashboard-view__at-risk {
+  background: var(--st-surface);
+  border: 1px solid var(--st-border);
+  border-radius: var(--st-radius-lg);
+  box-shadow: var(--st-shadow-sm);
+}
+.dashboard-view__eyebrow {
+  color: var(--st-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.session-view__filter-chip {
+  border-radius: 999px;
+}
+.session-view__filter-chip--active {
+  border-color: var(--st-primary-container);
+  color: var(--st-primary-container);
+}
+
+/* Enrollment */
+.enrollment-view__student {
+  background: var(--st-surface);
+  border: 1px solid var(--st-border);
+  border-radius: var(--st-radius);
+}
+.enrollment-view__student--selected {
+  border-color: var(--st-primary-container);
+  box-shadow: var(--st-shadow-sm);
+}
+.enrollment-view__student--enrolled {
+  border-left: 4px solid var(--st-success);
+}
+
+/* Preview kamera */
+.camera-preview-view__frame {
+  border-radius: var(--st-radius-lg);
+  border: 1px solid var(--st-border);
+}
+.camera-preview-view__guidance,
+.camera-preview-view__identity {
+  font-family: var(--st-font);
+}
+
+/* Shell 1:1 Stitch — grup submenu, topbar breadcrumb & scope */
+.app-sidebar__brand {
+  text-decoration: none;
+  display: block;
+  padding: 16px 20px;
+}
+.app-sidebar__brand-name {
+  display: block;
+  font-weight: 700;
+  font-size: 0.95rem;
+  line-height: 1.25;
+}
+.app-sidebar__brand-name small {
+  display: block;
+  font-weight: 400;
+  font-size: 0.72rem;
+  white-space: normal;
+  line-height: 1.4;
+}
+.app-sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 12px 24px;
+  overflow-y: auto;
+}
+.app-sidebar__group-toggle {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.app-sidebar__group-caret {
+  margin-left: auto;
+  font-size: 20px;
+}
+.app-sidebar__group-children {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: 30px;
+  border-left: 1px solid var(--st-border);
+  padding-left: 10px;
+}
+.app-sidebar__link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  text-decoration: none;
+  font-size: 0.86rem;
+}
+.app-sidebar__link .st-material-icon {
+  font-size: 20px;
+}
+.app-sidebar__link--active {
+  background: var(--st-secondary);
+  color: #ffffff;
+  box-shadow: inset 3px 0 0 var(--st-gold);
+}
+
+.app-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  gap: 12px;
+}
+.app-topbar__left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.app-topbar__breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.app-topbar__breadcrumb-home {
+  color: var(--st-text-muted);
+  display: inline-flex;
+  text-decoration: none;
+}
+.app-topbar__breadcrumb-home .st-material-icon {
+  font-size: 18px;
+}
+.app-topbar__breadcrumb-sep {
+  color: var(--st-text-muted);
+  font-weight: 400;
+}
+.app-topbar__breadcrumb-item--current {
+  color: var(--st-text-main);
+}
+.app-topbar__right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+}
+@media (max-width: 640px) {
+  .app-topbar {
+    padding: 8px 12px;
+  }
+  .app-topbar__scope {
+    max-width: 38vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+.app-topbar__scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--st-surface-container-low);
+  border: 1px solid var(--st-border);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--st-text-main);
+}
+.app-topbar__scope-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--st-primary-container);
+}
+.app-topbar__avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: var(--st-primary);
+  color: var(--st-on-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+.app-topbar__logout {
+  border: 0;
+  background: transparent;
+  color: var(--st-danger);
+  font-weight: 600;
+  font-size: 0.84rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+/* Pustaka UI 1:1 Stitch — tabel, filter, chip, drawer/modal generik */
+.st-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  background: var(--st-surface);
+  border: 1px solid var(--st-border);
+  border-radius: var(--st-radius-lg);
+  padding: 12px 14px;
+  box-shadow: var(--st-shadow-sm);
+}
+.st-toolbar__spacer {
+  flex: 1;
+}
+.st-chip--on {
+  background: var(--st-surface-container-low);
+  border-color: var(--st-border);
+  cursor: default;
+}
+
+.st-table__who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  color: var(--st-text-main);
+}
+.st-table__sub {
+  display: block;
+  font-weight: 400;
+  font-size: 0.76rem;
+  color: var(--st-text-muted);
+}
+.st-table__num {
+  font-variant-numeric: tabular-nums;
+  color: var(--st-text-main);
+}
+.st-rowbtn {
+  border: 0;
+  background: transparent;
+  color: var(--st-primary-container);
+  font-weight: 600;
+  font-size: 0.82rem;
+  cursor: pointer;
+  padding: 4px 6px;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.st-rowbtn .st-material-icon {
+  font-size: 18px;
+}
+
+.st-listrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--st-surface-container-low);
+  border: 1px solid var(--st-border);
+  border-radius: var(--st-radius);
+  padding: 12px 14px;
+}
+.st-listrow__title {
+  margin: 0;
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: var(--st-text-main);
+}
+.st-listrow__desc {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  color: var(--st-text-muted);
+}
+
+.st-btn--danger-soft {
+  background: var(--st-danger-tint);
+  border-color: var(--st-danger-tint);
+  color: var(--st-danger);
+}
+.st-btn {
+  font-family: var(--st-font);
+}
+button.st-btn,
+.st-btn {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 18px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+@media (max-width: 900px) {
+  .app-topbar__breadcrumb {
+    display: none;
+  }
+  .st-table {
+    min-width: 640px;
+  }
+}
+
+/* ---- Stitch shared page kit (dipakai ulang antar halaman) ---- */
+.st-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  font-family: var(--st-font);
+}
+.st-toolbar__spacer {
+  flex: 1 1 auto;
+}
+.st-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--st-success-tint, #e3f2ec);
+  color: var(--st-success, #1d6b4f);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.st-chip--muted {
+  background: var(--st-neutral-tint);
+  color: var(--st-neutral-pill);
+}
+.st-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.st-card {
+  background: var(--st-surface);
+  border: 1px solid var(--st-border);
+  border-radius: var(--st-radius);
+  padding: 18px 20px;
+}
+.st-card__title {
+  margin: 0 0 4px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--st-text-main);
+}
+.st-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  min-width: 760px;
+}
+.st-tablewrap {
+  overflow-x: auto;
+  background: var(--st-surface);
+  border: 1px solid var(--st-border);
+  border-radius: var(--st-radius);
+  box-shadow: var(--st-shadow-sm);
+}
+.st-tablewrap > .st-table {
+  min-width: 760px;
+}
+.st-table thead th {
+  text-align: left;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--st-text-muted);
+  font-weight: 700;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--st-border);
+  white-space: nowrap;
+}
+.st-table tbody td {
+  padding: 12px;
+  border-bottom: 1px solid var(--st-border);
+  vertical-align: middle;
+}
+.st-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.st-table__mono {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.st-table__muted {
+  color: var(--st-text-muted);
+  font-size: 0.82rem;
+}
+.st-table__actions {
+  text-align: right;
+  white-space: nowrap;
+}
+.st-identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.st-link {
+  background: none;
+  border: 0;
+  padding: 6px 4px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--st-primary-container);
+  min-height: 44px;
+}
+.st-link + .st-link {
+  margin-left: 10px;
+}
+.st-link--danger {
+  color: var(--st-danger);
+}
+.st-alert {
+  border-radius: var(--st-radius-sm);
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  margin: 0;
+}
+.st-alert--error {
+  background: var(--st-danger-tint);
+  color: var(--st-danger);
+}
+.st-alert--success {
+  background: var(--st-success-tint, #e3f2ec);
+  color: var(--st-success, #1d6b4f);
+}
+.st-grid2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+.st-grid3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+@media (max-width: 900px) {
+  .st-grid2,
+  .st-grid3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.st-kpi {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  margin: 0;
+}
+.st-kpi small {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--st-text-muted);
+}
+.st-split {
+  display: grid;
+  grid-template-columns: minmax(280px, 5fr) minmax(0, 7fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 1000px) {
+  .st-split {
+    grid-template-columns: 1fr;
+  }
+}
+.st-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.st-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  border: 1px solid var(--st-border);
+  border-radius: var(--st-radius-sm);
+  padding: 10px 12px;
+  background: var(--st-surface);
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+.st-list__item .st-identity {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.st-list__item .st-select,
+.st-list__item .st-input,
+.st-list__item select,
+.st-list__item input {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.st-list__item .st-btn {
+  flex-shrink: 0;
+}
+@media (max-width: 640px) {
+  .st-list__item {
+    align-items: stretch;
+  }
+  .st-list__item .st-btn {
+    width: 100%;
+    flex-basis: 100%;
+  }
+}
+.st-list__item--button {
+  cursor: pointer;
+}
+.st-list__item--button:hover {
+  border-color: var(--st-primary-container);
+}
+.st-list__item--active {
+  border-color: var(--st-primary-container);
+  box-shadow: var(--st-shadow-sm);
+}
+.st-section {
+  margin: 18px 0 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--st-text-muted);
+}
+.st-def {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin: 0;
+}
+.st-def > div {
+  background: var(--st-surface-container, #f4f6f5);
+  border-radius: var(--st-radius-sm);
+  padding: 10px 12px;
+}
+.st-def dt {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--st-text-muted);
+  font-weight: 700;
+}
+.st-def dd {
+  margin: 4px 0 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--st-text-main);
+}
+.st-detailhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.st-radio-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.st-radio-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--st-border);
+  border-radius: var(--st-radius-sm);
+  padding: 10px 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 44px;
+}
+.st-radio-card input {
+  accent-color: var(--st-primary-container);
+  width: 18px;
+  height: 18px;
+}
+.st-radio-card--active {
+  border-color: var(--st-primary-container);
+  background: var(--st-surface-container, #f4f6f5);
+}
+
+.st-file {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 12px;
+  border: 1px dashed var(--st-outline-variant);
+  border-radius: var(--st-radius-sm);
+  background: var(--st-surface);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.st-statline {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--st-surface);
+  border: 1px solid var(--st-border);
+  border-radius: var(--st-radius-sm);
+  padding: 8px 14px;
+  font-size: 0.82rem;
+  text-align: right;
+}
+.st-btnlink {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--st-outline-variant);
+  border-radius: var(--st-radius-sm);
+  background: var(--st-surface);
+  color: var(--st-text-main);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+.st-btnlink:hover {
+  border-color: var(--st-primary-container);
+  color: var(--st-primary-container);
+}
+.st-scope {
+  display: inline-flex;
+  background: var(--st-surface-container, #eef1f0);
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+}
+.st-scope button {
+  border: 0;
+  background: transparent;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--st-text-muted);
+  cursor: pointer;
+  min-height: 36px;
+}
+.st-scope--active {
+  background: var(--st-surface) !important;
+  color: var(--st-primary-container) !important;
+  box-shadow: var(--st-shadow-sm);
+}
+.st-schedule {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 16px;
+}
+.st-schedule__time {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  background: var(--st-success-tint, #e3f2ec);
+  border-radius: var(--st-radius-sm);
+  padding: 12px;
+  text-align: left;
+}
+.st-schedule__time strong {
+  font-size: 1.05rem;
+  color: var(--st-success, #1d6b4f);
+}
+.st-schedule__time small {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--st-text-muted);
+}
+.st-schedule__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.st-schedule__actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.st-field {
+  display: grid;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--st-text-main);
+  font-family: var(--st-font);
+}
+.st-field > span {
+  display: block;
+}
+.st-field > input,
+.st-field > select,
+.st-field > .st-input,
+.st-field > .st-select {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.st-list__item .st-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.st-decision-note {
+  min-width: 220px;
+  flex: 1 1 auto;
+}
+
+/* ---- UAD1-4 rhythm: aksi tidak nempel, judul-tabel berjarak, ukuran friendly ---- */
+.st-pagehead__actions {
+  gap: 8px 12px;
+}
+.st-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.st-btn--sm {
+  white-space: nowrap;
+}
+.st-tablewrap {
+  margin-top: 12px;
+}
+.st-card__head + .st-tablewrap,
+.st-card__head + .st-toolbar,
+.st-toolbar + .st-tablewrap {
+  margin-top: 0;
+}
+.st-card > .st-tablewrap:first-child {
+  margin-top: 0;
+}
+.st-page > .st-table__muted,
+.st-card > .st-table__muted,
+section > .st-table__muted {
+  display: block;
+  margin: 8px 2px;
+}
+.st-table__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px 6px;
+  flex-wrap: wrap;
+}
+.st-table__actions .st-rowbtn,
+.st-table__actions .st-link {
+  margin: 0;
+  white-space: nowrap;
+}
+.st-rowbtn + .st-rowbtn,
+.st-rowbtn + .st-link,
+.st-link + .st-rowbtn {
+  margin-left: 0;
+}
+.st-link + .st-link {
+  margin-left: 4px;
+}
+.st-schedule__actions {
+  gap: 8px 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.st-schedule__actions .st-link,
+.st-schedule__actions .st-rowbtn {
+  margin: 0;
+}
+.st-table tbody tr:hover td {
+  background: var(--st-surface-container-low);
+}
+.st-card__head {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.master-data__panel-heading {
+  margin-bottom: 12px;
+}
+.devices-view__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  align-items: flex-end;
+}
+.devices-view__toolbar .master-data__search {
+  flex: 2 1 280px;
+}
+form.accounts-view__pin-form {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  width: 100%;
+}
+.accounts-view__pin-form > div {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.accounts-view__pin-form > .st-input,
+.accounts-view__pin-form > input {
+  flex: 2 1 220px;
+  width: auto;
+  min-width: 140px;
+}
+@media (max-width: 640px) {
+  .st-table__actions {
+    justify-content: flex-start;
+  }
+  form.accounts-view__pin-form > div {
+    flex-basis: 100%;
+  }
+}
+
+/* ---- UAD1-5: skala teks Stitch + container ultra-wide + animasi ---- */
+/* Wadah konten: nyaman di laptop, tidak melar di 2-4K */
+.st-page {
+  max-width: 1600px;
+  margin-inline: auto;
+  width: 100%;
+}
+
+/* Skala teks mengikuti frame Stitch (judul halaman 20px, kartu 16px, isi 15px) */
+.st-pagehead__title {
+  font-size: 1.25rem;
+}
+.st-table {
+  font-size: 0.9375rem;
+}
+.st-card {
+  font-size: 0.9375rem;
+}
+.st-card__subtitle,
+.pageheader__description,
+.st-pagehead__desc {
+  font-size: 0.875rem;
+}
+.st-stat__value {
+  font-size: 1.75rem;
+}
+.st-pagehead__eyebrow,
+.st-kpi small,
+.st-table thead th {
+  font-size: 0.6875rem;
+}
+
+/* Kit animasi ala Stitch (pulse, ping, fade/scale-in, spin) */
+@keyframes st-pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.82);
+  }
+}
+@keyframes st-ping-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgb(69 211 184 / 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgb(69 211 184 / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(69 211 184 / 0);
+  }
+}
+@keyframes st-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes st-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+@keyframes st-slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes st-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.app-topbar__scope-dot,
+.kiosk__dot--live,
+.st-live-dot {
+  animation: st-pulse-dot 1.8s ease-in-out infinite;
+}
+.kiosk__result-card {
+  animation: st-scale-in 240ms ease-out;
+}
+.kiosk__avatar {
+  animation: st-ping-ring 2.2s ease-out infinite;
+}
+.st-drawer__backdrop {
+  animation: st-fade-in 160ms ease-out;
+}
+.st-drawer__panel {
+  animation: st-slide-in-right 200ms ease-out;
+}
+.st-modal__backdrop {
+  animation: st-fade-in 160ms ease-out;
+}
+.st-modal__box {
+  animation: st-scale-in 180ms ease-out;
+}
+.st-spinner,
+.st-loading-spinner {
+  animation: st-spin 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-topbar__scope-dot,
+  .kiosk__dot--live,
+  .st-live-dot,
+  .kiosk__result-card,
+  .kiosk__avatar,
+  .st-drawer__backdrop,
+  .st-drawer__panel,
+  .st-modal__backdrop,
+  .st-modal__box,
+  .st-spinner,
+  .st-loading-spinner {
+    animation: none;
+  }
+}
+
+/* ---- UAD1-5 Reports ala B04-01 ---- */
+.reports__filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+  margin: 12px 0 0;
+}
+@media (min-width: 1400px) {
+  .reports__filters {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.reports__tabletools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.st-coltoggle {
+  position: relative;
+}
+.st-coltoggle > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--st-outline-variant);
+  border-radius: var(--st-radius-sm);
+  background: var(--st-surface);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+  white-space: nowrap;
+}
+.st-coltoggle > summary::-webkit-details-marker {
+  display: none;
+}
+.st-coltoggle > summary:hover {
+  border-color: var(--st-primary-container);
+  color: var(--st-primary-container);
+}
+.st-coltoggle__panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  display: grid;
+  gap: 4px;
+  min-width: 200px;
+  padding: 10px 12px;
+  background: var(--st-surface);
+  border: 1px solid var(--st-border);
+  border-radius: var(--st-radius-sm);
+  box-shadow: var(--st-shadow-md);
+}
+.st-coltoggle__panel label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  min-height: 36px;
+  cursor: pointer;
+}
+.st-coltoggle__panel input {
+  accent-color: var(--st-primary-container);
+  width: 18px;
+  height: 18px;
+}
+.st-notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--st-surface);
+  border: 1px solid var(--st-border);
+  border-radius: var(--st-radius);
+  box-shadow: var(--st-shadow-sm);
+  padding: 14px 16px;
+}
+.st-notice--info {
+  background: var(--st-info-tint);
+  border-color: transparent;
+}
+.st-notice__icon {
+  font-size: 24px;
+  color: var(--st-info);
+  flex-shrink: 0;
+}
+.st-notice__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.st-notice__text strong {
+  display: block;
+  font-size: 0.9rem;
+}
+.st-notice__text p {
+  margin: 2px 0 0;
+  font-size: 0.85rem;
+  color: var(--st-text-main);
+}
+
+/* ---- UAD1-5 Sessions ala B03-01 ---- */
+.st-sectionrow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+}
+.st-sectionrow .st-section {
+  margin: 18px 0 8px;
+}
+.st-sectionrow .st-table__muted,
+.st-sectionrow .st-link {
+  margin: 18px 0 8px;
+}
+.st-session-live {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(240px, 5fr);
+  gap: 16px;
+}
+@media (max-width: 900px) {
+  .st-session-live {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.st-session-live__main {
+  min-width: 0;
+}
+.st-session-live__tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+@media (max-width: 640px) {
+  .st-session-live__tiles {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.st-session-live__tile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--st-surface-container-low);
+  border-radius: var(--st-radius-sm);
+  padding: 10px 12px;
+  min-width: 0;
+}
+.st-session-live__tile .st-material-icon {
+  font-size: 20px;
+  color: var(--st-primary-container);
+  flex-shrink: 0;
+}
+.st-session-live__tile > span:last-child {
+  display: grid;
+  min-width: 0;
+}
+.st-session-live__tile small {
+  font-size: 0.7rem;
+  color: var(--st-text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.st-session-live__tile strong {
+  font-size: 0.85rem;
+}
+.st-session-live__roster {
+  background: var(--st-surface-container-low);
+  border: 1px solid var(--st-border);
+  border-radius: var(--st-radius);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.st-session-live__roster-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--st-text-muted);
+}
+.st-session-live__roster-head strong {
+  color: var(--st-text-main);
+  white-space: nowrap;
+}
+.st-session-live__bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--st-neutral-tint);
+  overflow: hidden;
+  position: relative;
+}
+.st-session-live__bar::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--done-pct, 0%);
+  background: var(--st-primary-container);
+  border-radius: inherit;
+}
+.st-session-live__counts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.st-session-live__counts > span {
+  display: grid;
+  justify-items: center;
+  background: var(--st-surface);
+  border: 1px solid var(--st-border);
+  border-radius: var(--st-radius-sm);
+  padding: 8px 4px;
+}
+.st-session-live__counts strong {
+  font-size: 1.1rem;
+}
+.st-session-live__counts small {
+  font-size: 0.7rem;
+  color: var(--st-text-muted);
+}
+.st-session-live__cta {
+  width: 100%;
+}
+
+/* ---- UAD1-5 Corrections detail ala B03-09 ---- */
+.st-detailactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 12px;
+}
+.st-compare {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+}
+@media (max-width: 640px) {
+  .st-compare {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .st-compare__arrow {
+    transform: rotate(90deg);
+    justify-self: center;
+  }
+}
+.st-compare__card {
+  background: var(--st-surface-container-low);
+  border: 1px solid var(--st-border);
+  border-radius: var(--st-radius-sm);
+  padding: 12px 14px;
+}
+.st-compare__card--new {
+  background: var(--st-surface);
+}
+.st-compare__label {
+  margin: 0 0 8px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--st-text-muted);
+}
+.st-compare__arrow {
+  align-self: center;
+  color: var(--st-text-muted);
+}
+.st-quote {
+  margin: 8px 0 0;
+  padding: 12px 14px 12px 16px;
+  border-left: 4px solid var(--st-primary-container);
+  background: var(--st-surface-container-low);
+  border-radius: 0 var(--st-radius-sm) var(--st-radius-sm) 0;
+  font-size: 0.9375rem;
+}
+.st-kv {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 0;
+}
+.st-kv > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.st-kv dt {
+  font-size: 0.82rem;
+  color: var(--st-text-muted);
+}
+.st-kv dd {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+/* ---- UAD1-5 mobile topbar: tinggi otomatis agar tidak menumpuk konten ---- */
+@media (max-width: 640px) {
+  .app-topbar {
+    height: auto;
+    min-height: 60px;
+    row-gap: 8px;
+  }
+  .app-topbar__right {
+    justify-content: flex-start;
+  }
+}
+
+/* ---- UAD1-6 Mobile topbar + actions polish ---- */
+.app-topbar__icon-button {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.app-topbar__avatar-link {
+  display: inline-flex;
+  text-decoration: none;
+  flex: 0 0 auto;
+}
+.app-topbar__theme-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  flex: 0 0 auto;
+}
+.app-topbar__theme-button .st-material-icon {
+  font-size: 20px;
+}
+.app-topbar__logout {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 6px;
+  flex: 0 0 auto;
+}
+.app-topbar__logout .st-material-icon {
+  font-size: 20px;
+}
+.app-topbar__scope-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+@media (max-width: 640px) {
+  .app-topbar {
+    flex-wrap: nowrap;
+    height: auto;
+    min-height: 60px;
+    padding: 8px 12px;
+    gap: 8px;
+  }
+  .app-topbar__left {
+    gap: 8px;
+    flex: 0 0 auto;
+  }
+  .app-topbar__right {
+    flex: 1 1 auto;
+    gap: 8px;
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+  .app-topbar__scope {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+    font-size: 0.72rem;
+    padding: 4px 10px;
+  }
+  .app-topbar__profile-link {
+    display: none;
+  }
+  .app-topbar__logout-text {
+    display: none;
+  }
+  .app-topbar__logout {
+    padding: 0 2px;
+  }
+  /* Segmen filter/tab: bagi rata selebar kartu, tidak saling menempel */
+  .st-scope {
+    display: flex;
+    width: 100%;
+    max-width: 100%;
+    gap: 3px;
+  }
+  .st-scope button {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 8px 6px;
+    font-size: 0.75rem;
+    line-height: 1.3;
+    text-align: center;
+  }
+  /* Aksi berdampingan: lebar setara, melipat rapi bila sempit */
+  .st-detailactions .st-btn {
+    flex: 1 1 160px;
+  }
+  .st-detailhead {
+    flex-wrap: wrap;
+  }
+  .st-toolbar .st-btn,
+  .st-toolbar button[type='submit'] {
+    min-height: 44px;
+  }
+}
+@media (max-width: 380px) {
+  .app-topbar__scope {
+    font-size: 0.68rem;
+  }
+  .st-scope button {
+    font-size: 0.7rem;
+  }
+}
+/* Sidebar drawer mobile: sentuh nyaman + aman poni */
+@media (max-width: 900px) {
+  .app-sidebar {
+    width: min(300px, calc(100vw - 48px));
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+  .app-sidebar__link,
+  .app-sidebar__group-toggle {
+    min-height: 44px;
+  }
+}
+
+/* ---- UAD1-6 Dialog konfirmasi kritis ala Stitch (cabut acuan wajah) ---- */
+.st-modal__eyebrow {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--st-danger);
+  margin: 0 0 4px;
+}
+.st-identityline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--st-surface-container-low);
+  border: 1px solid var(--st-border);
+  border-radius: var(--st-radius-sm);
+  padding: 10px 12px;
+  margin: 10px 0 0;
+  font-size: 0.85rem;
+  color: var(--st-text-main);
+}
+.st-fieldhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 12px 0 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--st-text-main);
+}
+.st-charcount {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--st-text-muted);
+  white-space: nowrap;
+}
+
+/* ---- UAD1-6 Drawer detail EWS ala Stitch (frame_12) ---- */
+.st-ewshead__name {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--st-text-main);
+}
+.st-ewshead__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+.st-ewssec {
+  margin-top: 16px;
+}
+.st-ewssec__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.st-ewssec__head h3 {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--st-text-main);
+}
+.st-ewslist {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.st-ewslist__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--st-surface-container-low);
+  border: 1px solid var(--st-border);
+  border-radius: var(--st-radius);
+  padding: 12px;
+}
+.st-ewslist__num {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--st-surface-container);
+  border: 1px solid var(--st-border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--st-text-main);
+}
+
+/* ---- UAD1-6 Banner mode pantau sesi laboran ala Stitch (frame_0) ---- */
+.st-monitorbanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: var(--st-surface);
+  border: 1px solid var(--st-border);
+  border-radius: var(--st-radius-lg);
+  box-shadow: var(--st-shadow-sm);
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.st-monitorbanner__icon {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: var(--st-surface-container-low);
+  border: 1px solid var(--st-border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--st-primary-container);
+}
+.st-monitorbanner__icon .st-material-icon {
+  font-size: 20px;
+}
+.st-monitorbanner p {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.85rem;
+  color: var(--st-text-main);
+}
+.st-monitorbanner p .st-badge {
+  margin-left: 6px;
+}
+.st-monitorbanner__chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--st-surface-container-low);
+  border: 1px solid var(--st-border);
+  border-radius: var(--st-radius-sm);
+  padding: 8px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--st-text-main);
+  white-space: nowrap;
+}
+.st-monitorbanner__chip .st-material-icon {
+  font-size: 18px;
+}
+@media (max-width: 640px) {
+  .st-monitorbanner {
+    flex-wrap: wrap;
+  }
+  .st-monitorbanner__chip {
+    white-space: normal;
+  }
+}
+
+/* ---- UAD1-6 Kartu Kelas Saya ala Stitch (frame_6) ---- */
+.st-classlab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--st-surface-container-low);
+  border: 1px solid var(--st-border);
+  border-radius: var(--st-radius-sm);
+  padding: 10px 12px;
+  font-size: 0.85rem;
+  color: var(--st-text-main);
+}
+.st-classlab .st-material-icon {
+  color: var(--st-primary-container);
+  font-size: 20px;
+}
+.st-classnext {
+  margin: 0 0 2px;
+  font-size: 0.88rem;
+  color: var(--st-text-main);
+}
+
+/* ---- Ring kehadiran nyata Kelas Saya (data API, bukan 96,4% tempel) ---- */
+.st-classring {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 0 4px;
+}
+.st-classring .st-ring {
+  width: 64px;
+  height: 64px;
+  min-width: 64px;
+  min-height: 64px;
+  flex: none;
+  transform: rotate(-90deg);
+}
+.st-ring__track {
+  fill: none;
+  stroke: var(--st-border);
+  stroke-width: 5;
+}
+.st-ring__value {
+  fill: none;
+  stroke: var(--st-primary-container);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-dasharray: 97.4;
+  transition: stroke-dashoffset 0.4s ease;
+}
+.st-ring__text {
+  font-size: 9px;
+  font-weight: 700;
+  fill: var(--st-text-main);
+  text-anchor: middle;
+  dominant-baseline: central;
+  transform: rotate(90deg);
+  transform-origin: 20px 20px;
+}
+.st-classring__label {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--st-text-main);
+}
+.st-skline {
+  font-size: 0.78rem;
+  border-top: 1px dashed var(--st-border);
+  padding-top: 8px;
+}

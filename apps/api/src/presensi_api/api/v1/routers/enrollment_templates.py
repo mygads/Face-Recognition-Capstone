@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 
 from presensi_api.api.errors import OPENAPI_ERROR_RESPONSES, ApiProblem
 from presensi_api.api.security.request_rate_limit import EnrollmentOperator
+from presensi_api.api.security.roles import RoleCode
+from presensi_api.api.security.scope import is_admin
 from presensi_api.api.v1.schemas.common import PageResponse, Pagination
 from presensi_api.api.v1.schemas.enrollment import (
     EnrollmentCaptureResultResponse,
@@ -81,10 +83,12 @@ def list_class_enrollment_status(
     session: DbSession,
     principal: EnrollmentOperator,
 ) -> list[EnrollmentStudentStatusResponse]:
-    del principal
     school_class = session.get(SchoolClass, class_id)
     if school_class is None:
         raise ApiProblem(404, "class_not_found", "Kelas tidak ditemukan.")
+    from presensi_api.api.security.scope import ensure_class_read as _ecr
+
+    _ecr(session, principal, class_id)
 
     students = session.execute(
         select(Student.id, Student.student_number, Student.full_name)
@@ -165,6 +169,9 @@ async def submit_enrollment_captures(
     )
     if student is None or not student.is_active:
         raise ApiProblem(404, "student_not_found", "Siswa aktif tidak ditemukan.")
+    from presensi_api.api.security.scope import ensure_student_read as _esr
+
+    _esr(session, principal, student_id)
 
     uploaded_frames: list[bytes] = []
     total_bytes = 0
@@ -330,6 +337,9 @@ def revoke_face_template_batch(
     selected = session.get(FaceTemplate, template_id)
     if selected is None:
         raise ApiProblem(404, "face_template_not_found", "Template tidak ditemukan.")
+    from presensi_api.api.security.scope import ensure_student_read as _esr2
+
+    _esr2(session, principal, selected.student_id)
     if selected.revoked_at is not None:
         raise ApiProblem(
             409, "face_template_already_revoked", "Template sudah dicabut."
@@ -385,10 +395,38 @@ def list_face_templates(
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> PageResponse[FaceTemplateResponse]:
-    del principal
-    query = select(FaceTemplate)
-    count_query = select(func.count()).select_from(FaceTemplate)
+    from presensi_api.api.security.scope import (
+        class_ids_in_laborant_scope as _tcs_lab,
+    )
+    from presensi_api.api.security.scope import (
+        ensure_student_read as _esr3,
+    )
+    from presensi_api.api.security.scope import (
+        teacher_class_ids as _tcs,
+    )
+    from presensi_api.db.models import ClassStudent as _CS
+
+    if not is_admin(principal):
+        scope_classes: set[UUID] = set()
+        if RoleCode.TEACHER in principal.roles:
+            scope_classes |= _tcs(session, principal.id)
+        if RoleCode.LABORANT in principal.roles:
+            scope_classes |= _tcs_lab(session, principal)
+        if scope_classes:
+            in_scope = select(_CS.student_id).where(_CS.class_id.in_(scope_classes))
+        else:
+            in_scope = select(_CS.student_id).where(_CS.class_id.is_(None))
+        query = select(FaceTemplate).where(FaceTemplate.student_id.in_(in_scope))
+        count_query = (
+            select(func.count())
+            .select_from(FaceTemplate)
+            .where(FaceTemplate.student_id.in_(in_scope))
+        )
+    else:
+        query = select(FaceTemplate)
+        count_query = select(func.count()).select_from(FaceTemplate)
     if student_id is not None:
+        _esr3(session, principal, student_id)
         query = query.where(FaceTemplate.student_id == student_id)
         count_query = count_query.where(FaceTemplate.student_id == student_id)
     if not include_revoked:

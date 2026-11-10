@@ -761,3 +761,97 @@ def test_watchlist_sorted_by_absence_then_paginated(
     assert [item["student_id"] for item in second_page.json()["items"]] == [
         str(STUDENT_A2_ID)
     ]
+
+
+def test_ews_follow_up_scoped_to_reader(
+    at_risk_database: dict[str, object],
+) -> None:
+    from presensi_api.api.security.roles import Permission as _Permission
+    from presensi_api.db.models import LaborantLabAssignment as _Assignment
+
+    factory = at_risk_database["factory"]
+    assert factory is not None
+    with factory.begin() as db:  # type: ignore[attr-defined]
+        from presensi_api.db.models import User as _User
+
+        db.add(
+            _User(
+                id=LABORANT_ID,
+                email="laborant@example.test",
+                full_name="Laborant",
+                password_hash="test-hash",
+            )
+        )
+        db.flush()
+        db.add(_Assignment(user_id=LABORANT_ID, laboratory_id=LAB_A_ID))
+
+    teacher_a = principal(RoleCode.TEACHER, TEACHER_A_ID)
+    # Guru A: siswa A1 dalam cakupan (roster jadwal miliknya) -> boleh.
+    response = request(
+        "POST",
+        f"/api/v1/reports/attendance/at-risk/{STUDENT_A1_ID}/follow-ups",
+        teacher_a,
+        {"note": "Sudah hubungi orang tua."},
+    )
+    assert response.status_code in (200, 201), response.text
+    # Guru A: siswa B1 di luar cakupan -> disamarkan sebagai tidak ada.
+    response = request(
+        "POST",
+        f"/api/v1/reports/attendance/at-risk/{STUDENT_B1_ID}/follow-ups",
+        teacher_a,
+        {"note": "Seharusnya ditolak."},
+    )
+    assert response.status_code == 404, response.text
+    response = request(
+        "GET",
+        f"/api/v1/reports/attendance/at-risk/{STUDENT_B1_ID}/follow-ups",
+        teacher_a,
+    )
+    assert response.status_code == 404, response.text
+
+    admin = principal(RoleCode.ADMIN, ADMIN_ID)
+    response = request(
+        "GET",
+        f"/api/v1/reports/attendance/at-risk/{STUDENT_B1_ID}/follow-ups",
+        admin,
+    )
+    assert response.status_code == 200, response.text
+
+    laborant = AuthenticatedUser(
+        id=LABORANT_ID,
+        email="laborant@example.test",
+        full_name="Laborant",
+        roles=frozenset({RoleCode.LABORANT}),
+        extra_permissions=frozenset({_Permission.EWS_READ, _Permission.EWS_FOLLOW_UP}),
+    )
+    # Laboran (lab A): siswa A1 boleh, siswa B1 (lab B) ditolak.
+    response = request(
+        "POST",
+        f"/api/v1/reports/attendance/at-risk/{STUDENT_A1_ID}/follow-ups",
+        laborant,
+        {"note": "Catatan laboran lab A."},
+    )
+    assert response.status_code in (200, 201), response.text
+    response = request(
+        "POST",
+        f"/api/v1/reports/attendance/at-risk/{STUDENT_B1_ID}/follow-ups",
+        laborant,
+        {"note": "Seharusnya ditolak lintas lab."},
+    )
+    assert response.status_code == 404, response.text
+    # Status catatan hanya bisa diubah bila siswa dalam cakupan.
+    created = request(
+        "GET",
+        f"/api/v1/reports/attendance/at-risk/{STUDENT_A1_ID}/follow-ups",
+        laborant,
+    )
+    assert created.status_code == 200, created.text
+    follow_up_id = created.json()[0]["id"]
+    response = request(
+        "PATCH",
+        f"/api/v1/reports/attendance/at-risk/{STUDENT_A1_ID}/follow-ups/{follow_up_id}",
+        laborant,
+        {"status": "done"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "done"

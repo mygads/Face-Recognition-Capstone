@@ -24,6 +24,7 @@ note bottom of SYS
   Tahap 1 (UC12 + agregat): human watchlist,
   tanpa notifikasi, tanpa sanksi.
   Scope: ADMIN semua, TEACHER miliknya/kelasnya,
-  LABORANT via API tanpa menu UI.
+  LABORANT dengan grant ews_read
+(menu muncul otomatis).
 end note
 @enduml

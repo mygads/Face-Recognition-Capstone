@@ -1,0 +1,100 @@
+/* Stitch design tokens — diekstrak dari frame B01/B02/B06/B07 (Tailwind config inline).
+   Sumber: /tmp/frame_*.html hasil export Stitch 2026-11-07. Tetap dipakai bersama
+   Gentelella (AGENTS.md): variabel memakai prefix --st agar tidak menabrak --* Gentelella.
+   Reskin 2026-11-10: primer diselaraskan ke Figma UI CAPSTONE node 47-1082
+   (header navy #102A43, aksen emas #D4A72C, canvas #F8FAFC) — disampling piksel
+   dari proto Figma karena API style Figma butuh login. */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap');
+
+:root {
+  --st-font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --st-icon-font: 'Material Symbols Outlined';
+
+  --st-primary: #0b2036;
+  --st-primary-container: #102a43;
+  --st-on-primary: #ffffff;
+  --st-primary-fixed: #d7e3ef;
+  --st-primary-fixed-dim: #b9cde0;
+  --st-inverse-primary: #b9cde0;
+  --st-on-primary-container: #ffffff;
+  --st-on-primary-fixed: #0b2036;
+  --st-on-primary-fixed-variant: #1b4965;
+  --st-surface-tint: #1b4965;
+
+  --st-gold: #d4a72c;
+  --st-gold-strong: #b8912a;
+  --st-gold-tint: #fef3c7;
+  --st-on-gold: #102a43;
+
+  --st-secondary: #1b4965;
+  --st-info: #0284c7;
+  --st-info-tint: #e0f2fe;
+  --st-secondary-container: #b6e3ff;
+  --st-on-secondary: #ffffff;
+  --st-on-secondary-container: #39667e;
+
+  --st-tertiary: #6b3322;
+  --st-tertiary-container: #884a37;
+  --st-on-tertiary: #ffffff;
+  --st-tertiary-fixed: #ffdbd1;
+  --st-tertiary-fixed-dim: #ffb59f;
+
+  --st-text-main: #0f172a;
+  --st-on-surface: #0f172a;
+  --st-on-surface-variant: #334155;
+  --st-text-muted: #64748b;
+  --st-canvas: #f8fafc;
+  --st-surface: #ffffff;
+  --st-background: #f1f5f9;
+  --st-surface-bright: #f8fafc;
+  --st-surface-dim: #cbd5e1;
+  --st-surface-container: #e8eef4;
+  --st-surface-container-low: #f1f5f9;
+  --st-surface-container-high: #e2e8f0;
+  --st-surface-container-highest: #dbe3ec;
+  --st-surface-variant: #dbe3ec;
+  --st-neutral-tint: #f1f5f9;
+  --st-neutral-pill: #475569;
+  --st-outline: #64748b;
+  --st-outline-variant: #cbd5e1;
+  --st-border: #e2e8f0;
+
+  --st-success: #155b43;
+  --st-success-tint: #e7f5ed;
+  --st-warning: #784700;
+  --st-warning-tint: #fff3d5;
+  --st-danger: #9d2c32;
+  --st-danger-tint: #fceaec;
+  --st-error: #ba1a1a;
+  --st-error-container: #ffdad6;
+  --st-on-error: #ffffff;
+  --st-on-error-container: #93000a;
+
+  --st-space-xs: 4px;
+  --st-space-sm: 8px;
+  --st-space-md: 16px;
+  --st-space-lg: 24px;
+  --st-radius-sm: 8px;
+  --st-radius: 12px;
+  --st-radius-lg: 16px;
+  --st-shadow-sm: 0 1px 2px rgb(22 37 37 / 0.06), 0 1px 3px rgb(22 37 37 / 0.08);
+  --st-shadow-md: 0 4px 12px rgb(22 37 37 / 0.1);
+}
+
+.st-material-icon {
+  font-family: var(--st-icon-font);
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  display: inline-block;
+  white-space: nowrap;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
+}

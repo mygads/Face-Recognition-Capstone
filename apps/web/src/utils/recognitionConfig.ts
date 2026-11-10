@@ -70,12 +70,12 @@ export function recognitionFrom(settings: UnknownSettings): RecognitionConfigura
  * Titik awal ketat SEMENTARA agar instalasi baru langsung jalan end-to-end.
  *
  * Ini BUKAN hasil kalibrasi: nilainya sengaja ketat (presisi tinggi, recall
- * rendah — wajah meragukan jatuh ke "ulangi/frontal" atau presensi manual)
+ * rendah - wajah meragukan jatuh ke "ulangi/frontal" atau presensi manual)
  * dan referensinya menandai diri sebagai non-final. Produksi WAJIB kalibrasi
  * lokal (backlog P0-5) sebelum threshold ini dianggap final.
  */
 export const FACTORY_SAFE_CALIBRATION_REFERENCE =
-  'DEFAULT-AMAN-SEMENTARA — wajib kalibrasi lokal sebelum produksi (P0-5)'
+  'DEFAULT-AMAN-SEMENTARA - wajib kalibrasi lokal sebelum produksi (P0-5)'
 
 export function factorySafeThresholds(): Pick<
   RecognitionConfiguration,

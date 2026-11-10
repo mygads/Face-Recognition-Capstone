@@ -18,8 +18,9 @@ Guru boleh membuka sesi kapan pun, termasuk di luar jendela otomatis — sesi
 paksa ini berstatus **`manual_override`** agar dashboard/audit menunjukkan
 intervensi guru. Auto-close pada jam akhir jadwal berlaku untuk `active` DAN
 `manual_override` (worker lifespan tiap 10 detik, `closed_at` = jam akhir lokal
-jadwal); guru tetap bisa close manual kapan pun. LABORANT scope global karena
-belum ada tabel lab-to-laborant.
+jadwal); guru tetap bisa close manual kapan pun. LABORANT dibatasi penugasan lab
+(`laborant_lab_assignments`) + grant per akun; tanpa lab/session grant,
+operasi sesi ditolak 403 dan dashboard menampilkan empty state.
 
 Membuka sesi membuat baris `attendance_sessions` + menyalin siswa aktif kelas
 ke `session_students` dalam satu transaksi (nomor/nama snapshot immutable;
@@ -43,14 +44,20 @@ atau menyimpan image/embedding.
 
 Endpoint menyimpan setiap event yang valid sebelum memutuskan presensi final.
 Outcome `ambiguous`/`no_match`/`error` hanya evidence audit. `matched`
-membuat record hanya bila 5 syarat lolos:
+membuat record hanya bila 6 syarat lolos (urutan evaluasi sama dengan
+`attendance_decision`: akses dulu, lalu device/sesi/roster/match/duplikat):
 
-1. device aktif dan lab-nya sama dengan lab jadwal sesi;
-2. sesi aktif saat API memproses event;
-3. kandidat ada di snapshot `session_students`;
+0. ingest manusia oleh TEACHER non-ADMIN berada dalam jadwalnya
+   (`session_not_accessible`; jalur device bearer melewati cek ini via scope);
+1. device aktif, kamera on, dan lab-nya sama dengan lab jadwal sesi
+   (`device_inactive`, `device_camera_disabled`, `device_laboratory_mismatch`);
+2. sesi aktif saat API memproses event (`session_inactive`);
+3. kandidat ada di snapshot `session_students`
+   (`student_not_found`, `student_not_in_session_roster`);
 4. outcome `matched` dan cek liveness yang dilaporkan lolos (liveness opsional
-   sampai kebijakan deployment mewajibkan; reported-fail menolak);
-5. belum ada record untuk student+sesi itu.
+   sampai kebijakan deployment mewajibkan; reported-fail menolak)
+   (`recognition_not_matched`, `liveness_failed`);
+5. belum ada record untuk student+sesi itu (`attendance_already_recorded`).
 
 Core API tidak memilih threshold similarity; konfigurasi recognition harus
 menghasilkan outcome `matched` dari kebijakan terkalibrasi.
@@ -78,6 +85,23 @@ status: present|late|absent|excused, note?}`) menulis `AttendanceRecord`
 (`active`/`manual_override`), roster snapshot, duplikat. UI guru menampilkan
 tombol tandai manual per siswa yang belum tercatat. Record manual tidak menimpa
 record face_recognition yang sudah ada; perubahan memakai alur koreksi.
+
+## Koreksi kehadiran + putusan ADMIN
+
+`POST /api/v1/attendance/corrections` (`ATTENDANCE_CORRECT`; guru/laboran
+sesuai scope+grant): kasus (a) record ada → `attendance_record_id` +
+`corrected_status`; kasus (b) pasangan sesi+siswa tanpa record (absen turunan,
+hanya sesi tutup — sesi aktif → 409 `session_still_active`, pakai tandai
+manual). `previous_status` otomatis, `reason` wajib, awal `pending` + audit;
+salah-identitas memakai `incident_ref` bersama (2 keputusan atomik). Satu
+pending aktif per target; pending tidak mengubah rekap/laporan/EWS.
+
+Putusan hanya ADMIN: `POST …/corrections/{id}/decision` (lock baris
+`FOR UPDATE`, cek ulang akses + status dasar, terapkan atomik + audit
+sebelum/sesudah, pertahankan ID record/sumber/tautan event; approve kasus b
+membuat `AttendanceRecord` manual). Tolak wajib `decision_note` (422 bila
+kosong). UI: `/app/corrections` (antrean + detail tiket + tombol
+Setujui/Tolak + validasi client).
 
 ## Laporan
 
@@ -122,11 +146,12 @@ titik awal usulan sekolah yang wajib dikalibrasi/ditetapkan pihak sekolah,
 bukan angka final.
 
 Makna: daftar ini murni pantauan manusia, BUKAN sanksi — tidak memblokir
-presensi, tidak ada notifikasi eksternal (email/WA) di tahap ini, dan tindak
-lanjut sepenuhnya manual oleh guru/BK. Akses baca memakai `REPORTS_READ`
-(guru dibatasi jadwal miliknya; admin/laboran semua); ubah policy butuh
-`MANAGE_SETTINGS`. Skema dan UI tidak memuat skor AI, similarity, embedding,
-atau foto.
+presensi, tidak ada notifikasi eksternal (email/WA) di tahap ini. Tindak
+lanjut (U-02, F-10) dicatat via `…/follow-ups` + drawer EWS (`ews_follow_up`
+untuk catat/selesai). Akses baca memakai `REPORTS_READ`/`EWS_READ`
+(ADMIN semua; guru jadwal/kelas miliknya; laboran lab penugasan + grant);
+ubah policy butuh `MANAGE_SETTINGS`. Skema dan UI tidak memuat skor AI,
+similarity, embedding, atau foto.
 
 ## Live dashboard
 

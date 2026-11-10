@@ -110,6 +110,80 @@ def decode_browser_session_token(
         return None
 
 
+DISPLAY_TOKEN_TTL_HOURS = 12
+DISPLAY_TOKEN_USE = "display"
+MAX_DISPLAY_PIN_ATTEMPTS = 5
+DISPLAY_PIN_LOCKOUT_MINUTES = 5
+
+
+@dataclass(frozen=True)
+class DisplayTokenClaims:
+    kind: str  # "lab" | "kiosk"
+    subject_id: UUID
+    laboratory_id: UUID
+
+
+def issue_display_token(
+    kind: str,
+    subject_id: UUID,
+    laboratory_id: UUID,
+    settings: AuthSettings,
+    *,
+    now: datetime | None = None,
+) -> tuple[str, int]:
+    issued_at = now or datetime.now(UTC)
+    expires_in_seconds = DISPLAY_TOKEN_TTL_HOURS * 3600
+    claims = {
+        "sub": str(subject_id),
+        "lab": str(laboratory_id),
+        "kind": kind,
+        "iat": issued_at,
+        "exp": issued_at + timedelta(seconds=expires_in_seconds),
+        "jti": str(uuid4()),
+        "iss": settings.issuer,
+        "token_use": DISPLAY_TOKEN_USE,
+    }
+    return jwt.encode(
+        claims, settings.signing_secret, algorithm="HS256"
+    ), expires_in_seconds
+
+
+def decode_display_token(
+    token: str, settings: AuthSettings
+) -> DisplayTokenClaims | None:
+    try:
+        claims = jwt.decode(
+            token,
+            settings.signing_secret,
+            algorithms=["HS256"],
+            issuer=settings.issuer,
+            options={
+                "require": [
+                    "sub",
+                    "lab",
+                    "kind",
+                    "iat",
+                    "exp",
+                    "jti",
+                    "iss",
+                    "token_use",
+                ]
+            },
+        )
+        if claims.get("token_use") != DISPLAY_TOKEN_USE:
+            return None
+        kind = claims.get("kind")
+        if kind not in ("lab", "kiosk"):
+            return None
+        return DisplayTokenClaims(
+            kind=kind,
+            subject_id=UUID(claims["sub"]),
+            laboratory_id=UUID(claims["lab"]),
+        )
+    except (jwt.InvalidTokenError, KeyError, TypeError, ValueError):
+        return None
+
+
 @dataclass(frozen=True)
 class AccessTokenClaims:
     user_id: UUID

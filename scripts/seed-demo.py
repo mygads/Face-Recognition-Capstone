@@ -527,14 +527,14 @@ for lab in [lab_rpl, lab_fis]:
     assert ra.status_code in (200, 201), ra.text[:200]
 check("laboran ditugaskan ke 2 lab", True)
 # hak opsional laboran: beri session_operate + reports_read untuk demo
-for perm in ["session_operate", "reports_read", "schedule_read"]:
+for perm in ["schedule_read", "session_view", "session_operate", "reports_read"]:
     rg = c.post(
         f"/api/v1/accounts/{budi_id}/permission-grants",
         headers=A,
         json={"permission": perm},
     )
     assert rg.status_code in (200, 201), rg.text[:200]
-check("hak opsional laboran diberikan (3)", True)
+check("hak opsional laboran diberikan (4)", True)
 # mode guru: Dewi otomatis, Agus manual
 _patch(f"/api/v1/accounts/{dewi_id}", A, {"opening_mode": "automatic"})
 _patch(f"/api/v1/accounts/{agus_id}", A, {"opening_mode": "manual"})
@@ -581,6 +581,53 @@ try:
         print("INFO tidak ada record untuk koreksi seed")
 except Exception as e:
     print("INFO koreksi seed dilewati:", e)
+
+# 10. Penugasan guru->kelas, relasi kelas<->lab, kiosk layar + PIN (spec 1:1)
+for acc_id, cls in [(dewi_id, cls_rpl), (agus_id, cls_tkj)]:
+    ra = c.post(
+        f"/api/v1/accounts/{acc_id}/teacher-assignments",
+        headers=A,
+        json={"class_id": cls["id"], "is_substitute": False},
+    )
+    assert ra.status_code in (200, 201, 409), ra.text[:200]
+check("guru ditugaskan ke kelas masing-masing", True)
+for cls, lab in [(cls_rpl, lab_rpl), (cls_tkj, lab_fis)]:
+    rm = c.post(
+        "/api/v1/accounts/class-laboratories",
+        headers=A,
+        json={"class_id": cls["id"], "laboratory_id": lab["id"]},
+    )
+    assert rm.status_code in (200, 201, 409), rm.text[:200]
+check("relasi kelas<->lab untuk enrollment laboran", True)
+
+
+def buat_kiosk(did: str, lab: dict[str, Any], nama: str) -> None:
+    rl = c.get("/api/v1/kiosks", headers=A, params={"limit": 100})
+    assert rl.status_code == 200, rl.text[:200]
+    for it in rl.json().get("items", []):
+        if it.get("display_name") == nama:
+            print("INFO kiosk ada:", nama)
+            return
+    rk = c.post(
+        "/api/v1/kiosks",
+        headers=A,
+        json={
+            "device_id": did,
+            "laboratory_id": lab["id"],
+            "display_name": nama,
+            "camera_label": "Kamera utama",
+        },
+    )
+    assert rk.status_code in (200, 201), rk.text[:200]
+    kid = rk.json()["id"]
+    rp = c.post(f"/api/v1/kiosks/{kid}/pin", headers=A)
+    assert rp.status_code in (200, 201), rp.text[:200]
+    print("INFO PIN sementara kiosk", nama, "dibuat (lihat respons, sekali tampil)")
+
+
+buat_kiosk(dev_rpl, lab_rpl, "Kiosk Lab Komputer 1")
+buat_kiosk(dev_fis, lab_fis, "Kiosk Lab Fisika")
+check("kiosk layar + PIN per lab", True)
 
 print(f"\nSEED DEMO LULUS: {len(passed)} checks")
 print(

@@ -150,3 +150,15 @@ berhasil → runner nonaktif, readiness pending/degraded. Kegagalan apply yang v
 quality/temporal/burst berlaku tanpa restart; URL, credential, file/versi
 model, kamera tetap dikelola provisioning host. Lihat
 [AI inferensi](ai-inferensi.md) dan `apps/edge-agent/README.md`.
+
+## Layar kiosk per lab (pairing + PIN)
+
+Selain perangkat kamera, tiap lab dapat punya **layar kiosk** (`kiosk_screens`:
+unik per pasangan device+lab, `display_name`, `camera_label`, hash PIN,
+`is_active`, `last_seen_at`). Admin mendaftarkan layar di halaman
+**Layar Presensi** (`/app/kiosks`), memberi nama dan label kamera, lalu
+membuat/mereset PIN yang hanya tampil sekali; pencabutan akses menutup layar.
+Layar siswa dibuka di route `/presensi` (tanpa login staf): pilih lab → pilih
+kamera → masukkan PIN → board fullscreen. PIN salah dibatasi, data lintas lab
+terisolasi, dan token kiosk hanya menerima status kesiapan + hasil tersaring
+(tanpa roster, skor, embedding, atau endpoint tulis).

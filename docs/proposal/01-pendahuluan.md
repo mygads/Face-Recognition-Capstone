@@ -47,8 +47,9 @@
    lokal (`MANUAL HARDWARE TEST REQUIRED`).
 5. Tidak memakai face-recognition SaaS cloud; tidak membuka endpoint biometrik
    ke publik; tidak menyimpan foto siswa by default.
-6. Koreksi kehadiran tahap berjalan = pengajuan **pending** beraudit
-   (workflow keputusan persetujuan belum diimplementasikan).
+6. Koreksi kehadiran = pengajuan **pending** beraudit + putusan ADMIN
+   beraudit (setujui/tolak; tolak wajib alasan; kasus tanpa record setelah
+   sesi tutup membuat record manual baru).
 7. Status `cancelled` pada sesi dicadangkan di skema tetapi belum ada endpoint
    penulisnya; penutupan sesi hanya menghasilkan `closed`.
 
@@ -59,8 +60,8 @@
    sesi, roster snapshot, device, grace period, dan anti-duplikasi.
 3. Menyediakan dashboard live, laporan + ekspor, dan watchlist at-risk yang
    ambangnya transparan.
-4. Merancang EWS tahap 2 (tindak lanjut, notifikasi internal, eskalasi) tanpa
-   mengubah arsitektur.
+4. Merancang EWS tahap 2 (tindak lanjut SUDAH jalan sebagai F-10;
+   notifikasi internal, eskalasi) tanpa mengubah arsitektur.
 
 ## 1.6 Manfaat
 

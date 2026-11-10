@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Literal
 from uuid import UUID
 
@@ -97,6 +98,8 @@ class StaffAccountUpdateRequest(ApiSchema):
     full_name: str | None = Field(default=None, min_length=2, max_length=200)
     is_active: bool | None = None
     opening_mode: Literal["manual", "automatic"] | None = None
+    role: Literal["TEACHER", "LABORANT"] | None = None
+    deactivation_reason: str | None = Field(default=None, max_length=500)
 
 
 class StaffPasswordResetResponse(ApiSchema):
@@ -111,4 +114,16 @@ class PermissionGrantRequest(ApiSchema):
 
 
 class LaborantAssignmentRequest(ApiSchema):
+    laboratory_id: UUID
+
+
+class TeacherAssignmentRequest(ApiSchema):
+    class_id: UUID
+    starts_on: date | None = None
+    ends_on: date | None = None
+    is_substitute: bool = False
+
+
+class ClassLaboratoryRequest(ApiSchema):
+    class_id: UUID
     laboratory_id: UUID

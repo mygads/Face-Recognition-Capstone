@@ -2,7 +2,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { todayLocalISO } from '../utils/dateFormat'
 import {
-  ApiError,
   createSchedule,
   listClasses,
   listLaboratories,
@@ -14,6 +13,17 @@ import {
   type ScheduleTeacher,
   type SchoolClass,
 } from '../api/client'
+import { formatApiError } from '../utils/apiError'
+import UiBadge from '../components/ui/UiBadge.vue'
+import UiButton from '../components/ui/UiButton.vue'
+import UiDrawer from '../components/ui/UiDrawer.vue'
+import UiEmptyState from '../components/ui/UiEmptyState.vue'
+import UiField from '../components/ui/UiField.vue'
+import UiInput from '../components/ui/UiInput.vue'
+import UiPageHeader from '../components/ui/UiPageHeader.vue'
+import UiPagination from '../components/ui/UiPagination.vue'
+import UiSearchInput from '../components/ui/UiSearchInput.vue'
+import UiSelect from '../components/ui/UiSelect.vue'
 import { useAuthStore } from '../stores/auth'
 
 type ScheduleForm = {
@@ -74,15 +84,11 @@ function emptyForm(): ScheduleForm {
 }
 
 function formatError(error: unknown): string {
-  if (error instanceof ApiError) {
-    const details = error.details?.map((item) => `${item.field}: ${item.message}`)
-    return details?.length ? details.join(' · ') : error.message
-  }
-  return 'Permintaan tidak dapat diproses. Coba lagi.'
+  return formatApiError(error, 'Permintaan tidak dapat diproses. Coba lagi.')
 }
 
 function weekdayName(day: number): string {
-  return weekdays[day] ?? '—'
+  return weekdays[day] ?? '-'
 }
 
 function displayTime(value: string): string {
@@ -166,6 +172,15 @@ function openEdit(schedule: Schedule): void {
 
 async function submitForm(): Promise<void> {
   formError.value = null
+  const missing: string[] = []
+  if (!form.value.class_id) missing.push('Kelas')
+  if (!form.value.laboratory_id) missing.push('Laboratorium')
+  if (!form.value.teacher_user_id) missing.push('Guru')
+  if (!form.value.subject.trim()) missing.push('Nama pertemuan')
+  if (missing.length) {
+    formError.value = 'Lengkapi dulu: ' + missing.join(', ') + '.'
+    return
+  }
   isSaving.value = true
   const body = {
     class_id: form.value.class_id,
@@ -195,6 +210,36 @@ async function submitForm(): Promise<void> {
   }
 }
 
+const isTeacher = computed(
+  () =>
+    (auth.account?.roles.includes('TEACHER') ?? false) &&
+    !(auth.account?.roles.includes('ADMIN') ?? false),
+)
+const canManageSchedule = computed(() => {
+  const roles = auth.account?.roles ?? []
+  if (roles.includes('ADMIN') || roles.includes('TEACHER')) return true
+  const perms = (auth.account?.permissions ?? []) as string[]
+  return perms.includes('schedule_manage')
+})
+const dayScope = ref<'today' | 'week' | 'all'>('week')
+const conflictAlternatives = computed(() =>
+  laboratories.value.filter((lab) => lab.id !== form.value.laboratory_id).slice(0, 2),
+)
+const isConflictError = computed(() => /tabrakan|conflict/i.test(formError.value ?? ''))
+
+function setScope(scope: 'today' | 'week' | 'all'): void {
+  dayScope.value = scope
+  if (scope === 'today') weekdayFilter.value = String((new Date().getDay() + 6) % 7)
+  else weekdayFilter.value = ''
+  page.value = 0
+  void loadRows()
+}
+
+function applyAltLab(laboratoryId: string): void {
+  form.value.laboratory_id = laboratoryId
+  formError.value = null
+}
+
 function goToPage(nextPage: number): void {
   if (nextPage < 0 || nextPage >= totalPages.value || nextPage === page.value) return
   page.value = nextPage
@@ -203,219 +248,125 @@ function goToPage(nextPage: number): void {
 </script>
 
 <template>
-  <section class="master-data schedule-view" aria-label="Jadwal praktikum">
-    <p class="schedule-view__hint">
-      Mode guru: “Saya membuka sesi sendiri” (manual) atau “Sesi saya dibuka otomatis sesuai
-      jadwal”. Admin melihat mode tiap guru pada pilihan di atas.
-    </p>
-    <p class="schedule-view__hint">
-      Jadwal berulang setiap minggu sesuai zona waktu dan rentang tanggal yang dipilih.
-    </p>
-
-    <div class="master-data__toolbar">
-      <form class="master-data__search" role="search" @submit.prevent="submitFilters">
-        <label class="visually-hidden" for="schedule-search">Cari jadwal praktikum</label>
-        <input
-          id="schedule-search"
-          v-model="searchText"
-          type="search"
-          placeholder="Cari mata pelajaran, kelas, atau lab"
-        />
-        <button class="button button--secondary" type="submit">Cari</button>
-      </form>
-      <label class="schedule-view__filter">
-        <span class="visually-hidden">Filter hari</span>
-        <select v-model="weekdayFilter" aria-label="Filter hari" @change="submitFilters">
-          <option value="">Semua hari</option>
-          <option v-for="(day, index) in weekdays" :key="day" :value="index">{{ day }}</option>
-        </select>
-      </label>
-      <label class="schedule-view__filter">
-        <span class="visually-hidden">Filter status</span>
-        <select v-model="statusFilter" aria-label="Filter status" @change="submitFilters">
-          <option value="active">Aktif</option>
-          <option value="inactive">Nonaktif</option>
-          <option value="all">Semua status</option>
-        </select>
-      </label>
-      <button class="button button--primary" data-testid="create-schedule" @click="openCreate">
-        Tambah jadwal
-      </button>
-    </div>
-
-    <p v-if="errorMessage" class="master-data__alert" role="alert">{{ errorMessage }}</p>
-
-    <section v-if="isFormOpen" class="master-data__panel" aria-labelledby="schedule-form-title">
-      <div class="master-data__panel-heading">
-        <div>
-          <p class="master-data__eyebrow">{{ editingId ? 'Perbarui' : 'Jadwal baru' }}</p>
-          <h2 id="schedule-form-title">{{ editingId ? 'Ubah jadwal' : 'Tambah jadwal' }}</h2>
-        </div>
-        <button class="button button--text" type="button" @click="isFormOpen = false">Tutup</button>
-      </div>
-      <form class="master-data__form schedule-view__form" @submit.prevent="submitForm">
-        <label
-          >Mata pelajaran<input v-model="form.subject" required maxlength="120" autocomplete="off"
-        /></label>
-        <label
-          >Kelas<select v-model="form.class_id" required>
-            <option value="" disabled>Pilih kelas aktif</option>
-            <option v-for="schoolClass in classes" :key="schoolClass.id" :value="schoolClass.id">
-              {{ schoolClass.name }} · {{ schoolClass.academic_year }}
-            </option>
-          </select></label
+  <div class="st-page">
+    <UiPageHeader
+      :title="isTeacher ? 'Jadwal Saya' : 'Jadwal Praktikum'"
+      :description="
+        isTeacher
+          ? 'Jadwal praktikum untuk kelas penugasan Anda.'
+          : 'Agenda praktikum semua kelas, lab, dan guru.'
+      "
+    >
+      <template #actions>
+        <UiButton v-if="canManageSchedule" variant="primary" @click="openCreate"
+          >+ Tambah Jadwal</UiButton
         >
-        <label
-          >Laboratorium<select v-model="form.laboratory_id" required>
-            <option value="" disabled>Pilih laboratorium aktif</option>
-            <option v-for="lab in laboratories" :key="lab.id" :value="lab.id">
-              {{ lab.name }} · {{ lab.code }}
-            </option>
-          </select></label
-        >
-        <label
-          >Guru<select v-model="form.teacher_user_id" required :disabled="!canAssignTeacher">
-            <option value="" disabled>Pilih guru</option>
-            <option v-for="teacher in teachers" :key="teacher.id" :value="teacher.id">
-              {{ teacher.full_name }} —
-              {{
-                teacher.opening_mode === 'automatic'
-                  ? 'otomatis sesuai jadwal'
-                  : 'membuka sesi sendiri'
-              }}
-            </option>
-          </select></label
-        >
-        <label
-          >Hari<select v-model.number="form.weekday" required>
-            <option v-for="(day, index) in weekdays" :key="day" :value="index">{{ day }}</option>
-          </select></label
-        >
-        <label>Jam mulai<input v-model="form.start_time" required type="time" /></label>
-        <label>Jam selesai<input v-model="form.end_time" required type="time" /></label>
-        <label
-          >Zona waktu<input
-            v-model="form.timezone_name"
-            required
-            maxlength="64"
-            placeholder="Asia/Jakarta"
-        /></label>
-        <label
-          >Tanggal mulai berlaku<input v-model="form.effective_from" required type="date"
-        /></label>
-        <label
-          >Tanggal akhir berlaku<input
-            v-model="form.effective_through"
-            type="date"
-            :min="form.effective_from"
-          /><small>Kosongkan jika tidak memiliki tanggal akhir.</small></label
-        >
-        <label v-if="editingId" class="master-data__checkbox">
-          <input v-model="form.is_active" type="checkbox" /> Jadwal aktif
-        </label>
-        <p v-if="formError" class="master-data__alert schedule-view__form-error" role="alert">
-          {{ formError }}
-        </p>
-        <div class="master-data__form-actions">
-          <button class="button button--secondary" type="button" @click="isFormOpen = false">
-            Batal
-          </button>
-          <button class="button button--primary" type="submit" :disabled="isSaving">
-            {{ isSaving ? 'Menyimpan…' : 'Simpan jadwal' }}
-          </button>
-        </div>
-      </form>
-    </section>
+        <span v-else class="st-table__muted">Mode baca saja — membutuhkan izin Kelola Jadwal.</span>
+      </template>
+    </UiPageHeader>
 
-    <div class="master-data__table-wrap">
-      <table class="master-data__table schedule-view__table">
-        <thead>
-          <tr>
-            <th scope="col">Hari & waktu</th>
-            <th scope="col">Praktikum</th>
-            <th scope="col">Kelas</th>
-            <th scope="col">Laboratorium</th>
-            <th scope="col">Guru</th>
-            <th scope="col">Status</th>
-            <th scope="col">Aksi</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="isLoading">
-            <td colspan="7" class="master-data__empty">Memuat jadwal…</td>
-          </tr>
-          <tr v-else-if="rows.length === 0">
-            <td colspan="7" class="master-data__empty">Belum ada jadwal yang cocok.</td>
-          </tr>
-          <tr v-for="schedule in rows" v-else :key="schedule.id">
-            <td data-label="Hari & waktu">
-              <strong>{{ weekdayName(schedule.weekday) }}</strong>
-              <small
-                >{{ displayTime(schedule.start_time) }}–{{ displayTime(schedule.end_time) }}</small
-              >
-            </td>
-            <td data-label="Praktikum">{{ schedule.subject }}</td>
-            <td data-label="Kelas">{{ schedule.class_name }}</td>
-            <td data-label="Laboratorium">{{ schedule.laboratory_name }}</td>
-            <td data-label="Guru">{{ schedule.teacher_name }}</td>
-            <td data-label="Status">
-              <span
-                class="status-badge"
-                :class="schedule.is_active ? 'status-badge--active' : 'status-badge--inactive'"
-                >{{ schedule.is_active ? 'Aktif' : 'Nonaktif' }}</span
-              >
-            </td>
-            <td class="master-data__actions" data-label="Aksi">
-              <button class="button button--text" type="button" @click="selected = schedule">
-                Detail
-              </button>
-              <button class="button button--text" type="button" @click="openEdit(schedule)">
-                Ubah
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <p v-if="errorMessage" class="st-alert st-alert--error" role="alert">{{ errorMessage }}</p>
 
-    <div class="master-data__pagination" aria-label="Navigasi halaman jadwal">
-      <span>{{
-        total === 0
-          ? '0 jadwal'
-          : `${page * pageSize + 1}–${Math.min((page + 1) * pageSize, total)} dari ${total}`
-      }}</span>
-      <div>
+    <div class="st-toolbar">
+      <div class="st-scope" role="group" aria-label="Rentang jadwal">
         <button
-          class="button button--secondary"
           type="button"
-          :disabled="page === 0"
-          @click="goToPage(page - 1)"
+          :class="{ 'st-scope--active': dayScope === 'today' }"
+          @click="setScope('today')"
         >
-          Sebelumnya
+          Hari Ini
         </button>
-        <span>Halaman {{ page + 1 }} dari {{ totalPages }}</span>
         <button
-          class="button button--secondary"
           type="button"
-          :disabled="page + 1 >= totalPages"
-          @click="goToPage(page + 1)"
+          :class="{ 'st-scope--active': dayScope === 'week' }"
+          @click="setScope('week')"
         >
-          Berikutnya
+          Minggu Ini
+        </button>
+        <button
+          type="button"
+          :class="{ 'st-scope--active': dayScope === 'all' }"
+          @click="setScope('all')"
+        >
+          Semua Jadwal
         </button>
       </div>
+      <UiSelect v-model="weekdayFilter" aria-label="Filter hari" @change="submitFilters">
+        <option value="">Semua Hari</option>
+        <option v-for="(day, index) in weekdays" :key="day" :value="index">{{ day }}</option>
+      </UiSelect>
+      <UiSelect v-model="statusFilter" aria-label="Filter status" @change="submitFilters">
+        <option value="active">Terjadwal</option>
+        <option value="inactive">Nonaktif</option>
+        <option value="all">Semua status</option>
+      </UiSelect>
     </div>
 
-    <section v-if="selected" class="master-data__panel" aria-labelledby="schedule-detail-title">
-      <div class="master-data__panel-heading">
-        <div>
-          <p class="master-data__eyebrow">Detail jadwal</p>
-          <h2 id="schedule-detail-title">{{ selected.subject }}</h2>
+    <form class="st-toolbar" @submit.prevent="submitFilters">
+      <UiSearchInput
+        v-model="searchText"
+        placeholder="Cari mata pelajaran, kelas, atau lab…"
+        aria-label="Cari jadwal"
+      />
+      <span class="st-toolbar__spacer" />
+      <UiButton variant="secondary" type="submit">Cari</UiButton>
+    </form>
+
+    <p v-if="isLoading" class="st-table__muted">Memuat jadwal…</p>
+    <UiEmptyState
+      v-else-if="!rows.length && !errorMessage"
+      title="Belum ada jadwal yang cocok"
+      description="Ubah filter atau tambah jadwal baru."
+    />
+    <div v-else class="st-grid2">
+      <article v-for="schedule in rows" :key="schedule.id" class="st-card st-schedule">
+        <div class="st-schedule__time">
+          <strong>{{ displayTime(schedule.start_time) }}</strong>
+          <small>sampai</small>
+          <strong>{{ displayTime(schedule.end_time) }} WIB</strong>
         </div>
-        <button class="button button--text" type="button" @click="selected = null">
-          Tutup detail
-        </button>
-      </div>
-      <dl class="master-data__details schedule-view__details">
+        <div class="st-schedule__main">
+          <div class="st-schedule__tags">
+            <UiBadge tone="info">{{ weekdayName(schedule.weekday) }}</UiBadge>
+            <UiBadge :tone="schedule.is_active ? 'present' : 'neutral'">{{
+              schedule.is_active ? 'Terjadwal' : 'Nonaktif'
+            }}</UiBadge>
+          </div>
+          <h2 class="st-card__title">{{ schedule.subject }}</h2>
+          <p class="st-table__muted">
+            {{ schedule.laboratory_name }} · {{ schedule.class_name }} · {{ schedule.teacher_name }}
+          </p>
+          <div class="st-schedule__actions">
+            <button type="button" class="st-link" @click="selected = schedule">Detail</button>
+            <button
+              v-if="canManageSchedule"
+              type="button"
+              class="st-link"
+              @click="openEdit(schedule)"
+            >
+              Ubah
+            </button>
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <UiPagination
+      :page="page + 1"
+      :total-pages="totalPages"
+      :total="total"
+      label="jadwal"
+      @update:page="goToPage($event - 1)"
+    />
+
+    <!-- Detail jadwal -->
+    <UiDrawer
+      v-if="selected"
+      :title="selected.subject"
+      subtitle="Detail jadwal praktikum"
+      @close="selected = null"
+    >
+      <dl class="st-def">
         <div>
           <dt>Kelas</dt>
           <dd>{{ selected.class_name }}</dd>
@@ -446,6 +397,118 @@ function goToPage(nextPage: number): void {
           <dd>{{ selected.is_active ? 'Aktif' : 'Nonaktif' }}</dd>
         </div>
       </dl>
-    </section>
-  </section>
+      <template #footer>
+        <UiButton variant="secondary" @click="selected = null">Tutup</UiButton>
+        <UiButton v-if="canManageSchedule" variant="primary" @click="selected && openEdit(selected)"
+          >Ubah Jadwal</UiButton
+        >
+      </template>
+    </UiDrawer>
+
+    <!-- Form tambah/ubah (B02-10) -->
+    <UiDrawer
+      v-if="isFormOpen"
+      :title="editingId ? 'Ubah Jadwal Praktikum' : 'Tambah Jadwal Praktikum'"
+      subtitle="Atur pertemuan praktikum rutin mingguan untuk kelas penugasan."
+      @close="isFormOpen = false"
+    >
+      <p v-if="formError && !isConflictError" class="st-alert st-alert--error" role="alert">
+        {{ formError }}
+      </p>
+      <div v-if="isConflictError" class="st-alert st-alert--error" role="alert">
+        <strong>Konflik Jadwal Laboratorium Terdeteksi</strong><br />
+        {{ formError }}<br />
+        <span v-if="conflictAlternatives.length">
+          Silakan pilih waktu lain atau
+          <button
+            v-for="alt in conflictAlternatives"
+            :key="alt.id"
+            type="button"
+            class="st-link"
+            @click="applyAltLab(alt.id)"
+          >
+            Pindah ke {{ alt.name }}
+          </button>
+        </span>
+      </div>
+      <form @submit.prevent="submitForm">
+        <UiField label="Pilih Kelas Praktikum" required>
+          <UiSelect v-model="form.class_id" required>
+            <option value="" disabled>Pilih kelas aktif</option>
+            <option v-for="schoolClass in classes" :key="schoolClass.id" :value="schoolClass.id">
+              {{ schoolClass.code }} - {{ schoolClass.name }}
+            </option>
+          </UiSelect>
+        </UiField>
+        <UiField label="Nama Pertemuan / Praktikum" required>
+          <UiInput v-model="form.subject" required name="subject" />
+        </UiField>
+        <UiField label="Hari" required>
+          <UiSelect
+            :model-value="form.weekday"
+            required
+            @update:model-value="form.weekday = Number($event)"
+          >
+            <option v-for="(day, index) in weekdays" :key="day" :value="index">{{ day }}</option>
+          </UiSelect>
+        </UiField>
+        <div class="st-grid2">
+          <UiField label="Jam Mulai" required>
+            <UiInput v-model="form.start_time" required type="time" name="start_time" />
+          </UiField>
+          <UiField label="Jam Selesai" required>
+            <UiInput v-model="form.end_time" required type="time" name="end_time" />
+          </UiField>
+        </div>
+        <UiField label="Pilihan Laboratorium" required>
+          <UiSelect v-model="form.laboratory_id" required>
+            <option value="" disabled>Pilih laboratorium aktif</option>
+            <option v-for="lab in laboratories" :key="lab.id" :value="lab.id">
+              {{ lab.name }}
+            </option>
+          </UiSelect>
+        </UiField>
+        <UiField label="Guru" required>
+          <UiSelect v-model="form.teacher_user_id" required :disabled="!canAssignTeacher">
+            <option value="" disabled>Pilih guru</option>
+            <option v-for="teacher in teachers" :key="teacher.id" :value="teacher.id">
+              {{ teacher.full_name }} -
+              {{
+                teacher.opening_mode === 'automatic'
+                  ? 'otomatis sesuai jadwal'
+                  : 'membuka sesi sendiri'
+              }}
+            </option>
+          </UiSelect>
+        </UiField>
+        <div class="st-grid2">
+          <UiField label="Tanggal Mulai Berlaku" required>
+            <UiInput v-model="form.effective_from" required type="date" name="effective_from" />
+          </UiField>
+          <UiField
+            label="Tanggal Akhir Berlaku"
+            hint="Kosongkan jika tidak memiliki tanggal akhir."
+          >
+            <UiInput
+              v-model="form.effective_through"
+              type="date"
+              name="effective_through"
+              :min="form.effective_from"
+            />
+          </UiField>
+        </div>
+        <UiField v-if="editingId" label="Status">
+          <label class="st-radio-card" :class="{ 'st-radio-card--active': form.is_active }">
+            <input v-model="form.is_active" type="checkbox" /> Jadwal aktif
+          </label>
+        </UiField>
+      </form>
+      <template #footer>
+        <UiButton variant="secondary" @click="isFormOpen = false">Batal</UiButton>
+        <UiButton variant="primary" :disabled="isSaving" @click="submitForm">{{
+          isSaving ? 'Menyimpan…' : 'Simpan jadwal'
+        }}</UiButton>
+      </template>
+    </UiDrawer>
+  </div>
 </template>

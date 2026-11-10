@@ -8,9 +8,9 @@ Seluruh diagram proposal dalam 5 format siap-import. Sumber kebenaran teks:
 | PlantUML | [plantuml/](plantuml/) | 36 `.puml` | Visual Paradigm, Draw.io (plugin PlantUML), plantuml.jar |
 | Mermaid | [mermaid/](mermaid/) | 36 `.mmd` | Draw.io → Arrange → Insert → Mermaid (paste isi file) |
 | BPMN 2.0 | [bpmn/](bpmn/) | 18 `.bpmn` | Visual Paradigm (Import XML), Draw.io (Open) |
-| XMI 2.5 | [xmi/](xmi/) | 1 `presensi-uml.xmi` | Visual Paradigm (Import XMI): aktor + 33 use case + asosiasi + include/extend + 20 class + atribut + relasi |
+| XMI 2.5 | [xmi/](xmi/) | 1 `presensi-uml.xmi` | Visual Paradigm (Import XMI): 4 aktor + 33 use case + 34 asosiasi + 17 include + 8 extend + 25 class + atribut + relasi |
 | Draw.io | [drawio/](drawio/) | 26 `.drawio` | Draw.io (Open) |
-| SQL DDL (ERD) | `../proposal/schema-erd.sql` | 18 `CREATE TABLE` | Draw.io → Arrange → Insert → SQL (paste DDL) |
+| SQL DDL (ERD) | `../proposal/schema-erd.sql` | 24 `CREATE TABLE` | Draw.io → Arrange → Insert → SQL (paste DDL) |
 
 Generator (jangan edit hasil generate manual — ubah `.puml`/proposal lalu regenerate):
 
@@ -23,13 +23,13 @@ py docs/diagrams/_gen/gen_struct.py       # uc/class/container .drawio + .xmi (p
 ## Isi per folder
 
 - `plantuml/`: `uc-00` overall + `uc-01..05` per role · `act-f01..f13` + `f14-roles` + `prototype-method` +
-  `act-e2e-business` (§6.1) + `act-ews-stage1` (§9.1) + `act-ews-stage2` (§9.2) ·
+  `act-e2e-business` (§6.1) + `act-ews-stage1` (§9.1) + `act-ews-stage2` (§9.2, U-02 kini jalan) ·
   `class-01..06` · `seq-01..03` · `state-01..02` · `deployment-container`.
 - `mermaid/`: salinan 1-per-1 semua blok mermaid proposal, nama `\<file proposal>-\<nn>.mmd`.
 - `bpmn/`: F-01–F-13, `f14-roles` (§5.14), `prototype-method` (§2.1),
   `e2e-business` (§6.1, memakai lane), `ews-stage1` (§9.1) + `ews-stage2` (§9.2 usulan).
 - `drawio/`: `flow-*` (18 alur), `uc-overall`, `class-01..06`, `deployment-container`.
-- `xmi/`: satu model UML (4 aktor, 33 use case, 32 asosiasi aktor, 17 include, 8 extend, 1 dependency, 20 class unik gabungan, 25 relasi class).
+- `xmi/`: satu model UML (4 aktor, 33 use case, 34 asosiasi aktor, 17 include, 8 extend, 1 dependency, 25 class unik gabungan, 38 relasi class).
 
 ## Catatan import
 

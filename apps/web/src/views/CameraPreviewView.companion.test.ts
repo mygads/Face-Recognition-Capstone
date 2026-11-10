@@ -4,6 +4,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useAuthStore } from '../stores/auth'
 import CameraPreviewView from './CameraPreviewView.vue'
 
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: {} }),
+  useRouter: () => ({ replace: vi.fn() }),
+}))
+
 function laborantPinia() {
   const pinia = createPinia()
   useAuthStore(pinia).$patch({

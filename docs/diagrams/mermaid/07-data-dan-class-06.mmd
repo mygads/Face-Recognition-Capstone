@@ -16,10 +16,10 @@ classDiagram
   }
   class EwsFollowUp {
     +UUID student_id
-    +UUID session_id
-    +String stage
+    +UUID author_user_id
+    +String status
+    +DateTime resolved_at
     +String note
-    +UUID created_by_user_id
     +DateTime created_at
   }
   class AuditLog {
@@ -38,5 +38,6 @@ classDiagram
   }
   RuntimeConfigurationVersion "1" -- "0..1" AtRiskPolicy : scope attendance-at-risk-policy
   AtRiskPolicy ..> Student : menghitung flag
-  Student "1" -- "0..*" EwsFollowUp : U-02 usulan (belum tabel)
+  Student "1" -- "0..*" EwsFollowUp : tindak lanjut (F-10 jalan)
+  User "1" -- "0..*" EwsFollowUp : penulis
   User "1" -- "0..*" AuditLog : aktor (nullable)

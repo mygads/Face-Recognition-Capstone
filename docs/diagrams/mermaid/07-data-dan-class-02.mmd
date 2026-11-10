@@ -38,9 +38,30 @@ classDiagram
     +UUID id
     +String full_name
   }
+  class TeacherClassAssignment {
+    +UUID user_id
+    +UUID class_id
+    +Date starts_on
+    +Date ends_on
+    +bool is_substitute
+  }
+  class LaborantLabAssignment {
+    +UUID user_id
+    +UUID laboratory_id
+  }
+  class ClassLaboratory {
+    +UUID class_id
+    +UUID laboratory_id
+  }
   SchoolClass "1" -- "*" ClassStudent : roster
   Student "1" -- "*" ClassStudent : anggota
   SchoolClass "1" -- "*" PracticumSchedule : dijadwalkan
   Laboratory "1" -- "*" PracticumSchedule : dipakai
   User "1" -- "*" PracticumSchedule : diajar guru
   User "1" -- "0..*" SchoolClass : wali kelas (nullable)
+  User "1" -- "*" TeacherClassAssignment : mengampu
+  SchoolClass "1" -- "*" TeacherClassAssignment : diampu
+  User "1" -- "*" LaborantLabAssignment : ditugaskan
+  Laboratory "1" -- "*" LaborantLabAssignment : dilayani
+  SchoolClass "1" -- "*" ClassLaboratory : dilayani lab
+  Laboratory "1" -- "*" ClassLaboratory : melayani kelas

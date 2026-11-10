@@ -71,8 +71,10 @@ TCH -- UC12
 
 LAB -- UC1
 LAB -- UC4
+LAB -- UC5
 LAB -- UC6
 LAB -- UC8
+LAB -- UC9
 LAB -- UC10
 LAB -- UC11
 LAB -- UC12
@@ -108,8 +110,10 @@ UC13 ..> UC16 : <<include>>
 UC14 ..> UC16 : <<include>>
 
 note bottom of SYS
-  UC7 eksklusif DEVICE. UC16 milik sistem (write-only).
-  U-02/U-03/U-04 usulan Tahap 2. LABORANT memakai
-  UC11/UC12 via API tanpa menu UI.
+  UC7 eksklusif DEVICE. UC16 milik sistem
+  (dibaca ADMIN via audit endpoint/UI).
+  U-02 SUDAH jalan (F-10); U-03/U-04 usulan Tahap 2.
+  LABORANT UC5/UC6/UC8/UC9/UC11/UC12
+  bersyarat grant (menu muncul bila ada grant).
 end note
 @enduml

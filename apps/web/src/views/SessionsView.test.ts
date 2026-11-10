@@ -72,6 +72,23 @@ const policy = {
   updated_at: null,
 }
 
+function laboranPinia() {
+  const pinia = createPinia()
+  useAuthStore(pinia).$patch({
+    accessToken: 'unit-test-token',
+    expiresAt: Date.now() + 60_000,
+    account: {
+      id: 'laboran-1',
+      email: 'laboran@example.test',
+      full_name: 'Test Laboran',
+      roles: ['LABORANT'],
+      must_change_password: false,
+      permissions: [],
+    },
+  })
+  return pinia
+}
+
 function teacherPinia() {
   const pinia = createPinia()
   useAuthStore(pinia).$patch({
@@ -83,7 +100,7 @@ function teacherPinia() {
       full_name: 'Test Teacher',
       roles: ['TEACHER'],
       must_change_password: false,
-      permissions: [],
+      permissions: ['schedule_read', 'session_view', 'attendance_manual', 'attendance_correct'],
     },
   })
   return pinia
@@ -115,23 +132,14 @@ describe('sessions view', () => {
     expect(wrapper.find('[data-testid="teacher-opening-preference"]').exists()).toBe(true)
   })
 
-  it('saves the teacher opening preference without a global mode select', async () => {
+  it('links the teacher opening preference to the profile page', async () => {
     const wrapper = mount(SessionsView, { global: { plugins: [teacherPinia()] } })
     await flushPromises()
 
     expect(wrapper.find('select[data-testid="opening-mode"]').exists()).toBe(false)
-    api.saveOpeningPreference.mockResolvedValue({
-      opening_mode: 'automatic',
-      updated_at: '2026-10-05T02:00:00Z',
-    })
-    await wrapper.get('[data-testid="opening-mode-automatic"]').setValue()
-    await wrapper.get('[data-testid="teacher-opening-preference"] form').trigger('submit')
-    await flushPromises()
-
-    expect(api.saveOpeningPreference).toHaveBeenCalledWith({
-      opening_mode: 'automatic',
-    })
-    expect(wrapper.text()).toContain('dibuka otomatis dalam jendela jadwal')
+    const panel = wrapper.get('[data-testid="teacher-opening-preference"]')
+    expect(panel.text()).toContain('Profil')
+    expect(api.getOpeningPreference).not.toHaveBeenCalled()
   })
 
   it('marks unmarked roster students manually and maps duplicate errors', async () => {
@@ -147,7 +155,7 @@ describe('sessions view', () => {
     const wrapper = mount(SessionsView, { global: { plugins: [teacherPinia()] } })
     await flushPromises()
 
-    await wrapper.get('button.button--text').trigger('click')
+    await wrapper.get('[data-testid^="show-status-"]').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('Siswa Satu')
 
@@ -183,6 +191,13 @@ describe('sessions view', () => {
     await wrapper.get('[data-testid="open-session-schedule-1"]').trigger('click')
     await flushPromises()
 
+    // Konfirmasi B03-02 menampilkan ringkasan sebelum membuka sesi.
+    const confirmTitle = wrapper.get('[data-testid="confirm-open-session"]')
+    expect(confirmTitle.text()).toContain('Buka Sesi')
+    expect(wrapper.text()).toContain('Roster dikunci saat sesi')
+    await confirmTitle.trigger('click')
+    await flushPromises()
+
     expect(api.listOpenableSchedules.mock.calls.length).toBeGreaterThan(reloadCalls)
     expect(wrapper.text()).toContain('sudah dibuka. Daftar dimuat ulang.')
   })
@@ -215,7 +230,7 @@ describe('session roster overview', () => {
     api.getSessionRoster.mockResolvedValue(rosterEntries)
     const wrapper = mount(SessionsView, { global: { plugins: [teacherPinia()] } })
     await flushPromises()
-    await wrapper.get('button.button--text').trigger('click')
+    await wrapper.get('[data-testid^="show-status-"]').trigger('click')
     await flushPromises()
     return wrapper
   }
@@ -228,6 +243,19 @@ describe('session roster overview', () => {
     expect(wrapper.text()).toContain('Belum tercatat (1)')
     expect(wrapper.text()).toContain('Hadir')
     expect(wrapper.text()).toContain('Terlambat')
+  })
+
+  it('shows a monitor-only banner for laboran without operate permission', async () => {
+    api.getAttendanceSessionStatus.mockResolvedValue(overrideSession)
+    api.getSessionRoster.mockResolvedValue([])
+    const wrapper = mount(SessionsView, { global: { plugins: [laboranPinia()] } })
+    await flushPromises()
+    await wrapper.get('[data-testid^="show-status-"]').trigger('click')
+    await flushPromises()
+    const banner = wrapper.get('[data-testid="session-monitor-banner"]')
+    expect(banner.text()).toContain('Mode Pantau Sesi Aktif')
+    expect(banner.text()).toContain('Test Teacher')
+    expect(banner.text()).toContain('Delegasi Laboran')
   })
 
   it('shows the teacher note in the roster when a manual mark has one', async () => {
@@ -250,7 +278,7 @@ describe('session roster overview', () => {
     ])
     const wrapper = mount(SessionsView, { global: { plugins: [teacherPinia()] } })
     await flushPromises()
-    await wrapper.get('button.button--text').trigger('click')
+    await wrapper.get('[data-testid^="show-status-"]').trigger('click')
     await flushPromises()
     const rows = wrapper.findAll('[data-testid="roster-row"]')
     expect(rows).toHaveLength(2)
@@ -273,5 +301,56 @@ describe('session roster overview', () => {
     await wrapper.get('[data-testid="roster-filter-present"]').trigger('click')
     expect(wrapper.findAll('[data-testid="roster-row"]')).toHaveLength(1)
     expect(wrapper.text()).toContain('Siswa Satu')
+  })
+})
+
+describe('session close confirmation', () => {
+  it('asks for confirmation showing unmarked count before closing', async () => {
+    const { mount: mountView } = await import('@vue/test-utils')
+    const { createPinia: makePinia } = await import('pinia')
+    const pinia = makePinia()
+    const { useAuthStore: useAuth } = await import('../stores/auth')
+    const { default: View } = await import('./SessionsView.vue')
+    useAuth(pinia).$patch({
+      accessToken: 'unit-test-token',
+      expiresAt: Date.now() + 60_000,
+      account: {
+        id: 'teacher-1',
+        email: 'teacher@example.test',
+        full_name: 'Test Teacher',
+        roles: ['TEACHER'],
+        must_change_password: false,
+        permissions: ['schedule_read', 'session_view', 'attendance_manual', 'attendance_correct'],
+      },
+    })
+    api.listOpenableSchedules.mockResolvedValue([])
+    api.listAttendanceSessions.mockResolvedValue({
+      items: [overrideSession],
+      pagination: { total: 1, limit: 50, offset: 0 },
+    })
+    api.getSessionRoster.mockResolvedValue([
+      { student_id: 's1', student_number: 'S-1', full_name: 'Satu', record_status: null },
+      {
+        student_id: 's2',
+        student_number: 'S-2',
+        full_name: 'Dua',
+        record_status: 'present',
+      },
+    ])
+    api.getAttendanceSessionStatus.mockResolvedValue(overrideSession)
+    api.closeAttendanceSession.mockResolvedValue({ ...overrideSession, status: 'closed' })
+    const wrapper = mountView(View, { global: { plugins: [pinia] } })
+    await flushPromises()
+
+    const closeButton = wrapper.get('[data-testid="close-session-session-1"]')
+    expect(closeButton.text()).toBe('Tutup sesi')
+    await closeButton.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('belum tercatat akan menjadi absen')
+    expect(api.closeAttendanceSession).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-testid="confirm-close-session"]').trigger('click')
+    await flushPromises()
+    expect(api.closeAttendanceSession).toHaveBeenCalledWith('session-1')
   })
 })

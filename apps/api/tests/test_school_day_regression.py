@@ -25,8 +25,10 @@ from presensi_api.db.models import (
     AttendanceCorrection,
     AttendanceRecord,
     AuditLog,
+    ClassLaboratory,
     Device,
     FaceTemplate,
+    LaborantLabAssignment,
     Laboratory,
     PracticumSchedule,
     SchoolClass,
@@ -345,6 +347,13 @@ def regression_harness(
                     student_number="OUT-001",
                     full_name="Synthetic Outside Roster Student",
                 ),
+            ]
+        )
+        session.flush()
+        session.add_all(
+            [
+                LaborantLabAssignment(user_id=LABORANT_ID, laboratory_id=LAB_ID),
+                ClassLaboratory(class_id=CLASS_ID, laboratory_id=LAB_ID),
             ]
         )
         session.flush()

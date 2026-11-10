@@ -2,9 +2,15 @@
 
 Bukti visual: `/tmp/shots/` (23 PNG desktop 1440px: 2 publik + 8 admin +
 4 guru + 6 laboran + 3 master-tab) + `rekap.csv` / `rekap.xlsx` (hasil unduh
-laporan asli). UAT browser **5/5 HIJAU** + `seed-demo` **24–25 checks HIJAU** (25 bila koreksi contoh baru dibuat)
+laporan asli). UAT browser **5/5 HIJAU** + `seed-demo` **±28 checks HIJAU** (jumlah lolos dicetak seed; bila koreksi contoh sudah ada, contoh dilewati)
 (Playwright Chromium). Arsip lama per halaman tetap di `screenshots/` (40 PNG
 + 2 tablet).
+
+> Branding: sidebar navy + logo sekolah, halaman login berlogo, dan kiosk
+> berlogo mengikuti reskin 2026-11-10 (navy `#102A43` + emas `#D4A72C`,
+> token `--st-*`; detail di `docs/architecture/overview.md` §Baseline UI).
+> Logo (`apps/web/public/logo-sekolah.png`, 180px) adalah crop sementara dari
+> header Figma — ganti dengan file resmi sekolah bila sudah ada.
 
 > Catatan 6 Nov malam: sesi demo pertama auto-tutup melewati akhir jadwal
 > (domain: backend selalu menutup sesi di akhir jadwal — by design). Seed
@@ -18,7 +24,7 @@ laporan asli). UAT browser **5/5 HIJAU** + `seed-demo` **24–25 checks HIJAU** 
 
 ```bash
 # stack dev menyala (postgres :5432, API :8000, web :5173)
-python3 scripts/seed-demo.py   # idempoten, 24-25 checks: akun→lab/kelas/siswa→jadwal→device→2 sesi→heartbeat→PIN→assignment→grant→mode guru→EWS follow-up→koreksi
+python3 scripts/seed-demo.py   # idempoten, ±28 checks (dihitung seed saat jalan): akun→lab/kelas/siswa→jadwal→device→2 sesi→heartbeat→PIN→assignment→grant→mode guru→EWS follow-up→koreksi→teacher-assign→class-lab→kiosk
 ```
 
 Akun demo: `admin@local.test` / `DemoAdmin2026!x`;
@@ -29,13 +35,13 @@ XII-TKJ-1 (8 siswa NIS 20260201–08); jadwal mengikuti jam jalan (mulai-30 mnt 
 device `edge-pc-rpl-01` + `stb-fis-01`; sesi RPL AKTIF (5 event face-recognition
 + 1 ambiguous + manual present/late/excused/absent + 1 belum tercatat) dan sesi
 TKJ DITUTUP (4 present + 1 late + 1 excused + 2 absen otomatis); PIN layar `1234`
-di kedua lab; Budi ditugaskan ke 2 lab + 3 grant (`schedule_read`,
-`session_operate`, `reports_read`); Dewi mode otomatis, Agus manual;
+di kedua lab; Budi ditugaskan ke 2 lab + 4 grant (`schedule_read`,
+`session_view`, `session_operate`, `reports_read`); Dewi mode otomatis, Agus manual;
 1 EWS follow-up; 1 koreksi approved (contoh).
 
-## 2. Matriks role → menu (terverifikasi di router + sidebar + 13 permission)
+## 2. Matriks role → menu (terverifikasi di router + sidebar + 18 permission)
 
-| Menu | ADMIN (10+profil) | TEACHER (4+dashboard) | LABORANT (4 default + hingga 3 grant) |
+| Menu | ADMIN (18 permission) | TEACHER (13) | LABORANT (4 bawaan + hingga 10 grant) |
 |---|---|---|---|
 | Layar publik `/display` | n/a (tanpa login: lab + PIN) | n/a | n/a |
 | Ringkasan | ✔ semua | ✔ miliknya | ✔ khusus laboran |
@@ -125,3 +131,54 @@ edge-pc). Setelah itu kembalikan `docker compose up -d api` (edge) +
 Preview kamera butuh agent loopback; threshold final butuh kalibrasi benchmark
 lokal; field test + benchmark PC/STB. Status: `MANUAL HARDWARE TEST REQUIRED`.
 Galeri preview hanya AI_EDGE, hanya saat tidak ada sesi aktif.
+
+## 6. UAT 2026-11-07 — spesifikasi baru §1–§9 (terurut, fresh)
+
+Gate: pytest 279 passed · vitest 86 · vue-tsc/eslint/prettier/ruff/mypy
+bersih · alembic check bersih · seed ±28 checks · API-UAT 35 PASS 0 FAIL.
+Bukti di `/tmp/uat/` (prefix `adm-`, `dewi-`, `agus-`, `budi-`, `nolab-`, `pub-`).
+
+- ADMIN: dashboard → master-data (3 tab) → accounts (grant grup + "Pilih
+  semua …" + "Butuh: …" prasyarat, `adm-accounts-grants.png`) → devices →
+  kiosks → schedules → sessions → corrections (3 tab) → reports
+  (`?student_number=` prefill dari URL, `adm-reports-url.png`) → EWS
+  (detail + catat → "tersimpan", `adm-ews-note.png`; "Riwayat di laporan →"
+  prefill `student_number=20260207`) → enrollment → camera-preview
+  (pemilih Lab→Device) → attendance-policy → audit (kolom Detail expand
+  Sebelum/Sesudah JSON, `adm-audit-expand.png`) → tutup sesi 2-langkah
+  ("1 belum tercatat akan menjadi absen", `adm-close-confirm.png`;
+  dibatalkan agar sesi tetap aktif) → detail sesi RPL (badge tunggal
+  "Terlambat · 10 menit", tanpa ganda).
+- DEWI (RPL, otomatis): dashboard → my-classes (hanya RPL) → sesi RPL OK →
+  sesi TKJ API 404 → accounts forbidden → reports (opsi hanya RPL) →
+  corrections → profil (radio otomatis tercentang).
+- AGUS (TKJ, manual): my-classes (hanya TKJ) → sesi RPL API 404 → profil
+  ("Saya membuka sesi sendiri" tercentang).
+- BUDI (laboran + `schedule_read,session_operate,reports_read`):
+  dashboard → devices (pantau, 2 lab) → enrollment → sessions (via grant)
+  → reports (via grant) → corrections/accounts forbidden. Ekspor CSV
+  tanpa `reports_export` → 403 (prasyarat ditegakkan).
+- NOLAB2 (laboran 0 lab, lalu dinonaktifkan): API sessions 403, devices
+  200 kosong, dashboard ramah "Belum ada penugasan…".
+- PUBLIK `/presensi`: PIN salah → alert "PIN salah." (`pub-wrong-pin.png`);
+  lab RPL + PIN lab `1234` → board sesi aktif (`pub-board-aktif.png`);
+  kiosk + PIN sekali-tampil → board aktif (`pub-board-kiosk-pin.png`).
+- Kebersihan: akun UAT sementara (`citra.*`, `nolab*`) dinonaktifkan;
+  kiosk RPL aktif PIN baru `882870` (sekali tampil, tercatat di sini).
+
+### 6.1 Temuan audit eksternal vs `main@248e062` (diperbaiki + UAT 2026-11-07 sesi 2)
+
+- PIN layar tidak lagi lewat URL: `POST /public/display/session` dan
+  `/public/kiosk-display/session` (PIN di body) → token JWT 12 jam untuk
+  polling; PIN salah 5x → 429 kunci 5 menit; ganti sumber mengakhiri sesi.
+  FE `DisplayView` + `client.ts` dimigrasi; skrip API-UAT 37 PASS.
+- Koreksi tanpa record ditolak bila sesi masih aktif (409
+  `session_still_active`); putusan mengunci baris (`FOR UPDATE`); tolak
+  tanpa alasan → 422. Test 8 passed.
+- Ganti role TEACHER↔LABORANT dari panel akun (melepas penugasan/grant +
+  audit; admin & diri sendiri diproteksi) — UAT browser Budi → TEACHER →
+  LABORANT + restore grant/lab, bukti `adm2-rolechange.png`.
+- Tautan EWS→laporan hanya bila punya `reports_read` (`v-if`).
+- Fondasi komponen reusable `components/ui` (UiButton/UiBadge/UiCard/UiField,
+  ala shadcn tanpa Tailwind) + test; UiBadge dipakai di board publik.
+- Keputusan enrollment: UI 4 capture dipertahankan, API ≥3 (terdokumentasi).

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Annotated, TypeVar
+from typing import Annotated, Any, TypeVar
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
@@ -49,7 +49,9 @@ def _timestamp(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
-def _student_response(student: Student) -> StudentResponse:
+def _student_response(
+    student: Student, classes: list[StudentClassResponse] | None = None
+) -> StudentResponse:
     return StudentResponse(
         id=student.id,
         student_number=student.student_number,
@@ -57,6 +59,7 @@ def _student_response(student: Student) -> StudentResponse:
         is_active=student.is_active,
         created_at=_timestamp(student.created_at),
         updated_at=_timestamp(student.updated_at),
+        classes=classes or [],
     )
 
 
@@ -106,10 +109,16 @@ def list_students(
     offset: Annotated[int, Query(ge=0)] = 0,
     search: Annotated[str | None, Query(max_length=200)] = None,
     is_active: bool | None = None,
+    class_id: Annotated[UUID | None, Query()] = None,
 ) -> PageResponse[StudentResponse]:
     query = select(Student)
     count_query = select(func.count()).select_from(Student)
-    filters = []
+    filters: list[Any] = []
+    if class_id is not None:
+        member_ids = select(ClassStudent.student_id).where(
+            ClassStudent.class_id == class_id
+        )
+        filters.append(Student.id.in_(member_ids))
     if search and search.strip():
         pattern = like_contains(search)
         filters.append(
@@ -127,8 +136,40 @@ def list_students(
     students = session.scalars(
         query.order_by(Student.student_number, Student.id).limit(limit).offset(offset)
     ).all()
+    class_map: dict[UUID, list[StudentClassResponse]] = {
+        student.id: [] for student in students
+    }
+    if students:
+        rows = session.execute(
+            select(
+                ClassStudent.student_id,
+                SchoolClass.id,
+                SchoolClass.code,
+                SchoolClass.name,
+                SchoolClass.academic_year,
+            )
+            .join(SchoolClass, SchoolClass.id == ClassStudent.class_id)
+            .where(ClassStudent.student_id.in_([student.id for student in students]))
+            .order_by(SchoolClass.academic_year.desc(), SchoolClass.code)
+        ).all()
+        for row in rows:
+            mapping = row._mapping
+            class_map[mapping["student_id"]].append(
+                StudentClassResponse(
+                    id=mapping["id"],
+                    code=mapping["code"],
+                    name=mapping["name"],
+                    academic_year=mapping["academic_year"],
+                )
+            )
     return _page(
-        [_student_response(student) for student in students], total, limit, offset
+        [
+            _student_response(student, classes=class_map[student.id])
+            for student in students
+        ],
+        total,
+        limit,
+        offset,
     )
 
 
@@ -188,10 +229,13 @@ def get_student(student_id: UUID, session: DbSession) -> StudentDetailResponse:
         .order_by(SchoolClass.academic_year.desc(), SchoolClass.code)
     ).all()
     return StudentDetailResponse(
-        **_student_response(student).model_dump(),
-        classes=[
-            StudentClassResponse(**membership._mapping) for membership in memberships
-        ],
+        **{
+            **_student_response(student).model_dump(),
+            "classes": [
+                StudentClassResponse(**membership._mapping)
+                for membership in memberships
+            ],
+        }
     )
 
 
@@ -297,11 +341,29 @@ def update_student(
 )
 def list_classes(
     session: DbSession,
+    principal: Annotated[
+        AuthenticatedUser, Depends(require_permissions(Permission.ROSTER_READ))
+    ],
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     search: Annotated[str | None, Query(max_length=200)] = None,
     is_active: bool | None = None,
 ) -> PageResponse[ClassResponse]:
+    from presensi_api.api.security.roles import RoleCode as _LC
+
+    _scope_ids: set[UUID] | None = None
+    if _LC.ADMIN not in principal.roles:
+        from presensi_api.api.security.scope import (
+            class_ids_in_laborant_scope as _lcs,
+        )
+        from presensi_api.api.security.scope import (
+            teacher_class_ids as _tcs,
+        )
+
+        if _LC.TEACHER in principal.roles:
+            _scope_ids = _tcs(session, principal.id)
+        elif _LC.LABORANT in principal.roles:
+            _scope_ids = _lcs(session, principal)
     query = select(SchoolClass)
     count_query = select(func.count()).select_from(SchoolClass)
     filters = []
@@ -315,6 +377,11 @@ def list_classes(
         )
     if is_active is not None:
         filters.append(SchoolClass.is_active.is_(is_active))
+    if _scope_ids is not None:
+        if _scope_ids:
+            filters.append(SchoolClass.id.in_(_scope_ids))
+        else:
+            filters.append(SchoolClass.id.is_(None))
     if filters:
         query = query.where(*filters)
         count_query = count_query.where(*filters)
@@ -473,3 +540,108 @@ def remove_student_from_class(
         )
     )
     session.commit()
+
+
+@router.get(
+    "/my-classes",
+    response_model=PageResponse[ClassResponse],
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="List classes assigned to the caller (Kelas Saya)",
+    dependencies=[Depends(require_permissions(Permission.ROSTER_READ))],
+)
+def list_my_classes(
+    session: DbSession,
+    principal: Annotated[
+        AuthenticatedUser, Depends(require_permissions(Permission.ROSTER_READ))
+    ],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> PageResponse[ClassResponse]:
+    from presensi_api.api.security.roles import RoleCode as _RC
+    from presensi_api.api.security.scope import (
+        class_ids_in_laborant_scope as _cls,
+    )
+    from presensi_api.api.security.scope import (
+        teacher_class_ids as _tc,
+    )
+
+    if _RC.ADMIN in principal.roles:
+        query = select(SchoolClass)
+    elif _RC.TEACHER in principal.roles:
+        ids = _tc(session, principal.id)
+        if not ids:
+            return PageResponse(
+                items=[], pagination=Pagination(total=0, limit=limit, offset=offset)
+            )
+        query = select(SchoolClass).where(SchoolClass.id.in_(ids))
+    elif _RC.LABORANT in principal.roles:
+        ids = _cls(session, principal)
+        if not ids:
+            return PageResponse(
+                items=[], pagination=Pagination(total=0, limit=limit, offset=offset)
+            )
+        query = select(SchoolClass).where(SchoolClass.id.in_(ids))
+    else:
+        return PageResponse(
+            items=[], pagination=Pagination(total=0, limit=limit, offset=offset)
+        )
+    total = session.scalar(select(func.count()).select_from(query.subquery())) or 0
+    rows = session.scalars(
+        query.order_by(SchoolClass.academic_year.desc(), SchoolClass.code)
+        .limit(limit)
+        .offset(offset)
+    ).all()
+    return _page([_class_response(r) for r in rows], total, limit, offset)
+
+
+@router.get(
+    "/my-classes/{class_id}",
+    response_model=ClassDetailResponse,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Get an assigned class with roster (Kelas Saya detail)",
+    dependencies=[Depends(require_permissions(Permission.ROSTER_READ))],
+)
+def get_my_class(
+    class_id: UUID,
+    session: DbSession,
+    principal: Annotated[
+        AuthenticatedUser, Depends(require_permissions(Permission.ROSTER_READ))
+    ],
+) -> ClassDetailResponse:
+    from presensi_api.api.security.roles import RoleCode as _RC2
+    from presensi_api.api.security.scope import (
+        class_ids_in_laborant_scope as _cls2,
+    )
+    from presensi_api.api.security.scope import (
+        teacher_class_ids as _tc2,
+    )
+
+    school_class = session.get(SchoolClass, class_id)
+    if school_class is None:
+        raise _not_found("Class")
+    if _RC2.ADMIN not in principal.roles:
+        allowed = False
+        if _RC2.TEACHER in principal.roles and class_id in _tc2(session, principal.id):
+            allowed = True
+        if _RC2.LABORANT in principal.roles and class_id in _cls2(session, principal):
+            allowed = True
+        if not allowed:
+            raise ApiProblem(404, "class_not_found", "Kelas tidak ditemukan.")
+    students = session.scalars(
+        select(Student)
+        .join(ClassStudent, ClassStudent.student_id == Student.id)
+        .where(ClassStudent.class_id == class_id)
+        .order_by(Student.student_number)
+    ).all()
+    return ClassDetailResponse(
+        **_class_response(school_class).model_dump(),
+        students=[
+            ClassStudentResponse(
+                id=row.id,
+                student_number=row.student_number,
+                full_name=row.full_name,
+                is_active=row.is_active,
+            )
+            for row in students
+        ],
+    )

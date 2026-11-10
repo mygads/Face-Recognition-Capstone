@@ -25,6 +25,12 @@ classDiagram
     +DateTime last_used_at
     +DateTime revoked_at
   }
+  class UserPermissionGrant {
+    +UUID user_id
+    +String permission
+    +UUID granted_by_user_id
+  }
   User "1" -- "*" UserRole : memiliki
   Role "1" -- "*" UserRole : dipakai
   User "1" -- "*" AuthSession : sesi login
+  User "1" -- "*" UserPermissionGrant : grant opsional

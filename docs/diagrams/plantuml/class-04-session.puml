@@ -36,9 +36,14 @@ class AttendanceRecord {
   +String status
   +String source
   +DateTime recorded_at
+  +DateTime occurred_at
+  +String note
 }
 class AttendanceCorrection {
   +UUID attendance_record_id
+  +UUID session_id
+  +UUID student_id
+  +UUID incident_ref
   +UUID requested_by_user_id
   +String previous_status
   +String corrected_status
@@ -67,7 +72,9 @@ Device "1" -- "*" RecognitionEvent : menangkap
 Student "1" -- "0..*" RecognitionEvent : dikenali (nullable)
 SessionStudent "1" -- "0..1" AttendanceRecord : FK roster
 RecognitionEvent "1" -- "0..1" AttendanceRecord : maks 1 record
-AttendanceRecord "1" -- "*" AttendanceCorrection : pending saja
+AttendanceRecord "1" -- "*" AttendanceCorrection : kasus a
+AttendanceSession "1" -- "*" AttendanceCorrection : kasus b tanpa record
+Student "1" -- "*" AttendanceCorrection : kasus b tanpa record
 
 note bottom of AttendanceSession
   status in {active, manual_override, closed, cancelled}.

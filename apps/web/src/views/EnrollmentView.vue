@@ -12,6 +12,19 @@ import {
   type FaceTemplate,
   type SchoolClass,
 } from '../api/client'
+import {
+  UiAvatar,
+  UiBadge,
+  UiButton,
+  UiCard,
+  UiEmptyState,
+  UiModal,
+  UiPageHeader,
+  UiSearchInput,
+  UiSelect,
+  UiStat,
+  UiTextarea,
+} from '../components/ui'
 
 type CapturePhase = 'ready' | 'countdown' | 'capturing' | 'processing' | 'confirming' | 'complete'
 
@@ -19,6 +32,22 @@ const classes = ref<SchoolClass[]>([])
 const students = ref<EnrollmentStudentStatus[]>([])
 const selectedClassId = ref('')
 const selectedStudentId = ref('')
+const rosterSearch = ref('')
+const filteredStudents = computed(() => {
+  const q = rosterSearch.value.trim().toLowerCase()
+  if (!q) return students.value
+  return students.value.filter(
+    (student) =>
+      student.full_name.toLowerCase().includes(q) ||
+      student.student_number.toLowerCase().includes(q),
+  )
+})
+const enrolledCount = computed(
+  () => students.value.filter((s) => s.template_status === 'enrolled').length,
+)
+const pendingCount = computed(
+  () => students.value.filter((s) => s.template_status !== 'enrolled').length,
+)
 const videoElement = ref<HTMLVideoElement | null>(null)
 const capturePhase = ref<CapturePhase>('ready')
 const countdownValue = ref(3)
@@ -29,6 +58,8 @@ const confirmationRequired = computed(() => captureResult.value?.confirmation_re
 const activeTemplates = ref<FaceTemplate[]>([])
 const isLoadingTemplates = ref(false)
 const isRevoking = ref(false)
+const showRevokeConfirm = ref(false)
+const revokeReason = ref('')
 const identityConfirmed = ref(false)
 const pageError = ref<string | null>(null)
 const pageMessage = ref<string | null>(null)
@@ -262,6 +293,28 @@ async function revokeSelectedTemplates(): Promise<void> {
   }
 }
 
+const selectedClassLabel = computed(
+  () => classes.value.find((item) => item.id === selectedClassId.value)?.code ?? '',
+)
+const revokeReasonLength = computed(() => revokeReason.value.trim().length)
+const revokeReasonValid = computed(
+  () => revokeReasonLength.value >= 10 && revokeReasonLength.value <= 120,
+)
+
+function openRevokeConfirm(): void {
+  revokeReason.value = ''
+  showRevokeConfirm.value = true
+}
+
+async function confirmRevoke(): Promise<void> {
+  if (!revokeReasonValid.value || isRevoking.value) return
+  await revokeSelectedTemplates()
+  if (!pageError.value) {
+    showRevokeConfirm.value = false
+    revokeReason.value = ''
+  }
+}
+
 function confirmIdentityAndContinue(): void {
   if (
     !captureResult.value ||
@@ -305,113 +358,144 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
 </script>
 
 <template>
-  <section class="master-data enrollment-view" aria-label="Pendaftaran wajah siswa">
-    <p class="enrollment-view__hint">
-      Daftarkan siswa satu per satu. Pastikan nama di layar sesuai dengan siswa di depan kamera.
-      Capture hanya digunakan selama proses ini.
-    </p>
+  <div class="st-page" aria-label="Pendaftaran wajah siswa">
+    <UiPageHeader
+      eyebrow="Modul biometrik siswa"
+      title="Pendaftaran Wajah Biometrik"
+      description="Manajemen acuan biometrik siswa yang bersumber dari Data Master. Daftarkan siswa satu per satu; pastikan nama di layar sesuai dengan siswa di depan kamera."
+    >
+      <template #actions>
+        <UiButton variant="secondary" type="button" @click="loadClasses">Sinkron Master</UiButton>
+      </template>
+    </UiPageHeader>
+    <p v-if="pageError" class="st-alert st-alert--error" role="alert">{{ pageError }}</p>
+    <p v-if="pageMessage" class="st-alert st-alert--success" role="status">{{ pageMessage }}</p>
 
-    <p v-if="pageError" class="master-data__alert" role="alert">{{ pageError }}</p>
-    <p v-if="pageMessage" class="master-data__success" role="status">{{ pageMessage }}</p>
+    <div class="st-kpi">
+      <UiStat
+        label="Siap & terverifikasi"
+        :value="`${enrolledCount} siswa`"
+        caption="Koleksi valid"
+        tone="success"
+      />
+      <UiStat
+        label="Belum terdaftar"
+        :value="`${pendingCount} siswa`"
+        caption="Perlu sesi pemotretan"
+        tone="warning"
+      />
+    </div>
 
-    <section class="master-data__panel" aria-labelledby="enrollment-roster-title">
-      <div class="master-data__panel-heading">
-        <div>
-          <p class="master-data__eyebrow">Pendaftaran wajah — data acuan wajah</p>
-          <h2 id="enrollment-roster-title">Pilih kelas dan siswa</h2>
-          <p class="accounts-view__hint">
-            1. Data master siswa = identitas &amp; keanggotaan kelas (di Data master).<br />
-            2. Pendaftaran wajah = membuat / memperbarui data acuan wajah untuk presensi.
-          </p>
-        </div>
-        <label class="enrollment-view__class-picker">
-          Kelas
-          <select v-model="selectedClassId" aria-label="Pilih kelas" :disabled="isLoading">
+    <UiCard
+      title="Pilih kelas dan siswa"
+      subtitle="1. Data master siswa = identitas & keanggotaan kelas. 2. Pendaftaran wajah = data acuan wajah untuk presensi."
+    >
+      <template #header>
+        <label class="st-field" style="min-width: 240px"
+          ><span>Kelas</span>
+          <UiSelect v-model="selectedClassId" aria-label="Pilih kelas" :disabled="isLoading">
             <option value="" disabled>Pilih kelas aktif</option>
             <option v-for="schoolClass in classes" :key="schoolClass.id" :value="schoolClass.id">
               {{ schoolClass.name }} · {{ schoolClass.academic_year }}
             </option>
-          </select>
+          </UiSelect>
         </label>
+      </template>
+      <UiSearchInput
+        v-model="rosterSearch"
+        placeholder="Cari NIS atau Nama Siswa…"
+        aria-label="Cari siswa"
+      />
+      <div class="st-tablewrap" style="margin-top: 10px">
+        <table class="st-table">
+          <thead>
+            <tr>
+              <th>Nomor siswa</th>
+              <th>Nama lengkap</th>
+              <th>Status acuan</th>
+              <th><span class="st-table__actions">Tindakan</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="isLoading">
+              <td colspan="4"><UiEmptyState title="Memuat kelas dan siswa…" /></td>
+            </tr>
+            <tr v-else-if="!selectedClassId">
+              <td colspan="4"><UiEmptyState title="Belum ada kelas aktif untuk dipilih." /></td>
+            </tr>
+            <tr v-else-if="filteredStudents.length === 0">
+              <td colspan="4"><UiEmptyState title="Tidak ada siswa yang cocok." /></td>
+            </tr>
+            <tr
+              v-for="student in filteredStudents"
+              v-else
+              :key="student.id"
+              :data-testid="`enrollment-student-${student.id}`"
+              :class="{ 'st-list__item--active': student.id === selectedStudentId }"
+            >
+              <td class="st-table__mono">{{ student.student_number }}</td>
+              <td>
+                <span class="st-table__who"
+                  ><UiAvatar :name="student.full_name" />{{ student.full_name }}</span
+                >
+              </td>
+              <td>
+                <UiBadge
+                  :tone="
+                    student.template_status === 'enrolled'
+                      ? 'present'
+                      : student.template_status === 'needs_reenrollment'
+                        ? 'late'
+                        : 'neutral'
+                  "
+                >
+                  {{ statusLabel(student.template_status) }}
+                </UiBadge>
+              </td>
+              <td class="st-table__actions">
+                <button
+                  class="st-rowbtn"
+                  type="button"
+                  :disabled="isStarting"
+                  @click="selectStudent(student)"
+                >
+                  {{
+                    student.id === selectedStudentId
+                      ? 'Dipilih ✓'
+                      : student.template_status === 'enrolled'
+                        ? 'Ambil Ulang'
+                        : 'Mulai Pendaftaran'
+                  }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
+    </UiCard>
 
-      <div class="enrollment-view__roster" aria-label="Daftar siswa">
-        <button
-          v-for="student in students"
-          :key="student.id"
-          class="enrollment-view__student"
-          :class="{
-            'enrollment-view__student--selected': student.id === selectedStudentId,
-            'enrollment-view__student--enrolled': student.template_status === 'enrolled',
-          }"
-          type="button"
-          :disabled="isStarting"
-          :aria-pressed="student.id === selectedStudentId"
-          :data-testid="`enrollment-student-${student.id}`"
-          @click="selectStudent(student)"
-        >
-          <span class="enrollment-view__student-copy">
-            <strong>{{ student.full_name }}</strong>
-            <small>{{ student.student_number }}</small>
-          </span>
-          <span
-            class="status-badge"
-            :class="
-              student.template_status === 'enrolled'
-                ? 'status-badge--active'
-                : student.template_status === 'needs_reenrollment'
-                  ? 'status-badge--warning'
-                  : 'status-badge--inactive'
-            "
-          >
-            {{ statusLabel(student.template_status) }}
-          </span>
-        </button>
-        <p v-if="isLoading" class="master-data__empty">Memuat kelas dan siswa…</p>
-        <p v-else-if="!selectedClassId" class="master-data__empty">
-          Belum ada kelas aktif untuk dipilih.
-        </p>
-        <p v-else-if="students.length === 0" class="master-data__empty">
-          Tidak ada siswa aktif di kelas ini.
-        </p>
-        <p v-else-if="eligibleStudents.length === 0" class="master-data__empty">
-          Semua siswa di kelas ini sudah terdaftar.
-        </p>
-      </div>
-    </section>
-
-    <section
+    <UiCard
       v-if="selectedStudent || capturePhase === 'complete'"
-      class="master-data__panel enrollment-view__capture-panel"
-      aria-labelledby="capture-panel-title"
+      title="Capture kamera"
+      :subtitle="
+        selectedStudent
+          ? `${selectedStudent.full_name} · ${selectedStudent.student_number}`
+          : 'Pendaftaran kelas selesai'
+      "
     >
-      <div class="master-data__panel-heading">
-        <div>
-          <p class="master-data__eyebrow">
-            {{ capturePhase === 'confirming' ? 'Konfirmasi identitas' : 'Capture kamera' }}
-          </p>
-          <h2 id="capture-panel-title">
-            {{ selectedStudent ? selectedStudent.full_name : 'Pendaftaran kelas selesai' }}
-          </h2>
-          <p v-if="selectedStudent" class="master-data__muted">
-            {{ selectedStudent.student_number }} ·
-            {{ statusLabel(selectedStudent.template_status) }}
-          </p>
-        </div>
-        <button
+      <template #header>
+        <UiButton
           v-if="
             capturePhase === 'countdown' ||
             capturePhase === 'capturing' ||
             capturePhase === 'processing'
           "
-          class="button button--secondary"
+          variant="secondary"
           type="button"
           @click="cancelCapture"
+          >Batalkan</UiButton
         >
-          Batalkan
-        </button>
-      </div>
-
+      </template>
       <div v-if="selectedStudent" class="enrollment-view__capture-layout">
         <div class="enrollment-view__camera-frame">
           <video
@@ -435,9 +519,8 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             v-if="capturePhase === 'countdown'"
             class="enrollment-view__countdown"
             aria-live="polite"
+            >{{ countdownValue }}</span
           >
-            {{ countdownValue }}
-          </span>
         </div>
 
         <div class="enrollment-view__capture-info">
@@ -472,30 +555,27 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             </p>
             <label v-if="confirmationRequired" class="enrollment-view__confirm">
               <input v-model="identityConfirmed" type="checkbox" />
-              <span>
-                Saya memastikan siswa di kamera adalah {{ selectedStudent.full_name }} ({{
+              <span
+                >Saya memastikan siswa di kamera adalah {{ selectedStudent.full_name }} ({{
                   selectedStudent.student_number
-                }}).
-              </span>
+                }}).</span
+              >
             </label>
-            <p v-if="duplicateWarnings.length" class="master-data__alert" role="status">
+            <p v-if="duplicateWarnings.length" class="st-alert st-alert--error" role="status">
               Ada kemungkinan wajah mirip dengan
-              {{
-                duplicateWarnings
-                  .map((warning) => `${warning.full_name} (${warning.student_number})`)
-                  .join(', ')
-              }}. Periksa kembali identitas dan lanjutkan hanya setelah operator memastikan siswa
-              yang benar.
+              {{ duplicateWarnings.map((w) => `${w.full_name} (${w.student_number})`).join(', ') }}.
+              Periksa kembali identitas dan lanjutkan hanya setelah operator memastikan siswa yang
+              benar.
             </p>
-            <button
-              class="button button--primary"
+            <UiButton
+              variant="primary"
               type="button"
               data-testid="confirm-enrollment-identity"
               :disabled="confirmationRequired && !identityConfirmed"
               @click="confirmIdentityAndContinue"
             >
               Konfirmasi identitas & lanjut
-            </button>
+            </UiButton>
           </template>
           <div v-else-if="capturePhase === 'complete'" class="enrollment-view__instruction">
             Semua siswa yang dapat diproses sudah selesai.
@@ -516,7 +596,7 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
           >
             <span :style="{ width: `${progressPercent}%` }" />
           </div>
-          <p v-if="capturePhase === 'capturing'" class="master-data__muted">
+          <p v-if="capturePhase === 'capturing'" class="st-table__muted">
             {{ captureIndex }} / 4 capture
           </p>
           <p
@@ -530,26 +610,80 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             v-if="selectedStudent.template_status === 'enrolled' && capturePhase === 'ready'"
             class="enrollment-view__revoke"
           >
-            <p class="master-data__muted">
+            <p class="st-table__muted">
               Template aktif: {{ isLoadingTemplates ? 'memuat…' : activeTemplates.length }}
             </p>
-            <button
-              class="button button--secondary"
+            <UiButton
+              variant="secondary"
               type="button"
               data-testid="revoke-enrollment-template"
               :disabled="isLoadingTemplates || isRevoking || activeTemplates.length === 0"
-              @click="revokeSelectedTemplates"
+              @click="openRevokeConfirm"
             >
               {{ isRevoking ? 'Mencabut…' : 'Cabut semua template untuk daftar ulang' }}
-            </button>
+            </UiButton>
+            <UiModal
+              v-if="showRevokeConfirm"
+              title="Cabut Acuan Wajah Siswa?"
+              @close="showRevokeConfirm = false"
+            >
+              <p class="st-modal__eyebrow">Konfirmasi kritis</p>
+              <p v-if="selectedStudent" class="st-identityline" data-testid="revoke-identity">
+                <UiAvatar :name="selectedStudent.full_name" />
+                <span>
+                  <strong>{{ selectedStudent.full_name }}</strong
+                  ><br />
+                  <span class="st-table__muted"
+                    >NIS: {{ selectedStudent.student_number
+                    }}<span v-if="selectedClassLabel"> · {{ selectedClassLabel }}</span></span
+                  >
+                </span>
+              </p>
+              <p class="st-alert st-alert--error" role="note">
+                <strong>Peringatan dampak:</strong>
+                Pencabutan menghapus acuan wajah aktif siswa ini. Siswa tidak dapat melakukan
+                presensi mandiri sampai acuan wajah didaftarkan kembali.
+              </p>
+              <div class="st-fieldhead">
+                <label for="revoke-reason">Alasan pencabutan *</label>
+                <span class="st-charcount" aria-live="polite"
+                  >{{ revokeReasonLength }}/120 karakter</span
+                >
+              </div>
+              <UiTextarea
+                id="revoke-reason"
+                v-model="revokeReason"
+                data-testid="revoke-reason-input"
+                maxlength="120"
+                rows="3"
+                placeholder="Contoh: Perubahan bentuk fisik signifikan / kualitas tangkapan lama menyebabkan galat pengenalan berulang…"
+                :invalid="revokeReasonLength > 0 && !revokeReasonValid"
+              />
+              <p class="st-table__muted">Alasan wajib diisi (minimal 10 karakter).</p>
+              <template #footer>
+                <UiButton variant="secondary" type="button" @click="showRevokeConfirm = false"
+                  >Batal</UiButton
+                >
+                <UiButton
+                  variant="danger"
+                  type="button"
+                  data-testid="confirm-revoke-template"
+                  :disabled="!revokeReasonValid || isRevoking"
+                  @click="confirmRevoke"
+                >
+                  <span class="st-material-icon" aria-hidden="true">person_remove</span>
+                  {{ isRevoking ? 'Mencabut…' : 'Ya, cabut acuan' }}
+                </UiButton>
+              </template>
+            </UiModal>
           </div>
-          <button
+          <UiButton
             v-if="
               capturePhase === 'ready' &&
               selectedStudent &&
               selectedStudent.template_status !== 'enrolled'
             "
-            class="button button--primary"
+            variant="primary"
             type="button"
             data-testid="start-enrollment-capture"
             :disabled="isStarting"
@@ -560,9 +694,9 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
                 ? 'Daftar ulang siswa'
                 : 'Mulai pendaftaran'
             }}
-          </button>
+          </UiButton>
         </div>
       </div>
-    </section>
-  </section>
+    </UiCard>
+  </div>
 </template>
