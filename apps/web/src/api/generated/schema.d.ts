@@ -1253,6 +1253,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/public/display/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rotate a lab display token (no login) */
+        post: operations["rotate_lab_display_api_v1_public_display_rotate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/kiosk-display/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rotate a kiosk display token (no login) */
+        post: operations["rotate_kiosk_display_api_v1_public_kiosk_display_rotate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{session_id}/dashboard": {
         parameters: {
             query?: never;
@@ -2767,6 +2801,11 @@ export interface components {
             /** Is Active */
             is_active?: boolean | null;
         };
+        /** DisplayRotateRequest */
+        DisplayRotateRequest: {
+            /** Display Token */
+            display_token: string;
+        };
         /** DisplaySessionResponse */
         DisplaySessionResponse: {
             /** Display Token */
@@ -2974,6 +3013,11 @@ export interface components {
             device_id: string;
             /** Pin */
             pin: string;
+            /**
+             * Light
+             * @default false
+             */
+            light: boolean;
         };
         /** KioskPinResponse */
         KioskPinResponse: {
@@ -3041,6 +3085,11 @@ export interface components {
             laboratory_id: string;
             /** Pin */
             pin: string;
+            /**
+             * Light
+             * @default false
+             */
+            light: boolean;
         };
         /** LaborantAssignmentRequest */
         LaborantAssignmentRequest: {
@@ -4107,6 +4156,75 @@ export interface components {
              * @default false
              */
             password_change_required: boolean;
+        };
+        /** KioskSpotlight */
+        KioskSpotlight: {
+            /** Full Name */
+            full_name: string;
+            /** Status */
+            status: string;
+            /**
+             * Recorded At
+             * @default null
+             */
+            recorded_at: string | null;
+        };
+        /**
+         * KioskLiveUpdate
+         * @description Payload ringan stream SSE kiosk: agregat + 1 sorotan, TANPA roster.
+         */
+        KioskLiveUpdate: {
+            /**
+             * Laboratory Id
+             * Format: uuid
+             */
+            laboratory_id: string;
+            /** Laboratory Name */
+            laboratory_name: string;
+            /**
+             * Session Id
+             * @default null
+             */
+            session_id: string | null;
+            /**
+             * Subject
+             * @default null
+             */
+            subject: string | null;
+            /**
+             * Status
+             * @default null
+             */
+            status: string | null;
+            /**
+             * Opened At
+             * @default null
+             */
+            opened_at: string | null;
+            /**
+             * Present Count
+             * @default 0
+             */
+            present_count: number;
+            /**
+             * Late Count
+             * @default 0
+             */
+            late_count: number;
+            /**
+             * Waiting Count
+             * @default 0
+             */
+            waiting_count: number;
+            /**
+             * Total Roster
+             * @default 0
+             */
+            total_roster: number;
+            /** @default null */
+            spotlight: components["schemas"]["KioskSpotlight"] | null;
+            /** Server Time */
+            server_time: string;
         };
     };
     responses: never;
@@ -16125,6 +16243,7 @@ export interface operations {
         parameters: {
             query: {
                 token: string;
+                light?: boolean;
             };
             header?: never;
             path?: never;
@@ -16405,6 +16524,7 @@ export interface operations {
         parameters: {
             query: {
                 token: string;
+                light?: boolean;
             };
             header?: never;
             path?: never;
@@ -16690,13 +16810,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description Aliran SSE; setiap event snapshot memakai KioskLiveUpdate. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": unknown;
+                    "text/event-stream": components["schemas"]["KioskLiveUpdate"];
                 };
             };
             /** @description The request could not be processed. */
@@ -16829,13 +16950,296 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description Aliran SSE; setiap event snapshot memakai KioskLiveUpdate. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": unknown;
+                    "text/event-stream": components["schemas"]["KioskLiveUpdate"];
+                };
+            };
+            /** @description The request could not be processed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Authentication is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description You are not allowed to perform this action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The requested resource was not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This method is not allowed for the resource. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The uploaded file exceeds the allowed size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The file extension or media type is not supported. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Request validation failed. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many requests. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description An unexpected server error occurred. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This API operation is not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The service is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    rotate_lab_display_api_v1_public_display_rotate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DisplayRotateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisplaySessionResponse"];
+                };
+            };
+            /** @description The request could not be processed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Authentication is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description You are not allowed to perform this action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The requested resource was not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This method is not allowed for the resource. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The uploaded file exceeds the allowed size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The file extension or media type is not supported. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Request validation failed. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many requests. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description An unexpected server error occurred. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This API operation is not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The service is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    rotate_kiosk_display_api_v1_public_kiosk_display_rotate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DisplayRotateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisplaySessionResponse"];
                 };
             };
             /** @description The request could not be processed. */

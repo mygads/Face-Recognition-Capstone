@@ -201,10 +201,23 @@ def create_laboratory(
     summary="Get laboratory details",
     dependencies=[Depends(require_permissions(Permission.LABORATORY_READ))],
 )
-def get_laboratory(laboratory_id: UUID, session: DbSession) -> LaboratoryResponse:
+def get_laboratory(
+    laboratory_id: UUID,
+    session: DbSession,
+    principal: Annotated[
+        AuthenticatedUser, Depends(require_permissions(Permission.LABORATORY_READ))
+    ],
+) -> LaboratoryResponse:
+    from presensi_api.api.security.roles import RoleCode as _RC
+
     laboratory = session.get(Laboratory, laboratory_id)
     if laboratory is None:
         raise _not_found("Laboratory")
+    if _RC.ADMIN not in principal.roles and _RC.LABORANT in principal.roles:
+        from presensi_api.api.security.scope import laborant_lab_ids as _ll
+
+        if laboratory_id not in _ll(session, principal.id):
+            raise _not_found("Laboratory")
     return _laboratory_response(laboratory)
 
 

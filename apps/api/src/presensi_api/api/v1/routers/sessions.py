@@ -608,6 +608,7 @@ def get_session_roster(
             AttendanceRecord.status,
             AttendanceRecord.note,
             AttendanceRecord.recorded_at,
+            AttendanceRecord.occurred_at,
             AttendanceRecord.id,
         )
         .outerjoin(
@@ -631,17 +632,31 @@ def get_session_roster(
         record_status,
         record_note,
         recorded_at,
+        occurred_at,
         attendance_record_id,
     ) in rows:
         minutes_late: int | None = None
         recorded_out = None
+        # Keterlambatan mengacu pada waktu kedatangan aktual (occurred_at),
+        # bukan waktu sistem mencatat (recorded_at) yang bisa jauh lebih telat
+        # pada tandai manual. Bila waktu datang tak diketahui, jangan karang
+        # angka: minutes_late tetap None.
+        arrival_out = None
         if recorded_at is not None:
             from presensi_api.session_lifecycle import as_utc as _as_utc
 
             recorded_out = _as_utc(recorded_at)
-            if record_status == "late" and opened_at is not None:
-                delta_s = (recorded_out - opened_at).total_seconds()
-                minutes_late = max(0, int(delta_s // 60))
+        if occurred_at is not None:
+            from presensi_api.session_lifecycle import as_utc as _as_utc2
+
+            arrival_out = _as_utc2(occurred_at)
+        if (
+            record_status == "late"
+            and opened_at is not None
+            and arrival_out is not None
+        ):
+            delta_s = (arrival_out - opened_at).total_seconds()
+            minutes_late = max(0, int(delta_s // 60))
         items.append(
             SessionRosterEntry(
                 student_id=student_id,

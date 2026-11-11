@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from presensi_api.api.errors import OPENAPI_ERROR_RESPONSES, ApiProblem
 from presensi_api.api.security.dependencies import require_permissions
 from presensi_api.api.security.roles import AuthenticatedUser, Permission, RoleCode
+from presensi_api.api.security.scope import laborant_lab_ids
 from presensi_api.api.v1.schemas.common import PageResponse, Pagination
 from presensi_api.api.v1.schemas.schedules import (
     ScheduleCreateRequest,
@@ -103,11 +104,19 @@ def _validate_references(
         )
 
     if RoleCode.ADMIN not in principal.roles and teacher_user_id != principal.id:
-        raise ApiProblem(
-            403,
-            "schedule_teacher_scope",
-            "Guru hanya dapat mengelola jadwalnya sendiri.",
+        # Laboran dengan grant kelola jadwal boleh mengatur jadwal guru lain
+        # selama lab-nya termasuk penugasannya (bukan akunnya sendiri).
+        is_laboran_manager = (
+            RoleCode.TEACHER not in principal.roles
+            and Permission.SCHEDULE_MANAGE in principal.permissions
+            and laboratory_id in laborant_lab_ids(session, principal.id)
         )
+        if not is_laboran_manager:
+            raise ApiProblem(
+                403,
+                "schedule_teacher_scope",
+                "Guru hanya dapat mengelola jadwalnya sendiri.",
+            )
     if RoleCode.TEACHER in principal.roles and RoleCode.ADMIN not in principal.roles:
         from presensi_api.api.security.scope import teacher_class_ids as _vrtc
 

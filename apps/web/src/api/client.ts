@@ -736,16 +736,24 @@ export interface DisplaySession {
 export async function openPublicDisplaySession(
   laboratoryId: string,
   pin: string,
+  light = true,
 ): Promise<DisplaySession> {
   const result = await apiClient.POST('/api/v1/public/display/session', {
-    body: { laboratory_id: laboratoryId, pin },
+    body: { laboratory_id: laboratoryId, pin, light },
   })
   return unwrap(result)
 }
 
-export async function getPublicDisplay(token: string): Promise<PublicDisplay> {
+export async function getPublicDisplay(token: string, light = true): Promise<PublicDisplay> {
   const result = await apiClient.GET('/api/v1/public/display', {
-    params: { query: { token } },
+    params: { query: { token, light } },
+  })
+  return unwrap(result)
+}
+
+export async function rotatePublicDisplaySession(token: string): Promise<DisplaySession> {
+  const result = await apiClient.POST('/api/v1/public/display/rotate', {
+    body: { display_token: token },
   })
   return unwrap(result)
 }
@@ -1071,16 +1079,24 @@ export async function revokeKiosk(kioskId: string): Promise<unknown> {
 export async function openKioskDisplaySession(
   deviceId: string,
   pin: string,
+  light = true,
 ): Promise<DisplaySession> {
   const result = await apiClient.POST('/api/v1/public/kiosk-display/session', {
-    body: { device_id: deviceId, pin },
+    body: { device_id: deviceId, pin, light },
   })
   return unwrap(result)
 }
 
-export async function getKioskDisplay(token: string): Promise<PublicDisplay> {
+export async function getKioskDisplay(token: string, light = true): Promise<PublicDisplay> {
   const result = await apiClient.GET('/api/v1/public/kiosk-display', {
-    params: { query: { token } },
+    params: { query: { token, light } },
+  })
+  return unwrap(result)
+}
+
+export async function rotateKioskDisplaySession(token: string): Promise<DisplaySession> {
+  const result = await apiClient.POST('/api/v1/public/kiosk-display/rotate', {
+    body: { display_token: token },
   })
   return unwrap(result)
 }

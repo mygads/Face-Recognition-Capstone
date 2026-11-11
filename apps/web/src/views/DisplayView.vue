@@ -13,6 +13,8 @@ import {
   openKioskDisplaySession,
   openPublicDisplaySession,
   publicDisplayStreamUrl,
+  rotateKioskDisplaySession,
+  rotatePublicDisplaySession,
   type KioskLiveUpdate,
   type PublicDisplay,
   type PublicKioskOption,
@@ -35,8 +37,10 @@ const streamState = ref<'off' | 'sse' | 'polling'>('off')
 const cameraState = ref<'idle' | 'active' | 'unavailable' | 'insecure'>('idle')
 const localVideo = ref<HTMLVideoElement | null>(null)
 let pollTimer: ReturnType<typeof setInterval> | undefined
+let rotationTimer: ReturnType<typeof setTimeout> | undefined
 let eventSource: EventSource | null = null
 let localStream: MediaStream | null = null
+const ROTATE_AHEAD_SECONDS = 1800
 
 const STATUS_GUIDE = [
   { key: 'waiting', label: 'Menunggu', hint: 'Silakan berdiri di dalam bingkai' },
@@ -190,8 +194,37 @@ function connectStream(): void {
   }
 }
 
+function clearRotation(): void {
+  if (rotationTimer) clearTimeout(rotationTimer)
+  rotationTimer = undefined
+}
+
+async function rotateToken(): Promise<void> {
+  if (!displayToken.value) return
+  try {
+    const rotated = deviceId.value
+      ? await rotateKioskDisplaySession(displayToken.value)
+      : await rotatePublicDisplaySession(displayToken.value)
+    displayToken.value = rotated.display_token
+    applyPollSnapshot(rotated.snapshot)
+    connectStream()
+    scheduleRotation(rotated.expires_in_seconds)
+  } catch {
+    /* biarkan stream lama berjalan; 401 mengembalikan ke aktivasi */
+  }
+}
+
+function scheduleRotation(expiresInSeconds: number | undefined): void {
+  clearRotation()
+  if (!expiresInSeconds || expiresInSeconds <= 0) return
+  const ahead = expiresInSeconds > ROTATE_AHEAD_SECONDS ? ROTATE_AHEAD_SECONDS : 0
+  const delayMs = Math.max((expiresInSeconds - ahead) * 1000, 30_000)
+  rotationTimer = setTimeout(() => void rotateToken(), delayMs)
+}
+
 function stopLive(): void {
   disconnectStream()
+  clearRotation()
   streamState.value = 'off'
 }
 
@@ -244,6 +277,7 @@ async function submit(): Promise<void> {
     applyPollSnapshot(opened.snapshot)
     pin.value = ''
     connectStream()
+    scheduleRotation(opened.expires_in_seconds)
     void startLocalCamera()
   } catch (err) {
     error.value = formatError(err)
@@ -331,6 +365,7 @@ function formatRecordedTime(value: string | null | undefined): string {
 
 function resetSession(): void {
   stopLive()
+  clearRotation()
   stopLocalCamera()
   displayToken.value = ''
   display.value = null
@@ -351,6 +386,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   stopLive()
+  clearRotation()
   stopLocalCamera()
   if (clockTimer) clearInterval(clockTimer)
 })

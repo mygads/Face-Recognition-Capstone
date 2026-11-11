@@ -171,7 +171,7 @@ publik, bukti `/tmp/uat/nw-*.png`): semua halaman di atas memakai shell
    (tidak membuat jam palsu; tanpa jam tampil tanpa durasi).
 4. **Kiosk**: admin pairing device+lab + PIN sekali tampil → layar `/presensi`
    pilih lab → pilih kamera → PIN (**POST body, tidak pernah di URL**) →
-   token JWT 12 jam → board fullscreen (nama sekolah, lab,
+   token JWT 8 jam + rotasi proaktif (`POST .../rotate`, snapshot ringan) → board fullscreen (nama sekolah, lab,
    sesi, jam lokal, indikator koneksi; hasil besar; auto-hilang ~3 dtk).
    PIN salah 5x → kunci 5 menit (429, counter persisten di DB); ganti sumber
    mengakhiri sesi + membuang pesan lama; revoke menutup layar (401);

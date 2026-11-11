@@ -17,6 +17,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
+from pydantic import Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -107,17 +108,23 @@ class PublicKioskOption(ApiSchema):
 class LabDisplaySessionRequest(ApiSchema):
     laboratory_id: UUID
     pin: str
+    light: bool = False
 
 
 class KioskDisplaySessionRequest(ApiSchema):
     device_id: UUID
     pin: str
+    light: bool = False
 
 
 class DisplaySessionResponse(ApiSchema):
     display_token: str
     expires_in_seconds: int
     snapshot: PublicDisplayResponse
+
+
+class DisplayRotateRequest(ApiSchema):
+    display_token: str = Field(min_length=16, max_length=1024)
 
 
 @router.get(
@@ -347,7 +354,9 @@ def _snapshot_digest(payload: dict[str, object]) -> str:
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 
-def _build_snapshot(lab: Laboratory, session: Session) -> PublicDisplayResponse:
+def _build_snapshot(
+    lab: Laboratory, session: Session, *, light: bool = False
+) -> PublicDisplayResponse:
     active = _find_active_session(lab, session)
     if active is None:
         return PublicDisplayResponse(laboratory_id=lab.id, laboratory_name=lab.name)
@@ -395,7 +404,7 @@ def _build_snapshot(lab: Laboratory, session: Session) -> PublicDisplayResponse:
         present_count=present,
         late_count=late,
         total_roster=len(students),
-        students=students,
+        students=[] if light else students,
     )
 
 
@@ -423,7 +432,7 @@ def open_lab_display_session(
     return DisplaySessionResponse(
         display_token=token,
         expires_in_seconds=ttl,
-        snapshot=_build_snapshot(lab, session),
+        snapshot=_build_snapshot(lab, session, light=request.light),
     )
 
 
@@ -437,6 +446,7 @@ def get_public_display(
     session: DbSession,
     settings: AuthDep,
     token: Annotated[str, Query(min_length=16, max_length=1024)],
+    light: Annotated[bool, Query()] = False,
 ) -> PublicDisplayResponse:
     claims = decode_display_token(token, settings)
     if claims is None or claims.kind != "lab":
@@ -444,7 +454,7 @@ def get_public_display(
     lab = session.get(Laboratory, claims.laboratory_id)
     if lab is None or not lab.is_active:
         raise ApiProblem(404, "laboratory_not_found", "Laboratorium tidak ditemukan.")
-    return _build_snapshot(lab, session)
+    return _build_snapshot(lab, session, light=light)
 
 
 @router.post(
@@ -484,7 +494,7 @@ def open_kiosk_display_session(
     return DisplaySessionResponse(
         display_token=token,
         expires_in_seconds=ttl,
-        snapshot=_build_snapshot(lab, session),
+        snapshot=_build_snapshot(lab, session, light=request.light),
     )
 
 
@@ -498,6 +508,7 @@ def get_kiosk_display(
     session: DbSession,
     settings: AuthDep,
     token: Annotated[str, Query(min_length=16, max_length=1024)],
+    light: Annotated[bool, Query()] = False,
 ) -> PublicDisplayResponse:
     claims = decode_display_token(token, settings)
     if claims is None or claims.kind != "kiosk":
@@ -523,7 +534,7 @@ def get_kiosk_display(
         raise ApiProblem(404, "laboratory_not_found", "Laboratorium tidak ditemukan.")
     if claims.laboratory_id != lab.id:
         raise ApiProblem(401, "display_token_invalid", "Sesi layar tidak valid.")
-    return _build_snapshot(lab, session)
+    return _build_snapshot(lab, session, light=light)
 
 
 @router.get(
@@ -582,7 +593,17 @@ def _require_lab_stream_target(
 
 @router.get(
     "/display/stream",
-    responses=OPENAPI_ERROR_RESPONSES,
+    responses={
+        **OPENAPI_ERROR_RESPONSES,
+        200: {
+            "description": "Aliran SSE; setiap event snapshot memakai KioskLiveUpdate.",
+            "content": {
+                "text/event-stream": {
+                    "schema": {"$ref": "#/components/schemas/KioskLiveUpdate"}
+                }
+            },
+        },
+    },
     summary="SSE live kiosk updates (lab token, no login)",
 )
 def stream_lab_display(
@@ -606,7 +627,17 @@ def stream_lab_display(
 
 @router.get(
     "/kiosk-display/stream",
-    responses=OPENAPI_ERROR_RESPONSES,
+    responses={
+        **OPENAPI_ERROR_RESPONSES,
+        200: {
+            "description": "Aliran SSE; setiap event snapshot memakai KioskLiveUpdate.",
+            "content": {
+                "text/event-stream": {
+                    "schema": {"$ref": "#/components/schemas/KioskLiveUpdate"}
+                }
+            },
+        },
+    },
     summary="SSE live kiosk updates (kiosk token, no login)",
 )
 def stream_kiosk_display(
@@ -627,3 +658,59 @@ def stream_kiosk_display(
         media_type="text/event-stream",
         headers=SSE_HEADERS,
     )
+
+
+def _rotate_display_token(
+    kind: str,
+    request: DisplayRotateRequest,
+    session: Session,
+    settings: AuthSettings,
+) -> DisplaySessionResponse:
+    """Terbitkan token pengganti; token lama tetap hidup sampai kedaluwarsa.
+
+    Kiosk memakai ini untuk rotasi proaktif sebelum token habis (lihat
+    DisplayView). PIN tidak diminta ulang; cakupan lab/perangkat dicek ulang.
+    """
+    claims = decode_display_token(request.display_token, settings)
+    if claims is None or claims.kind != kind:
+        raise ApiProblem(401, "display_token_invalid", "Sesi layar tidak valid.")
+    _require_lab_stream_target(kind, claims.subject_id, claims.laboratory_id, session)
+    lab = session.get(Laboratory, claims.laboratory_id)
+    if lab is None or not lab.is_active:
+        raise ApiProblem(404, "laboratory_not_found", "Laboratorium tidak ditemukan.")
+    token, ttl = issue_display_token(
+        kind, claims.subject_id, claims.laboratory_id, settings
+    )
+    return DisplaySessionResponse(
+        display_token=token,
+        expires_in_seconds=ttl,
+        snapshot=_build_snapshot(lab, session, light=True),
+    )
+
+
+@router.post(
+    "/display/rotate",
+    response_model=DisplaySessionResponse,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Rotate a lab display token (no login)",
+)
+def rotate_lab_display(
+    request: DisplayRotateRequest,
+    session: DbSession,
+    settings: AuthDep,
+) -> DisplaySessionResponse:
+    return _rotate_display_token("lab", request, session, settings)
+
+
+@router.post(
+    "/kiosk-display/rotate",
+    response_model=DisplaySessionResponse,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Rotate a kiosk display token (no login)",
+)
+def rotate_kiosk_display(
+    request: DisplayRotateRequest,
+    session: DbSession,
+    settings: AuthDep,
+) -> DisplaySessionResponse:
+    return _rotate_display_token("kiosk", request, session, settings)

@@ -9,6 +9,8 @@ const api = vi.hoisted(() => ({
   listPublicLaboratories: vi.fn(async () => [{ id: 'lab-1', code: 'LAB-1', name: 'Lab Kimia 1' }]),
   openKioskDisplaySession: vi.fn(),
   openPublicDisplaySession: vi.fn(),
+  rotateKioskDisplaySession: vi.fn(),
+  rotatePublicDisplaySession: vi.fn(),
   publicDisplayStreamUrl: (token: string) => `/api/v1/public/display/stream?token=${token}`,
   kioskDisplayStreamUrl: (token: string) => `/api/v1/public/kiosk-display/stream?token=${token}`,
 }))
@@ -161,6 +163,58 @@ describe('DisplayView realtime (SSE + video lokal)', () => {
       expect(w.find('[data-testid="display-board"]').exists()).toBe(true)
       expect(w.find('[data-testid="display-board"]').text()).toContain('Raka P.')
     } finally {
+      g['EventSource'] = realES
+    }
+  })
+})
+
+describe('DisplayView rotasi token', () => {
+  class FakeES2 {
+    static instances: FakeES2[] = []
+    url: string
+    handlers: Record<string, ((ev: { data: string }) => void)[]> = {}
+    onerror: (() => void) | null = null
+    constructor(url: string) {
+      this.url = url
+      FakeES2.instances.push(this)
+    }
+    addEventListener(type: string, cb: (ev: { data: string }) => void): void {
+      this.handlers[type] = [...(this.handlers[type] ?? []), cb]
+    }
+    close(): void {}
+  }
+
+  it('memutar token sebelum kedaluwarsa dan menyambung ulang stream', async () => {
+    const g = globalThis as unknown as Record<string, unknown>
+    const realES = g['EventSource']
+    g['EventSource'] = FakeES2
+    FakeES2.instances = []
+    vi.useFakeTimers()
+    try {
+      api.openPublicDisplaySession.mockResolvedValueOnce({
+        display_token: 'tok-lama',
+        expires_in_seconds: 3600,
+        snapshot,
+      })
+      api.rotatePublicDisplaySession.mockResolvedValueOnce({
+        display_token: 'tok-baru',
+        expires_in_seconds: 3600,
+        snapshot,
+      })
+      const w = mount(DisplayView)
+      await flushPromises()
+      await w.find('[data-testid="display-pin-input"]').setValue('1234')
+      await w.find('form').trigger('submit.prevent')
+      await flushPromises()
+      expect(FakeES2.instances).toHaveLength(1)
+      expect(FakeES2.instances[0].url).toContain('tok-lama')
+      await vi.advanceTimersByTimeAsync(30 * 60 * 1000)
+      await flushPromises()
+      expect(api.rotatePublicDisplaySession).toHaveBeenCalledWith('tok-lama')
+      expect(FakeES2.instances).toHaveLength(2)
+      expect(FakeES2.instances[1].url).toContain('tok-baru')
+    } finally {
+      vi.useRealTimers()
       g['EventSource'] = realES
     }
   })

@@ -110,7 +110,7 @@ def decode_browser_session_token(
         return None
 
 
-DISPLAY_TOKEN_TTL_HOURS = 12
+DISPLAY_TOKEN_TTL_HOURS = 8
 DISPLAY_TOKEN_USE = "display"
 MAX_DISPLAY_PIN_ATTEMPTS = 5
 DISPLAY_PIN_LOCKOUT_MINUTES = 5

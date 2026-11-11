@@ -17,6 +17,13 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
    Fallback otomatis ke polling 5 detik bila `EventSource` tak tersedia/gagal.
 3. **Roster dihapus dari layar**: tidak ada daftar nama/NIS; tinggal spotlight
    1 hasil + hitungan menunggu. Memangkas render dan menaikkan privasi.
+4. **Mode ringan (`light=true`)**: `POST .../session` menerima `light` di body,
+   `GET /display` dan `/kiosk-display` menerima `?light=true`, dan
+   `POST .../rotate` selalu membalas snapshot ringan. Snapshot ringan
+   mengosongkan `students: []` (hitungan + spotlight tetap ada) agar roster
+   penuh tidak pernah keluar untuk kiosk — frontend selalu memakai mode ini.
+   Snapshot awal non-light hanya tersisa untuk kompatibilitas; jangan dipakai
+   alur kiosk baru.
 
 ## Keterbatasan yang diketahui
 
@@ -25,6 +32,27 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
   Lewat HTTP nyata (uvicorn/nginx) stream mengalir normal.
 - Koneksi DB validasi ditutup sebelum stream dimulai; generator membuka sesi
   singkat per tick agar kiosk tidak menahan koneksi pool berjam-jam.
+
+## Token display: TTL 8 jam + rotasi proaktif
+
+- `DISPLAY_TOKEN_TTL_HOURS = 8` (`api/security/dependencies.py`). Frontend
+  menjadwalkan rotasi pada `ttl - 1800` detik (min 30 detik) via
+  `POST /display/rotate` / `POST /kiosk-display/rotate` (body
+  `{display_token}`): PIN tidak diminta ulang, tetapi lab/perangkat
+  (`_require_lab_stream_target`) dicek ulang sebelum token baru diterbitkan
+  (kind/subject/lab sama). Token lama tetap hidup sampai kedaluwarsa;
+  rotasi yang gagal diabaikan — stream lama berjalan sampai 401.
+- **Risiko yang diterima (didokumentasikan, bukan diabaikan)**: token display
+  tetap lewat URL query pada endpoint GET/stream (tercatat pada riwayat
+  browser, log server/proxy, sistem pemantauan). PIN pembuka awal dikirim via
+  POST body; token di query adalah trade-off `EventSource` (tidak bisa set
+  header), jadi endpoint GET snapshot dan GET stream tetap menerima token di
+  query, sedangkan rotasi memakai POST body. Mitigasi: TTL 8 jam + rotasi proaktif, token hanya
+  baca kesiapan + hasil tersaring (tanpa roster/gallery/embedding/riwayat),
+  revoke menutup layar (401), PIN salah 5x kunci 5 menit. Bila deployment
+  memakai proxy yang me-log query string, matikan log query atau pindahkan
+  stream ke header/cookie — dicatat sebagai tindak lanjut deployment, bukan
+  perilaku default kode.
 
 ## Operasional kiosk (PC lab)
 
@@ -46,4 +74,10 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
   `/display/stream`, `/kiosk-display/stream`).
 - `apps/web/src/views/DisplayView.vue` (video lokal, EventSource, tanpa roster).
 - Test: `apps/api/tests/test_public_display_stream.py`,
-  `apps/web/src/views/DisplayView.test.ts`.
+  `apps/api/tests/test_scope_gaps_p1p3.py` (light + rotate + TTL),
+  `apps/web/src/views/DisplayView.test.ts` (termasuk rotasi fake-timer).
+- Kontrak SSE di OpenAPI: `StreamingResponse` tak punya `response_model`,
+  jadi `main.py::_openapi_with_kiosk_stream()` mendaftarkan
+  `KioskSpotlight`/`KioskLiveUpdate` ke components dan memberi kedua endpoint
+  stream `responses[200]` content `text/event-stream` `$ref KioskLiveUpdate`.
+  `schema.d.ts` diregen via openapi-typescript dari `app.openapi()` langsung.

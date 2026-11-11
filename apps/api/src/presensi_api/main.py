@@ -4,6 +4,7 @@ import os
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -150,6 +151,40 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(api_v1_router)
+
+
+def _openapi_with_kiosk_stream() -> dict[str, Any]:
+    """OpenAPI bawaan + payload SSE kiosk (StreamingResponse tak punya response_model).
+
+    KioskLiveUpdate/KioskSpotlight didaftarkan ke components agar kontrak
+    stream terdokumentasi dan terkunci test kontrak.
+    """
+    from fastapi.openapi.utils import get_openapi
+
+    from presensi_api.api.v1.routers.public_display import (
+        KioskLiveUpdate,
+        KioskSpotlight,
+    )
+
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    components = schema.setdefault("components", {}).setdefault("schemas", {})
+    for model in (KioskSpotlight, KioskLiveUpdate):
+        dumped = model.model_json_schema(ref_template="#/components/schemas/{model}")
+        for name, definition in dumped.pop("$defs", {}).items():
+            components.setdefault(name, definition)
+        components.setdefault(model.__name__, dumped)
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = _openapi_with_kiosk_stream  # type: ignore[method-assign]
 app.state.request_rate_limiter = SlidingWindowRateLimiter()
 app.state.device_requests_per_minute = _positive_integer_setting(
     "PRESENSI_DEVICE_API_REQUESTS_PER_MINUTE", 120
