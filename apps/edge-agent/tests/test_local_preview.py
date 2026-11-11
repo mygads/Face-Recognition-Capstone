@@ -251,6 +251,112 @@ def test_preview_encodes_only_an_in_memory_downscaled_frame(
         preview.stop()
 
 
+def _read_stream_until(
+    sock: socket.socket,
+    marker: bytes,
+    count: int,
+    buf: bytearray,
+    deadline_s: float = 10.0,
+) -> bytes:
+    # Stream MJPEG tak-berujung: kumpulkan sampai marker terlihat beberapa
+    # kali. http.client tak cocok di sini (read(n) pada body tanpa
+    # Content-Length menunggu EOF, bukan n byte). Sisa byte setelah marker
+    # dipertahankan di buf untuk pembacaan berikutnya.
+    import time as _time
+
+    sock.settimeout(deadline_s)
+    deadline = _time.monotonic() + deadline_s
+    while buf.count(marker) < count:
+        if _time.monotonic() > deadline:
+            break
+        try:
+            piece = sock.recv(4096)
+        except TimeoutError:
+            break
+        if not piece:
+            break
+        buf += piece
+    out = bytes(buf)
+    del buf[:]
+    return out
+
+
+def _open_stream(port: int, path: str) -> socket.socket:
+    sock = socket.create_connection(("127.0.0.1", port), timeout=10)
+    sock.sendall(
+        f"GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+        "Connection: close\r\n\r\n".encode()
+    )
+    return sock
+
+
+def test_preview_stream_serves_multipart_frames_with_query_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Frame:
+        shape = (360, 800, 3)
+
+        def copy(self) -> "Frame":
+            return self
+
+    class Encoded:
+        def tobytes(self) -> bytes:
+            return b"\xff\xd8synthetic-jpeg\xff\xd9"
+
+    fake_cv2: Any = SimpleNamespace(
+        INTER_AREA=1,
+        IMWRITE_JPEG_QUALITY=2,
+        resize=lambda _frame, _size, **_kwargs: Frame(),
+        imencode=lambda *_args, **_kwargs: (True, Encoded()),
+    )
+    monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
+    preview, port, token = _start_preview(monkeypatch, ["LABORANT"])
+    try:
+        preview.update_frame(Frame())
+
+        sock = _open_stream(port, f"/v1/stream?token={token}")
+        try:
+            buf = bytearray()
+            head = _read_stream_until(sock, b"\r\n\r\n", 1, buf)
+            assert b"200 OK" in head
+            assert b"multipart/x-mixed-replace; boundary=presensi-frame" in head
+            first = _read_stream_until(sock, b"--presensi-frame", 1, buf)
+            assert b"--presensi-frame" in first
+            assert b"\xff\xd8synthetic-jpeg\xff\xd9" in first
+            # Frame kedua hanya dikirim setelah ada frame baru (tanpa
+            # handshake ulang): simulasikan frame berikutnya dari kamera.
+            import time as _time2
+
+            _time2.sleep(0.2)
+            assert preview.update_frame(Frame()) is True
+            second = _read_stream_until(sock, b"--presensi-frame", 1, buf)
+            assert b"--presensi-frame" in second
+        finally:
+            sock.close()
+
+        # Token query wajib: tanpa token atau token salah ditolak.
+        for bad_path in ("/v1/stream", "/v1/stream?token=salah"):
+            bad = _open_stream(port, bad_path)
+            try:
+                head = _read_stream_until(bad, b"\r\n\r\n", 1, bytearray())
+                assert b"401" in head.split(b"\r\n")[0]
+            finally:
+                bad.close()
+
+        # Stream berhenti setelah sesi dicabut (tidak menggantung thread).
+        sock = _open_stream(port, f"/v1/stream?token={token}")
+        try:
+            buf2 = bytearray()
+            assert _read_stream_until(sock, b"--presensi-frame", 1, buf2)
+            _request(port, "/v1/session", method="DELETE", token=token)
+            rest = _read_stream_until(sock, b"__never__", 1, buf2, deadline_s=10.0)
+            assert b"--presensi-frame" not in rest
+        finally:
+            sock.close()
+    finally:
+        preview.stop()
+
+
 def test_local_diagnostics_keep_only_aggregate_scores_and_hide_unusable_margin(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

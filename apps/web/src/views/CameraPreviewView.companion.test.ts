@@ -1,11 +1,12 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAuthStore } from '../stores/auth'
 import CameraPreviewView from './CameraPreviewView.vue'
 
+const mockRouteQuery = vi.hoisted(() => ({ value: {} as Record<string, string> }))
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ query: {} }),
+  useRoute: () => ({ query: mockRouteQuery.value }),
   useRouter: () => ({ replace: vi.fn() }),
 }))
 
@@ -54,6 +55,7 @@ function laborantPinia() {
 describe('camera preview confidence companion', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+    mockRouteQuery.value = {}
   })
 
   it('labels candidates as non-accuracy and never creates attendance', async () => {
@@ -120,6 +122,9 @@ describe('camera preview confidence companion', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('bukan tingkat akurasi')
+    const streamImg = wrapper.find('[data-testid="preview-stream-img"]')
+    expect(streamImg.exists()).toBe(true)
+    expect(streamImg.attributes('src')).toContain('/v1/stream?token=preview-1')
     const forbidden = fetchCalls.filter(
       (url) =>
         url.includes('recognition-event') ||
@@ -129,12 +134,74 @@ describe('camera preview confidence companion', () => {
     expect(forbidden).toEqual([])
     wrapper.unmount()
   })
+
+  it('falls back to frame polling when the stream errors', async () => {
+    const fetchCalls: string[] = []
+    const nowSeconds = Date.now() / 1000
+    const stubFetch = vi.fn(async (input: unknown) => {
+      const url = String(input)
+      fetchCalls.push(url)
+      if (url.endsWith('/v1/session')) {
+        return { ok: true, status: 200, json: async () => ({ preview_token: 'preview-1' }) }
+      }
+      if (url.endsWith('/v1/status')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            camera_open: true,
+            session_active: false,
+            recognition_state: 'preview_only',
+            display_name: null,
+            diagnostic_candidate: null,
+            attendance_result: null,
+            updated_at: nowSeconds,
+          }),
+        }
+      }
+      if (url.endsWith('/v1/frame.jpg')) {
+        return { ok: true, status: 200, blob: async () => new Blob(['frame']) }
+      }
+      return { ok: false, status: 404, json: async () => ({}), blob: async () => new Blob() }
+    })
+    vi.stubGlobal('fetch', stubFetch)
+    Object.defineProperty(window, 'location', {
+      value: { hostname: '127.0.0.1' },
+      writable: true,
+    })
+    const urlWithStubs = URL as unknown as {
+      createObjectURL: () => string
+      revokeObjectURL: (url: string) => void
+    }
+    urlWithStubs.createObjectURL = () => 'blob:fallback-frame'
+    urlWithStubs.revokeObjectURL = () => {}
+
+    const wrapper = mount(CameraPreviewView, { global: { plugins: [laborantPinia()] } })
+    await flushPromises()
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    await flushPromises()
+    // Mode stream: belum ada fetch frame.jpg (browser memuat via <img>).
+    expect(fetchCalls.some((url) => url.endsWith('/v1/frame.jpg'))).toBe(false)
+
+    await wrapper.find('[data-testid="preview-stream-img"]').trigger('error')
+    await flushPromises()
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    await flushPromises()
+
+    expect(fetchCalls.some((url) => url.endsWith('/v1/frame.jpg'))).toBe(true)
+    expect(wrapper.find('.camera-preview-view__frame-stage img').exists()).toBe(true)
+    wrapper.unmount()
+  })
 })
 
 describe('camera preview source switching', () => {
+  beforeEach(() => {
+    mockRouteQuery.value = { transport: 'poll' }
+  })
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
+    mockRouteQuery.value = {}
   })
 
   function stubCompanion(options: { framesOk: number; failStatus?: number }) {

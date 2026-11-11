@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Literal, cast
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 from uuid import UUID
 
 import httpx
@@ -475,8 +475,7 @@ class LocalCameraPreview:
                     return None
                 return cast(dict[str, object], payload)
 
-            def _authorized(self) -> bool:
-                supplied = self.headers.get("X-Presensi-Preview-Token", "")
+            def _authorized_token(self, supplied: str) -> bool:
                 now = time.monotonic()
                 with preview._lock:
                     preview._sessions = {
@@ -491,6 +490,78 @@ class LocalCameraPreview:
                         # operator through another authenticate round-trip.
                         preview._sessions[supplied] = now + _PREVIEW_SESSION_TTL_SECONDS
                 return bool(supplied) and expiry is not None
+
+            def _authorized(self) -> bool:
+                supplied = self.headers.get("X-Presensi-Preview-Token", "")
+                return self._authorized_token(supplied)
+
+            def _loopback_host_ok(self) -> bool:
+                host_header = self.headers.get("Host", "")
+                hostname = urlsplit(f"//{host_header}").hostname
+                return hostname in {"localhost", "127.0.0.1", "::1"}
+
+            def _serve_stream(self, supplied: str) -> None:
+                # MJPEG multipart: satu koneksi HTTP untuk semua frame,
+                # tanpa handshake per-frame seperti polling /v1/frame.jpg.
+                # <img> tidak bisa mengirim header kustom, jadi token lewat
+                # query; Host loopback + token tetap diperiksa.
+                if not self._loopback_host_ok():
+                    self.send_error(403)
+                    return
+                if not self._authorized_token(supplied):
+                    self.send_error(401)
+                    return
+                with preview._lock:
+                    jpeg = preview._jpeg_frame
+                if jpeg is None:
+                    self.send_error(503)
+                    return
+                self.send_response(200)
+                self.send_header(
+                    "Content-Type",
+                    "multipart/x-mixed-replace; boundary=presensi-frame",
+                )
+                self.send_header("Cache-Control", "no-store, max-age=0")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                boundary = b"--presensi-frame\r\n"
+                min_interval = 1.0 / max(1, min(30, preview.config.camera.fps))
+                last_sent_at = 0.0
+                stream_started = time.monotonic()
+                try:
+                    while True:
+                        if (
+                            time.monotonic() - stream_started
+                            > _PREVIEW_SESSION_TTL_SECONDS
+                        ):
+                            return
+                        with preview._lock:
+                            jpeg = preview._jpeg_frame
+                            frame_at = preview._last_frame_at
+                            expiry = preview._sessions.get(supplied)
+                        if expiry is None or expiry <= time.monotonic():
+                            return
+                        if jpeg is None or frame_at <= last_sent_at:
+                            time.sleep(min_interval)
+                            continue
+                        part = (
+                            boundary
+                            + b"Content-Type: image/jpeg\r\nContent-Length: "
+                            + str(len(jpeg)).encode()
+                            + b"\r\n\r\n"
+                            + jpeg
+                            + b"\r\n"
+                        )
+                        self.wfile.write(part)
+                        self.wfile.flush()
+                        last_sent_at = frame_at
+                        with preview._lock:
+                            preview._sessions[supplied] = (
+                                time.monotonic() + _PREVIEW_SESSION_TTL_SECONDS
+                            )
+                except (BrokenPipeError, ConnectionResetError):
+                    return
 
             def do_OPTIONS(self) -> None:
                 origin = self._origin()
@@ -610,6 +681,15 @@ class LocalCameraPreview:
                 self._send_json(200, {"cleared": True}, origin)
 
             def do_GET(self) -> None:
+                path_only = urlsplit(self.path).path
+                if path_only == "/v1/stream":
+                    # <img> tidak mengirim Origin/header kustom: cukup cek
+                    # Host loopback + token query di dalam _serve_stream.
+                    supplied = dict(parse_qsl(urlsplit(self.path).query)).get(
+                        "token", ""
+                    )
+                    self._serve_stream(supplied)
+                    return
                 origin = self._origin()
                 if origin is None:
                     return

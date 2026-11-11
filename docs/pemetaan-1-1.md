@@ -201,11 +201,15 @@ publik, bukti `/tmp/uat/nw-*.png`): semua halaman di atas memakai shell
 8. **Perangkat & preview staf**: filter lab → aktif/offline/perlu perhatian
    → detail (kamera, heartbeat + kapan terakhir, antrean, status konfig).
    Preview staf: Lab→Device→Hubungkan (auto-isi bila tunggal, label
-   "Lab · Kamera"); ganti sumber melepas aliran lama + menghapus gambar,
-   status, dan FPS lama (placeholder "Menghubungkan" sampai frame baru tiba);
-   gangguan sesaat tidak langsung menghapus frame terakhir (dibuang setelah
-   3 respons tak-tersedia beruntun), kegagalan non-503 menampilkan badge
-   "Frame beku + umur frame"; tanpa membuat event kehadiran;
+   "Lab · Kamera"); transport utama MJPEG satu koneksi `/v1/stream`
+   (token via query, khusus loopback; tanpa handshake per-frame seperti
+   polling `frame.jpg` yang tersisa sebagai fallback + `?transport=poll`);
+   ganti sumber melepas aliran lama + menghapus gambar, status, dan FPS lama
+   (placeholder "Menghubungkan" sampai frame baru tiba); gangguan sesaat
+   tidak langsung menghapus frame terakhir (dibuang setelah 3 respons
+   tak-tersedia beruntun), kegagalan non-503 menampilkan badge "Frame beku
+   + umur frame"; stream error → hubung ulang otomatis (token baru), stream
+   putus lama → fallback polling; tanpa membuat event kehadiran;
    status "Preview teknis"/"Sesi berjalan";
    perangkat offline tetap terdaftar dengan statusnya.
 9. **Laporan**: filter tanggal/lab/kelas/sesi/status + ringkasan + tabel

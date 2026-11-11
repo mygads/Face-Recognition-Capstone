@@ -219,6 +219,28 @@ const diagnosticSimilarityPercent = computed(() => {
 const errorMessage = ref<string | null>(null)
 const isStarting = ref(true)
 const isFullscreen = ref(false)
+// Transport utama: satu koneksi MJPEG /v1/stream (tanpa handshake per-frame).
+// polling /v1/frame.jpg hanya sebagai fallback (agent lama / ?transport=poll).
+const routeTransport = typeof route.query.transport === 'string' ? route.query.transport : ''
+const transport = ref<'stream' | 'poll'>(routeTransport === 'poll' ? 'poll' : 'stream')
+const streamAlive = ref(false)
+const streamRetry = ref(0)
+let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+let feedGeneration = 0
+const streamUrl = computed(() => {
+  if (!previewBaseUrl.value || !previewToken.value) return null
+  return `${previewBaseUrl.value}/v1/stream?token=${encodeURIComponent(previewToken.value)}&retry=${streamRetry.value}`
+})
+const hasFeed = computed(
+  () =>
+    (transport.value === 'poll' && frameUrl.value !== null) ||
+    (transport.value === 'stream' && streamUrl.value !== null),
+)
+const placeholderTitle = computed(() => {
+  if (errorMessage.value) return 'Preview belum tersedia'
+  if (transport.value === 'stream' && !streamAlive.value) return 'Menghubungkan ke stream…'
+  return isStarting.value ? 'Menghubungkan ke agent…' : 'Preview belum tersedia'
+})
 const lastFrameAt = ref<number | null>(null)
 const FRAME_STALE_AFTER_MS = 3000
 // Gangguan sesaat (satu-dua 503) tidak langsung menghapus frame bagus terakhir;
@@ -228,11 +250,15 @@ let consecutiveUnavailable = 0
 
 function resetPreviewFeed(): void {
   // Ganti sumber harus membuang gambar + status lama agar tidak disalahartikan
-  // sebagai feed kamera yang baru; loop polling yang berjalan mengisi ulang.
+  // sebagai feed kamera yang baru; stream/polling yang berjalan mengisi ulang.
+  feedGeneration += 1
+  if (reconnectTimer) clearTimeout(reconnectTimer)
   if (frameUrl.value) {
     URL.revokeObjectURL(frameUrl.value)
     frameUrl.value = null
   }
+  transport.value = routeTransport === 'poll' ? 'poll' : 'stream'
+  streamAlive.value = false
   previewStatus.value = null
   previewFps.value = null
   previewFrameTimes.length = 0
@@ -241,6 +267,51 @@ function resetPreviewFeed(): void {
   consecutiveUnavailable = 0
   errorMessage.value = null
   isStarting.value = true
+}
+
+function onStreamLoad(): void {
+  if (stopped) return
+  streamAlive.value = true
+  errorMessage.value = null
+  isStarting.value = false
+}
+
+function onStreamError(): void {
+  if (stopped) return
+  streamAlive.value = false
+  if (transport.value === 'stream') {
+    // Agent lama tanpa /v1/stream (atau token bermasalah): fallback polling.
+    transport.value = 'poll'
+    void pollFrame()
+    return
+  }
+  scheduleStreamReconnect()
+}
+
+function scheduleStreamReconnect(): void {
+  if (reconnectTimer) clearTimeout(reconnectTimer)
+  const generation = feedGeneration
+  reconnectTimer = setTimeout(() => {
+    if (stopped || generation !== feedGeneration) return
+    void reconnectStream()
+  }, 3000)
+}
+
+async function reconnectStream(): Promise<void> {
+  if (stopped) return
+  const generation = feedGeneration
+  try {
+    previewToken.value = await openPreviewSession()
+    if (stopped || generation !== feedGeneration) return
+    streamRetry.value += 1
+    transport.value = 'stream'
+    errorMessage.value = null
+  } catch (error) {
+    if (!stopped && generation === feedGeneration) {
+      errorMessage.value = error instanceof Error ? error.message : 'Preview kamera tidak tersedia.'
+      scheduleStreamReconnect()
+    }
+  }
 }
 
 const frameAgeMs = computed(() => {
@@ -556,6 +627,7 @@ async function pollFrame(): Promise<void> {
     lastFrameAt.value = Date.now()
     if (previousUrl) URL.revokeObjectURL(previousUrl)
     errorMessage.value = null
+    isStarting.value = false
   } catch (error) {
     if (!stopped && !frameUrl.value) {
       errorMessage.value = error instanceof Error ? error.message : 'Preview kamera tidak tersedia.'
@@ -586,7 +658,7 @@ onMounted(async () => {
   try {
     previewToken.value = await openPreviewSession()
     if (stopped) return
-    void pollFrame()
+    if (transport.value === 'poll') void pollFrame()
     void pollStatus()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'Tidak dapat membuka preview.'
@@ -600,6 +672,7 @@ onBeforeUnmount(() => {
   stopped = true
   if (frameTimer) clearTimeout(frameTimer)
   if (statusTimer) clearTimeout(statusTimer)
+  if (reconnectTimer) clearTimeout(reconnectTimer)
   if (frameUrl.value) URL.revokeObjectURL(frameUrl.value)
   const token = previewToken.value
   if (previewBaseUrl.value && token) {
@@ -712,7 +785,14 @@ onBeforeUnmount(() => {
       </div>
       <div>
         <span>FPS preview browser</span>
-        <strong>{{ previewFps === null ? 'Mengukur…' : `${previewFps} FPS` }}</strong>
+        <strong>{{
+          transport === 'stream'
+            ? 'Stream langsung'
+            : previewFps === null
+              ? 'Mengukur…'
+              : `${previewFps} FPS`
+        }}</strong>
+        <small v-if="transport === 'stream'">MJPEG satu koneksi, tanpa polling.</small>
       </div>
       <div>
         <span>Kualitas frame</span>
@@ -726,8 +806,21 @@ onBeforeUnmount(() => {
 
     <div class="camera-preview-view__layout">
       <figure class="camera-preview-view__frame">
-        <div v-if="frameUrl" class="camera-preview-view__frame-stage">
-          <img :src="frameUrl" alt="Preview langsung kamera presensi" @load="recordPreviewFrame" />
+        <div v-if="hasFeed" class="camera-preview-view__frame-stage">
+          <img
+            v-if="transport === 'stream' && streamUrl"
+            :src="streamUrl"
+            alt="Preview langsung kamera presensi"
+            data-testid="preview-stream-img"
+            @load="onStreamLoad"
+            @error="onStreamError"
+          />
+          <img
+            v-else-if="transport === 'poll' && frameUrl"
+            :src="frameUrl"
+            alt="Preview langsung kamera presensi"
+            @load="recordPreviewFrame"
+          />
           <svg
             v-if="cameraObservation && cameraObservation.frame_width > 0"
             class="camera-preview-view__face-overlay"
@@ -789,11 +882,11 @@ onBeforeUnmount(() => {
         </div>
         <div v-else class="camera-preview-view__placeholder" role="status">
           <span aria-hidden="true">◉</span>
-          <strong>{{ isStarting ? 'Menghubungkan ke agent…' : 'Preview belum tersedia' }}</strong>
+          <strong>{{ placeholderTitle }}</strong>
           <p>Pastikan agent AI_EDGE berjalan pada komputer yang sama dengan browser ini.</p>
         </div>
         <p
-          v-if="frameStale"
+          v-if="transport === 'poll' && frameStale"
           class="st-table__muted"
           role="status"
           data-testid="preview-stale-warning"
