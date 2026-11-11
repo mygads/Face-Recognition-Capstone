@@ -128,6 +128,7 @@ function onDeviceChange(event: Event): void {
     const dev = devices.value.find((d) => d.device_id === el.value)
     if (dev) selectedLabId.value = dev.laboratory_id
     openedRemotely.value = false
+    resetPreviewFeed()
     syncSelectionToUrl()
   }
 }
@@ -137,6 +138,7 @@ function onLabChange(event: Event): void {
   if (el instanceof HTMLSelectElement) {
     selectedLabId.value = el.value
     openedRemotely.value = false
+    resetPreviewFeed()
     syncSelectionToUrl()
   }
 }
@@ -217,6 +219,41 @@ const diagnosticSimilarityPercent = computed(() => {
 const errorMessage = ref<string | null>(null)
 const isStarting = ref(true)
 const isFullscreen = ref(false)
+const lastFrameAt = ref<number | null>(null)
+const FRAME_STALE_AFTER_MS = 3000
+// Gangguan sesaat (satu-dua 503) tidak langsung menghapus frame bagus terakhir;
+// frame baru dibuang setelah 3 respons tak-tersedia beruntun (~200 ms).
+const CONSECUTIVE_UNAVAILABLE_BEFORE_CLEAR = 3
+let consecutiveUnavailable = 0
+
+function resetPreviewFeed(): void {
+  // Ganti sumber harus membuang gambar + status lama agar tidak disalahartikan
+  // sebagai feed kamera yang baru; loop polling yang berjalan mengisi ulang.
+  if (frameUrl.value) {
+    URL.revokeObjectURL(frameUrl.value)
+    frameUrl.value = null
+  }
+  previewStatus.value = null
+  previewFps.value = null
+  previewFrameTimes.length = 0
+  lastPreviewFpsUpdate = 0
+  lastFrameAt.value = null
+  consecutiveUnavailable = 0
+  errorMessage.value = null
+  isStarting.value = true
+}
+
+const frameAgeMs = computed(() => {
+  // Bergantung pada previewStatus agar dievaluasi ulang tiap status poll 500 ms.
+  void previewStatus.value
+  if (!frameUrl.value || lastFrameAt.value === null) return null
+  return Date.now() - lastFrameAt.value
+})
+const frameStale = computed(() => (frameAgeMs.value ?? 0) > FRAME_STALE_AFTER_MS)
+const frameAgeLabel = computed(() => {
+  if (frameAgeMs.value === null) return ''
+  return `${Math.max(0, Math.round(frameAgeMs.value / 1000))} dtk`
+})
 let frameTimer: ReturnType<typeof setTimeout> | undefined
 let statusTimer: ReturnType<typeof setTimeout> | undefined
 let stopped = false
@@ -499,12 +536,16 @@ async function pollFrame(): Promise<void> {
   try {
     const response = await authorizedFetch('/v1/frame.jpg')
     if (!response.ok) {
-      if (response.status === 503 && frameUrl.value) {
-        URL.revokeObjectURL(frameUrl.value)
-        frameUrl.value = null
+      if (response.status === 503) {
+        consecutiveUnavailable += 1
+        if (consecutiveUnavailable >= CONSECUTIVE_UNAVAILABLE_BEFORE_CLEAR && frameUrl.value) {
+          URL.revokeObjectURL(frameUrl.value)
+          frameUrl.value = null
+        }
       }
       throw new Error('Frame kamera belum tersedia.')
     }
+    consecutiveUnavailable = 0
     const nextUrl = URL.createObjectURL(await response.blob())
     if (stopped) {
       URL.revokeObjectURL(nextUrl)
@@ -512,6 +553,7 @@ async function pollFrame(): Promise<void> {
     }
     const previousUrl = frameUrl.value
     frameUrl.value = nextUrl
+    lastFrameAt.value = Date.now()
     if (previousUrl) URL.revokeObjectURL(previousUrl)
     errorMessage.value = null
   } catch (error) {
@@ -750,6 +792,15 @@ onBeforeUnmount(() => {
           <strong>{{ isStarting ? 'Menghubungkan ke agent…' : 'Preview belum tersedia' }}</strong>
           <p>Pastikan agent AI_EDGE berjalan pada komputer yang sama dengan browser ini.</p>
         </div>
+        <p
+          v-if="frameStale"
+          class="st-table__muted"
+          role="status"
+          data-testid="preview-stale-warning"
+        >
+          <UiBadge tone="late">Frame beku</UiBadge>
+          <span>Frame terakhir {{ frameAgeLabel }} lalu - koneksi mungkin beku.</span>
+        </p>
         <figcaption>
           Gambar ditampilkan sementara di browser dan tidak disimpan oleh halaman ini.
         </figcaption>

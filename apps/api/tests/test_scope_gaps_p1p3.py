@@ -295,6 +295,64 @@ def test_laboran_schedule_manage_scoped_to_assigned_labs(
     assert denied.status_code == 403, denied.text
 
 
+def test_autoclose_session_opened_after_schedule_end(
+    gap_database: sessionmaker[Session],
+) -> None:
+    """Sesi yang dibuka setelah jam berakhir tetap bisa dibaca.
+
+    Auto-close pada GET roster tidak boleh 500 karena closed_at mundur
+    sebelum opened_at (CHECK ..._close_after_open); closed_at dijepit ke
+    opened_at dan sesi ditutup saat itu juga.
+    """
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+
+    from sqlalchemy import select
+
+    with gap_database.begin() as session:
+        lab = session.scalars(
+            select(Laboratory).where(Laboratory.code == "LAB-A")
+        ).one()
+        class_a = session.scalars(select(SchoolClass)).one()
+        teacher = session.scalars(select(User).where(User.id == TEACHER_ID)).one()
+        wib_now = datetime.now(UTC).astimezone(ZoneInfo("Asia/Jakarta"))
+        ended = (wib_now - timedelta(hours=1)).time().replace(microsecond=0)
+        schedule = PracticumSchedule(
+            class_id=class_a.id,
+            laboratory_id=lab.id,
+            teacher_user_id=teacher.id,
+            subject="Kimia Susulan",
+            weekday=wib_now.weekday(),
+            start_time=(wib_now - timedelta(hours=2)).time().replace(microsecond=0),
+            end_time=ended,
+            timezone_name="Asia/Jakarta",
+            effective_from=wib_now.date(),
+            is_active=True,
+        )
+        session.add(schedule)
+        session.flush()
+        opened_at = datetime.now(UTC).replace(microsecond=0)
+        att_session = AttendanceSession(
+            practicum_schedule_id=schedule.id,
+            opened_by_user_id=teacher.id,
+            status="active",
+            opened_at=opened_at,
+        )
+        session.add(att_session)
+        session.flush()
+        session_id = str(att_session.id)
+    _set_principal(TEACHER_ID, frozenset({RoleCode.TEACHER}), frozenset())
+    roster = request("GET", f"/api/v1/sessions/{session_id}/roster")
+    assert roster.status_code == 200, roster.text
+    with gap_database() as session:
+        row = session.scalars(
+            select(AttendanceSession).where(AttendanceSession.id == UUID(session_id))
+        ).one()
+        assert row.status == "closed"
+        assert row.closed_at is not None
+        assert row.closed_at >= row.opened_at
+
+
 def test_minutes_late_uses_occurred_at(gap_database: sessionmaker[Session]) -> None:
     with gap_database() as session:
         from sqlalchemy import select

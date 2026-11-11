@@ -92,6 +92,11 @@ def close_expired_sessions(
         except (ZoneInfoNotFoundError, ValueError, TypeError):
             continue
         if session_end <= current_time:
+            # Sesi yang dibuka setelah jam berakhir (mis. mode manual) tetap
+            # kedaluwarsa saat itu juga, tetapi closed_at tidak boleh mundur
+            # sebelum opened_at (CHECK ck_attendance_sessions_..._after_open).
+            opened_utc = as_utc(attendance_session.opened_at)
+            closed_at = session_end if session_end > opened_utc else opened_utc
             # Capture the running status before the compare-and-swap: the
             # UPDATE below synchronizes the in-session object, so reading
             # attendance_session.status afterwards would report "closed".
@@ -102,7 +107,7 @@ def close_expired_sessions(
                     AttendanceSession.id == attendance_session.id,
                     AttendanceSession.status.in_(RUNNING_SESSION_STATUSES),
                 )
-                .values(status="closed", closed_at=session_end)
+                .values(status="closed", closed_at=closed_at)
                 .returning(AttendanceSession.id)
             )
             if result.scalar_one_or_none() is None:
