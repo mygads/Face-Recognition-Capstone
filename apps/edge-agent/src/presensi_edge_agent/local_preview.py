@@ -105,6 +105,7 @@ class LocalCameraPreview:
             "updated_at": None,
         }
         self._sessions: dict[str, float] = {}
+        self._last_kiosk_hint_at = 0.0
         self._calibration_students: tuple[tuple[str, str], ...] = ()
         self._calibration_gallery_identity_count = 0
         self._calibration_request: dict[str, str | None] | None = None
@@ -141,6 +142,51 @@ class LocalCameraPreview:
                 if expiry > now
             }
             return bool(self._sessions)
+
+    def note_kiosk_hint_hit(self) -> None:
+        """Record a kiosk-hint poll so face diagnostics keep warming."""
+        with self._lock:
+            self._last_kiosk_hint_at = time.monotonic()
+
+    def has_kiosk_hint_consumer(self) -> bool:
+        """True when the kiosk screen polled the hint within 3 seconds."""
+        with self._lock:
+            return time.monotonic() - self._last_kiosk_hint_at < 3.0
+
+    def kiosk_hint(self) -> dict[str, object]:
+        """Build the unauthenticated kiosk hint: generic state, no identity.
+
+        Only loopback callers reach this (enforced in the HTTP handler).
+        Never include display names, face boxes, or calibration data here.
+        """
+        with self._lock:
+            status = dict(self._status)
+        observation = status.get("camera_observation")
+        face_count = (
+            observation.get("face_count") if isinstance(observation, dict) else 0
+        )
+        face_present = (
+            type(face_count) is int
+            and face_count > 0
+            and self._observation_fresh_locked()
+        )
+        attendance = status.get("attendance_result")
+        state = status.get("recognition_state")
+        return {
+            "session_active": status.get("session_active") is True,
+            "camera_open": status.get("camera_open") is True,
+            "recognition_state": state if isinstance(state, str) else None,
+            "face_present": face_present,
+            "face_count": face_count if type(face_count) is int else 0,
+            "attendance_result": attendance if isinstance(attendance, str) else None,
+            "updated_at": status.get("updated_at"),
+        }
+
+    def _observation_fresh_locked(self) -> bool:
+        updated_at = self._status.get("updated_at")
+        if not isinstance(updated_at, (int, float)):
+            return False
+        return time.time() - updated_at < 3.0
 
     def update_calibration_students(
         self,
@@ -500,6 +546,41 @@ class LocalCameraPreview:
                 hostname = urlsplit(f"//{host_header}").hostname
                 return hostname in {"localhost", "127.0.0.1", "::1"}
 
+            def _kiosk_cors_headers(self, origin: str | None) -> None:
+                # Kiosk hint boleh dipanggil browser tanpa Origin allowlist
+                # karena bind loopback-only sudah membatasi ke PC ini.
+                self.send_header(
+                    "Access-Control-Allow-Origin", origin if origin else "*"
+                )
+                self.send_header("Vary", "Origin")
+                self.send_header("Access-Control-Allow-Private-Network", "true")
+                self.send_header("Cache-Control", "no-store, max-age=0")
+
+            def _send_kiosk_preflight(self) -> None:
+                self.send_response(204)
+                self._kiosk_cors_headers(self.headers.get("Origin"))
+                self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+                self.send_header("Access-Control-Max-Age", "600")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def _serve_kiosk_hint(self) -> None:
+                # Tanpa token dan tanpa Origin allowlist: hanya Host
+                # loopback yang diterima, dan payload tidak memuat identitas.
+                if not self._loopback_host_ok():
+                    self.send_error(403)
+                    return
+                preview.note_kiosk_hint_hit()
+                body = json.dumps(preview.kiosk_hint(), separators=(",", ":")).encode(
+                    "utf-8"
+                )
+                self.send_response(200)
+                self._kiosk_cors_headers(self.headers.get("Origin"))
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
             def _serve_stream(self, supplied: str) -> None:
                 # MJPEG multipart: satu koneksi HTTP untuk semua frame,
                 # tanpa handshake per-frame seperti polling /v1/frame.jpg.
@@ -564,6 +645,12 @@ class LocalCameraPreview:
                     return
 
             def do_OPTIONS(self) -> None:
+                if urlsplit(self.path).path == "/v1/kiosk-hint":
+                    if not self._loopback_host_ok():
+                        self.send_error(403)
+                        return
+                    self._send_kiosk_preflight()
+                    return
                 origin = self._origin()
                 if origin is None:
                     return
@@ -682,6 +769,9 @@ class LocalCameraPreview:
 
             def do_GET(self) -> None:
                 path_only = urlsplit(self.path).path
+                if path_only == "/v1/kiosk-hint":
+                    self._serve_kiosk_hint()
+                    return
                 if path_only == "/v1/stream":
                     # <img> tidak mengirim Origin/header kustom: cukup cek
                     # Host loopback + token query di dalam _serve_stream.

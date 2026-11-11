@@ -12,10 +12,13 @@ api:
   token_file: null # Provision a device credential to this protected file.
 
 camera:
+  # Operasi realtime: 640x480 @ 15fps. 1080p hanya untuk diagnostik karena
+  # YuNet cost skala dengan piksel (~6x piksel vs 480p) dan USB YUYV bisa
+  # membunuh FPS sebelum inference mulai.
   index: 0
-  width: 1920
-  height: 1080
-  fps: 30
+  width: 640
+  height: 480
+  fps: 15
   backend: auto # auto, dshow/MSMF on Windows, or v4l2 on Linux.
   scan_max_index: 8
   reconnect_seconds: 2
@@ -41,7 +44,7 @@ recognition:
   min_top1_top2_margin: null
   # Consensus must stay reachable inside one track lifetime:
   # ceil(track_ttl_seconds * camera fps / sample_every_n_frames)
-  # must cover minimum_agreeing_frames (here 3s*30fps/6 = ~15 >= 3).
+  # must cover minimum_agreeing_frames (here 3s*15fps/6 = ~7 >= 3).
   # Startup refuses to run otherwise instead of stalling silently.
   minimum_agreeing_frames: 3
   sample_every_n_frames: 6
@@ -51,11 +54,11 @@ recognition:
   # Calibrated YuNet operating point (confirm via local benchmark report).
   yunet_score_threshold: 0.9
   yunet_nms_threshold: 0.3
-  # Optional detector input cap for weak lab PCs (0 = disabled). When set
-  # (e.g. 640), YuNet runs on a downscaled copy and boxes are mapped back;
-  # quality/align/embed still use the full frame. Confirm recall impact with
-  # the local calibration report before enabling in production.
-  detection_max_width: 0
+  # Detector input cap: YuNet runs on a downscaled copy and boxes are
+  # mapped back; quality/align/embed still use the full frame. Default 640
+  # keeps YuNet cheap; set 0 only for full-resolution diagnostics. Confirm
+  # recall impact with the local calibration report before changing.
+  detection_max_width: 640
 
 liveness:
   # Keep disabled only with a documented physical/session control.

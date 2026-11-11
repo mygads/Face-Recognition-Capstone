@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import struct
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -74,6 +75,27 @@ def enumerate_cameras(
     return tuple(cameras)
 
 
+def _mjpg_fourcc(cv2: Any) -> int | None:
+    """Return the MJPG fourcc code, or None when the backend lacks it."""
+    writer = getattr(cv2, "VideoWriter_fourcc", None)
+    if not callable(writer):
+        return None
+    try:
+        return int(writer("M", "J", "P", "G"))
+    except Exception:
+        return None
+
+
+def _decode_fourcc(raw: int) -> str | None:
+    """Decode a FOURCC integer to its four-character code, if recognizable."""
+    try:
+        code = struct.pack("<I", raw & 0xFFFFFFFF).decode("ascii")
+    except (struct.error, UnicodeDecodeError):
+        return None
+    code = code.strip(chr(0)).strip()
+    return code or None
+
+
 class OpenCVCamera:
     def __init__(
         self,
@@ -97,6 +119,14 @@ class OpenCVCamera:
         capture.set(self._cv2.CAP_PROP_FRAME_WIDTH, self.settings.width)
         capture.set(self._cv2.CAP_PROP_FRAME_HEIGHT, self.settings.height)
         capture.set(self._cv2.CAP_PROP_FPS, self.settings.fps)
+        fourcc_property = getattr(self._cv2, "CAP_PROP_FOURCC", None)
+        if fourcc_property is not None:
+            mjpg = _mjpg_fourcc(self._cv2)
+            if mjpg is not None:
+                # Best effort: USB YUYV pada resolusi tinggi menghabiskan bus
+                # sebelum inference mulai; MJPG menjaga FPS capture tetap
+                # hidup. Driver boleh mengabaikan; jangan pernah gagal karenanya.
+                capture.set(fourcc_property, mjpg)
         autofocus_property = getattr(self._cv2, "CAP_PROP_AUTOFOCUS", None)
         if autofocus_property is not None:
             # Best effort only; fixed-focus and unsupported cameras ignore this.
@@ -128,15 +158,23 @@ class OpenCVCamera:
                     )
         return bool(ok), frame
 
-    def reported_mode(self) -> dict[str, int | float] | None:
+    def reported_mode(self) -> dict[str, int | float | str | None] | None:
         """Return the camera driver's negotiated mode when the stream is open."""
         if self._capture is None:
             return None
-        return {
+        mode: dict[str, int | float | str | None] = {
             "width": int(self._capture.get(self._cv2.CAP_PROP_FRAME_WIDTH)),
             "height": int(self._capture.get(self._cv2.CAP_PROP_FRAME_HEIGHT)),
             "fps": round(float(self._capture.get(self._cv2.CAP_PROP_FPS)), 1),
         }
+        fourcc_property = getattr(self._cv2, "CAP_PROP_FOURCC", None)
+        if fourcc_property is not None:
+            try:
+                raw_fourcc = int(self._capture.get(fourcc_property))
+            except (TypeError, ValueError):
+                raw_fourcc = 0
+            mode["fourcc"] = _decode_fourcc(raw_fourcc)
+        return mode
 
     def close(self) -> None:
         if self._capture is not None:

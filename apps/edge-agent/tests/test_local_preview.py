@@ -509,3 +509,140 @@ def test_preview_session_slides_expiry_while_watched(
         assert preview.has_active_viewer() is True
     finally:
         preview.stop()
+
+
+def test_kiosk_hint_serves_generic_state_without_token_or_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview, port, token = _start_preview(monkeypatch, ["ADMIN"])
+    try:
+        preview.update_status(
+            camera_open=True,
+            session_active=True,
+            recognition_state="collecting",
+            display_name="Siswa Rahasia",
+        )
+        preview.update_diagnostic_candidate("Siswa Rahasia", 0.95)
+        preview.update_camera_observation(
+            {
+                "state": "ready",
+                "message": "Frame siap diperiksa.",
+                "frame_width": 640,
+                "frame_height": 480,
+                "face_count": 1,
+                "faces": [
+                    {
+                        "x": 0.5,
+                        "y": 0.25,
+                        "width": 0.15,
+                        "height": 0.3,
+                        "acceptable": True,
+                        "quality_score": 0.9,
+                        "embedding": [9.0, 9.0],
+                        "student_name": "Siswa Rahasia",
+                    }
+                ],
+            }
+        )
+        # Tanpa token dan tanpa Origin allowlist: tetap 200 via loopback.
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/v1/kiosk-hint", method="GET"
+        )
+        with urllib.request.urlopen(request, timeout=2) as response:
+            assert response.status == 200
+            assert response.headers.get("Access-Control-Allow-Private-Network") == (
+                "true"
+            )
+            hint = json.loads(response.read())
+        assert hint["session_active"] is True
+        assert hint["camera_open"] is True
+        assert hint["recognition_state"] == "collecting"
+        assert hint["face_present"] is True
+        assert hint["face_count"] == 1
+        assert hint["attendance_result"] is None
+        serialized = json.dumps(hint)
+        assert "Siswa Rahasia" not in serialized
+        assert "display_name" not in hint
+        assert "faces" not in hint
+        assert "embedding" not in serialized.lower()
+        assert "diagnostic_candidate" not in hint
+        # Poll kiosk-hint menandai konsumen agar diagnostik wajah tetap jalan.
+        assert preview.has_kiosk_hint_consumer() is True
+    finally:
+        preview.stop()
+
+
+def test_kiosk_hint_hides_stale_face_signal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview, port, _token = _start_preview(monkeypatch, ["ADMIN"])
+    try:
+        preview.update_status(camera_open=True, session_active=True)
+        preview.update_camera_observation(
+            {
+                "state": "ready",
+                "message": "Frame siap diperiksa.",
+                "frame_width": 640,
+                "frame_height": 480,
+                "face_count": 2,
+                "faces": [],
+            }
+        )
+        assert preview.kiosk_hint()["face_present"] is True
+        import time as _time
+
+        with preview._lock:
+            preview._status["updated_at"] = _time.time() - 10.0
+        assert preview.kiosk_hint()["face_present"] is False
+        assert preview.kiosk_hint()["face_count"] == 2
+    finally:
+        preview.stop()
+
+
+def test_kiosk_hint_rejects_non_loopback_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview, port, _token = _start_preview(monkeypatch, ["ADMIN"])
+    try:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/v1/kiosk-hint",
+            headers={"Host": "kiosk.sekolah.example"},
+            method="GET",
+        )
+        with pytest.raises(urllib.error.HTTPError) as forbidden:
+            urllib.request.urlopen(request, timeout=2)
+        assert forbidden.value.code == 403
+
+        preflight = urllib.request.Request(
+            f"http://127.0.0.1:{port}/v1/kiosk-hint",
+            headers={
+                "Host": "kiosk.sekolah.example",
+                "Origin": "http://127.0.0.1:5173",
+            },
+            method="OPTIONS",
+        )
+        with pytest.raises(urllib.error.HTTPError) as preflight_forbidden:
+            urllib.request.urlopen(preflight, timeout=2)
+        assert preflight_forbidden.value.code == 403
+    finally:
+        preview.stop()
+
+
+def test_kiosk_hint_preflight_allows_private_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview, port, _token = _start_preview(monkeypatch, ["ADMIN"])
+    try:
+        preflight = urllib.request.Request(
+            f"http://127.0.0.1:{port}/v1/kiosk-hint",
+            headers={"Origin": ORIGIN},
+            method="OPTIONS",
+        )
+        with urllib.request.urlopen(preflight, timeout=2) as response:
+            assert response.status == 204
+            assert response.headers.get("Access-Control-Allow-Private-Network") == (
+                "true"
+            )
+            assert response.headers.get("Access-Control-Allow-Origin") == ORIGIN
+    finally:
+        preview.stop()

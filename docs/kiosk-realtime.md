@@ -62,17 +62,51 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
 - Autostart + watchdog via systemd/user-session sesuai OS lab.
 - Nyalakan `PRESENSI_EDGE_PERFORMANCE_LOGS=1`, ukur `camera_read_fps`,
   `detect_ms`, `embed_ms`, `pipeline_total_ms` (p50/p95) sebelum klaim FPS.
-- Checklist tuning: capture 640x480, `detection_max_width`, model ONNX
-  quantized, `intra_op_num_threads` = jumlah core fisik, format MJPEG di USB.
+- Checklist tuning (default kode sudah operasi, bukan diagnostik):
+  capture 640x480 @ 15fps, `detection_max_width: 640`, FOURCC MJPG best-effort
+  di `OpenCVCamera.open()` (fallback diam bila driver menolak; mode negosiasi
+  tercatat di `reported_mode().fourcc`).
+- Koreksi penting: YuNet/SFace berjalan via OpenCV DNN, BUKAN ONNX Runtime,
+  jadi tidak ada `SessionOptions` untuk keduanya — tuasnya resolusi capture +
+  `detection_max_width`. `intra_op_num_threads` = jumlah core fisik hanya
+  berlaku untuk sesi ORT model anti-spoof liveness
+  (`libs/recognition-core/.../onnx_liveness.py`), dan hanya relevan bila
+  liveness diaktifkan.
 - Target UX: tangkap → konfirmasi tampil < 1 detik. Tanpa perangkat nyata,
   klaim performa bertanda `MANUAL HARDWARE TEST REQUIRED` (AGENTS.md).
+
+## Sinyal generik "Memverifikasi" (tanpa pindah inference ke browser)
+
+- Agent di PC kiosk yang sama menyajikan `GET /v1/kiosk-hint` (bind
+  loopback-only, tanpa token, tanpa Origin allowlist — Host non-loopback
+  ditolak 403). Payload hanya status generik: `session_active`,
+  `camera_open`, `recognition_state`, `face_present`/`face_count`,
+  `attendance_result`, `updated_at`. TIDAK PERNAH: nama, kotak wajah,
+  embedding, kandidat diagnostik, kalibrasi.
+- `DisplayView.vue` mem-poll hint tiap 1 detik (timeout 900ms, best-effort)
+  hanya saat sesi live; saat wajah terdeteksi (`face_present`) atau kirim
+  menunggu konfirmasi (`attendance_result: pending`) dan belum ada sorotan
+  hasil terbaru (< 4 detik), tampil chip "Memverifikasi kehadiran - tahan
+  posisi wajah…". SSE tetap satu-satunya sumber kebenaran hasil.
+- Poll hint menandai konsumen (`has_kiosk_hint_consumer`, jendela 3 detik)
+  sehingga `CameraFrameInspector` (deteksi + quality saja, tanpa identitas)
+  tetap berjalan walau tidak ada operator membuka preview staf.
+- Preflight Private Network Access dijawab `204` +
+  `Access-Control-Allow-Private-Network: true` khusus path ini.
+- Target UX tetap: tangkap → konfirmasi tampil < 1 detik; chip generik
+  memberi rasa respons < 1 detik tanpa mengorbankan kepastian server.
 
 ## File terkait
 
 - `apps/api/src/presensi_api/api/v1/routers/public_display.py`
   (`KioskLiveUpdate`, `_build_live_update`, `_live_event_generator`,
   `/display/stream`, `/kiosk-display/stream`).
-- `apps/web/src/views/DisplayView.vue` (video lokal, EventSource, tanpa roster).
+- `apps/web/src/views/DisplayView.vue` (video lokal, EventSource, tanpa
+  roster, poll hint generik + chip "Memverifikasi").
+- `apps/edge-agent/src/presensi_edge_agent/local_preview.py`
+  (`/v1/kiosk-hint`, `kiosk_hint()`, `has_kiosk_hint_consumer()`).
+- Test: `apps/edge-agent/tests/test_local_preview.py` (hint tanpa identitas,
+  freshness, 403 non-loopback, preflight PNA).
 - Test: `apps/api/tests/test_public_display_stream.py`,
   `apps/api/tests/test_scope_gaps_p1p3.py` (light + rotate + TTL),
   `apps/web/src/views/DisplayView.test.ts` (termasuk rotasi fake-timer).

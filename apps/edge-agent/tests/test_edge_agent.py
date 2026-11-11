@@ -115,8 +115,9 @@ def test_yaml_config_accepts_environment_overrides_without_a_secret_in_yaml() ->
 
     assert config.device_id == DEVICE_ID
     assert config.camera.index == 2
-    assert config.camera.width == 1920
-    assert config.camera.height == 1080
+    assert config.camera.width == 640
+    assert config.camera.height == 480
+    assert config.camera.fps == 15
     assert config.recognition.sample_every_n_frames == 7
     assert config.api.cache_max_offline_seconds == 90
     assert config.recognition.min_top1_similarity is None
@@ -225,11 +226,11 @@ def test_managed_edge_defaults_can_apply_without_enabling_recognition() -> None:
     assert recognizer.pipeline is None
 
 
-def test_detection_max_width_defaults_to_zero_and_accepts_env_override() -> None:
+def test_detection_max_width_defaults_to_640_and_accepts_env_override() -> None:
     config = load_config(
         EXAMPLE_CONFIG, environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)}
     )
-    assert config.recognition.detection_max_width == 0
+    assert config.recognition.detection_max_width == 640
 
     config = load_config(
         EXAMPLE_CONFIG,
@@ -1435,6 +1436,8 @@ def test_outbox_migrates_prior_sqlite_schema_without_losing_fifo_order(
 
 
 class FakeCapture:
+    MJPG_FOURCC = 1196444237  # little-endian 'MJPG'
+
     def __init__(self, opened: bool) -> None:
         self.opened = opened
         self.released = False
@@ -1449,6 +1452,17 @@ class FakeCapture:
     def set(self, prop: int, value: float) -> bool:
         self.properties.append((prop, value))
         return True
+
+    def get(self, prop: int) -> float:
+        negotiated = {
+            3: 640,
+            4: 480,
+            5: 15,
+            7: FakeCapture.MJPG_FOURCC,
+        }
+        if prop in negotiated:
+            return negotiated[prop]
+        raise AssertionError(f"unexpected capture property {prop}")
 
     def read(self) -> tuple[bool, object]:
         return True, object()
@@ -1476,6 +1490,8 @@ def test_camera_enumeration_and_capture_apply_requested_mode(
             "CAP_PROP_FRAME_HEIGHT": 4,
             "CAP_PROP_FPS": 5,
             "CAP_PROP_BUFFERSIZE": 6,
+            "CAP_PROP_FOURCC": 7,
+            "VideoWriter_fourcc": staticmethod(lambda *chars: FakeCapture.MJPG_FOURCC),
             "VideoCapture": staticmethod(lambda _index: video_capture),
         },
     )()
@@ -1495,7 +1511,19 @@ def test_camera_enumeration_and_capture_apply_requested_mode(
     camera.open()
     ok, frame = camera.read()
     assert ok and frame is not None
-    assert video_capture.properties == [(3, 1920), (4, 1080), (5, 30), (6, 1)]
+    assert video_capture.properties == [
+        (3, 1920),
+        (4, 1080),
+        (5, 30),
+        (7, FakeCapture.MJPG_FOURCC),
+        (6, 1),
+    ]
+    assert camera.reported_mode() == {
+        "width": 640,
+        "height": 480,
+        "fps": 15,
+        "fourcc": "MJPG",
+    }
     camera.close()
     assert video_capture.released
 

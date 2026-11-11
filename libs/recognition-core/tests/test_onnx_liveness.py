@@ -71,6 +71,31 @@ class FakeNumpy:
         return FakeArray(tuple(value.shape[index] for index in axes), value._values)
 
 
+class FakeSessionOptions:
+    def __init__(self) -> None:
+        # Mirrors onnxruntime SessionOptions knobs used by the adapter.
+        self.intra_op_num_threads = 0
+        self.inter_op_num_threads = 0
+
+
+class FakeOnnxRuntime:
+    SessionOptions = FakeSessionOptions
+
+    def __init__(self) -> None:
+        self.sessions: list[FakeInferenceSession] = []
+        self.probabilities = [0.9, 0.1]
+
+    def InferenceSession(self, path: str, **kwargs: Any) -> Any:
+        session = FakeInferenceSession(
+            path,
+            providers=kwargs.get("providers", []),
+            probabilities=self.probabilities,
+            sess_options=kwargs.get("sess_options"),
+        )
+        self.sessions.append(session)
+        return session
+
+
 class FakeInferenceSession:
     def __init__(
         self,
@@ -78,10 +103,12 @@ class FakeInferenceSession:
         *,
         providers: list[str],
         probabilities: list[float],
+        sess_options: Any | None = None,
     ) -> None:
         self.model_path = model_path
         self.providers = providers
         self.probabilities = probabilities
+        self.sess_options = sess_options
         self.feed: dict[str, Any] | None = None
 
     def get_inputs(self) -> list[Any]:
@@ -127,24 +154,14 @@ def test_local_anti_spoof_inference_returns_score_without_face_fixture(
 ) -> None:
     model_path = tmp_path / "anti-spoof-mn3.onnx"
     model_path.write_text("placeholder ONNX model file", encoding="utf-8")
-    sessions: list[FakeInferenceSession] = []
 
-    def load_session_factory() -> Any:
-        def create_session(path: str, *, providers: list[str]) -> FakeInferenceSession:
-            session = FakeInferenceSession(
-                path,
-                providers=providers,
-                probabilities=probabilities,
-            )
-            sessions.append(session)
-            return session
-
-        return create_session
+    fake_runtime = FakeOnnxRuntime()
+    fake_runtime.probabilities = probabilities
 
     monkeypatch.setattr(
         liveness_module,
-        "_load_inference_session",
-        load_session_factory,
+        "_load_onnxruntime",
+        lambda: fake_runtime,
     )
     monkeypatch.setattr(liveness_module, "_load_cv2", lambda: FakeOpenCV())
     monkeypatch.setattr(liveness_module, "_load_numpy", lambda: FakeNumpy())
@@ -154,10 +171,13 @@ def test_local_anti_spoof_inference_returns_score_without_face_fixture(
         model_version="local-test",
     )
     decision = model.evaluate(FakeArray((112, 112, 3)))
-    session = sessions[0]
+    session = fake_runtime.sessions[0]
 
     assert session.model_path == str(model_path)
     assert session.providers == ["CPUExecutionProvider"]
+    assert session.sess_options is not None
+    assert session.sess_options.intra_op_num_threads >= 1
+    assert session.sess_options.inter_op_num_threads == 1
     assert decision.state == expected_state
     assert decision.live_score == pytest.approx(expected_live_score)
     assert session.feed is not None
@@ -170,24 +190,14 @@ def test_adapter_rejects_invalid_probability_output(
 ) -> None:
     model_path = tmp_path / "anti-spoof-mn3.onnx"
     model_path.write_text("placeholder ONNX model file", encoding="utf-8")
-    sessions: list[FakeInferenceSession] = []
 
-    def load_session_factory() -> Any:
-        def create_session(path: str, *, providers: list[str]) -> FakeInferenceSession:
-            session = FakeInferenceSession(
-                path,
-                providers=providers,
-                probabilities=[1.2, -0.2],
-            )
-            sessions.append(session)
-            return session
-
-        return create_session
+    fake_runtime = FakeOnnxRuntime()
+    fake_runtime.probabilities = [1.2, -0.2]
 
     monkeypatch.setattr(
         liveness_module,
-        "_load_inference_session",
-        load_session_factory,
+        "_load_onnxruntime",
+        lambda: fake_runtime,
     )
     monkeypatch.setattr(liveness_module, "_load_cv2", lambda: FakeOpenCV())
     monkeypatch.setattr(liveness_module, "_load_numpy", lambda: FakeNumpy())

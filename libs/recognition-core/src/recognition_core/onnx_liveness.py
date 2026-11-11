@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import math
+import os
 from pathlib import Path
 from typing import Any, cast
 
@@ -20,15 +21,33 @@ class ONNXRuntimeUnavailableError(RuntimeError):
     """Raised when the optional ONNX Runtime inference dependency is missing."""
 
 
-def _load_inference_session() -> Any:
+def _load_onnxruntime() -> Any:
     try:
-        onnxruntime = importlib.import_module("onnxruntime")
+        return importlib.import_module("onnxruntime")
     except ImportError as error:
         raise ONNXRuntimeUnavailableError(
             "ONNX Runtime is required for anti-spoof-mn3. Install "
             "libs/recognition-core[antispoof]."
         ) from error
-    return onnxruntime.InferenceSession
+
+
+def _default_session_options(onnxruntime: Any) -> Any | None:
+    """Single-stream ORT tuning: intra-op = physical cores, inter-op = 1.
+
+    This only affects the anti-spoof model: YuNet/SFace run via OpenCV DNN
+    (bukan ONNX Runtime) so they have no SessionOptions to tune — their
+    lever is capture resolution + detection_max_width.
+    """
+    options_factory = getattr(onnxruntime, "SessionOptions", None)
+    if not callable(options_factory):
+        return None
+    try:
+        options = options_factory()
+        options.intra_op_num_threads = max(1, os.cpu_count() or 1)
+        options.inter_op_num_threads = 1
+        return options
+    except Exception:
+        return None
 
 
 class ONNXRuntimeAntiSpoofMN3:
@@ -63,8 +82,12 @@ class ONNXRuntimeAntiSpoofMN3:
         self.model_version = model_version
         self._cv2 = _load_cv2()
         self._numpy = _load_numpy()
-        inference_session = _load_inference_session()
-        self._session = inference_session(str(path), providers=list(providers))
+        onnxruntime = _load_onnxruntime()
+        session_options = _default_session_options(onnxruntime)
+        session_kwargs: dict[str, Any] = {"providers": list(providers)}
+        if session_options is not None:
+            session_kwargs["sess_options"] = session_options
+        self._session = onnxruntime.InferenceSession(str(path), **session_kwargs)
         inputs = self._session.get_inputs()
         outputs = self._session.get_outputs()
         if not inputs or not outputs:

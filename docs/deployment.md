@@ -321,12 +321,13 @@ kecil untuk roster satu kelas. Jangan naikkan resolusi/FPS untuk mengejar
 akurasi — wajah < `min_face_pixels` (default 80 px) tetap ditolak walau
 kamera 1080p.
 
-- **AI_EDGE di PC lemah**: set `recognition.detection_max_width: 640`
+- **AI_EDGE di PC lemah**: default `recognition.detection_max_width: 640`
   (env `PRESENSI_EDGE_DETECTION_MAX_WIDTH`). YuNet berjalan pada salinan
   kecil (±9x lebih ringan pada 1920→640) dan kotak dipetakan kembali;
   quality/align/embed tetap memakai frame penuh sehingga jalur acceptance
   tidak berubah. Wajib konfirmasi ulang via laporan kalibrasi lokal sebelum
-  produksi (recall wajah jauh bisa turun).
+  produksi (recall wajah jauh bisa turun). Set 0 hanya untuk diagnostik
+  resolusi penuh.
 - **Resolusi/FPS kamera**: validasi mewanti di atas 1280x720/15fps. Untuk
   lorong walk-through, 720p@10fps + `sample_every_n_frames: 6` cukup; PC
   kuat boleh 720p@15fps + stride 4–5. STB_GATEWAY cukup 640x360@10fps
@@ -392,7 +393,7 @@ kamera 1080p.
   hanya untuk PostgreSQL via `options`; SQLite dev diabaikan.
 - **Ukuran input YuNet**: detector tahan di resolusi kecil — untuk jarak
   check-in (±1–3 m) cukup frame ~128–320 px sisi panjang di sisi deteksi
-  (`detection_max_width` 640 untuk PC lemah, 0 = mati). Jangan naikkan
+  (`detection_max_width` default 640; 0 = hanya diagnostik). Jangan naikkan
   resolusi demi "akurasi": wajah kecil di lorong lebih terbantu oleh
   enrollment 2–3 sudut + pencahayaan daripada frame 1080p yang hanya
   menaikkan CPU.

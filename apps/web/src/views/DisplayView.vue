@@ -42,6 +42,66 @@ let eventSource: EventSource | null = null
 let localStream: MediaStream | null = null
 const ROTATE_AHEAD_SECONDS = 1800
 
+// Sinyal generik dari agent di PC kiosk yang sama (tanpa identitas):
+// wajah terlihat / kirim menunggu konfirmasi. Best-effort; SSE tetap
+// sumber kebenaran hasil. Gagal fetch = indikator disembunyikan diam-diam.
+const AGENT_HINT_URL = 'http://127.0.0.1:8765/v1/kiosk-hint'
+interface AgentHint {
+  session_active: boolean
+  camera_open: boolean
+  recognition_state: string | null
+  face_present: boolean
+  face_count: number
+  attendance_result: string | null
+}
+const agentHint = ref<AgentHint | null>(null)
+let hintTimer: ReturnType<typeof setInterval> | undefined
+let hintAbort: AbortController | null = null
+
+async function pollAgentHint(): Promise<void> {
+  if (!live.value?.session_id) {
+    agentHint.value = null
+    return
+  }
+  hintAbort?.abort()
+  hintAbort = new AbortController()
+  const timer = setTimeout(() => hintAbort?.abort(), 900)
+  try {
+    const response = await fetch(AGENT_HINT_URL, {
+      cache: 'no-store',
+      signal: hintAbort.signal,
+    })
+    if (!response.ok) throw new Error('hint tidak tersedia')
+    const data = (await response.json()) as Partial<AgentHint>
+    agentHint.value = {
+      session_active: data.session_active === true,
+      camera_open: data.camera_open === true,
+      recognition_state: typeof data.recognition_state === 'string' ? data.recognition_state : null,
+      face_present: data.face_present === true,
+      face_count: typeof data.face_count === 'number' ? data.face_count : 0,
+      attendance_result: typeof data.attendance_result === 'string' ? data.attendance_result : null,
+    }
+  } catch {
+    agentHint.value = null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function startHintPolling(): void {
+  stopHintPolling()
+  void pollAgentHint()
+  hintTimer = setInterval(() => void pollAgentHint(), 1000)
+}
+
+function stopHintPolling(): void {
+  if (hintTimer) clearInterval(hintTimer)
+  hintTimer = undefined
+  hintAbort?.abort()
+  hintAbort = null
+  agentHint.value = null
+}
+
 const STATUS_GUIDE = [
   { key: 'waiting', label: 'Menunggu', hint: 'Silakan berdiri di dalam bingkai' },
   {
@@ -150,6 +210,7 @@ function startPolling(): void {
   disconnectStream()
   streamState.value = 'polling'
   pollTimer = setInterval(() => void loadDisplay(true), 5000)
+  startHintPolling()
 }
 
 function connectStream(): void {
@@ -170,6 +231,8 @@ function connectStream(): void {
       try {
         const update = JSON.parse((ev as MessageEvent).data) as KioskLiveUpdate
         live.value = update
+        // session_id bisa tiba lewat push pertama; segarkan hint generik.
+        if (update.session_id) void pollAgentHint()
         if (display.value) {
           display.value = {
             ...display.value,
@@ -189,6 +252,7 @@ function connectStream(): void {
     src.onerror = () => {
       if (eventSource === src) startPolling()
     }
+    startHintPolling()
   } catch {
     startPolling()
   }
@@ -225,6 +289,7 @@ function scheduleRotation(expiresInSeconds: number | undefined): void {
 function stopLive(): void {
   disconnectStream()
   clearRotation()
+  stopHintPolling()
   streamState.value = 'off'
 }
 
@@ -353,6 +418,25 @@ const waitingCount = computed(() => live.value?.waiting_count ?? 0)
 const boardTitle = computed(() => display.value?.laboratory_name ?? 'Layar presensi')
 
 const spotlight = computed(() => live.value?.spotlight ?? null)
+
+const spotlightFresh = computed(() => {
+  void now.value
+  const recorded = spotlight.value?.recorded_at
+  if (!recorded) return false
+  const ts = new Date(recorded).getTime()
+  if (Number.isNaN(ts)) return false
+  return Date.now() - ts < 4000
+})
+
+// Umpan balik rasa KAI: generik, tanpa nama, hanya saat wajah terdeteksi
+// atau kirim menunggu konfirmasi dan belum ada sorotan hasil terbaru.
+const showVerifying = computed(() => {
+  if (!live.value?.session_id || streamState.value === 'off') return false
+  if (spotlightFresh.value) return false
+  const hint = agentHint.value
+  if (!hint || !hint.session_active) return false
+  return hint.face_present || hint.attendance_result === 'pending'
+})
 
 function formatRecordedTime(value: string | null | undefined): string {
   if (!value) return '-'
@@ -627,6 +711,15 @@ onBeforeUnmount(() => {
               {{ live?.late_count ?? 0 }} / {{ live?.total_roster ?? 0 }}
             </p>
             <p class="kiosk__muted">Silakan berdiri di dalam bingkai kamera.</p>
+            <p
+              v-if="showVerifying"
+              class="kiosk__verifying"
+              role="status"
+              data-testid="display-verifying"
+            >
+              <span class="kiosk__dot kiosk__dot--live" aria-hidden="true" />
+              Memverifikasi kehadiran - tahan posisi wajah…
+            </p>
           </div>
           <details class="kiosk__guide">
             <summary>Panduan status layar</summary>
@@ -836,6 +929,37 @@ onBeforeUnmount(() => {
   color: #a9bccd;
   font-size: 0.78rem;
   margin: 0;
+}
+
+.kiosk__verifying {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.6rem 0 0;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid #2dd4bf;
+  border-radius: 999px;
+  background: rgb(45 212 191 / 0.12);
+  color: #99f6e4;
+  font-size: 0.82rem;
+  font-weight: 600;
+  animation: kiosk-verify-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes kiosk-verify-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kiosk__verifying {
+    animation: none;
+  }
 }
 .kiosk__error {
   margin: 0;

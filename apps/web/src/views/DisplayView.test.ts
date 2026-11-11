@@ -219,3 +219,113 @@ describe('DisplayView rotasi token', () => {
     }
   })
 })
+
+describe('DisplayView sinyal agent lokal', () => {
+  class FakeEventSource {
+    static instances: FakeEventSource[] = []
+    url: string
+    private handlers: Record<string, Array<(ev: unknown) => void>> = {}
+    constructor(url: string) {
+      this.url = url
+      FakeEventSource.instances.push(this)
+    }
+    addEventListener(type: string, cb: (ev: unknown) => void): void {
+      this.handlers[type] = [...(this.handlers[type] ?? []), cb]
+    }
+    emit(type: string, data: unknown): void {
+      for (const cb of this.handlers[type] ?? []) cb({ data: JSON.stringify(data) })
+    }
+    close(): void {}
+  }
+
+  async function mountLiveBoard(hint: unknown): Promise<ReturnType<typeof mount>> {
+    const g = globalThis as unknown as Record<string, unknown>
+    const realES = g['EventSource']
+    g['EventSource'] = FakeEventSource
+    FakeEventSource.instances = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => hint,
+      })),
+    )
+    api.openPublicDisplaySession.mockResolvedValueOnce({
+      display_token: 'tok-hint',
+      snapshot,
+    })
+    const w = mount(DisplayView)
+    await flushPromises()
+    await w.find('[data-testid="display-pin-input"]').setValue('1234')
+    await w.find('form').trigger('submit.prevent')
+    await flushPromises()
+    FakeEventSource.instances[0].emit('snapshot', {
+      laboratory_id: 'lab-1',
+      laboratory_name: 'Lab Kimia 1',
+      session_id: 'ses-1',
+      subject: 'Uji Larutan',
+      status: 'active',
+      opened_at: null,
+      present_count: 1,
+      late_count: 0,
+      waiting_count: 2,
+      total_roster: 3,
+      spotlight: null,
+      server_time: new Date().toISOString(),
+    })
+    await flushPromises()
+    await flushPromises()
+    g['EventSource'] = realES
+    return w
+  }
+
+  it('menampilkan Memverifikasi saat wajah terdeteksi tanpa membocorkan nama', async () => {
+    const w = await mountLiveBoard({
+      session_active: true,
+      camera_open: true,
+      recognition_state: 'collecting',
+      face_present: true,
+      face_count: 1,
+      attendance_result: null,
+    })
+    try {
+      const chip = w.find('[data-testid="display-verifying"]')
+      expect(chip.exists()).toBe(true)
+      expect(chip.text()).toContain('Memverifikasi')
+      expect(chip.attributes('role')).toBe('status')
+    } finally {
+      w.unmount()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('menyembunyikan indikator saat hint gagal dijangkau', async () => {
+    const g = globalThis as unknown as Record<string, unknown>
+    const realES = g['EventSource']
+    g['EventSource'] = FakeEventSource
+    FakeEventSource.instances = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('agent tidak di PC ini')
+      }),
+    )
+    api.openPublicDisplaySession.mockResolvedValueOnce({
+      display_token: 'tok-hint-off',
+      snapshot,
+    })
+    const w = mount(DisplayView)
+    try {
+      await flushPromises()
+      await w.find('[data-testid="display-pin-input"]').setValue('1234')
+      await w.find('form').trigger('submit.prevent')
+      await flushPromises()
+      expect(w.find('[data-testid="display-verifying"]').exists()).toBe(false)
+      expect(w.find('[data-testid="display-board"]').exists()).toBe(true)
+    } finally {
+      g['EventSource'] = realES
+      w.unmount()
+      vi.unstubAllGlobals()
+    }
+  })
+})

@@ -407,7 +407,9 @@ class EdgeService:
 
     def _update_camera_diagnostics(self, frame: object) -> None:
         preview = self.preview
-        if preview is None or not preview.has_active_viewer():
+        if preview is None or not (
+            preview.has_active_viewer() or preview.has_kiosk_hint_consumer()
+        ):
             return
         now = time.monotonic()
         if now - self._last_camera_inspection < 0.75:

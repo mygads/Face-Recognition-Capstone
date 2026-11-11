@@ -69,10 +69,11 @@ class RecognitionSettings:
     # detector behavior; production values must come from the local benchmark.
     yunet_score_threshold: float = 0.9
     yunet_nms_threshold: float = 0.3
-    # Optional detector input cap (pixels of frame width) for weak lab PCs.
-    # 0 disables downscaling. When set, detection runs on a downscaled copy
-    # and boxes are mapped back; quality/align/embed still use the full frame.
-    detection_max_width: int = 0
+    # Detector input cap (pixels of frame width). Detection runs on a
+    # downscaled copy and boxes are mapped back; quality/align/embed still
+    # use the full frame. 0 disables downscaling (hanya untuk diagnostik
+    # resolusi penuh); default 640 menjaga YuNet murah pada PC lab lemah.
+    detection_max_width: int = 640
 
 
 @dataclass(frozen=True, slots=True)
@@ -497,9 +498,9 @@ def load_config(
         raise EdgeConfigError("camera.index must not be negative.")
     camera = CameraSettings(
         index=camera_index,
-        width=_integer(camera_raw, "width", 1920),
-        height=_integer(camera_raw, "height", 1080),
-        fps=_integer(camera_raw, "fps", 30),
+        width=_integer(camera_raw, "width", 640),
+        height=_integer(camera_raw, "height", 480),
+        fps=_integer(camera_raw, "fps", 15),
         backend=str(camera_raw.get("backend", "auto")).lower(),
         scan_max_index=_integer(camera_raw, "scan_max_index", 8, minimum=0),
         reconnect_seconds=_positive_number(
@@ -676,7 +677,9 @@ def load_config(
         yunet_nms_threshold = 0.3
     if not 0 <= yunet_nms_threshold <= 1:
         raise EdgeConfigError("recognition.yunet_nms_threshold must be in [0, 1].")
-    detection_max_width = _integer(recognition_raw, "detection_max_width", 0, minimum=0)
+    detection_max_width = _integer(
+        recognition_raw, "detection_max_width", 640, minimum=0
+    )
     if detection_max_width != 0 and not 320 <= detection_max_width <= 1920:
         raise EdgeConfigError(
             "recognition.detection_max_width must be 0 or within [320, 1920]."
