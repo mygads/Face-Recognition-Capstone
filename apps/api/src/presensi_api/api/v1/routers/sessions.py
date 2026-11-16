@@ -29,6 +29,7 @@ from presensi_api.api.v1.schemas.sessions import (
     TeacherOpeningPreference,
     TeacherOpeningPreferenceResponse,
 )
+from presensi_api.display_notify import notify_display_changed, pg_notify_display_changed
 from presensi_api.db.models import (
     AttendanceRecord,
     AttendanceSession,
@@ -441,6 +442,7 @@ def open_session(
                 },
             )
         )
+        pg_notify_display_changed(session, schedule.laboratory_id)
         session.commit()
     except IntegrityError as exc:
         session.rollback()
@@ -450,6 +452,7 @@ def open_session(
             "Sesi untuk jadwal ini masih terbuka.",
         ) from exc
     session.refresh(attendance_session)
+    notify_display_changed()
     return _session_response(session, attendance_session)
 
 
@@ -576,7 +579,9 @@ def close_session(
                 after_state={"status": "closed", "close_reason": "manual"},
             )
         )
+        pg_notify_display_changed(session, schedule.laboratory_id)
         session.commit()
+        notify_display_changed()
         session.refresh(attendance_session)
     return _session_response(session, attendance_session)
 

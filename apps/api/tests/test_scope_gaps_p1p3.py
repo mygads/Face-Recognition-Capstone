@@ -219,12 +219,18 @@ def test_display_light_mode_and_rotate(gap_database: sessionmaker[Session]) -> N
     body = opened.json()
     assert body["snapshot"]["students"] == []
     assert body["snapshot"]["total_roster"] == 3
-    assert body["expires_in_seconds"] == 8 * 3600
+    assert body["expires_in_seconds"] == 4 * 3600
     token = body["display_token"]
 
+    # Default kini light=true: hitungan ada, roster tidak keluar untuk kiosk.
     full = request("GET", f"/api/v1/public/display?token={token}")
     assert full.status_code == 200, full.text
-    assert len(full.json()["students"]) == 3
+    assert full.json()["students"] == []
+    assert full.json()["total_roster"] == 3
+
+    explicit_full = request("GET", f"/api/v1/public/display?token={token}&light=false")
+    assert explicit_full.status_code == 200, explicit_full.text
+    assert len(explicit_full.json()["students"]) == 3
 
     light = request("GET", f"/api/v1/public/display?token={token}&light=true")
     assert light.status_code == 200, light.text
@@ -248,9 +254,13 @@ def test_display_light_mode_and_rotate(gap_database: sessionmaker[Session]) -> N
     assert cross.status_code == 401, cross.text
 
 
-def test_issue_display_token_ttl_is_eight_hours() -> None:
+def test_issue_display_token_ttl_follows_env_default_four_hours(monkeypatch) -> None:
+    monkeypatch.setenv("KIOSK_DISPLAY_TOKEN_TTL_HOURS", "2")
     _, ttl = issue_display_token("lab", UUID(int=1), UUID(int=2), TEST_SETTINGS)
-    assert ttl == 8 * 3600
+    assert ttl == 2 * 3600
+    monkeypatch.delenv("KIOSK_DISPLAY_TOKEN_TTL_HOURS", raising=False)
+    _, default_ttl = issue_display_token("lab", UUID(int=1), UUID(int=2), TEST_SETTINGS)
+    assert default_ttl == 4 * 3600
 
 
 def test_laboratory_detail_scoped_for_laboran(
@@ -261,6 +271,69 @@ def test_laboratory_detail_scoped_for_laboran(
     assert request("GET", f"/api/v1/laboratories/{lab_a}").status_code == 200
     resp = request("GET", f"/api/v1/laboratories/{lab_b}")
     assert resp.status_code == 404, resp.text
+
+
+def test_laboran_schedule_manage_grantable_and_enforced(
+    gap_database: sessionmaker[Session],
+) -> None:
+    """SCHEDULE_MANAGE bisa di-grant ke laboran (butuh SCHEDULE_READ) dan
+    mengaktifkan cabang laboran-manager pada validasi jadwal."""
+    from presensi_api.api.security.roles import LABORANT_GRANTABLE_PERMISSIONS
+
+    assert Permission.SCHEDULE_MANAGE in LABORANT_GRANTABLE_PERMISSIONS
+    lab_a, lab_b = _lab_ids(gap_database)
+    with gap_database() as session:
+        from sqlalchemy import select
+
+        class_id = str(session.scalars(select(SchoolClass)).one().id)
+    # Default fixture = admin: grant tanpa prasyarat harus ditolak.
+    alone = request(
+        "POST",
+        f"/api/v1/accounts/{LABORAN_ID}/permission-grants",
+        {"permission": "schedule_manage"},
+    )
+    assert alone.status_code == 422, alone.text
+    assert alone.json()["error"]["code"] == "grant_missing_prerequisite"
+    assert (
+        request(
+            "POST",
+            f"/api/v1/accounts/{LABORAN_ID}/permission-grants",
+            {"permission": "schedule_read"},
+        ).status_code
+        == 201
+    )
+    granted = request(
+        "POST",
+        f"/api/v1/accounts/{LABORAN_ID}/permission-grants",
+        {"permission": "schedule_manage"},
+    )
+    assert granted.status_code == 201, granted.text
+    assert "schedule_manage" in request(
+        "GET", f"/api/v1/accounts/{LABORAN_ID}/permission-grants"
+    ).json()["grantable"]
+
+    def payload(lab: str) -> dict[str, object]:
+        return {
+            "class_id": class_id,
+            "laboratory_id": lab,
+            "teacher_user_id": str(TEACHER_ID),
+            "subject": "Kimia Laboran",
+            "weekday": 3,
+            "start_time": "09:00",
+            "end_time": "10:00",
+            "timezone_name": "Asia/Jakarta",
+            "effective_from": "2026-09-01",
+        }
+
+    _set_principal(
+        LABORAN_ID,
+        frozenset({RoleCode.LABORANT}),
+        frozenset({Permission.SCHEDULE_READ, Permission.SCHEDULE_MANAGE}),
+    )
+    ok_resp = request("POST", "/api/v1/schedules", payload(lab_a))
+    assert ok_resp.status_code == 201, ok_resp.text
+    denied_resp = request("POST", "/api/v1/schedules", payload(lab_b))
+    assert denied_resp.status_code == 403, denied_resp.text
 
 
 def test_laboran_schedule_manage_scoped_to_assigned_labs(
@@ -316,22 +389,31 @@ def test_autoclose_session_opened_after_schedule_end(
         class_a = session.scalars(select(SchoolClass)).one()
         teacher = session.scalars(select(User).where(User.id == TEACHER_ID)).one()
         wib_now = datetime.now(UTC).astimezone(ZoneInfo("Asia/Jakarta"))
-        ended = (wib_now - timedelta(hours=1)).time().replace(microsecond=0)
+        # scheduled_end_at memakai tanggal opened_at: tepat setelah tengah
+        # malam, "berakhir 1 jam lalu" jatuh kemarin sementara opened_at
+        # hari ini sehingga sesi terbaca berakhir nanti malam. Jangkar
+        # seluruh skenario ke satu tanggal agar deterministik.
+        ref = wib_now
+        while (ref - timedelta(hours=2)).date() != ref.date():
+            ref = ref - timedelta(hours=3)
+        ended = (ref - timedelta(hours=1)).time().replace(microsecond=0)
         schedule = PracticumSchedule(
             class_id=class_a.id,
             laboratory_id=lab.id,
             teacher_user_id=teacher.id,
             subject="Kimia Susulan",
-            weekday=wib_now.weekday(),
-            start_time=(wib_now - timedelta(hours=2)).time().replace(microsecond=0),
+            weekday=ref.weekday(),
+            start_time=(ref - timedelta(hours=2)).time().replace(microsecond=0),
             end_time=ended,
             timezone_name="Asia/Jakarta",
-            effective_from=wib_now.date(),
+            effective_from=ref.date(),
             is_active=True,
         )
         session.add(schedule)
         session.flush()
-        opened_at = datetime.now(UTC).replace(microsecond=0)
+        opened_at = (
+            (ref - timedelta(minutes=30)).astimezone(UTC).replace(microsecond=0)
+        )
         att_session = AttendanceSession(
             practicum_schedule_id=schedule.id,
             opened_by_user_id=teacher.id,

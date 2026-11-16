@@ -5,6 +5,7 @@ import { fetchWithPreviewTimeout } from '../utils/previewFetch'
 import { deviceHealthLabel } from '../utils/attendanceStatus'
 import { useAuthStore } from '../stores/auth'
 import { listDevices, listLaboratories, type Device, type Laboratory } from '../api/client'
+import FaceOverlay from '../components/FaceOverlay.vue'
 import { UiBadge, UiButton, UiCard, UiPageHeader, UiSelect } from '../components/ui'
 
 type PreviewStatus = {
@@ -36,6 +37,7 @@ type CameraFaceObservation = {
   y: number
   width: number
   height: number
+  landmarks?: number[][] | null
   detection_confidence?: number
   acceptable: boolean
   quality_score?: number
@@ -188,25 +190,12 @@ const cameraFaceMetrics = computed(() => {
   }
   return metrics
 })
-const detectionLabel = (face: CameraFaceObservation) => {
-  const observation = cameraObservation.value
-  if (!observation) return null
-  const fontSize = Math.max(16, Math.min(30, observation.frame_width / 55))
-  const width = fontSize * 7.8
-  const height = fontSize * 1.55
-  const x = Math.max(0, Math.min(face.x * observation.frame_width, observation.frame_width - width))
-  const y = Math.max(0, face.y * observation.frame_height - height)
-  return {
-    x,
-    y,
-    width,
-    height,
-    fontSize,
-    textX: x + fontSize * 0.45,
-    textY: y + height * 0.68,
-    text: `DETEKSI ${Math.round((face.detection_confidence ?? 0) * 100)}%`,
-  }
-}
+const faceOverlayLabel = computed(() => {
+  const count = cameraObservation.value?.face_count ?? 0
+  if (count > 1) return `Wajah utama · ${count} wajah`
+  return 'Wajah utama'
+})
+
 const diagnosticCandidate = computed(() => {
   const candidate = previewStatus.value?.diagnostic_candidate
   if (!candidate || Date.now() / 1000 - candidate.updated_at > 3) return null
@@ -821,53 +810,12 @@ onBeforeUnmount(() => {
             alt="Preview langsung kamera presensi"
             @load="recordPreviewFrame"
           />
-          <svg
-            v-if="cameraObservation && cameraObservation.frame_width > 0"
+          <FaceOverlay
+            v-if="cameraObservation && cameraObservation.faces.length"
+            :faces="cameraObservation.faces"
+            :label="identityMatched ? 'Cocok galeri' : faceOverlayLabel"
             class="camera-preview-view__face-overlay"
-            :viewBox="`0 0 ${cameraObservation.frame_width} ${cameraObservation.frame_height}`"
-            preserveAspectRatio="xMidYMid meet"
-            aria-hidden="true"
-          >
-            <g
-              v-for="(face, index) in cameraObservation.faces"
-              :key="`${index}-${cameraObservation.state}`"
-              :class="[
-                'camera-preview-view__face-mark',
-                face.acceptable || identityMatched ? 'is-ready' : 'is-adjust',
-              ]"
-            >
-              <rect
-                :x="face.x * cameraObservation.frame_width"
-                :y="face.y * cameraObservation.frame_height"
-                :width="face.width * cameraObservation.frame_width"
-                :height="face.height * cameraObservation.frame_height"
-                :class="[
-                  'camera-preview-view__face-box',
-                  face.acceptable || identityMatched ? 'is-ready' : 'is-adjust',
-                ]"
-              />
-              <template v-if="face.detection_confidence !== undefined">
-                <rect
-                  v-if="detectionLabel(face)"
-                  :x="detectionLabel(face)?.x"
-                  :y="detectionLabel(face)?.y"
-                  :width="detectionLabel(face)?.width"
-                  :height="detectionLabel(face)?.height"
-                  rx="5"
-                  class="camera-preview-view__confidence-bg"
-                />
-                <text
-                  v-if="detectionLabel(face)"
-                  :x="detectionLabel(face)?.textX"
-                  :y="detectionLabel(face)?.textY"
-                  :font-size="detectionLabel(face)?.fontSize"
-                  class="camera-preview-view__confidence-text"
-                >
-                  {{ detectionLabel(face)?.text }}
-                </text>
-              </template>
-            </g>
-          </svg>
+          />
           <div
             class="camera-preview-view__guidance"
             :class="`is-${cameraObservation?.state ?? 'pending'}`"

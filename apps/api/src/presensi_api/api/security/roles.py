@@ -31,7 +31,6 @@ class Permission(StrEnum):
     ATTENDANCE_MANUAL = "attendance_manual"
     ENROLLMENT_MANAGE = "enrollment_manage"
     ATTENDANCE_READ = "attendance_read"
-    ATTENDANCE_CORRECT = "attendance_correct"
     REPORTS_READ = "reports_read"
     REPORTS_EXPORT = "reports_export"
     EWS_READ = "ews_read"
@@ -50,7 +49,6 @@ ROLE_PERMISSIONS: dict[RoleCode, FrozenSet[Permission]] = {
             Permission.SESSION_OPERATE,
             Permission.ATTENDANCE_MANUAL,
             Permission.ATTENDANCE_READ,
-            Permission.ATTENDANCE_CORRECT,
             Permission.REPORTS_READ,
             Permission.REPORTS_EXPORT,
             Permission.EWS_READ,
@@ -71,11 +69,11 @@ ROLE_PERMISSIONS: dict[RoleCode, FrozenSet[Permission]] = {
 LABORANT_GRANTABLE_PERMISSIONS: frozenset[Permission] = frozenset(
     {
         Permission.SCHEDULE_READ,
+        Permission.SCHEDULE_MANAGE,
         Permission.SESSION_VIEW,
         Permission.SESSION_OPERATE,
         Permission.ATTENDANCE_MANUAL,
         Permission.ATTENDANCE_READ,
-        Permission.ATTENDANCE_CORRECT,
         Permission.REPORTS_READ,
         Permission.REPORTS_EXPORT,
         Permission.EWS_READ,
@@ -84,17 +82,14 @@ LABORANT_GRANTABLE_PERMISSIONS: frozenset[Permission] = frozenset(
 )
 
 # Prasyarat grant (pohon dependensi, 1 level):
+# - Kelola Jadwal butuh Lihat Jadwal.
 # - Operasikan Sesi & Tandai Manual butuh Pantau Sesi.
-# - Ajukan Koreksi butuh Pantau Sesi atau Lihat Laporan.
 # - Ekspor Laporan butuh Lihat Laporan.
 # - Catat Tindak Lanjut butuh Lihat EWS.
 PERMISSION_PREREQUISITES: dict[Permission, tuple[Permission, ...]] = {
+    Permission.SCHEDULE_MANAGE: (Permission.SCHEDULE_READ,),
     Permission.SESSION_OPERATE: (Permission.SESSION_VIEW,),
     Permission.ATTENDANCE_MANUAL: (Permission.SESSION_VIEW,),
-    Permission.ATTENDANCE_CORRECT: (
-        Permission.SESSION_VIEW,
-        Permission.REPORTS_READ,
-    ),
     Permission.REPORTS_EXPORT: (Permission.REPORTS_READ,),
     Permission.EWS_FOLLOW_UP: (Permission.EWS_READ,),
 }

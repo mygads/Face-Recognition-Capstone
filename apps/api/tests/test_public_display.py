@@ -111,9 +111,11 @@ def test_lab_session_then_token_polling(
 
     bad = get("/api/v1/public/display?token=" + "salah-token-salah-token")
     assert bad.status_code == 401, bad.text
-    # PIN tidak lagi diterima sebagai query URL.
+    # PIN tidak lagi diterima sebagai query URL (token kini opsional di
+    # signature sehingga tanpa token hasilnya 401, bukan 422).
     legacy = get(f"/api/v1/public/display?laboratory_id={lab_id}&pin=1234")
-    assert legacy.status_code == 422, legacy.text
+    assert legacy.status_code == 401, legacy.text
+    assert legacy.json()["error"]["code"] == "display_token_invalid"
 
 
 def test_lab_pin_lockout_after_repeated_failures(

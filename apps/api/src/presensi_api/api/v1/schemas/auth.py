@@ -109,6 +109,25 @@ class StaffPasswordResetResponse(ApiSchema):
     temporary_password: str
 
 
+class StaffPasswordSetRequest(ApiSchema):
+    new_password: str = Field(min_length=8, max_length=200)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        if len(value.strip()) < 8:
+            raise ValueError("Kata sandi minimal 8 karakter.")
+        if any(character.isspace() for character in value):
+            raise ValueError("Kata sandi tidak boleh mengandung spasi.")
+        return value
+
+
+class StaffPasswordSetResponse(ApiSchema):
+    id: UUID
+    email: str
+    must_change_password: bool
+
+
 class PermissionGrantRequest(ApiSchema):
     permission: str = Field(min_length=2, max_length=64)
 

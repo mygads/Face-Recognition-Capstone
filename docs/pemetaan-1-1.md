@@ -35,7 +35,7 @@ aksi penuh di mobile; verifikasi 390/768/1366/2560 tanpa overflow halaman;
 koreksi/EWS/kiosks/policy/display/forbidden 1:1 struktur frame Stitch;
 RBAC ulang dewi (1 kelas, cross-class 403) + budi (koreksi/akun 403,
 sidebar sesuai grant); bukti `/tmp/uat/uat5-*`).
-Cakupan: 3 role staf + identitas teknis, 18 permission, 26 path guarded +
+Cakupan: 3 role staf + identitas teknis, 17 permission, 25 path guarded +
 kiosk publik `/presensi` (alias `/display`), 92 path OpenAPI. Gate: pytest 491 passed, vitest 103 passed,
 `vue-tsc` bersih, eslint bersih, prettier bersih. Gate sesi 6: pytest 291, vitest 101.
 Gate sesi 7: backend 293 passed (8 grup, ruff+mypy bersih setelah rapikan E501 uji),
@@ -48,8 +48,8 @@ frontend vitest 103 passed (29 berkas) + Sessions/Schedule 11 passed pasca-prett
 | Akun                                                       | Role                                                                           | Cakupan seed                            | Mode / catatan                          |
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------ | --------------------------------------- | --------------------------------------- |
 | `admin@local.test`                                         | ADMIN (semua 18 permission)                                                    | sekolah                                 | proteksi admin terakhir + diri sendiri  |
-| `dewi.guru@sekolah.test`                                   | TEACHER (13 permission)                                                        | kelas XII-RPL-1 (Lab Komputer 1)        | `opening_mode=automatic`                |
-| `agus.guru@sekolah.test`                                   | TEACHER (13 permission)                                                        | kelas XII-TKJ-1 (Lab Fisika)            | `opening_mode=manual`                   |
+| `dewi.guru@sekolah.test`                                   | TEACHER (12 permission)                                                        | kelas XII-RPL-1 (Lab Komputer 1)        | `opening_mode=automatic`                |
+| `agus.guru@sekolah.test`                                   | TEACHER (12 permission)                                                        | kelas XII-TKJ-1 (Lab Fisika)            | `opening_mode=manual`                   |
 | `budi.laboran@sekolah.test`                                | LABORANT (4 bawaan + grant `schedule_read`, `session_view`, `session_operate`, `reports_read`) | LAB-RPL1, LAB-FIS | 2 lab + 4 grant |
 | `nolab@sekolah.test` (dibuat saat UAT, lalu dinonaktifkan) | LABORANT (4 bawaan, 0 lab, 0 grant)                                            | —                                       | pesan ramah "Belum ada penugasan…"      |
 | Perangkat edge/STB                                         | identitas teknis (device token, bukan role staf)                               | per lab                                 | kredensial sekali tampil, rotasi        |
@@ -63,22 +63,24 @@ state ramah). Relasi kelas↔lab untuk enrollment (`class_laboratories`).
 Semua dikelola admin via `/api/v1/accounts/...` dalam satu transaksi
 (penugasan + grant disimpan atomik; UI pratinjau menu sebelum simpan).
 
-## 2. Permission (18) dan dependensi grant
+## 2. Permission (17) dan dependensi grant
 
 `LABORANT_GRANTABLE_PERMISSIONS` (10 — master/akun/setting/device/enrollment
-tidak dapat didelegasikan): `schedule_read`, `session_view`,
-`session_operate`, `attendance_manual`, `attendance_read`,
-`attendance_correct`, `reports_read`, `reports_export`, `ews_read`,
+tidak dapat didelegasikan): `schedule_read`, `schedule_manage`,
+`session_view`, `session_operate`, `attendance_manual`, `attendance_read`,
+`reports_read`, `reports_export`, `ews_read`,
 `ews_follow_up`. Prasyarat (`PERMISSION_PREREQUISITES`, ditegakkan
 `grant_missing_prerequisite`):
+`schedule_manage` butuh `schedule_read`;
 `session_operate`/`attendance_manual` butuh `session_view`;
-`attendance_correct` butuh `session_view` atau `reports_read`;
 `reports_export` butuh `reports_read`; `ews_follow_up` butuh `ews_read`.
+(Fitur koreksi berjenjang dihapus 2026-11: tidak ada lagi
+`attendance_correct`; penggantinya pembaruan langsung oleh guru/aslab.)
 
-TEACHER bawaan (13, tanpa `manage_*`, `device_operate`,
+TEACHER bawaan (12, tanpa `manage_*`, `device_operate`,
 `enrollment_manage`): `roster_read`, `laboratory_read`, `schedule_read`,
 `schedule_manage`, `session_view`, `session_operate`, `attendance_manual`,
-`attendance_read`, `attendance_correct`, `reports_read`, `reports_export`,
+`attendance_read`, `reports_read`, `reports_export`,
 `ews_read`, `ews_follow_up`.
 LABORANT bawaan (4): `roster_read`, `laboratory_read`, `device_operate`,
 `enrollment_manage`.
@@ -92,10 +94,10 @@ LABORANT bawaan (4): `roster_read`, `laboratory_read`, `device_operate`,
 | Pendaftaran wajah                      | kelola            | —                                     | ambil ulang/daftar/cabut dalam lingkup | —                                                       |
 | Status perangkat + preview staf        | semua lab         | ringkas sesi sendiri                  | lab penugasan                          | —                                                       |
 | Registrasi device/kredensial/konfig AI | kelola            | —                                     | —                                      | tidak dapat didelegasikan                               |
-| Jadwal                                 | semua             | kelola untuk kelas penugasan          | —                                      | Lihat Jadwal (`schedule_read`)                          |
+| Jadwal                                 | semua             | kelola untuk kelas penugasan          | —                                      | Lihat (`schedule_read`), Kelola (`schedule_manage`, butuh Lihat) |
 | Sesi                                   | semua             | pantau + operasikan tanggung jawabnya | —                                      | Pantau (`session_view`), Operasikan (`session_operate`) |
 | Tandai manual                          | semua             | sesi tanggung jawabnya                | —                                      | `attendance_manual` (butuh `session_view`)              |
-| Koreksi                                | ajukan + putuskan | ajukan sesi kewenangannya             | —                                      | `attendance_correct` (butuh view/laporan)               |
+| Pembaruan langsung (pengganti koreksi) | semua             | sesi kewenangannya                    | —                                      | `attendance_manual` pada sesi tanggung jawab (butuh `session_view`) |
 | Laporan + ekspor                       | semua + ekspor    | kelas penugasan                       | —                                      | Lihat (`reports_read`), Ekspor (`reports_export`)       |
 | EWS + tindak lanjut                    | semua + atur      | kelas penugasan + catat               | —                                      | Lihat (`ews_read`), Catat (`ews_follow_up`)             |
 | Kelola staf, audit, PIN kiosk          | ya                | —                                     | —                                      | tidak dapat didelegasikan                               |
@@ -126,14 +128,13 @@ ulang izin.
 | `/app/schedules`                                     | `schedule_read`               | `/schedules`, `/schedules/teachers`                                                           | Akademik        |
 | `/app/sessions`, `/app/sessions/:sessionId`          | `session_view`                | `/sessions`, openable, open/close 2-langkah, roster, policy                                   | Presensi        |
 | `/app/enrollment`                                    | `enrollment_manage`           | `/enrollments`, `/face-templates`, revoke + dampak lintas lab                                 | Presensi        |
-| `/app/corrections`, `/app/corrections/:correctionId` | `attendance_correct`          | `/attendance/corrections`, decision atomik, detail sebelum/sesudah, `incident_ref`            | Presensi        |
 | `/app/attendance-policy`                             | ADMIN                         | `/sessions/policy`, at-risk policy, contoh lokal + tutup otomatis                             | Administrasi    |
 | `/app/audit`                                         | ADMIN                         | `/audit/activity` (redaksi sandi/PIN/token/gambar/embedding; kolom detail Sebelum/Sesudah)    | Administrasi    |
 | `/app/forbidden`                                     | login                         | —                                                                                             | —               |
 | `/presensi` (tanpa login)                            | PIN lab/kiosk                 | `/public/laboratories`, `/public/kiosk-screens`, `/public/display`, `/public/kiosk-display`   | Kiosk siswa     |
 | `/display`                                           | —                             | alias lama `/presensi`, tetap didukung                                                        | Kiosk siswa     |
 
-URL detail (`:sessionId`, `:classId`, `:correctionId`, query laporan) dapat
+URL detail (`:sessionId`, `:classId`, query laporan) dapat
 dibuka ulang/refresh selama masih berwenang (401/403/404 sesuai aturan).
 Satu `route dashboard` mengarah ke workspace per role; sidebar + `Sidebar.vue`
 memakai daftar kemampuan efektif yang sama dengan guard route.
@@ -157,27 +158,25 @@ publik, bukti `/tmp/uat/nw-*.png`): semua halaman di atas memakai shell
    record final unik per sesi+siswa. Sesi berjalan: "Belum Tercatat" ≠ absen.
 2. **Manual-mark**: sesi aktif + anggota roster + belum ada record + izin
    `attendance_manual`; `occurred_at` opsional (tidak default ke waktu klik;
-   tanpa jam = tampil tanpa durasi). Setelah tutup → wajib alur koreksi.
-3. **Koreksi**: ajukan dari roster/laporan (record ada atau pasangan
-   sesi+siswa tanpa record = absen turunan, **hanya untuk sesi tertutup**
-   (sesi aktif memakai tandai manual; 409 `session_still_active`);
-   salah-identitas memakai `incident_ref` bersama, 2 keputusan atomik) →
-   selalu `pending` → admin putuskan (kunci baris `FOR UPDATE`, cek ulang
-   akses + status dasar, terapkan atomik + audit sebelum/sesudah,
-   pertahankan ID record/sumber/tautan event). Satu pending aktif per
-   target; idem aman; pending tidak mengubah rekap/laporan/EWS sampai
-   `approved`. **Tolak wajib `decision_note`** (422 bila kosong).
-   Koreksi hanya mengubah status — waktu datang tetap milik record asal
-   (tidak membuat jam palsu; tanpa jam tampil tanpa durasi).
+   tanpa jam = tampil tanpa durasi). Setelah tutup → guru/aslab berwenang
+   memperbarui langsung (alur koreksi berjenjang dihapus).
+3. **Pembaruan langsung** (pengganti alur koreksi berjenjang yang dihapus):
+   guru/aslab berwenang memperbarui catatan sesi kewenangannya langsung dari
+   roster/laporan tanpa antrean admin; setiap perubahan tercatat di audit
+   sebelum/sesudah. Tanpa record = absen turunan hanya untuk sesi tertutup
+   (sesi aktif memakai tandai manual).
+
 4. **Kiosk**: admin pairing device+lab + PIN sekali tampil → layar `/presensi`
    pilih lab → pilih kamera → PIN (**POST body, tidak pernah di URL**) →
-   token JWT 8 jam + rotasi proaktif (`POST .../rotate`, snapshot ringan) → board fullscreen (nama sekolah, lab,
+   token display 4 jam + rotasi proaktif (`POST .../rotate`, snapshot ringan) → board fullscreen (nama sekolah, lab,
    sesi, jam lokal, indikator koneksi; hasil besar; auto-hilang ~3 dtk).
    PIN salah 5x → kunci 5 menit (429, counter persisten di DB); ganti sumber
    mengakhiri sesi + membuang pesan lama; revoke menutup layar (401);
    data lintas lab terisolasi (2 lab bersamaan OK). Token
    hanya baca kesiapan + hasil tersaring (tanpa roster/gallery/
-   embedding/riwayat). Preview lintas-host butuh tahap lanjutan
+   embedding/riwayat). Transport utama header `Authorization: Bearer` via
+   fetch (query `?token=` hanya fallback EventSource lawas); snapshot default
+   ringan (`students: []`). Preview lintas-host butuh tahap lanjutan
    (proxy/relay + token pendek per-device); loopback hanya host sama.
 5. **EWS**: watchlist absen/terlambat per ambang policy → detail sesi pemicu
    → catatan tindak lanjut (`Terbuka/Selesai`, penulis, waktu); koreksi
@@ -193,7 +192,7 @@ publik, bukti `/tmp/uat/nw-*.png`): semua halaman di atas memakai shell
    (melepas penugasan + grant tak relevan secara atomik + audit
    `released_assignments`; role ADMIN dan role diri sendiri tidak dapat
    diubah di sini), status, penugasan (guru: kelas + periode;
-   laboran: N lab), grant per grup (Jadwal / Sesi-Kehadiran / Koreksi /
+   laboran: N lab), grant per grup (Jadwal / Sesi-Kehadiran / Laporan-EWS +
    Laporan-EWS + deskripsi + dependensi + "Pilih semua operasional" +
    ringkasan dampak), reset sandi sekali tampil + wajib ganti + cabut sesi,
    nonaktifkan beralasan + cabut sesi aktif; proteksi admin terakhir dan

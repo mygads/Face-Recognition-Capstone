@@ -107,11 +107,20 @@ class CameraFrameInspector:
             )
         )
         signals = dict(quality.signals)
+        landmarks = tuple(detection.landmarks)[:5]
+        normalized_landmarks = [
+            [
+                min(1.0, max(0.0, float(lx) / frame_width)),
+                min(1.0, max(0.0, float(ly) / frame_height)),
+            ]
+            for lx, ly in landmarks
+        ]
         return {
             "x": min(1.0, box.x / frame_width),
             "y": min(1.0, box.y / frame_height),
             "width": min(1.0, box.width / frame_width),
             "height": min(1.0, box.height / frame_height),
+            "landmarks": normalized_landmarks,
             "detection_confidence": detection.confidence,
             "acceptable": quality.acceptable,
             "quality_score": quality.score,

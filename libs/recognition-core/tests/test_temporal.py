@@ -324,3 +324,69 @@ def test_replayed_burst_returns_prior_decision_without_new_evidence() -> None:
     fourth = _decide(engine, 4, matches)
     assert fourth.state == "accepted"
     assert fourth.observation_count > final.observation_count
+
+
+def test_accepted_identity_then_new_person_requires_fresh_consensus() -> None:
+    """A diterima penuh lalu B masuk tanpa frame kosong: B wajib konsensus baru."""
+    engine = _engine(minimum_agreeing_frames=3, best_frame_count=3)
+    for frame in (1, 2, 3):
+        accepted_a = _decide(engine, frame, _matches(PERSON_A, 0.94, PERSON_B, 0.3))
+    assert accepted_a.state == "accepted"
+    assert accepted_a.decision.student_id == PERSON_A
+
+    first_b = _decide(engine, 4, _matches(PERSON_B, 0.95, PERSON_A, 0.3))
+    assert first_b.state == "collecting"
+    assert first_b.decision.student_id is None
+    assert first_b.observation_count == 1
+    _decide(engine, 5, _matches(PERSON_B, 0.96, PERSON_A, 0.3))
+    accepted_b = _decide(engine, 6, _matches(PERSON_B, 0.97, PERSON_A, 0.3))
+    assert accepted_b.state == "accepted"
+    assert accepted_b.decision.student_id == PERSON_B
+    assert accepted_b.observation_count == 3
+
+
+def test_similar_faces_never_accept_without_sufficient_margin() -> None:
+    """Wajah mirip (margin < ambang) tidak boleh lolos jadi accept."""
+    engine = _engine(minimum_agreeing_frames=2, best_frame_count=2)
+    for frame in range(1, 8):
+        decision = _decide(engine, frame, _matches(PERSON_A, 0.95, PERSON_B, 0.90))
+        assert decision.state != "accepted"
+        assert decision.decision.student_id is None
+    assert decision.state == "retry_frontal"
+    assert decision.decision.outcome == "ambiguous"
+
+
+def test_multiple_faces_frame_clears_prior_evidence() -> None:
+    """Frame multi-wajah membuang evidence A; A berikutnya mulai dari nol."""
+    engine = _engine(minimum_agreeing_frames=3, best_frame_count=3)
+    _decide(engine, 1, _matches(PERSON_A, 0.94, PERSON_B, 0.3))
+    _decide(engine, 2, _matches(PERSON_A, 0.95, PERSON_B, 0.3))
+    reset = engine.decide(
+        _observation(3),
+        (),
+        FaceQuality(score=0.0, acceptable=False, reason_codes=("multiple_faces",)),
+        LivenessDecision(state="inconclusive"),
+    )
+    assert reset.state == "retry_frontal"
+    assert reset.decision.student_id is None
+    fresh = _decide(engine, 4, _matches(PERSON_A, 0.96, PERSON_B, 0.3))
+    assert fresh.state == "collecting"
+    assert fresh.observation_count == 1
+
+
+def test_top1_flip_between_similar_people_never_mixes_evidence() -> None:
+    """Top-1 A/B bergantian (keduanya di atas threshold) tidak pernah accept."""
+    engine = _engine(minimum_agreeing_frames=2, best_frame_count=2)
+    turns = [
+        (PERSON_A, 0.95, PERSON_B, 0.3),
+        (PERSON_B, 0.95, PERSON_A, 0.3),
+        (PERSON_A, 0.96, PERSON_B, 0.3),
+        (PERSON_B, 0.96, PERSON_A, 0.3),
+        (PERSON_A, 0.97, PERSON_B, 0.3),
+        (PERSON_B, 0.97, PERSON_A, 0.3),
+    ]
+    for index, (top, top_score, runner, runner_score) in enumerate(turns, start=1):
+        matches = _matches(top, top_score, runner, runner_score)
+        decision = _decide(engine, index, matches)
+        assert decision.state != "accepted"
+        assert decision.decision.student_id is None

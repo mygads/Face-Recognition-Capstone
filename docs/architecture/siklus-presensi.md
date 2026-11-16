@@ -83,10 +83,16 @@ status: present|late|absent|excused, note?}`) menulis `AttendanceRecord`
 `source='manual'`, `recognition_event_id=NULL`, `device_id=NULL`,
 `marked_by=<guru>` + audit `attendance.manual_marked`. Validasi: sesi berjalan
 (`active`/`manual_override`), roster snapshot, duplikat. UI guru menampilkan
-tombol tandai manual per siswa yang belum tercatat. Record manual tidak menimpa
-record face_recognition yang sudah ada; perubahan memakai alur koreksi.
+tombol tandai manual per siswa yang belum tercatat.
 
-## Koreksi kehadiran + putusan ADMIN
+> Status implementasi (2026-11): alur koreksi berjenjang di bawah ini
+> DIHAPUS. Pengganti: `POST .../manual-marks` memperbarui record yang sudah
+> ada secara langsung (guru/aslab pada sesi kewenangannya, tercatat di audit
+> sebelum/sesudah). Tidak ada `ATTENDANCE_CORRECT`, tabel
+> `attendance_corrections`, endpoint `/corrections`, atau halaman
+> `/app/corrections`.
+
+## Koreksi kehadiran + putusan ADMIN (DIHAPUS — arsip desain)
 
 `POST /api/v1/attendance/corrections` (`ATTENDANCE_CORRECT`; guru/laboran
 sesuai scope+grant): kasus (a) record ada → `attendance_record_id` +

@@ -22,6 +22,7 @@ from presensi_api.api.v1.schemas.attendance import (
     RecognitionEventRequest,
     RecognitionOutcome,
 )
+from presensi_api.display_notify import notify_display_changed, pg_notify_display_changed
 from presensi_api.db.models import (
     AttendanceRecord,
     AttendanceSession,
@@ -335,6 +336,11 @@ def decide_recognition_event(
         }
     event.quality_metadata = dict(metadata)
     flag_modified(event, "quality_metadata")
+    recorded = metadata.get("attendance_decision", {}).get("decision") == "attendance_recorded"
+    if recorded:
+        pg_notify_display_changed(db, schedule.laboratory_id)
     db.commit()
     db.refresh(event)
+    if recorded:
+        notify_display_changed()
     return _response_for_event(db, event, replayed=False)

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from presensi_api.api.errors import ApiProblem
 from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
 from presensi_api.api.v1.schemas.attendance import ManualMarkRequest
+from presensi_api.display_notify import notify_display_changed, pg_notify_display_changed
 from presensi_api.db.models import (
     AttendanceRecord,
     AttendanceSession,
@@ -99,15 +100,51 @@ def mark_manual_attendance(
             AttendanceRecord.student_id == request.student_id,
         )
     )
-    if existing is not None:
-        raise ApiProblem(
-            409,
-            "attendance_already_recorded",
-            "Presensi siswa untuk sesi ini sudah tercatat.",
-        )
-
     note = request.note.strip() if request.note else None
     occurred = request.occurred_at if request.occurred_at is not None else None
+    if existing is not None:
+        # Pengganti alur koreksi: guru/aslab berwenang langsung memperbarui
+        # catatan (termasuk milik face recognition) tanpa persetujuan admin.
+        before = {
+            "status": existing.status,
+            "source": existing.source,
+            "note": existing.note,
+            "occurred_at": (
+                as_utc(existing.occurred_at).isoformat()
+                if existing.occurred_at is not None
+                else None
+            ),
+        }
+        existing.status = request.status
+        existing.note = note
+        existing.occurred_at = occurred
+        existing.recorded_by_user_id = principal.id
+        existing.recorded_at = datetime.now(UTC)
+        db.add(
+            AuditLog(
+                actor_user_id=principal.id,
+                action="attendance.manual_updated",
+                entity_type="attendance_record",
+                entity_id=existing.id,
+                before_state={
+                    "session_id": str(attendance_session.id),
+                    "student_id": str(request.student_id),
+                    **before,
+                },
+                after_state={
+                    "status": request.status,
+                    "source": existing.source,
+                    "note": note,
+                    "recorded_by_user_id": str(principal.id),
+                    "recorded_at": as_utc(existing.recorded_at).isoformat(),
+                },
+            )
+        )
+        pg_notify_display_changed(db, schedule.laboratory_id)
+        db.commit()
+        db.refresh(existing)
+        notify_display_changed()
+        return existing
     record: AttendanceRecord | None = None
     try:
         # A concurrent mark (manual or recognition) can pass the pre-check
@@ -156,6 +193,8 @@ def mark_manual_attendance(
             },
         )
     )
+    pg_notify_display_changed(db, schedule.laboratory_id)
     db.commit()
     db.refresh(record)
+    notify_display_changed()
     return record

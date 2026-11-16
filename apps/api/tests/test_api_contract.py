@@ -68,7 +68,6 @@ def test_openapi_lists_each_versioned_router_group() -> None:
         "/api/v1/face-templates",
         "/api/v1/attendance",
         "/api/v1/attendance/recognition-events",
-        "/api/v1/attendance/corrections",
         "/api/v1/reports/attendance",
     } <= set(document["paths"])
     assert "delete" in document["paths"]["/api/v1/devices/{device_id}"]

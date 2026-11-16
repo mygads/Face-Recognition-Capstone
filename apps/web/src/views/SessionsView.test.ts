@@ -8,8 +8,7 @@ import SessionsView from './SessionsView.vue'
 const api = vi.hoisted(() => ({
   listOpenableSchedules: vi.fn(),
   listAttendanceSessions: vi.fn(),
-  getSessionOpeningPolicy: vi.fn(),
-  saveSessionOpeningPolicy: vi.fn(),
+  getSessionOpeningPolicy: vi.fn(async () => ({ default_grace_period_minutes: 20 })),
   getOpeningPreference: vi.fn(),
   saveOpeningPreference: vi.fn(),
   openAttendanceSession: vi.fn(),
@@ -63,15 +62,6 @@ const overrideSession = {
   scheduled_end_at: '2026-10-05T04:00:00Z',
 }
 
-const policy = {
-  mode: 'manual',
-  auto_open_minutes_before: 0,
-  auto_open_minutes_after: 15,
-  default_grace_period_minutes: 15,
-  revision: 0,
-  updated_at: null,
-}
-
 function laboranPinia() {
   const pinia = createPinia()
   useAuthStore(pinia).$patch({
@@ -100,7 +90,7 @@ function teacherPinia() {
       full_name: 'Test Teacher',
       roles: ['TEACHER'],
       must_change_password: false,
-      permissions: ['schedule_read', 'session_view', 'attendance_manual', 'attendance_correct'],
+      permissions: ['schedule_read', 'session_view', 'attendance_manual'],
     },
   })
   return pinia
@@ -114,11 +104,29 @@ describe('sessions view', () => {
       items: [overrideSession],
       pagination: { total: 1, limit: 50, offset: 0 },
     })
-    api.getSessionOpeningPolicy.mockResolvedValue(policy)
     api.getOpeningPreference.mockResolvedValue({
       opening_mode: 'manual',
       updated_at: null,
     })
+  })
+
+  it('memakai grace default dari Kebijakan Presensi dan tetap bisa diubah manual', async () => {
+    const wrapper = mount(SessionsView, { global: { plugins: [teacherPinia()] } })
+    await flushPromises()
+    const input = wrapper.get('[data-testid="open-grace-input"]')
+    expect((input.element as HTMLInputElement).value).toBe('20')
+    await input.setValue('10')
+    await flushPromises()
+    api.openAttendanceSession.mockResolvedValueOnce({
+      ...overrideSession,
+      status: 'active',
+      grace_period_minutes: 10,
+    })
+    await wrapper.get('[data-testid="open-session-schedule-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="confirm-open-session"]').trigger('click')
+    await flushPromises()
+    expect(api.openAttendanceSession).toHaveBeenCalledWith('schedule-1', 10)
   })
 
   it('keeps manual open visible and marks override sessions with a badge', async () => {
@@ -320,7 +328,7 @@ describe('session close confirmation', () => {
         full_name: 'Test Teacher',
         roles: ['TEACHER'],
         must_change_password: false,
-        permissions: ['schedule_read', 'session_view', 'attendance_manual', 'attendance_correct'],
+        permissions: ['schedule_read', 'session_view', 'attendance_manual'],
       },
     })
     api.listOpenableSchedules.mockResolvedValue([])

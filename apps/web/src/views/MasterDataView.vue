@@ -20,6 +20,7 @@ import {
   listLabLaborants,
   listLaboratories,
   listStudents,
+  downloadStudentImportTemplate,
   previewStudentImport,
   removeStudentFromClass,
   updateClass,
@@ -94,6 +95,7 @@ const importMapping = ref({
 })
 const importPreview = ref<StudentImportPreview | null>(null)
 const importError = ref<string | null>(null)
+const isDownloadingTemplate = ref(false)
 
 // detail siswa
 const studentDetail = ref<StudentDetails | null>(null)
@@ -331,6 +333,27 @@ function handleImportFileChange(event: Event): void {
   importFile.value = input instanceof HTMLInputElement ? (input.files?.[0] ?? null) : null
   importPreview.value = null
   importError.value = null
+}
+
+async function downloadTemplate(): Promise<void> {
+  if (isDownloadingTemplate.value) return
+  isDownloadingTemplate.value = true
+  importError.value = null
+  try {
+    const { blob, filename } = await downloadStudentImportTemplate()
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } catch (error) {
+    importError.value = formatError(error)
+  } finally {
+    isDownloadingTemplate.value = false
+  }
 }
 
 async function previewImport(): Promise<void> {
@@ -1164,8 +1187,19 @@ function labStatusTone(lab: Laboratory): 'present' | 'neutral' {
     <!-- ============ MODAL IMPOR SISWA (B02-03) ============ -->
     <UiModal v-if="isImportOpen" title="Impor Data Siswa" wide @close="isImportOpen = false">
       <p class="st-table__muted">
-        Unggah dan validasi berkas CSV atau XLSX untuk penambahan data siswa secara massal.
+        Unggah dan validasi berkas CSV atau XLSX untuk penambahan data siswa secara massal. Unduh
+        template bila belum punya format kolom yang benar.
       </p>
+      <div class="master-data__form-actions" style="justify-content: flex-start">
+        <UiButton
+          variant="secondary"
+          :disabled="isDownloadingTemplate"
+          data-testid="download-import-template"
+          @click="downloadTemplate"
+        >
+          {{ isDownloadingTemplate ? 'Mengunduh…' : 'Unduh Template CSV' }}
+        </UiButton>
+      </div>
       <p v-if="importError" class="st-alert st-alert--error" role="alert">{{ importError }}</p>
       <UiField label="Berkas CSV / XLSX" required>
         <input

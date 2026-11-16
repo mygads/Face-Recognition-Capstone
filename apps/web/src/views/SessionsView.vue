@@ -8,7 +8,6 @@ import UiField from '../components/ui/UiField.vue'
 import UiInput from '../components/ui/UiInput.vue'
 import UiModal from '../components/ui/UiModal.vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
-import { attendanceStatusLabel, correctionDecisionLabel } from '../utils/attendanceStatus'
 import { formatApiError } from '../utils/apiError'
 import UiSearchInput from '../components/ui/UiSearchInput.vue'
 import UiSelect from '../components/ui/UiSelect.vue'
@@ -18,45 +17,44 @@ import { useAuthStore } from '../stores/auth'
 import {
   ApiError,
   closeAttendanceSession,
-  decideAttendanceCorrection,
   getAttendanceSessionStatus,
   getSessionOpeningPolicy,
   getSessionRoster,
-  listAttendanceCorrections,
   listAttendanceSessions,
   listOpenableSchedules,
   markManualAttendance,
   openAttendanceSession,
-  requestAttendanceCorrection,
-  saveSessionOpeningPolicy,
-  type AttendanceCorrectionResponse,
   type AttendanceSession,
   type ManualMarkRequest,
   type OpenableSchedule,
-  type SessionOpeningPolicy,
-  type SessionOpeningPolicyResponse,
   type SessionRosterEntry,
 } from '../api/client'
 
 const weekdays = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu']
 const auth = useAuthStore()
 const route = useRoute() as unknown as { params: Record<string, unknown> } | undefined
-const canManagePolicy = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
 const isTeacher = computed(() => auth.account?.roles.includes('TEACHER') ?? false)
 const isLaborant = computed(
   () => !isAdmin.value && (auth.account?.roles ?? []).includes('LABORANT'),
 )
 const schedules = ref<OpenableSchedule[]>([])
 const sessions = ref<AttendanceSession[]>([])
-const policy = ref<SessionOpeningPolicyResponse | null>(null)
-const policyForm = ref<SessionOpeningPolicy>({
-  mode: 'manual',
-  auto_open_minutes_before: 0,
-  auto_open_minutes_after: 15,
-  default_grace_period_minutes: 15,
-})
-const isSavingPolicy = ref(false)
+// Grace period sesi baru: default 15 menit, dapat diubah per pembukaan.
+// Nilai baku diambil dari Kebijakan Presensi (satu sumber kebenaran);
+// backend tetap menerapkannya saat sesi dibuka tanpa override eksplisit.
 const gracePeriodMinutes = ref(15)
+
+async function loadPolicyGraceDefault(): Promise<void> {
+  try {
+    const policy = await getSessionOpeningPolicy()
+    const raw = policy.default_grace_period_minutes
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 && raw <= 1440) {
+      gracePeriodMinutes.value = Math.floor(raw)
+    }
+  } catch {
+    // Tanpa akses baca kebijakan (atau backend lama): tetap 15 menit.
+  }
+}
 const openingScheduleId = ref<string | null>(null)
 const closingSessionId = ref<string | null>(null)
 const isLoading = ref(false)
@@ -70,16 +68,6 @@ const markDrafts = reactive<
   Record<string, { status: string; note: string; saving: boolean; error: string | null }>
 >({})
 const manualMarkMessage = ref<string | null>(null)
-const corrections = ref<AttendanceCorrectionResponse[]>([])
-const correctionsError = ref<string | null>(null)
-const isCorrectionsLoading = ref(false)
-const correctionDrafts = reactive<
-  Record<
-    string,
-    { corrected_status: string; reason: string; saving: boolean; error: string | null }
-  >
->({})
-const correctionMessage = ref<string | null>(null)
 const isAdmin = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
 const staffPermissions = computed(() => (auth.account?.permissions ?? []) as string[])
 const canOperateSessions = computed(
@@ -88,115 +76,6 @@ const canOperateSessions = computed(
 const canManualMark = computed(
   () => isAdmin.value || isTeacher.value || staffPermissions.value.includes('attendance_manual'),
 )
-const canProposeCorrection = computed(
-  () => isAdmin.value || isTeacher.value || staffPermissions.value.includes('attendance_correct'),
-)
-function correctionDraftFor(key: string): {
-  corrected_status: string
-  reason: string
-  saving: boolean
-  error: string | null
-} {
-  let draft = correctionDrafts[key]
-  if (!draft) {
-    draft = { corrected_status: 'present', reason: '', saving: false, error: null }
-    correctionDrafts[key] = draft
-  }
-  return draft
-}
-async function loadCorrections(): Promise<void> {
-  if (!selected.value) return
-  isCorrectionsLoading.value = true
-  correctionsError.value = null
-  try {
-    const page = await listAttendanceCorrections({ session_id: selected.value.id, limit: 100 })
-    corrections.value = page.items
-  } catch (error) {
-    correctionsError.value = formatError(error)
-  } finally {
-    isCorrectionsLoading.value = false
-  }
-}
-async function submitCorrectionForRecord(entry: SessionRosterEntry): Promise<void> {
-  if (!selected.value || !entry.record_status) return
-  const key = 'record-' + entry.student_id
-  const draft = correctionDraftFor(key)
-  if (!draft.reason.trim()) {
-    draft.error = 'Alasan koreksi wajib diisi.'
-    return
-  }
-  const recordId = (entry as unknown as { attendance_record_id?: string }).attendance_record_id
-  if (!recordId) {
-    draft.error = 'ID record tidak tersedia; muat ulang roster.'
-    return
-  }
-  draft.saving = true
-  draft.error = null
-  try {
-    await requestAttendanceCorrection({
-      attendance_record_id: recordId,
-      corrected_status: draft.corrected_status as 'present' | 'late' | 'absent' | 'excused',
-      reason: draft.reason.trim(),
-    })
-    correctionMessage.value = 'Pengajuan koreksi untuk ' + entry.full_name + ' dikirim (pending).'
-    draft.reason = ''
-    await loadCorrections()
-  } catch (error) {
-    draft.error = formatError(error)
-  } finally {
-    draft.saving = false
-  }
-}
-async function submitCorrectionForMissing(entry: SessionRosterEntry): Promise<void> {
-  if (!selected.value) return
-  const key = 'missing-' + entry.student_id
-  const draft = correctionDraftFor(key)
-  if (!draft.reason.trim()) {
-    draft.error = 'Alasan koreksi wajib diisi.'
-    return
-  }
-  draft.saving = true
-  draft.error = null
-  try {
-    await requestAttendanceCorrection({
-      session_id: selected.value.id,
-      student_id: entry.student_id,
-      corrected_status: draft.corrected_status as 'present' | 'late' | 'absent' | 'excused',
-      reason: draft.reason.trim(),
-    })
-    correctionMessage.value =
-      'Pengajuan koreksi (siswa tanpa record, dianggap absen) untuk ' +
-      entry.full_name +
-      ' dikirim (pending).'
-    draft.reason = ''
-    await loadCorrections()
-  } catch (error) {
-    draft.error = formatError(error)
-  } finally {
-    draft.saving = false
-  }
-}
-const decisionNotes = reactive<Record<string, string>>({})
-
-async function decideCorrection(
-  item: AttendanceCorrectionResponse,
-  decision: 'approved' | 'rejected',
-): Promise<void> {
-  const note = (decisionNotes[item.id] ?? '').trim()
-  if (decision === 'rejected' && !note) {
-    correctionsError.value = 'Alasan penolakan wajib diisi pada catatan keputusan.'
-    return
-  }
-  try {
-    await decideAttendanceCorrection(item.id, { decision, decision_note: note || null })
-    correctionMessage.value =
-      decision === 'approved' ? 'Koreksi disetujui & diterapkan.' : 'Koreksi ditolak.'
-    await loadCorrections()
-    if (selected.value) await loadRoster(selected.value.id)
-  } catch (error) {
-    correctionsError.value = formatError(error)
-  }
-}
 
 function formatError(error: unknown): string {
   return formatApiError(error, 'Permintaan tidak dapat diproses. Coba lagi.')
@@ -272,6 +151,9 @@ function draftFor(studentId: string): {
 }
 
 const unmarkedRoster = computed(() => roster.value.filter((entry) => entry.record_status === null))
+const markedRoster = computed(() =>
+  roster.value.filter((entry) => entry.record_status !== null && entry.record_status !== undefined),
+)
 
 type RosterStatusFilter = 'all' | 'unmarked' | 'present' | 'late' | 'absent' | 'excused'
 const rosterSearch = ref('')
@@ -323,18 +205,6 @@ const filteredRoster = computed(() => {
     )
   })
 })
-
-function correctionErrorFor(entry: SessionRosterEntry): string | null {
-  const key = (entry.record_status ? 'record-' : 'missing-') + entry.student_id
-  return correctionDraftFor(key).error
-}
-
-function rosterName(studentId: string | null | undefined): string {
-  if (!studentId) return '-'
-  return (
-    roster.value.find((entry) => entry.student_id === studentId)?.full_name ?? studentId.slice(0, 8)
-  )
-}
 
 function rosterStatusLabel(status: SessionRosterEntry['record_status']): string {
   if (status === 'present') return 'Hadir'
@@ -410,24 +280,15 @@ async function reload(): Promise<void> {
   isLoading.value = true
   pageError.value = null
   try {
-    const [available, page, latestPolicy] = await Promise.all([
+    const [available, page] = await Promise.all([
       listOpenableSchedules(),
       listAttendanceSessions({ limit: 50, offset: 0 }),
-      getSessionOpeningPolicy(),
     ])
     schedules.value = available
     sessions.value = page.items
     void refreshLiveRoster(
       page.items.filter((s) => s.status !== 'closed' && s.status !== 'cancelled'),
     )
-    policy.value = latestPolicy
-    policyForm.value = {
-      mode: latestPolicy.mode,
-      auto_open_minutes_before: latestPolicy.auto_open_minutes_before,
-      auto_open_minutes_after: latestPolicy.auto_open_minutes_after,
-      default_grace_period_minutes: latestPolicy.default_grace_period_minutes,
-    }
-    gracePeriodMinutes.value = latestPolicy.default_grace_period_minutes
   } catch (error) {
     pageError.value = formatError(error)
   } finally {
@@ -436,6 +297,7 @@ async function reload(): Promise<void> {
 }
 
 onMounted(async () => {
+  await loadPolicyGraceDefault()
   await reload()
   // Route detail (/app/sessions/:sessionId) harus bisa dibuka ulang langsung:
   // pilih sesi dari URL bila tersedia.
@@ -446,23 +308,6 @@ onMounted(async () => {
     if (match) await showStatus(match)
   }
 })
-
-async function savePolicy(): Promise<void> {
-  isSavingPolicy.value = true
-  pageError.value = null
-  successMessage.value = null
-  try {
-    policy.value = await saveSessionOpeningPolicy(policyForm.value)
-    gracePeriodMinutes.value = policyForm.value.default_grace_period_minutes
-    successMessage.value =
-      'Jendela buka otomatis dan grace period tersimpan. Mode pembukaan mengikuti pengaturan tiap guru.'
-    await reload()
-  } catch (error) {
-    pageError.value = formatError(error)
-  } finally {
-    isSavingPolicy.value = false
-  }
-}
 
 function askOpenSession(schedule: OpenableSchedule): void {
   pageError.value = null
@@ -549,7 +394,6 @@ async function showStatus(item: AttendanceSession): Promise<void> {
   try {
     selected.value = await getAttendanceSessionStatus(item.id)
     await loadRoster(item.id)
-    await loadCorrections()
   } catch (error) {
     pageError.value = formatError(error)
   }
@@ -592,7 +436,10 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
       ...(trimmedNote ? { note: trimmedNote } : {}),
     }
     await markManualAttendance(selected.value.id, body)
-    manualMarkMessage.value = 'Kehadiran ' + entry.full_name + ' ditandai manual.'
+    manualMarkMessage.value =
+      'Kehadiran ' +
+      entry.full_name +
+      (entry.record_status ? ' diperbarui langsung.' : ' ditandai manual.')
     await loadRoster(selected.value.id)
   } catch (error) {
     draft.error = manualMarkError(error)
@@ -618,48 +465,6 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
       {{ successMessage }}
     </p>
 
-    <div v-if="policy" class="st-card" data-testid="session-opening-policy">
-      <h2 class="st-card__title">Cara membuka presensi</h2>
-      <form @submit.prevent="savePolicy">
-        <div class="st-grid3">
-          <UiField label="Grace period kehadiran (menit)">
-            <UiInput
-              :model-value="String(policyForm.default_grace_period_minutes)"
-              type="number"
-              :disabled="!canManagePolicy || isSavingPolicy"
-              @update:model-value="policyForm.default_grace_period_minutes = Number($event)"
-            />
-          </UiField>
-          <UiField label="Buka sebelum jadwal (menit)">
-            <UiInput
-              :model-value="String(policyForm.auto_open_minutes_before)"
-              type="number"
-              :disabled="!canManagePolicy || isSavingPolicy"
-              @update:model-value="policyForm.auto_open_minutes_before = Number($event)"
-            />
-          </UiField>
-          <UiField label="Buka setelah jadwal mulai (menit)">
-            <UiInput
-              :model-value="String(policyForm.auto_open_minutes_after)"
-              type="number"
-              :disabled="!canManagePolicy || isSavingPolicy"
-              @update:model-value="policyForm.auto_open_minutes_after = Number($event)"
-            />
-          </UiField>
-        </div>
-        <p class="st-table__muted">
-          Mode pembukaan global tidak lagi diberlakukan. Setiap guru mengatur modenya sendiri di
-          Profil dan Preferensi; backend membuka sesi otomatis hanya untuk guru dengan mode
-          otomatis.
-        </p>
-        <p v-if="canManagePolicy">
-          <UiButton variant="primary" type="submit" :disabled="isSavingPolicy">
-            {{ isSavingPolicy ? 'Menyimpan…' : 'Simpan kebijakan' }}
-          </UiButton>
-        </p>
-      </form>
-    </div>
-
     <div v-if="isTeacher" class="st-card" data-testid="teacher-opening-preference">
       <h2 class="st-card__title">Mode pembukaan sesi saya</h2>
       <p class="st-table__muted">
@@ -680,6 +485,7 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
             :model-value="String(gracePeriodMinutes)"
             type="number"
             aria-label="Grace period dalam menit"
+            data-testid="open-grace-input"
             @update:model-value="gracePeriodMinutes = Number($event)"
           />
         </UiField>
@@ -927,8 +733,8 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
           <strong>Mode Pantau Sesi Aktif</strong>
           <UiBadge tone="info">Izin terbatas</UiBadge><br />
           Anda memiliki izin memantau data kehadiran waktu nyata sesi
-          {{ selected.laboratory_name }}. Tindakan buka sesi, tutup sesi, tandai manual, atau ajukan
-          koreksi merupakan wewenang Guru Pengampu ({{ selected.teacher_name }}).
+          {{ selected.laboratory_name }}. Tindakan buka sesi, tutup sesi, dan ubah kehadiran
+          merupakan wewenang Guru Pengampu ({{ selected.teacher_name }}).
         </p>
         <span class="st-monitorbanner__chip">
           <span class="st-material-icon" aria-hidden="true">lock</span>
@@ -1107,44 +913,35 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
       </div>
       <p v-else class="st-table__muted">Tandai manual membutuhkan izin Tandai Kehadiran Manual.</p>
 
-      <div class="st-card" data-testid="correction-panel">
-        <h3 class="st-card__title">Pengajuan koreksi kehadiran</h3>
-        <p v-if="!canProposeCorrection" class="st-table__muted">
-          Pengajuan koreksi membutuhkan izin Ajukan Koreksi atau Pantau Sesi + Lihat Laporan.
-        </p>
+      <div v-if="canManualMark" class="st-card" data-testid="direct-update-panel">
+        <h3 class="st-card__title">Ubah kehadiran langsung</h3>
         <p class="st-table__muted">
-          Untuk record final yang perlu diperbaiki, atau siswa tanpa record setelah sesi ditutup
-          (diajukan sebagai absen → status yang diminta). Selalu butuh alasan dan diputuskan admin.
+          Pengganti koreksi berjenjang: guru/aslab berwenang langsung memperbarui catatan yang sudah
+          ada (termasuk hasil face recognition) tanpa persetujuan admin. Setiap perubahan dicatat
+          pada audit.
         </p>
-        <p v-if="correctionMessage" class="st-alert st-alert--success" role="status">
-          {{ correctionMessage }}
+        <p v-if="manualMarkMessage" class="st-alert st-alert--success" role="status">
+          {{ manualMarkMessage }}
         </p>
-        <p v-if="correctionsError" class="st-alert st-alert--error" role="alert">
-          {{ correctionsError }}
+        <p v-if="markedRoster.length === 0" class="st-table__muted">
+          Belum ada catatan pada sesi ini. Gunakan “Tandai kehadiran manual” di atas.
         </p>
-        <ul class="st-list">
-          <li v-for="entry in roster" :key="'corr-' + entry.student_id" class="st-list__item">
+        <ul v-else class="st-list">
+          <li v-for="entry in markedRoster" :key="'upd-' + entry.student_id" class="st-list__item">
             <span class="st-identity">
               <UiAvatar :name="entry.full_name" />
               <span
                 ><strong>{{ entry.full_name }}</strong
                 ><br /><span class="st-table__muted"
-                  >{{ entry.student_number }} · sebelumnya:
-                  {{
-                    entry.record_status
-                      ? attendanceStatusLabel(entry.record_status)
-                      : 'absen (tanpa record)'
-                  }}</span
+                  >{{ entry.student_number }} · saat ini:
+                  {{ rosterStatusLabel(entry.record_status) }}</span
                 ></span
               >
             </span>
             <UiSelect
-              v-model="
-                correctionDraftFor(
-                  (entry.record_status ? 'record-' : 'missing-') + entry.student_id,
-                ).corrected_status
-              "
-              aria-label="Status diminta"
+              v-model="draftFor(entry.student_id).status"
+              :disabled="draftFor(entry.student_id).saving"
+              :aria-label="'Status baru untuk ' + entry.full_name"
             >
               <option value="present">Hadir</option>
               <option value="late">Terlambat</option>
@@ -1152,78 +949,29 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
               <option value="excused">Izin</option>
             </UiSelect>
             <UiInput
-              v-model="
-                correctionDraftFor(
-                  (entry.record_status ? 'record-' : 'missing-') + entry.student_id,
-                ).reason
-              "
+              v-model="draftFor(entry.student_id).note"
               type="text"
-              maxlength="2000"
-              placeholder="Alasan wajib"
-              aria-label="Alasan koreksi"
+              maxlength="500"
+              placeholder="Alasan perubahan"
+              :disabled="draftFor(entry.student_id).saving"
+              :aria-label="'Catatan untuk ' + entry.full_name"
             />
             <UiButton
-              v-if="canProposeCorrection && entry.record_status"
               variant="secondary"
-              :disabled="correctionDraftFor('record-' + entry.student_id).saving"
-              :data-testid="'correction-record-' + entry.student_id"
-              @click="submitCorrectionForRecord(entry)"
-              >Ajukan koreksi</UiButton
+              :disabled="draftFor(entry.student_id).saving"
+              :data-testid="'direct-update-' + entry.student_id"
+              @click="submitManualMark(entry)"
+              >{{ draftFor(entry.student_id).saving ? 'Menyimpan…' : 'Ubah langsung' }}</UiButton
             >
-            <UiButton
-              v-else-if="canProposeCorrection"
-              variant="secondary"
-              :disabled="correctionDraftFor('missing-' + entry.student_id).saving"
-              :data-testid="'correction-missing-' + entry.student_id"
-              @click="submitCorrectionForMissing(entry)"
-              >Ajukan koreksi (tanpa record)</UiButton
+            <p
+              v-if="draftFor(entry.student_id).error"
+              class="st-alert st-alert--error"
+              role="alert"
             >
-            <p v-if="correctionErrorFor(entry)" class="st-alert st-alert--error" role="alert">
-              {{ correctionErrorFor(entry) }}
+              {{ draftFor(entry.student_id).error }}
             </p>
           </li>
         </ul>
-        <h3 class="st-section">Daftar pengajuan koreksi</h3>
-        <p v-if="isCorrectionsLoading" class="st-table__muted">Memuat koreksi…</p>
-        <ul v-else-if="corrections.length" class="st-list">
-          <li v-for="c in corrections" :key="c.id" class="st-list__item">
-            <span
-              ><strong>{{ rosterName(c.student_id) }}</strong
-              ><br /><span class="st-table__muted"
-                >{{ attendanceStatusLabel(c.previous_status) }} →
-                {{ attendanceStatusLabel(c.corrected_status) }} ·
-                {{ correctionDecisionLabel(c.decision_status) }} · {{ c.reason }}</span
-              ></span
-            >
-            <span v-if="isAdmin && c.decision_status === 'pending'">
-              <UiInput
-                v-model="decisionNotes[c.id]"
-                type="text"
-                maxlength="2000"
-                placeholder="Catatan keputusan (wajib bila menolak)"
-                aria-label="Catatan keputusan"
-                :data-testid="'correction-decision-note-' + c.id"
-                class="st-decision-note"
-              />
-              <UiButton
-                variant="primary"
-                size="sm"
-                :data-testid="'correction-approve-' + c.id"
-                @click="decideCorrection(c, 'approved')"
-                >Setujui &amp; terapkan</UiButton
-              >
-              <UiButton
-                variant="secondary"
-                size="sm"
-                :data-testid="'correction-reject-' + c.id"
-                @click="decideCorrection(c, 'rejected')"
-                >Tolak</UiButton
-              >
-            </span>
-            <UiBadge v-else tone="info">{{ correctionDecisionLabel(c.decision_status) }}</UiBadge>
-          </li>
-        </ul>
-        <p v-else class="st-table__muted">Belum ada pengajuan koreksi untuk sesi ini.</p>
       </div>
     </section>
 

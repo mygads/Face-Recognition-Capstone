@@ -10,11 +10,13 @@ class KioskCreateRequest(ApiSchema):
     laboratory_id: UUID
     display_name: str = Field(min_length=2, max_length=120)
     camera_label: str | None = Field(default=None, max_length=120)
+    token_ttl_hours: int | None = Field(default=None, ge=1, le=12)
 
 
 class KioskUpdateRequest(ApiSchema):
     display_name: str | None = Field(default=None, min_length=2, max_length=120)
     camera_label: str | None = Field(default=None, max_length=120)
+    token_ttl_hours: int | None = Field(default=None, ge=1, le=12)
     is_active: bool | None = None
 
 
@@ -24,6 +26,7 @@ class KioskResponse(ApiSchema):
     laboratory_id: UUID
     display_name: str
     camera_label: str | None = None
+    token_ttl_hours: int | None = None
     has_pin: bool
     is_active: bool
     last_seen_at: AwareDatetime | None = None

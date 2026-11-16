@@ -28,6 +28,8 @@ from presensi_api.api.v1.schemas.auth import (
     StaffAccountCreateRequest,
     StaffAccountUpdateRequest,
     StaffPasswordResetResponse,
+    StaffPasswordSetRequest,
+    StaffPasswordSetResponse,
     TeacherAssignmentRequest,
 )
 from presensi_api.api.v1.schemas.common import PageResponse, Pagination
@@ -504,6 +506,57 @@ def reset_staff_password(
         email=user.email,
         must_change_password=True,
         temporary_password=temporary_password,
+    )
+
+
+@router.post(
+    "/{account_id}/set-password",
+    response_model=StaffPasswordSetResponse,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Set staff password directly (ADMIN only)",
+    description="Admin menetapkan kata sandi baru untuk staf.",
+)
+def set_staff_password(
+    account_id: str,
+    request: StaffPasswordSetRequest,
+    session: Session = Depends(get_db_session),
+    principal: AuthenticatedUser = Depends(
+        require_permissions(Permission.MANAGE_ACCOUNTS)
+    ),
+) -> StaffPasswordSetResponse:
+    from uuid import UUID as _UUID
+
+    try:
+        uid = _UUID(str(account_id))
+    except ValueError:
+        raise ApiProblem(404, "account_not_found", "Akun tidak ditemukan.")
+    user = session.get(User, uid)
+    if user is None:
+        raise ApiProblem(404, "account_not_found", "Akun tidak ditemukan.")
+    user.password_hash = hash_password(request.new_password)
+    user.must_change_password = False
+    user.auth_token_version += 1
+    session.query(AuthSession).filter(
+        AuthSession.user_id == user.id,
+        AuthSession.revoked_at.is_(None),
+    ).update(
+        {AuthSession.revoked_at: func.now()},
+        synchronize_session=False,
+    )
+    session.add(
+        AuditLog(
+            action="account.password_set",
+            actor_user_id=principal.id,
+            entity_type="user",
+            entity_id=user.id,
+            after_state={"must_change_password": False},
+        )
+    )
+    session.commit()
+    return StaffPasswordSetResponse(
+        id=user.id,
+        email=user.email,
+        must_change_password=False,
     )
 
 

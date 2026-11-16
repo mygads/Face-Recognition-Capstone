@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import UiDrawer from '../components/ui/UiDrawer.vue'
 import { UiButton, UiInput, UiPageHeader, UiSelect } from '../components/ui'
 import {
   addClassLaboratory,
@@ -21,6 +22,7 @@ import {
   removeTeacherAssignment,
   resetStaffPassword,
   revokeOptionalPermission,
+  setStaffPassword,
   updateStaffAccount,
   type Account,
   type AccountDetail,
@@ -97,6 +99,11 @@ const selectedClassLabClass = ref('')
 const selectedClassLabLab = ref('')
 const resetResult = ref<string | null>(null)
 const manageMessage = ref<string | null>(null)
+const managingId = ref<string | null>(null)
+const newPassword = ref('')
+const setPasswordMessage = ref<string | null>(null)
+const setPasswordError = ref<string | null>(null)
+const isSettingPassword = ref(false)
 
 async function loadAccounts(): Promise<void> {
   isLoadingAccounts.value = true
@@ -122,9 +129,14 @@ async function loadLabs(): Promise<void> {
 }
 
 async function selectAccount(account: Account): Promise<void> {
+  if (managingId.value) return
+  managingId.value = account.id
   detailError.value = null
   manageMessage.value = null
   resetResult.value = null
+  setPasswordMessage.value = null
+  setPasswordError.value = null
+  newPassword.value = ''
   try {
     selectedDetail.value = await getStaffAccount(account.id)
     editName.value = selectedDetail.value.full_name
@@ -143,7 +155,16 @@ async function selectAccount(account: Account): Promise<void> {
     editDeactivationReason.value = ''
   } catch (error) {
     detailError.value = formatError(error)
+  } finally {
+    managingId.value = null
   }
+}
+
+function closeManage(): void {
+  selectedDetail.value = null
+  newPassword.value = ''
+  setPasswordMessage.value = null
+  setPasswordError.value = null
 }
 
 async function saveAccount(): Promise<void> {
@@ -177,6 +198,28 @@ async function doReset(): Promise<void> {
     manageMessage.value = 'Kata sandi direset. Berikan sandi sementara baru ke staf.'
   } catch (error) {
     detailError.value = formatError(error)
+  }
+}
+
+async function doSetPassword(): Promise<void> {
+  if (!selectedDetail.value || isSettingPassword.value) return
+  setPasswordError.value = null
+  setPasswordMessage.value = null
+  const value = newPassword.value
+  if (value.length < 8) {
+    setPasswordError.value = 'Kata sandi minimal 8 karakter tanpa spasi.'
+    return
+  }
+  isSettingPassword.value = true
+  try {
+    await setStaffPassword(selectedDetail.value.id, value)
+    newPassword.value = ''
+    setPasswordMessage.value =
+      'Kata sandi diperbarui. Staf dapat langsung masuk memakai kata sandi baru.'
+  } catch (error) {
+    setPasswordError.value = formatError(error)
+  } finally {
+    isSettingPassword.value = false
   }
 }
 
@@ -440,9 +483,10 @@ async function copyTemporaryPassword(): Promise<void> {
             variant="secondary"
             type="button"
             :data-testid="'manage-' + account.id"
+            :disabled="managingId === account.id"
             @click="selectAccount(account)"
           >
-            Kelola
+            {{ managingId === account.id ? 'Membuka…' : 'Kelola' }}
           </UiButton>
         </li>
       </ul>
@@ -496,13 +540,13 @@ async function copyTemporaryPassword(): Promise<void> {
       </form>
     </section>
 
-    <section v-if="selectedDetail" class="master-data__panel" data-testid="account-manage">
-      <div class="master-data__panel-heading">
-        <div>
-          <p class="master-data__eyebrow">Kelola staf</p>
-          <h2>{{ selectedDetail.full_name }} · {{ selectedDetail.email }}</h2>
-        </div>
-      </div>
+    <UiDrawer
+      v-if="selectedDetail"
+      :title="`${selectedDetail.full_name} · ${selectedDetail.email}`"
+      subtitle="Kelola staf: status, role, penugasan, izin, dan kata sandi."
+      data-testid="account-manage"
+      @close="closeManage"
+    >
       <p v-if="detailError" class="master-data__alert" role="alert">{{ detailError }}</p>
       <p v-if="manageMessage" class="master-data__success" role="status">{{ manageMessage }}</p>
       <p class="accounts-view__hint">
@@ -555,6 +599,40 @@ async function copyTemporaryPassword(): Promise<void> {
       </form>
       <p v-if="resetResult" class="master-data__success" role="status">
         Sandi sementara baru: <code>{{ resetResult }}</code>
+      </p>
+      <h3>Tetapkan kata sandi langsung (admin)</h3>
+      <p class="accounts-view__hint">
+        Tetapkan kata sandi baru tanpa menampilkan sandi sementara. Sesi lama staf dicabut dan staf
+        dapat langsung masuk.
+      </p>
+      <form class="master-data__form" @submit.prevent="doSetPassword">
+        <label>
+          Kata sandi baru (min. 8 karakter, tanpa spasi)
+          <UiInput
+            v-model="newPassword"
+            type="password"
+            minlength="8"
+            maxlength="200"
+            autocomplete="new-password"
+            data-testid="set-password-input"
+          />
+        </label>
+        <div class="master-data__form-actions">
+          <UiButton
+            variant="primary"
+            type="submit"
+            :disabled="isSettingPassword || newPassword.length < 8"
+            data-testid="set-password-submit"
+          >
+            {{ isSettingPassword ? 'Menyimpan…' : 'Tetapkan kata sandi' }}
+          </UiButton>
+        </div>
+      </form>
+      <p v-if="setPasswordMessage" class="master-data__success" role="status">
+        {{ setPasswordMessage }}
+      </p>
+      <p v-if="setPasswordError" class="master-data__alert" role="alert">
+        {{ setPasswordError }}
       </p>
       <h3>Penugasan guru → kelas</h3>
       <p class="accounts-view__hint">
@@ -703,6 +781,6 @@ async function copyTemporaryPassword(): Promise<void> {
         dicentang membuka menu terkait (Jadwal → Sesi → Koreksi → Laporan/EWS). Tanpa lab yang
         ditugaskan, data lab tetap kosong (“Belum ada penugasan laboratorium”).
       </p>
-    </section>
+    </UiDrawer>
   </div>
 </template>

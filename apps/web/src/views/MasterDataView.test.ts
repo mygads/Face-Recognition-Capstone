@@ -26,6 +26,7 @@ const api = vi.hoisted(() => ({
   removeStudentFromClass: vi.fn(),
   previewStudentImport: vi.fn(),
   commitStudentImport: vi.fn(),
+  downloadStudentImportTemplate: vi.fn(),
 }))
 
 vi.mock('../api/client', () => ({
@@ -228,6 +229,53 @@ describe('master data view (Stitch B02)', () => {
     expect(commit.attributes('disabled')).toBeDefined()
     expect(api.commitStudentImport).not.toHaveBeenCalled()
     wrapper.unmount()
+  })
+
+  it('tombol unduh template mengunduh CSV contoh', async () => {
+    const blob = new Blob(['student_number,full_name,class_code\n'], { type: 'text/csv' })
+    api.downloadStudentImportTemplate.mockResolvedValue({
+      blob,
+      filename: 'template-import-siswa.csv',
+    })
+    const created = document.createElement.bind(document)
+    const urls: string[] = []
+    const originalCreateObjectURL = URL.createObjectURL
+    const originalRevokeObjectURL = URL.revokeObjectURL
+    // jsdom stub
+    URL.createObjectURL = function stubCreate(input: Blob): string {
+      void input
+      urls.push('blob:template')
+      return 'blob:template'
+    } as typeof URL.createObjectURL
+    // jsdom stub
+    URL.revokeObjectURL = () => undefined
+    const clicks: string[] = []
+    document.createElement = ((tag: string, ...rest: never[]) => {
+      const element = created(tag, ...rest) as HTMLElement
+      if (tag === 'a') {
+        element.click = () => {
+          clicks.push((element as HTMLAnchorElement).download)
+        }
+      }
+      return element
+    }) as typeof document.createElement
+    try {
+      const { wrapper } = await mountAt('/app/master-data/students', 'ADMIN')
+      await wrapper
+        .findAll('button')
+        .find((b) => b.text().includes('Impor Siswa'))!
+        .trigger('click')
+      await flushPromises()
+      await wrapper.find('[data-testid="download-import-template"]').trigger('click')
+      await flushPromises()
+      expect(api.downloadStudentImportTemplate).toHaveBeenCalled()
+      expect(clicks).toContain('template-import-siswa.csv')
+      wrapper.unmount()
+    } finally {
+      document.createElement = created
+      URL.createObjectURL = originalCreateObjectURL
+      URL.revokeObjectURL = originalRevokeObjectURL
+    }
   })
 
   it('tab kelas memuat daftar dan membuka detail beserta guru penugasan', async () => {

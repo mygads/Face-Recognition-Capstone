@@ -24,7 +24,6 @@ const SessionsView = () => import('../views/SessionsView.vue')
 const AiSetupView = () => import('../views/AiSetupView.vue')
 const CameraPreviewView = () => import('../views/CameraPreviewView.vue')
 const MyClassesView = () => import('../views/MyClassesView.vue')
-const CorrectionsView = () => import('../views/CorrectionsView.vue')
 const EwsView = () => import('../views/EwsView.vue')
 const KiosksView = () => import('../views/KiosksView.vue')
 const AttendancePolicyView = () => import('../views/AttendancePolicyView.vue')
@@ -277,28 +276,6 @@ export const routes: RouteRecordRaw[] = [
         },
       },
       {
-        path: 'corrections',
-        name: 'corrections',
-        component: CorrectionsView,
-        meta: {
-          title: 'Koreksi kehadiran',
-          description: 'Antrean pengajuan, keputusan, dan jejak sebelum/sesudah.',
-          requiredPermissions: ['attendance_correct'],
-          pageHeaderInView: true,
-        },
-      },
-      {
-        path: 'corrections/:correctionId',
-        name: 'correction-detail',
-        component: CorrectionsView,
-        meta: {
-          title: 'Detail koreksi',
-          description: 'Bukti, status lama, usulan, alasan, dan riwayat.',
-          requiredPermissions: ['attendance_correct'],
-          pageHeaderInView: true,
-        },
-      },
-      {
         path: 'attendance-policy',
         name: 'attendance-policy',
         component: AttendancePolicyView,
@@ -315,7 +292,7 @@ export const routes: RouteRecordRaw[] = [
         component: AuditView,
         meta: {
           title: 'Audit aktivitas',
-          description: 'Jejak perubahan akun, penugasan, koreksi, dan PIN.',
+          description: 'Jejak perubahan akun, penugasan, pembaruan langsung, dan PIN.',
           requiredRoles: ['ADMIN'],
           pageHeaderInView: true,
         },

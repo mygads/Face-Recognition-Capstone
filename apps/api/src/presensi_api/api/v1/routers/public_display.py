@@ -10,12 +10,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import time
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Cookie, Depends, Header, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import Field
 from sqlalchemy import func, select
@@ -39,6 +40,7 @@ from presensi_api.db.models import (
     KioskScreen,
     Laboratory,
     PracticumSchedule,
+    RecognitionEvent,
     SessionStudent,
 )
 from presensi_api.db.session import get_db_session, get_session_factory
@@ -47,6 +49,30 @@ from presensi_api.session_lifecycle import as_utc
 router = APIRouter(prefix="/public", tags=["public-display"])
 DbSession = Annotated[Session, Depends(get_db_session)]
 AuthDep = Annotated[AuthSettings, Depends(get_auth_settings)]
+
+
+def _resolve_display_token(
+    request: Request,
+    query_token: str | None,
+    authorization: str | None,
+    cookie_token: str | None,
+) -> str:
+    """Ambil token display tanpa mewajibkan query string.
+
+    Prioritas: header ``Authorization: Bearer <token>`` (dipakai fetch
+    streaming FE agar token tidak tercatat di URL/riwayat/proxy),
+    lalu cookie ``display_token`` (deployment same-origin), terakhir
+    query ``?token=`` (kompatibilitas EventSource lama).
+    """
+    header_token: str | None = None
+    if authorization:
+        scheme, _, value = authorization.partition(" ")
+        if scheme.lower() == "bearer" and value.strip():
+            header_token = value.strip()
+    for candidate in (header_token, cookie_token, query_token):
+        if candidate and 16 <= len(candidate) <= 1024:
+            return candidate
+    raise ApiProblem(401, "display_token_invalid", "Sesi layar tidak valid.")
 
 
 class PublicLaboratory(ApiSchema):
@@ -80,6 +106,8 @@ class KioskSpotlight(ApiSchema):
     full_name: str
     status: str
     recorded_at: str | None = None
+    recognition_event_id: UUID | None = None
+    source: str | None = None
 
 
 class KioskLiveUpdate(ApiSchema):
@@ -96,6 +124,7 @@ class KioskLiveUpdate(ApiSchema):
     waiting_count: int = 0
     total_roster: int = 0
     spotlight: KioskSpotlight | None = None
+    grace_period_minutes: int | None = None
     server_time: str
 
 
@@ -108,13 +137,16 @@ class PublicKioskOption(ApiSchema):
 class LabDisplaySessionRequest(ApiSchema):
     laboratory_id: UUID
     pin: str
-    light: bool = False
+    # Default ringan: roster tidak pernah keluar untuk kiosk kecuali
+    # diminta eksplisit (?light=false hanya untuk operator).
+    light: bool = True
 
 
 class KioskDisplaySessionRequest(ApiSchema):
     device_id: UUID
     pin: str
-    light: bool = False
+    # Default ringan: lihat LabDisplaySessionRequest.
+    light: bool = True
 
 
 class DisplaySessionResponse(ApiSchema):
@@ -216,8 +248,18 @@ def _find_active_session(lab: Laboratory, session: Session) -> AttendanceSession
     return None
 
 
-def _build_live_update(lab: Laboratory, session: Session) -> KioskLiveUpdate:
-    """Agregat ringan untuk SSE: hitungan + 1 hasil terbaru, tanpa roster."""
+def _build_live_update(
+    lab: Laboratory, session: Session, device_id: UUID | None = None
+) -> KioskLiveUpdate:
+    """Agregat ringan untuk SSE: hitungan lab + 1 sorotan, tanpa roster.
+
+    - Agregat (present/late/waiting/total) selalu cakupan laboratorium.
+    - Sorotan kiosk (device_id terisi): hanya record face_recognition yang
+      event-nya berasal dari perangkat itu. Record manual / perangkat lain
+      tidak pernah menjadi sorotan scan kiosk ini.
+    - Sorotan lab (device_id None): hasil terbaru lab apa pun, beserta
+      ``source`` agar UI dapat membedakan hasil scan vs pencatatan manual.
+    """
     active = _find_active_session(lab, session)
     if active is None:
         return KioskLiveUpdate(
@@ -256,32 +298,74 @@ def _build_live_update(lab: Laboratory, session: Session) -> KioskLiveUpdate:
         )
         or 0
     )
-    latest = session.execute(
-        select(
-            SessionStudent.full_name_snapshot,
-            AttendanceRecord.status,
-            AttendanceRecord.recorded_at,
-        )
-        .join(
-            AttendanceRecord,
-            (AttendanceRecord.session_id == SessionStudent.session_id)
-            & (AttendanceRecord.student_id == SessionStudent.student_id),
-        )
-        .where(
-            SessionStudent.session_id == active.id,
-            AttendanceRecord.status.in_(["present", "late"]),
-        )
-        .order_by(AttendanceRecord.recorded_at.desc())
-        .limit(1)
-    ).first()
     spotlight: KioskSpotlight | None = None
-    if latest is not None:
-        name, status, recorded_at = latest
-        spotlight = KioskSpotlight(
-            full_name=name,
-            status=status,
-            recorded_at=as_utc(recorded_at).isoformat() if recorded_at else None,
-        )
+    if device_id is None:
+        latest = session.execute(
+            select(
+                SessionStudent.full_name_snapshot,
+                AttendanceRecord.status,
+                AttendanceRecord.recorded_at,
+                AttendanceRecord.recognition_event_id,
+                AttendanceRecord.source,
+            )
+            .join(
+                AttendanceRecord,
+                (AttendanceRecord.session_id == SessionStudent.session_id)
+                & (AttendanceRecord.student_id == SessionStudent.student_id),
+            )
+            .where(
+                SessionStudent.session_id == active.id,
+                AttendanceRecord.status.in_(["present", "late"]),
+            )
+            .order_by(AttendanceRecord.recorded_at.desc())
+            .limit(1)
+        ).first()
+        if latest is not None:
+            name, status, recorded_at, event_id, source = latest
+            spotlight = KioskSpotlight(
+                full_name=name,
+                status=status,
+                recorded_at=as_utc(recorded_at).isoformat() if recorded_at else None,
+                recognition_event_id=event_id,
+                source=source,
+            )
+    else:
+        latest = session.execute(
+            select(
+                SessionStudent.full_name_snapshot,
+                AttendanceRecord.status,
+                AttendanceRecord.recorded_at,
+                AttendanceRecord.recognition_event_id,
+                AttendanceRecord.source,
+            )
+            .join(
+                AttendanceRecord,
+                (AttendanceRecord.session_id == SessionStudent.session_id)
+                & (AttendanceRecord.student_id == SessionStudent.student_id),
+            )
+            .join(
+                RecognitionEvent,
+                RecognitionEvent.id == AttendanceRecord.recognition_event_id,
+            )
+            .where(
+                SessionStudent.session_id == active.id,
+                AttendanceRecord.status.in_(["present", "late"]),
+                AttendanceRecord.source == "face_recognition",
+                RecognitionEvent.device_id == device_id,
+                RecognitionEvent.session_id == active.id,
+            )
+            .order_by(AttendanceRecord.recorded_at.desc())
+            .limit(1)
+        ).first()
+        if latest is not None:
+            name, status, recorded_at, event_id, source = latest
+            spotlight = KioskSpotlight(
+                full_name=name,
+                status=status,
+                recorded_at=as_utc(recorded_at).isoformat() if recorded_at else None,
+                recognition_event_id=event_id,
+                source=source,
+            )
     return KioskLiveUpdate(
         laboratory_id=lab.id,
         laboratory_name=lab.name,
@@ -294,6 +378,7 @@ def _build_live_update(lab: Laboratory, session: Session) -> KioskLiveUpdate:
         waiting_count=max(total - present - late, 0),
         total_roster=total,
         spotlight=spotlight,
+        grace_period_minutes=active.grace_period_minutes,
         server_time=datetime.now(UTC).isoformat(),
     )
 
@@ -301,11 +386,40 @@ def _build_live_update(lab: Laboratory, session: Session) -> KioskLiveUpdate:
 async def _live_event_generator(
     kind: str, subject_id: UUID, laboratory_id: UUID
 ) -> AsyncGenerator[str, None]:
-    """Stream SSE: kirim snapshot ringan hanya saat berubah (hash), tick 1 dtk."""
+    """Stream SSE: kirim snapshot ringan hanya saat berubah (hash).
+
+    Push dalam proses: write path menaikkan versi via
+    ``display_notify.notify_display_changed`` sehingga generator
+    me-query ulang segera (< 100 ms, bukan tick berikutnya). Jaring
+    pengaman: query ulang tiap ~10 bangun tanpa perubahan (mencakup
+    worker/proses lain) + ping tiap 15 tick agar proksi tidak menutup
+    koneksi idle.
+    """
+    from presensi_api.display_notify import (
+        current_display_version,
+        wait_for_display_version,
+    )
+
     last_digest = ""
     ticks = 0
+    last_seen_version = current_display_version()
+    last_query_at = 0.0
     while True:
         try:
+            version_changed = False
+            if ticks > 0:
+                new_version = await asyncio.to_thread(
+                    wait_for_display_version, last_seen_version, 1.0
+                )
+                version_changed = new_version != last_seen_version
+                last_seen_version = new_version
+            now = time.monotonic()
+            if not (ticks == 0 or version_changed or now - last_query_at >= 10.0):
+                ticks += 1
+                if ticks % 15 == 0:
+                    yield ": ping\n\n"
+                continue
+            last_query_at = now
             with get_session_factory()() as db:
                 lab = db.get(Laboratory, laboratory_id)
                 if lab is None or not lab.is_active:
@@ -326,7 +440,8 @@ async def _live_event_generator(
                     if kiosk is None or laboratory_id != lab.id:
                         yield 'event: error\ndata: {"code":"kiosk_not_found"}\n\n'
                         return
-                update = _build_live_update(lab, db)
+                device_scope = subject_id if kind == "kiosk" else None
+                update = _build_live_update(lab, db, device_id=device_scope)
             payload = update.model_dump(mode="json")
             digest = _snapshot_digest(payload)
             if digest != last_digest:
@@ -335,7 +450,6 @@ async def _live_event_generator(
             ticks += 1
             if ticks % 15 == 0:
                 yield ": ping\n\n"
-            await asyncio.sleep(1)
         except (asyncio.CancelledError, GeneratorExit):
             break
         except Exception:
@@ -443,12 +557,16 @@ def open_lab_display_session(
     summary="Public display snapshot (short-lived token, no login)",
 )
 def get_public_display(
+    request: Request,
     session: DbSession,
     settings: AuthDep,
-    token: Annotated[str, Query(min_length=16, max_length=1024)],
-    light: Annotated[bool, Query()] = False,
+    token: Annotated[str | None, Query(min_length=16, max_length=1024)] = None,
+    light: Annotated[bool, Query()] = True,
+    authorization: Annotated[str | None, Header()] = None,
+    display_token: Annotated[str | None, Cookie()] = None,
 ) -> PublicDisplayResponse:
-    claims = decode_display_token(token, settings)
+    resolved = _resolve_display_token(request, token, authorization, display_token)
+    claims = decode_display_token(resolved, settings)
     if claims is None or claims.kind != "lab":
         raise ApiProblem(401, "display_token_invalid", "Sesi layar tidak valid.")
     lab = session.get(Laboratory, claims.laboratory_id)
@@ -490,7 +608,9 @@ def open_kiosk_display_session(
         raise
     kiosk.last_seen_at = datetime.now(UTC)
     session.commit()
-    token, ttl = issue_display_token("kiosk", device.id, lab.id, settings)
+    token, ttl = issue_display_token(
+        "kiosk", device.id, lab.id, settings, ttl_hours=kiosk.token_ttl_hours
+    )
     return DisplaySessionResponse(
         display_token=token,
         expires_in_seconds=ttl,
@@ -505,12 +625,16 @@ def open_kiosk_display_session(
     summary="Public kiosk snapshot (short-lived token, no login)",
 )
 def get_kiosk_display(
+    request: Request,
     session: DbSession,
     settings: AuthDep,
-    token: Annotated[str, Query(min_length=16, max_length=1024)],
-    light: Annotated[bool, Query()] = False,
+    token: Annotated[str | None, Query(min_length=16, max_length=1024)] = None,
+    light: Annotated[bool, Query()] = True,
+    authorization: Annotated[str | None, Header()] = None,
+    display_token: Annotated[str | None, Cookie()] = None,
 ) -> PublicDisplayResponse:
-    claims = decode_display_token(token, settings)
+    resolved = _resolve_display_token(request, token, authorization, display_token)
+    claims = decode_display_token(resolved, settings)
     if claims is None or claims.kind != "kiosk":
         raise ApiProblem(401, "display_token_invalid", "Sesi layar tidak valid.")
     device = session.get(Device, claims.subject_id)
@@ -607,11 +731,15 @@ def _require_lab_stream_target(
     summary="SSE live kiosk updates (lab token, no login)",
 )
 def stream_lab_display(
+    request: Request,
     session: DbSession,
     settings: AuthDep,
-    token: Annotated[str, Query(min_length=16, max_length=1024)],
+    token: Annotated[str | None, Query(min_length=16, max_length=1024)] = None,
+    authorization: Annotated[str | None, Header()] = None,
+    display_token: Annotated[str | None, Cookie()] = None,
 ) -> StreamingResponse:
-    claims = decode_display_token(token, settings)
+    resolved = _resolve_display_token(request, token, authorization, display_token)
+    claims = decode_display_token(resolved, settings)
     if claims is None or claims.kind != "lab":
         raise ApiProblem(401, "display_token_invalid", "Sesi layar tidak valid.")
     _require_lab_stream_target("lab", claims.subject_id, claims.laboratory_id, session)
@@ -641,11 +769,15 @@ def stream_lab_display(
     summary="SSE live kiosk updates (kiosk token, no login)",
 )
 def stream_kiosk_display(
+    request: Request,
     session: DbSession,
     settings: AuthDep,
-    token: Annotated[str, Query(min_length=16, max_length=1024)],
+    token: Annotated[str | None, Query(min_length=16, max_length=1024)] = None,
+    authorization: Annotated[str | None, Header()] = None,
+    display_token: Annotated[str | None, Cookie()] = None,
 ) -> StreamingResponse:
-    claims = decode_display_token(token, settings)
+    resolved = _resolve_display_token(request, token, authorization, display_token)
+    claims = decode_display_token(resolved, settings)
     if claims is None or claims.kind != "kiosk":
         raise ApiProblem(401, "display_token_invalid", "Sesi layar tidak valid.")
     _require_lab_stream_target(
@@ -678,8 +810,19 @@ def _rotate_display_token(
     lab = session.get(Laboratory, claims.laboratory_id)
     if lab is None or not lab.is_active:
         raise ApiProblem(404, "laboratory_not_found", "Laboratorium tidak ditemukan.")
+    kiosk_ttl: int | None = None
+    if kind == "kiosk":
+        kiosk_row = session.scalar(
+            select(KioskScreen).where(
+                KioskScreen.device_id == claims.subject_id,
+                KioskScreen.laboratory_id == claims.laboratory_id,
+                KioskScreen.is_active.is_(True),
+            )
+        )
+        if kiosk_row is not None:
+            kiosk_ttl = kiosk_row.token_ttl_hours
     token, ttl = issue_display_token(
-        kind, claims.subject_id, claims.laboratory_id, settings
+        kind, claims.subject_id, claims.laboratory_id, settings, ttl_hours=kiosk_ttl
     )
     return DisplaySessionResponse(
         display_token=token,

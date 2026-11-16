@@ -298,19 +298,21 @@ def test_manual_mark_unknown_and_outside_roster_students(
     assert outside.json()["error"]["code"] == "student_not_in_session_roster"
 
 
-def test_manual_mark_duplicate_conflicts_including_face_recognition_record(
+def test_manual_mark_updates_existing_record_directly_without_correction_flow(
     manual_marks_database: tuple[sessionmaker[Session], dict[str, UUID]],
 ) -> None:
+    """Pengganti alur koreksi: tandai manual langsung memperbarui catatan."""
     factory, ids = manual_marks_database
     first = post_mark(
         ids["session"], {"student_id": str(ids["first"]), "status": "present"}
     )
     assert first.status_code == 201
     duplicate = post_mark(
-        ids["session"], {"student_id": str(ids["first"]), "status": "late"}
+        ids["session"],
+        {"student_id": str(ids["first"]), "status": "late", "note": "ralat langsung"},
     )
-    assert duplicate.status_code == 409
-    assert duplicate.json()["error"]["code"] == "attendance_already_recorded"
+    assert duplicate.status_code == 201, duplicate.text
+    assert duplicate.json()["record"]["status"] == "late"
 
     with factory.begin() as db:
         laboratory = db.scalars(select(Laboratory)).one()
@@ -347,8 +349,8 @@ def test_manual_mark_duplicate_conflicts_including_face_recognition_record(
     over_recognition = post_mark(
         ids["session"], {"student_id": str(ids["second"]), "status": "late"}
     )
-    assert over_recognition.status_code == 409
-    assert over_recognition.json()["error"]["code"] == "attendance_already_recorded"
+    assert over_recognition.status_code == 201, over_recognition.text
+    assert over_recognition.json()["record"]["status"] == "late"
 
 
 def test_manual_mark_on_inactive_session_conflicts(

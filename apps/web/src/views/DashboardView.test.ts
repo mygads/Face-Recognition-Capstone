@@ -9,11 +9,9 @@ const api = vi.hoisted(() => ({
   listLaboratories: vi.fn(),
   listDevices: vi.fn(),
   listAttendanceSessions: vi.fn(),
-  listAttendanceCorrections: vi.fn(),
   listAtRiskStudents: vi.fn(),
   listMyClasses: vi.fn(),
   listLaborantAssignments: vi.fn(),
-  getSessionRoster: vi.fn(),
 }))
 
 vi.mock('../api/client', () => ({
@@ -43,20 +41,6 @@ const sessions = [
     student_count: 28,
   },
 ]
-const corrections = [
-  {
-    id: 'corr-1',
-    attendance_record_id: null,
-    session_id: 'sess-1',
-    student_id: 'stu-1',
-    previous_status: 'absent',
-    corrected_status: 'present',
-    decision_status: 'pending',
-    reason: 'Kamera tertutup saat masuk',
-    created_at: '2026-11-06T06:00:00Z',
-    decided_at: null,
-  },
-]
 const atRisk = {
   items: [
     {
@@ -73,7 +57,6 @@ const atRisk = {
     },
   ],
 }
-const roster = [{ student_id: 'stu-1', student_number: '2403', full_name: 'Tio Mahendra' }]
 
 function testRouter() {
   return createRouter({
@@ -81,7 +64,6 @@ function testRouter() {
     routes: [
       { path: '/app/dashboard', name: 'dashboard', component: { template: '<div />' } },
       { path: '/app/sessions/:id', name: 'session-detail', component: { template: '<div />' } },
-      { path: '/app/corrections', name: 'corrections', component: { template: '<div />' } },
       { path: '/app/ews', name: 'ews', component: { template: '<div />' } },
       { path: '/app/accounts', name: 'accounts', component: { template: '<div />' } },
       { path: '/app/my-classes', name: 'my-classes', component: { template: '<div />' } },
@@ -130,7 +112,6 @@ beforeEach(() => {
   api.listLaboratories.mockResolvedValue({ items: labs })
   api.listDevices.mockResolvedValue({ items: devices, pagination: { total: 1 } })
   api.listAttendanceSessions.mockResolvedValue({ items: sessions, pagination: { total: 1 } })
-  api.listAttendanceCorrections.mockResolvedValue({ items: corrections, pagination: { total: 1 } })
   api.listAtRiskStudents.mockResolvedValue(atRisk)
   api.listMyClasses.mockResolvedValue({
     items: [{ id: 'c1', name: 'XI IPA 1', academic_year: '2026/2027' }],
@@ -138,11 +119,10 @@ beforeEach(() => {
   api.listLaborantAssignments.mockResolvedValue({
     items: [{ laboratory_id: 'lab-1', code: 'KIM1', name: 'Lab Kimia 1' }],
   })
-  api.getSessionRoster.mockResolvedValue(roster)
 })
 
 describe('dashboard admin ala Stitch B01-03', () => {
-  it('menampilkan KPI, kartu lab, dan antrean koreksi', async () => {
+  it('menampilkan KPI, kartu lab, dan aksi operasional', async () => {
     const wrapper = mount(DashboardView, {
       global: { plugins: [piniaWith(adminAccount), testRouter()] },
     })
@@ -151,11 +131,11 @@ describe('dashboard admin ala Stitch B01-03', () => {
     expect(text).toContain('Dashboard Admin')
     expect(text).toContain('Sesi Praktikum Aktif')
     expect(text).toContain('Kesiapan Perangkat Kamera')
-    expect(text).toContain('Antrean Koreksi Kehadiran')
+    expect(text).toContain('Aksi Cepat Operasional')
     expect(text).toContain('Siswa Terpantau EWS')
     expect(text).toContain('Lab Kimia 1')
-    expect(text).toContain('Tinjau Koreksi')
-    expect(text).toContain('Tio Mahendra')
+    expect(text).toContain('Buka Sesi Presensi')
+    expect(text).toContain('melewati ambang')
   })
 })
 

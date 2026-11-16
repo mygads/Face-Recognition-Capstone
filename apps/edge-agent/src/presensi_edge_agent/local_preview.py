@@ -157,27 +157,54 @@ class LocalCameraPreview:
         """Build the unauthenticated kiosk hint: generic state, no identity.
 
         Only loopback callers reach this (enforced in the HTTP handler).
-        Never include display names, face boxes, or calibration data here.
+        Never include display names, embeddings, or calibration data here.
+        Faces carry normalized box + landmarks + quality flags only, so the
+        kiosk can draw the same skeleton overlay as the operator preview.
+        Up to 5 faces; empty when the observation is stale.
         """
         with self._lock:
             status = dict(self._status)
-        observation = status.get("camera_observation")
+            observation = status.get("camera_observation")
+            fresh = self._observation_fresh_locked()
         face_count = (
             observation.get("face_count") if isinstance(observation, dict) else 0
         )
-        face_present = (
-            type(face_count) is int
-            and face_count > 0
-            and self._observation_fresh_locked()
-        )
+        if type(face_count) is not int:
+            face_count = 0
+        face_present = face_count > 0 and fresh
         attendance = status.get("attendance_result")
         state = status.get("recognition_state")
+        faces: list[dict[str, object]] = []
+        if fresh and isinstance(observation, dict):
+            raw_faces = observation.get("faces")
+            if isinstance(raw_faces, list):
+                for entry in raw_faces[:5]:
+                    if not isinstance(entry, dict):
+                        continue
+                    landmarks = entry.get("landmarks")
+                    faces.append(
+                        {
+                            "x": entry.get("x", 0.0),
+                            "y": entry.get("y", 0.0),
+                            "width": entry.get("width", 0.0),
+                            "height": entry.get("height", 0.0),
+                            "landmarks": landmarks
+                            if isinstance(landmarks, list)
+                            else [],
+                            "acceptable": entry.get("acceptable") is True,
+                            "quality_score": entry.get("quality_score"),
+                            "reason_codes": entry.get("reason_codes")
+                            if isinstance(entry.get("reason_codes"), list)
+                            else [],
+                        }
+                    )
         return {
             "session_active": status.get("session_active") is True,
             "camera_open": status.get("camera_open") is True,
             "recognition_state": state if isinstance(state, str) else None,
             "face_present": face_present,
-            "face_count": face_count if type(face_count) is int else 0,
+            "face_count": face_count,
+            "faces": faces,
             "attendance_result": attendance if isinstance(attendance, str) else None,
             "updated_at": status.get("updated_at"),
         }
@@ -581,6 +608,61 @@ class LocalCameraPreview:
                 self.end_headers()
                 self.wfile.write(body)
 
+            def _serve_kiosk_stream(self) -> None:
+                # MJPEG loopback tanpa token untuk layar kiosk di PC yang sama.
+                # Single-owner: browser kiosk TIDAK membuka kamera sendiri;
+                # frame yang ditampilkan adalah frame agent yang sama dengan
+                # inference. Tidak memuat identitas; hanya piksel JPEG.
+                if not self._loopback_host_ok():
+                    self.send_error(403)
+                    return
+                with preview._lock:
+                    jpeg = preview._jpeg_frame
+                if jpeg is None:
+                    self.send_error(503)
+                    return
+                preview.note_kiosk_hint_hit()
+                self.send_response(200)
+                self.send_header(
+                    "Content-Type",
+                    "multipart/x-mixed-replace; boundary=presensi-frame",
+                )
+                self.send_header("Cache-Control", "no-store, max-age=0")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                boundary = b"--presensi-frame\r\n"
+                min_interval = 1.0 / max(1, min(30, preview.config.camera.fps))
+                last_sent_at = 0.0
+                stream_started = time.monotonic()
+                try:
+                    while True:
+                        if (
+                            time.monotonic() - stream_started
+                            > _PREVIEW_SESSION_TTL_SECONDS
+                        ):
+                            return
+                        with preview._lock:
+                            jpeg = preview._jpeg_frame
+                            frame_at = preview._last_frame_at
+                        if jpeg is None or frame_at <= last_sent_at:
+                            time.sleep(min_interval)
+                            continue
+                        part = (
+                            boundary
+                            + b"Content-Type: image/jpeg\r\nContent-Length: "
+                            + str(len(jpeg)).encode()
+                            + b"\r\n\r\n"
+                            + jpeg
+                            + b"\r\n"
+                        )
+                        self.wfile.write(part)
+                        self.wfile.flush()
+                        last_sent_at = frame_at
+                        preview.note_kiosk_hint_hit()
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+
             def _serve_stream(self, supplied: str) -> None:
                 # MJPEG multipart: satu koneksi HTTP untuk semua frame,
                 # tanpa handshake per-frame seperti polling /v1/frame.jpg.
@@ -645,7 +727,7 @@ class LocalCameraPreview:
                     return
 
             def do_OPTIONS(self) -> None:
-                if urlsplit(self.path).path == "/v1/kiosk-hint":
+                if urlsplit(self.path).path in ("/v1/kiosk-hint", "/v1/kiosk-stream"):
                     if not self._loopback_host_ok():
                         self.send_error(403)
                         return
@@ -771,6 +853,9 @@ class LocalCameraPreview:
                 path_only = urlsplit(self.path).path
                 if path_only == "/v1/kiosk-hint":
                     self._serve_kiosk_hint()
+                    return
+                if path_only == "/v1/kiosk-stream":
+                    self._serve_kiosk_stream()
                     return
                 if path_only == "/v1/stream":
                     # <img> tidak mengirim Origin/header kustom: cukup cek

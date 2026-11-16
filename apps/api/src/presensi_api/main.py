@@ -135,6 +135,21 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # server looks healthy (R27: live restart without the secret served 503
     # until the env gap was found). Crash here with a clear message instead.
     AuthSettings.from_environment()
+    from presensi_api.display_notify import (
+        start_pg_display_listener,
+        stop_pg_display_listener,
+    )
+
+    # Push SSE lintas proses: LISTEN Postgres best-effort. Tanpa Postgres
+    # (sqlite/dev) atau bila koneksi gagal, generator tetap memakai
+    # in-process notify + safety re-query — server tidak boleh crash.
+    try:
+        pg_push = start_pg_display_listener()
+    except Exception as exc:  # pragma: no cover - defensif
+        logger.warning("PG display listener gagal dipasang (%s)", exc)
+        pg_push = False
+    if not pg_push:
+        logger.info("PG display listener nonaktif; push SSE in-process saja.")
     worker = asyncio.create_task(_session_auto_close_worker())
     try:
         yield
@@ -142,6 +157,10 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         worker.cancel()
         with suppress(asyncio.CancelledError):
             await worker
+        try:
+            stop_pg_display_listener()
+        except Exception:  # pragma: no cover - defensif
+            pass
 
 
 app = FastAPI(

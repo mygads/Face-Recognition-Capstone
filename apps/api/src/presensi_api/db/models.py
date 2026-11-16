@@ -584,78 +584,6 @@ class AttendanceRecord(UUIDPrimaryKey, TimestampMixin, Base):
     note: Mapped[str | None] = mapped_column(Text)
 
 
-class AttendanceCorrection(UUIDPrimaryKey, TimestampMixin, Base):
-    __tablename__ = "attendance_corrections"
-    __table_args__ = (
-        CheckConstraint(
-            "previous_status IN ('present', 'late', 'absent', 'excused')",
-            name="correction_previous_status",
-        ),
-        CheckConstraint(
-            "corrected_status IN ('present', 'late', 'absent', 'excused')",
-            name="correction_corrected_status",
-        ),
-        CheckConstraint(
-            "decision_status IN ('pending', 'approved', 'rejected')",
-            name="correction_decision",
-        ),
-        CheckConstraint("length(trim(reason)) > 0", name="correction_reason_required"),
-        CheckConstraint(
-            "(decision_status = 'pending' AND decided_at IS NULL AND "
-            "decided_by_user_id IS NULL) OR "
-            "(decision_status IN ('approved', 'rejected') AND "
-            "decided_at IS NOT NULL AND "
-            "decided_by_user_id IS NOT NULL)",
-            name="correction_decision_consistency",
-        ),
-        Index("ix_attendance_corrections_attendance_record_id", "attendance_record_id"),
-        Index("ix_attendance_corrections_requested_by_user_id", "requested_by_user_id"),
-        Index("ix_attendance_corrections_incident_ref", "incident_ref"),
-        Index(
-            "uq_correction_pending_record",
-            "attendance_record_id",
-            unique=True,
-            postgresql_where=text("decision_status = 'pending'"),
-            sqlite_where=text("decision_status = 'pending'"),
-        ),
-        Index(
-            "uq_correction_pending_missing",
-            "session_id",
-            "student_id",
-            unique=True,
-            postgresql_where=text("decision_status = 'pending'"),
-            sqlite_where=text("decision_status = 'pending'"),
-        ),
-    )
-
-    attendance_record_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("attendance_records.id", ondelete="RESTRICT"),
-    )
-    session_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("attendance_sessions.id", ondelete="RESTRICT"),
-    )
-    student_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("students.id", ondelete="RESTRICT")
-    )
-    requested_by_user_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
-    )
-    incident_ref: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), default=uuid4)
-    decided_by_user_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT")
-    )
-    previous_status: Mapped[str] = mapped_column(String(16), nullable=False)
-    corrected_status: Mapped[str] = mapped_column(String(16), nullable=False)
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
-    decision_status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="pending", server_default=text("'pending'")
-    )
-    decision_note: Mapped[str | None] = mapped_column(Text)
-    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
 class LaborantLabAssignment(TimestampMixin, Base):
     __tablename__ = "laborant_lab_assignments"
     # Unik per (user, lab) dijamin composite PK; UniqueConstraint terpisah
@@ -796,6 +724,7 @@ class KioskScreen(UUIDPrimaryKey, TimestampMixin, Base):
         Integer, nullable=False, default=0, server_default=text("0")
     )
     pin_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    token_ttl_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
     )

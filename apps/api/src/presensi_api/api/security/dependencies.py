@@ -110,7 +110,18 @@ def decode_browser_session_token(
         return None
 
 
-DISPLAY_TOKEN_TTL_HOURS = 8
+def _display_token_ttl_hours() -> int:
+    import os as _os
+
+    try:
+        raw = _os.getenv("KIOSK_DISPLAY_TOKEN_TTL_HOURS", "4")
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return 4
+    return min(12, max(1, value))
+
+
+DISPLAY_TOKEN_TTL_HOURS = _display_token_ttl_hours()
 DISPLAY_TOKEN_USE = "display"
 MAX_DISPLAY_PIN_ATTEMPTS = 5
 DISPLAY_PIN_LOCKOUT_MINUTES = 5
@@ -123,6 +134,13 @@ class DisplayTokenClaims:
     laboratory_id: UUID
 
 
+def _clamp_ttl_hours(value: int | None) -> int:
+    """Batasi TTL per kiosk ke 1..12 jam; None memakai default global."""
+    if value is None:
+        return _display_token_ttl_hours()
+    return min(12, max(1, value))
+
+
 def issue_display_token(
     kind: str,
     subject_id: UUID,
@@ -130,9 +148,10 @@ def issue_display_token(
     settings: AuthSettings,
     *,
     now: datetime | None = None,
+    ttl_hours: int | None = None,
 ) -> tuple[str, int]:
     issued_at = now or datetime.now(UTC)
-    expires_in_seconds = DISPLAY_TOKEN_TTL_HOURS * 3600
+    expires_in_seconds = _clamp_ttl_hours(ttl_hours) * 3600
     claims = {
         "sub": str(subject_id),
         "lab": str(laboratory_id),
