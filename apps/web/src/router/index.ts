@@ -24,7 +24,6 @@ const SessionsView = () => import('../views/SessionsView.vue')
 const AiSetupView = () => import('../views/AiSetupView.vue')
 const CameraPreviewView = () => import('../views/CameraPreviewView.vue')
 const MyClassesView = () => import('../views/MyClassesView.vue')
-const CorrectionsView = () => import('../views/CorrectionsView.vue')
 const EwsView = () => import('../views/EwsView.vue')
 const KiosksView = () => import('../views/KiosksView.vue')
 const AttendancePolicyView = () => import('../views/AttendancePolicyView.vue')
@@ -274,28 +273,6 @@ export const routes: RouteRecordRaw[] = [
           description:
             'Buat atau perbarui data acuan wajah siswa (berbeda dari data master identitas & keanggotaan kelas).',
           requiredPermissions: ['enrollment_manage'],
-        },
-      },
-      {
-        path: 'corrections',
-        name: 'corrections',
-        component: CorrectionsView,
-        meta: {
-          title: 'Koreksi kehadiran',
-          description: 'Antrean pengajuan, keputusan, dan jejak sebelum/sesudah.',
-          requiredPermissions: ['attendance_correct'],
-          pageHeaderInView: true,
-        },
-      },
-      {
-        path: 'corrections/:correctionId',
-        name: 'correction-detail',
-        component: CorrectionsView,
-        meta: {
-          title: 'Detail koreksi',
-          description: 'Bukti, status lama, usulan, alasan, dan riwayat.',
-          requiredPermissions: ['attendance_correct'],
-          pageHeaderInView: true,
         },
       },
       {

@@ -102,3 +102,33 @@ describe('enrollment revoke dialog', () => {
     expect(wrapper.find('[data-testid="revoke-identity"]').exists()).toBe(false)
   })
 })
+
+describe('enrollment camera source', () => {
+  it('opsi kamera lab menampilkan stream agent dan satu pemilik', async () => {
+    api.listClasses.mockResolvedValue({
+      items: [
+        {
+          id: 'class-1',
+          code: 'XII-RPL-1',
+          name: 'Kelas XII RPL 1',
+          academic_year: '2026-2027',
+          grade: 12,
+          homeroom_teacher_id: null,
+          is_active: true,
+        },
+      ],
+      pagination: { total: 1, limit: 100, offset: 0 },
+    })
+    api.listClassEnrollmentStatus.mockResolvedValue([pendingStudent])
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper
+      .find('[data-testid="enrollment-student-student-pending"] .st-rowbtn')
+      .trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="enrollment-source-lab"]').setValue('lab')
+    expect(wrapper.find('[data-testid="enrollment-lab-stream"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Satu kamera satu pemilik')
+    wrapper.unmount()
+  })
+})

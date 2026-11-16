@@ -25,6 +25,7 @@ import {
   UiStat,
   UiTextarea,
 } from '../components/ui'
+import FaceOverlay from '../components/FaceOverlay.vue'
 
 type CapturePhase = 'ready' | 'countdown' | 'capturing' | 'processing' | 'confirming' | 'complete'
 
@@ -49,6 +50,10 @@ const pendingCount = computed(
   () => students.value.filter((s) => s.template_status !== 'enrolled').length,
 )
 const videoElement = ref<HTMLVideoElement | null>(null)
+const labImageElement = ref<HTMLImageElement | null>(null)
+const cameraSource = ref<'device' | 'lab'>('device')
+const AGENT_STREAM_URL = 'http://127.0.0.1:8765/v1/kiosk-stream'
+const labStreamFailed = ref(false)
 const capturePhase = ref<CapturePhase>('ready')
 const countdownValue = ref(3)
 const captureIndex = ref(0)
@@ -154,16 +159,28 @@ onBeforeUnmount(() => {
 })
 
 function captureVideoFrame(): Promise<Blob> {
-  const video = videoElement.value
-  if (!video || video.videoWidth < 1 || video.videoHeight < 1) {
-    return Promise.reject(new Error('Kamera belum siap.'))
-  }
   const canvas = document.createElement('canvas')
-  canvas.width = video.videoWidth
-  canvas.height = video.videoHeight
-  const context = canvas.getContext('2d')
-  if (!context) return Promise.reject(new Error('Kamera belum siap.'))
-  context.drawImage(video, 0, 0, canvas.width, canvas.height)
+  if (cameraSource.value === 'lab') {
+    const image = labImageElement.value
+    if (!image || image.naturalWidth < 1 || image.naturalHeight < 1) {
+      return Promise.reject(new Error('Stream lab belum siap.'))
+    }
+    canvas.width = image.naturalWidth
+    canvas.height = image.naturalHeight
+    const context = canvas.getContext('2d')
+    if (!context) return Promise.reject(new Error('Kamera belum siap.'))
+    context.drawImage(image, 0, 0, canvas.width, canvas.height)
+  } else {
+    const video = videoElement.value
+    if (!video || video.videoWidth < 1 || video.videoHeight < 1) {
+      return Promise.reject(new Error('Kamera belum siap.'))
+    }
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    const context = canvas.getContext('2d')
+    if (!context) return Promise.reject(new Error('Kamera belum siap.'))
+    context.drawImage(video, 0, 0, canvas.width, canvas.height)
+  }
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (image) => (image ? resolve(image) : reject(new Error('Capture kamera gagal.'))),
@@ -184,21 +201,30 @@ async function startEnrollment(): Promise<void> {
   const currentFlow = ++flowVersion
 
   try {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error('Browser ini tidak dapat membuka kamera.')
+    if (cameraSource.value === 'lab') {
+      // Single-owner: kamera lab dipegang agent; browser hanya membaca
+      // stream MJPEG yang sama dengan inference, lalu capture via canvas.
+      stopCamera()
+      if (!labImageElement.value || labStreamFailed.value) {
+        throw new Error('Stream kamera lab belum tersedia di perangkat ini.')
+      }
+    } else {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Browser ini tidak dapat membuka kamera.')
+      }
+      const cameraStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+      })
+      if (currentFlow !== flowVersion) {
+        cameraStream.getTracks().forEach((track) => track.stop())
+        return
+      }
+      stream.value = cameraStream
+      if (!videoElement.value) throw new Error('Preview kamera tidak tersedia.')
+      videoElement.value.srcObject = stream.value
+      await videoElement.value.play()
     }
-    const cameraStream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
-    })
-    if (currentFlow !== flowVersion) {
-      cameraStream.getTracks().forEach((track) => track.stop())
-      return
-    }
-    stream.value = cameraStream
-    if (!videoElement.value) throw new Error('Preview kamera tidak tersedia.')
-    videoElement.value.srcObject = stream.value
-    await videoElement.value.play()
     capturePhase.value = 'countdown'
     for (let remaining = 3; remaining > 0; remaining -= 1) {
       countdownValue.value = remaining
@@ -497,8 +523,29 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
         >
       </template>
       <div v-if="selectedStudent" class="enrollment-view__capture-layout">
+        <div class="enrollment-view__source-toggle" role="radiogroup" aria-label="Sumber kamera">
+          <label>
+            <input v-model="cameraSource" type="radio" value="device" name="camera-source" />
+            Kamera perangkat ini
+          </label>
+          <label>
+            <input
+              v-model="cameraSource"
+              type="radio"
+              value="lab"
+              name="camera-source"
+              data-testid="enrollment-source-lab"
+            />
+            Kamera lab via agent
+          </label>
+        </div>
+        <p v-if="cameraSource === 'lab'" class="st-table__muted">
+          Satu kamera satu pemilik: stream lab berasal dari agent yang sama dengan pengenalan,
+          browser tidak membuka kamera kedua.
+        </p>
         <div class="enrollment-view__camera-frame">
           <video
+            v-if="cameraSource === 'device'"
             ref="videoElement"
             class="enrollment-view__camera"
             autoplay
@@ -507,7 +554,38 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             aria-label="Preview kamera siswa"
             data-testid="enrollment-camera"
           />
-          <div v-if="!stream" class="enrollment-view__camera-placeholder">
+          <img
+            v-else
+            ref="labImageElement"
+            :src="AGENT_STREAM_URL"
+            class="enrollment-view__camera"
+            alt="Stream kamera lab dari agent"
+            data-testid="enrollment-lab-stream"
+            @error="labStreamFailed = true"
+            @load="labStreamFailed = false"
+          />
+          <FaceOverlay
+            :faces="[
+              {
+                x: 0.28,
+                y: 0.18,
+                width: 0.44,
+                height: 0.55,
+                landmarks: [
+                  [0.38, 0.35],
+                  [0.55, 0.35],
+                  [0.465, 0.47],
+                  [0.4, 0.58],
+                  [0.53, 0.58],
+                ],
+              },
+            ]"
+            label="Sejajarkan wajah"
+          />
+          <div
+            v-if="cameraSource === 'device' && !stream"
+            class="enrollment-view__camera-placeholder"
+          >
             <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
               <rect x="5" y="11" width="28" height="26" rx="4" />
               <path d="m33 19 10-6v22l-10-6" />

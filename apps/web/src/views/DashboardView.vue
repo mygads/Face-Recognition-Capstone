@@ -3,16 +3,13 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   ApiError,
-  getSessionRoster,
   listAtRiskStudents,
-  listAttendanceCorrections,
   listAttendanceSessions,
   listDevices,
   listLaborantAssignments,
   listLaboratories,
   listMyClasses,
   type AtRiskStudentRow,
-  type AttendanceCorrectionResponse,
   type AttendanceSession,
   type Device,
   type Laboratory,
@@ -20,7 +17,6 @@ import {
 } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { formatDateTime } from '../utils/dateFormat'
-import { attendanceStatusLabel } from '../utils/attendanceStatus'
 import UiBadge from '../components/ui/UiBadge.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiCard from '../components/ui/UiCard.vue'
@@ -53,11 +49,9 @@ const dateFilter = ref('')
 const labs = ref<Laboratory[]>([])
 const devices = ref<Device[]>([])
 const activeSessions = ref<AttendanceSession[]>([])
-const pendingCorrections = ref<AttendanceCorrectionResponse[]>([])
 const atRisk = ref<AtRiskStudentRow[]>([])
 const myClasses = ref<SchoolClass[]>([])
 const myLabs = ref<{ laboratory_id: string; code: string | null; name: string | null }[]>([])
-const rosterNames = ref<Record<string, string>>({})
 
 const todayLabel = computed(() => {
   try {
@@ -101,32 +95,10 @@ function labDeviceCount(labName: string): number {
   return devices.value.filter((d) => d.laboratory_name === labName).length
 }
 
-function correctionStudent(id: string | null | undefined): string {
-  if (!id) return 'Siswa'
-  return rosterNames.value[id] ?? 'Siswa'
-}
-
 function atRiskReason(row: AtRiskStudentRow): string {
   if (row.reasons.includes('sering_terlambat'))
     return `Terlambat ${row.late_count}x dari ${row.total_sessions} sesi`
   return `Absen ${row.absent_count}x dari ${row.total_sessions} sesi`
-}
-
-async function resolveCorrectionNames(): Promise<void> {
-  const sessionIds = [
-    ...new Set(pendingCorrections.value.map((c) => c.session_id).filter(Boolean)),
-  ] as string[]
-  for (const sid of sessionIds.slice(0, 5)) {
-    try {
-      const roster = await getSessionRoster(sid)
-      for (const entry of roster) {
-        if (entry.student_id) rosterNames.value[entry.student_id] = entry.full_name
-        rosterNames.value[entry.student_number] = entry.full_name
-      }
-    } catch {
-      /* abaikan */
-    }
-  }
 }
 
 async function load(): Promise<void> {
@@ -134,17 +106,12 @@ async function load(): Promise<void> {
   pageError.value = null
   try {
     if (isAdmin.value) {
-      const [labPage, devPage, sessPage, corrPage, riskPage] = await Promise.all([
+      const [labPage, devPage, sessPage, riskPage] = await Promise.all([
         listLaboratories({ limit: 100, offset: 0 }).catch(() => ({ items: [] as Laboratory[] })),
         listDevices({ limit: 100, offset: 0 }).catch(() => ({ items: [] as Device[] })),
         listAttendanceSessions({ status: 'active', limit: 100, offset: 0 }).catch(() => ({
           items: [] as AttendanceSession[],
         })),
-        listAttendanceCorrections({ decision_status: 'pending', limit: 20, offset: 0 }).catch(
-          () => ({
-            items: [] as AttendanceCorrectionResponse[],
-          }),
-        ),
         listAtRiskStudents({ limit: 25, offset: 0 }).catch(() => ({
           items: [] as AtRiskStudentRow[],
         })),
@@ -152,20 +119,13 @@ async function load(): Promise<void> {
       labs.value = labPage.items ?? []
       devices.value = devPage.items ?? []
       activeSessions.value = sessPage.items ?? []
-      pendingCorrections.value = corrPage.items ?? []
       atRisk.value = (riskPage.items ?? []) as AtRiskStudentRow[]
-      await resolveCorrectionNames()
     } else if (isTeacher.value) {
-      const [clsPage, sessPage, corrPage, riskPage] = await Promise.all([
+      const [clsPage, sessPage, riskPage] = await Promise.all([
         listMyClasses({ limit: 50 }).catch(() => ({ items: [] as SchoolClass[] })),
         listAttendanceSessions({ status: 'active', limit: 100, offset: 0 }).catch(() => ({
           items: [] as AttendanceSession[],
         })),
-        listAttendanceCorrections({ decision_status: 'pending', limit: 20, offset: 0 }).catch(
-          () => ({
-            items: [] as AttendanceCorrectionResponse[],
-          }),
-        ),
         listAtRiskStudents({ limit: 25, offset: 0 }).catch(() => ({
           items: [] as AtRiskStudentRow[],
         })),
@@ -173,9 +133,7 @@ async function load(): Promise<void> {
       myClasses.value = clsPage.items ?? []
       const classNames = new Set(myClasses.value.map((c) => c.name))
       activeSessions.value = (sessPage.items ?? []).filter((s) => classNames.has(s.class_name))
-      pendingCorrections.value = corrPage.items ?? []
       atRisk.value = (riskPage.items ?? []) as AtRiskStudentRow[]
-      await resolveCorrectionNames()
     } else {
       const accountId = auth.account?.id
       const assign = accountId
@@ -221,7 +179,7 @@ onMounted(load)
       <template v-if="isAdmin">
         <UiPageHeader
           title="Dashboard Admin"
-          description="Ringkasan operasional presensi praktikum, infrastruktur dua laboratorium, dan antrean koreksi"
+          description="Ringkasan operasional presensi praktikum dan infrastruktur dua laboratorium"
         >
           <template #actions>
             <UiSelect v-model="labFilter" aria-label="Filter laboratorium">
@@ -254,12 +212,6 @@ onMounted(load)
                   devices.length ? Math.round((onlineDevices / devices.length) * 100) : 0
                 }}%</UiBadge
               >
-            </p>
-          </UiCard>
-          <UiCard>
-            <p class="st-kpi__label">Antrean Koreksi Kehadiran</p>
-            <p class="st-kpi__value">
-              {{ pendingCorrections.length }} <UiBadge tone="late">Menunggu</UiBadge>
             </p>
           </UiCard>
           <UiCard>
@@ -311,28 +263,33 @@ onMounted(load)
         </div>
 
         <div class="st-grid2">
-          <UiCard title="Antrean Koreksi Kehadiran">
+          <UiCard title="Aksi Cepat Operasional">
             <template #header
-              ><UiButton variant="primary" @click="go('/app/corrections')"
-                >Tinjau Koreksi</UiButton
+              ><UiButton variant="primary" @click="go('/app/sessions')"
+                >Buka Sesi Presensi</UiButton
               ></template
             >
             <div class="st-list">
-              <div v-for="c in pendingCorrections.slice(0, 5)" :key="c.id" class="st-listrow">
+              <div class="st-listrow">
                 <div>
-                  <p class="st-listrow__title">{{ correctionStudent(c.student_id) }}</p>
+                  <p class="st-listrow__title">Perbarui kehadiran langsung</p>
                   <p class="st-listrow__desc">
-                    Usulan: {{ attendanceStatusLabel(c.previous_status) }} →
-                    {{ attendanceStatusLabel(c.corrected_status) }} · {{ c.reason }}
+                    Guru dan aslab mengubah status hadir, terlambat, izin, atau absen langsung di
+                    halaman sesi tanpa antrean persetujuan.
                   </p>
                 </div>
-                <UiBadge tone="late">Menunggu</UiBadge>
+                <UiButton variant="text" @click="go('/app/sessions')">Ke Sesi</UiButton>
               </div>
-              <UiEmptyState
-                v-if="!pendingCorrections.length"
-                title="Antrean kosong"
-                description="Tidak ada pengajuan koreksi menunggu keputusan."
-              />
+              <div class="st-listrow">
+                <div>
+                  <p class="st-listrow__title">Daftarkan wajah siswa</p>
+                  <p class="st-listrow__desc">
+                    Pendaftaran wajah memakai kamera perangkat yang sama dengan pengenalan agar
+                    tidak berebut akses.
+                  </p>
+                </div>
+                <UiButton variant="text" @click="go('/app/enrollment')">Ke Pendaftaran</UiButton>
+              </div>
             </div>
           </UiCard>
           <UiCard title="Ringkasan EWS & Aktivitas Administrasi">
@@ -353,7 +310,7 @@ onMounted(load)
                 <div>
                   <p class="st-listrow__title">Audit aktivitas staf</p>
                   <p class="st-listrow__desc">
-                    Perubahan akun, penugasan, dan keputusan koreksi tercatat.
+                    Perubahan akun, penugasan, dan pembaruan kehadiran tercatat.
                   </p>
                 </div>
                 <UiButton variant="text" @click="go('/app/audit')">Audit</UiButton>
@@ -414,24 +371,13 @@ onMounted(load)
               />
             </div>
           </UiCard>
-          <UiCard title="Pengajuan Koreksi & Peringatan Dini">
+          <UiCard title="Peringatan Dini (EWS)">
             <template #header
               ><UiButton variant="text" @click="go('/app/ews')"
                 >Tindak Lanjut EWS</UiButton
               ></template
             >
             <div class="st-list">
-              <div v-for="c in pendingCorrections.slice(0, 3)" :key="c.id" class="st-listrow">
-                <div>
-                  <p class="st-listrow__title">
-                    {{ correctionStudent(c.student_id) }} · Ajukan Koreksi
-                  </p>
-                  <p class="st-listrow__desc">
-                    Usulan status {{ attendanceStatusLabel(c.corrected_status) }}
-                  </p>
-                </div>
-                <UiBadge tone="late">Menunggu Keputusan</UiBadge>
-              </div>
               <div
                 v-for="row in atRisk.slice(0, 3)"
                 :key="row.student_id"
@@ -445,9 +391,9 @@ onMounted(load)
                 <UiButton variant="text" @click="go('/app/ews')">Lihat Detail</UiButton>
               </div>
               <UiEmptyState
-                v-if="!pendingCorrections.length && !atRisk.length"
+                v-if="!atRisk.length"
                 title="Semua aman"
-                description="Tidak ada koreksi menunggu atau siswa terpantau."
+                description="Tidak ada siswa terpantau."
               />
             </div>
           </UiCard>

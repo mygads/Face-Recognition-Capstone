@@ -31,12 +31,6 @@ export const PERMISSION_META: Record<
     label: 'Baca Kehadiran',
     hint: 'Melihat hasil presensi sesi.',
   },
-  attendance_correct: {
-    group: 'Koreksi',
-    label: 'Ajukan Koreksi',
-    hint: 'Mengajukan koreksi dari sesi/laporan.',
-    needs: 'session_view atau reports_read',
-  },
   reports_read: {
     group: 'Laporan dan EWS',
     label: 'Lihat Laporan',

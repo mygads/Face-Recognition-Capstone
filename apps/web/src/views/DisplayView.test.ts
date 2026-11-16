@@ -329,3 +329,200 @@ describe('DisplayView sinyal agent lokal', () => {
     }
   })
 })
+
+describe('DisplayView kamera lokal', () => {
+  class FakeES {
+    static instances: FakeES[] = []
+    url: string
+    private handlers: Record<string, Array<(ev: unknown) => void>> = {}
+    constructor(url: string) {
+      this.url = url
+      FakeES.instances.push(this)
+    }
+    addEventListener(type: string, cb: (ev: unknown) => void): void {
+      this.handlers[type] = [...(this.handlers[type] ?? []), cb]
+    }
+    close(): void {}
+  }
+
+  it('menampilkan stream agent sebagai primer tanpa membuka kamera browser', async () => {
+    const g = globalThis as unknown as Record<string, unknown>
+    const realES = g['EventSource']
+    g['EventSource'] = FakeES
+    FakeES.instances = []
+    const fakeTrack = { stop: vi.fn() }
+    const fakeStream = { getTracks: () => [fakeTrack] }
+    Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true })
+    const realMediaDevices = window.navigator.mediaDevices
+    Object.defineProperty(window.navigator, 'mediaDevices', {
+      value: { getUserMedia: vi.fn(async () => fakeStream) },
+      configurable: true,
+    })
+    const realPlay = HTMLMediaElement.prototype.play
+    HTMLMediaElement.prototype.play = vi.fn(async () => undefined) as unknown as () => Promise<void>
+    api.openPublicDisplaySession.mockResolvedValueOnce({ display_token: 'tok-cam', snapshot })
+    const w = mount(DisplayView)
+    try {
+      await flushPromises()
+      await w.find('[data-testid="display-pin-input"]').setValue('1234')
+      await w.find('form').trigger('submit.prevent')
+      await flushPromises()
+      await flushPromises()
+      // Single-owner: browser tidak membuka kamera; stream agent yang tampil.
+      expect(window.navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled()
+      expect(w.find('[data-testid="display-agent-video"]').exists()).toBe(true)
+      // Fallback diagnostik: stream gagal lalu operator meminta kamera perangkat.
+      await w.find('[data-testid="display-agent-video"]').trigger('error')
+      await w
+        .findAll('button')
+        .find((b) => b.text().includes('diagnostik'))!
+        .trigger('click')
+      await flushPromises()
+      await flushPromises()
+      const video = w.find('[data-testid="display-local-video"]')
+      expect(video.exists()).toBe(true)
+      expect((video.element as unknown as { srcObject: unknown }).srcObject).toBe(fakeStream)
+    } finally {
+      w.unmount()
+      g['EventSource'] = realES
+      Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true })
+      Object.defineProperty(window.navigator, 'mediaDevices', {
+        value: realMediaDevices,
+        configurable: true,
+      })
+      HTMLMediaElement.prototype.play = realPlay
+    }
+  })
+})
+
+describe('DisplayView sorotan aman (grace + sumber + basi)', () => {
+  class FreshES {
+    static instances: FreshES[] = []
+    url: string
+    handlers: Record<string, Array<(ev: { data: string }) => void>> = {}
+    constructor(url: string) {
+      this.url = url
+      FreshES.instances.push(this)
+    }
+    addEventListener(type: string, cb: (ev: { data: string }) => void): void {
+      this.handlers[type] = [...(this.handlers[type] ?? []), cb]
+    }
+    emit(type: string, data: unknown): void {
+      for (const cb of this.handlers[type] ?? []) cb({ data: JSON.stringify(data) })
+    }
+    close(): void {}
+  }
+
+  async function mountWithSnapshot(snap: unknown) {
+    const g = globalThis as unknown as Record<string, unknown>
+    const realES = g['EventSource']
+    g['EventSource'] = FreshES
+    FreshES.instances = []
+    api.openPublicDisplaySession.mockResolvedValueOnce({ display_token: 'tok-x', snapshot: snap })
+    const w = mount(DisplayView)
+    await flushPromises()
+    await w.find('[data-testid="display-pin-input"]').setValue('1234')
+    await w.find('form').trigger('submit.prevent')
+    await flushPromises()
+    return { w, realES }
+  }
+
+  it('sorotan basi berlabel Hasil terakhir, bukan Hasil Dikonfirmasi', async () => {
+    const { w, realES } = await mountWithSnapshot(snapshot)
+    try {
+      const spot = w.find('[data-testid="display-spotlight"]')
+      expect(spot.exists()).toBe(true)
+      expect(spot.text()).toContain('Hasil terakhir')
+      expect(spot.text()).not.toContain('Hasil Dikonfirmasi')
+    } finally {
+      ;(globalThis as Record<string, unknown>)['EventSource'] = realES
+      w.unmount()
+    }
+  })
+
+  it('toleransi memakai grace_period_minutes dari server', async () => {
+    const g = globalThis as unknown as Record<string, unknown>
+    const realES = g['EventSource']
+    g['EventSource'] = FreshES
+    FreshES.instances = []
+    try {
+      api.openPublicDisplaySession.mockResolvedValueOnce({ display_token: 'tok-g', snapshot })
+      const w = mount(DisplayView)
+      await flushPromises()
+      await w.find('[data-testid="display-pin-input"]').setValue('1234')
+      await w.find('form').trigger('submit.prevent')
+      await flushPromises()
+      FreshES.instances[0].emit('snapshot', {
+        laboratory_id: 'lab-1',
+        laboratory_name: 'Lab Kimia 1',
+        session_id: 'ses-1',
+        subject: 'Uji Larutan',
+        status: 'active',
+        opened_at: null,
+        present_count: 1,
+        late_count: 1,
+        waiting_count: 1,
+        total_roster: 3,
+        grace_period_minutes: 20,
+        spotlight: {
+          full_name: 'Raka Pratama',
+          status: 'late',
+          recorded_at: new Date().toISOString(),
+          recognition_event_id: 'ev-1',
+          source: 'face_recognition',
+        },
+        server_time: new Date().toISOString(),
+      })
+      await flushPromises()
+      const spot = w.find('[data-testid="display-spotlight"]')
+      expect(spot.text()).toContain('Hasil Dikonfirmasi')
+      expect(spot.text()).toContain('20 menit')
+      expect(spot.text()).not.toContain('15 menit')
+      w.unmount()
+    } finally {
+      g['EventSource'] = realES
+    }
+  })
+
+  it('sorotan manual berlabel petugas, bukan hasil pindaian', async () => {
+    const g = globalThis as unknown as Record<string, unknown>
+    const realES = g['EventSource']
+    g['EventSource'] = FreshES
+    FreshES.instances = []
+    try {
+      api.openPublicDisplaySession.mockResolvedValueOnce({ display_token: 'tok-m', snapshot })
+      const w = mount(DisplayView)
+      await flushPromises()
+      await w.find('[data-testid="display-pin-input"]').setValue('1234')
+      await w.find('form').trigger('submit.prevent')
+      await flushPromises()
+      FreshES.instances[0].emit('snapshot', {
+        laboratory_id: 'lab-1',
+        laboratory_name: 'Lab Kimia 1',
+        session_id: 'ses-1',
+        subject: 'Uji Larutan',
+        status: 'active',
+        opened_at: null,
+        present_count: 1,
+        late_count: 0,
+        waiting_count: 2,
+        total_roster: 3,
+        grace_period_minutes: 15,
+        spotlight: {
+          full_name: 'Budi Santoso',
+          status: 'present',
+          recorded_at: new Date().toISOString(),
+          recognition_event_id: null,
+          source: 'manual',
+        },
+        server_time: new Date().toISOString(),
+      })
+      await flushPromises()
+      const spot = w.find('[data-testid="display-spotlight"]')
+      expect(spot.text()).toContain('Dicatat manual oleh petugas')
+      w.unmount()
+    } finally {
+      g['EventSource'] = realES
+    }
+  })
+})

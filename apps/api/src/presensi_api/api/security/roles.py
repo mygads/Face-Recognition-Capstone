@@ -31,7 +31,6 @@ class Permission(StrEnum):
     ATTENDANCE_MANUAL = "attendance_manual"
     ENROLLMENT_MANAGE = "enrollment_manage"
     ATTENDANCE_READ = "attendance_read"
-    ATTENDANCE_CORRECT = "attendance_correct"
     REPORTS_READ = "reports_read"
     REPORTS_EXPORT = "reports_export"
     EWS_READ = "ews_read"
@@ -50,7 +49,6 @@ ROLE_PERMISSIONS: dict[RoleCode, FrozenSet[Permission]] = {
             Permission.SESSION_OPERATE,
             Permission.ATTENDANCE_MANUAL,
             Permission.ATTENDANCE_READ,
-            Permission.ATTENDANCE_CORRECT,
             Permission.REPORTS_READ,
             Permission.REPORTS_EXPORT,
             Permission.EWS_READ,
@@ -75,7 +73,6 @@ LABORANT_GRANTABLE_PERMISSIONS: frozenset[Permission] = frozenset(
         Permission.SESSION_OPERATE,
         Permission.ATTENDANCE_MANUAL,
         Permission.ATTENDANCE_READ,
-        Permission.ATTENDANCE_CORRECT,
         Permission.REPORTS_READ,
         Permission.REPORTS_EXPORT,
         Permission.EWS_READ,
@@ -91,10 +88,6 @@ LABORANT_GRANTABLE_PERMISSIONS: frozenset[Permission] = frozenset(
 PERMISSION_PREREQUISITES: dict[Permission, tuple[Permission, ...]] = {
     Permission.SESSION_OPERATE: (Permission.SESSION_VIEW,),
     Permission.ATTENDANCE_MANUAL: (Permission.SESSION_VIEW,),
-    Permission.ATTENDANCE_CORRECT: (
-        Permission.SESSION_VIEW,
-        Permission.REPORTS_READ,
-    ),
     Permission.REPORTS_EXPORT: (Permission.REPORTS_READ,),
     Permission.EWS_FOLLOW_UP: (Permission.EWS_READ,),
 }

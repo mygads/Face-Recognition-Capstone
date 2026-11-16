@@ -414,11 +414,12 @@ onMounted(async () => {
       <span class="st-material-icon st-notice__icon" aria-hidden="true">info</span>
       <div class="st-notice__text">
         <strong>Status Rekonsiliasi Kehadiran Praktikum</strong>
-        <p>{{ summary.absent_count }} siswa berstatus absen sebelum proses koreksi manual admin.</p>
+        <p>
+          {{ summary.absent_count }} siswa berstatus absen dan dapat diperbarui langsung oleh
+          guru/aslab.
+        </p>
       </div>
-      <RouterLink class="st-btnlink" to="/app/corrections"
-        >Tinjau di Koreksi Kehadiran →</RouterLink
-      >
+      <RouterLink class="st-btnlink" to="/app/sessions">Perbarui di Sesi Presensi →</RouterLink>
     </div>
 
     <UiCard title="Daftar Presensi Peserta Praktikum" :subtitle="`${total} entri`">

@@ -105,12 +105,6 @@ const menuGroups = computed<MenuGroup[]>(() => {
             to: '/app/enrollment',
             testid: 'enrollment-link',
           },
-          {
-            label: 'Koreksi Kehadiran',
-            icon: 'edit_note',
-            to: '/app/corrections',
-            testid: 'corrections-link',
-          },
         ],
       },
       {
@@ -208,12 +202,6 @@ const menuGroups = computed<MenuGroup[]>(() => {
             to: '/app/sessions',
             testid: 'sessions-link',
           },
-          {
-            label: 'Koreksi Saya',
-            icon: 'edit_note',
-            to: '/app/corrections',
-            testid: 'corrections-link',
-          },
         ],
       },
       {
@@ -263,14 +251,6 @@ const menuGroups = computed<MenuGroup[]>(() => {
       icon: 'face',
       to: '/app/enrollment',
       testid: 'enrollment-link',
-    })
-  }
-  if (hasPerm('attendance_correct')) {
-    presensi.push({
-      label: 'Koreksi Saya',
-      icon: 'edit_note',
-      to: '/app/corrections',
-      testid: 'corrections-link',
     })
   }
   if (presensi.length) groups.push({ heading: 'Presensi', entries: presensi })

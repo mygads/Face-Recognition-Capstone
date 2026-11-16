@@ -8,8 +8,6 @@ import SessionsView from './SessionsView.vue'
 const api = vi.hoisted(() => ({
   listOpenableSchedules: vi.fn(),
   listAttendanceSessions: vi.fn(),
-  getSessionOpeningPolicy: vi.fn(),
-  saveSessionOpeningPolicy: vi.fn(),
   getOpeningPreference: vi.fn(),
   saveOpeningPreference: vi.fn(),
   openAttendanceSession: vi.fn(),
@@ -63,15 +61,6 @@ const overrideSession = {
   scheduled_end_at: '2026-10-05T04:00:00Z',
 }
 
-const policy = {
-  mode: 'manual',
-  auto_open_minutes_before: 0,
-  auto_open_minutes_after: 15,
-  default_grace_period_minutes: 15,
-  revision: 0,
-  updated_at: null,
-}
-
 function laboranPinia() {
   const pinia = createPinia()
   useAuthStore(pinia).$patch({
@@ -100,7 +89,7 @@ function teacherPinia() {
       full_name: 'Test Teacher',
       roles: ['TEACHER'],
       must_change_password: false,
-      permissions: ['schedule_read', 'session_view', 'attendance_manual', 'attendance_correct'],
+      permissions: ['schedule_read', 'session_view', 'attendance_manual'],
     },
   })
   return pinia
@@ -114,7 +103,6 @@ describe('sessions view', () => {
       items: [overrideSession],
       pagination: { total: 1, limit: 50, offset: 0 },
     })
-    api.getSessionOpeningPolicy.mockResolvedValue(policy)
     api.getOpeningPreference.mockResolvedValue({
       opening_mode: 'manual',
       updated_at: null,
@@ -320,7 +308,7 @@ describe('session close confirmation', () => {
         full_name: 'Test Teacher',
         roles: ['TEACHER'],
         must_change_password: false,
-        permissions: ['schedule_read', 'session_view', 'attendance_manual', 'attendance_correct'],
+        permissions: ['schedule_read', 'session_view', 'attendance_manual'],
       },
     })
     api.listOpenableSchedules.mockResolvedValue([])

@@ -8,6 +8,7 @@ from uuid import UUID
 from zipfile import BadZipFile, ZipFile
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from fastapi.responses import PlainTextResponse
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 from sqlalchemy import func, select
@@ -16,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from presensi_api.api.errors import OPENAPI_ERROR_RESPONSES, ApiProblem
 from presensi_api.api.security.dependencies import require_permissions
-from presensi_api.api.security.roles import Permission
+from presensi_api.api.security.roles import AuthenticatedUser, Permission
 from presensi_api.api.v1.schemas.common import ErrorDetail
 from presensi_api.api.v1.schemas.students import (
     StudentImportCommitResponse,
@@ -348,6 +349,32 @@ async def _validated_import(
         return _validate_rows(session, headers, rows, columns)
     finally:
         await upload.close()
+
+
+@router.get(
+    "/template",
+    response_class=PlainTextResponse,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Download student import CSV template",
+    description="Unduh template CSV import siswa (header + contoh).",
+)
+def download_student_import_template(
+    _principal: AuthenticatedUser = Depends(
+        require_permissions(Permission.MANAGE_MASTER_DATA)
+    ),
+) -> PlainTextResponse:
+    content = (
+        "student_number,full_name,class_code\n"
+        "2401,Contoh Siswa Satu,XI-IPA-1\n"
+        "2402,Contoh Siswa Dua,XI-IPA-1\n"
+    )
+    return PlainTextResponse(
+        content,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="template-import-siswa.csv"'
+        },
+    )
 
 
 @router.post(

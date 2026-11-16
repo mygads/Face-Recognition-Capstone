@@ -225,3 +225,206 @@ def test_snapshot_digest_ignores_server_time() -> None:
     assert display_module._snapshot_digest(changed) != display_module._snapshot_digest(
         tick_a
     )
+
+
+def _seed_kiosk_spotlight_scenario(
+    factory: sessionmaker[Session],
+) -> tuple[Laboratory, list[Device]]:
+    """Satu lab, dua perangkat, satu sesi aktif, record campur manual/kamera."""
+    from datetime import UTC, datetime, timedelta
+    from datetime import time as dtime
+    from uuid import uuid4
+
+    from presensi_api.db.models import (
+        AttendanceRecord,
+        AttendanceSession,
+        Device,
+        Laboratory,
+        PracticumSchedule,
+        RecognitionEvent,
+        SchoolClass,
+        SessionStudent,
+        Student,
+        User,
+    )
+
+    with factory.begin() as session:
+        lab = session.query(Laboratory).one()
+        dev_a = session.query(Device).one()
+        dev_b = Device(
+            laboratory_id=lab.id,
+            name="edge-pc-sse-02",
+            device_type="edge_pc",
+            deployment_profile="AI_EDGE",
+        )
+        session.add(dev_b)
+        session.flush()
+        teacher = User(
+            email="guru-kiosk@example.test",
+            full_name="Guru Kiosk",
+            password_hash="x",
+        )
+        session.add(teacher)
+        session.flush()
+        cls = SchoolClass(
+            code="X-K", name="Kelas X K", grade=10, academic_year="2026-2027"
+        )
+        session.add(cls)
+        session.flush()
+        sched = PracticumSchedule(
+            class_id=cls.id,
+            laboratory_id=lab.id,
+            teacher_user_id=teacher.id,
+            subject="Kimia",
+            weekday=0,
+            start_time=dtime(9, 0),
+            end_time=dtime(10, 0),
+            timezone_name="Asia/Jakarta",
+            effective_from=datetime.now(UTC).date(),
+            is_active=True,
+        )
+        session.add(sched)
+        session.flush()
+        opened_at = datetime.now(UTC).replace(microsecond=0) - timedelta(minutes=30)
+        att = AttendanceSession(
+            practicum_schedule_id=sched.id,
+            opened_by_user_id=teacher.id,
+            status="active",
+            opened_at=opened_at,
+            grace_period_minutes=20,
+        )
+        session.add(att)
+        session.flush()
+        s_cam_a = Student(student_number="K-A", full_name="Kamera A")
+        s_cam_b = Student(student_number="K-B", full_name="Kamera B")
+        s_man = Student(student_number="K-M", full_name="Manual M")
+        session.add_all([s_cam_a, s_cam_b, s_man])
+        session.flush()
+        for s in (s_cam_a, s_cam_b, s_man):
+            session.add(
+                SessionStudent(
+                    session_id=att.id,
+                    student_id=s.id,
+                    student_number_snapshot=s.student_number,
+                    full_name_snapshot=s.full_name,
+                )
+            )
+        session.flush()
+        base = opened_at
+        ev_a = RecognitionEvent(
+            event_uuid=uuid4(),
+            session_id=att.id,
+            device_id=dev_a.id,
+            recognized_student_id=s_cam_a.id,
+            occurred_at=base + timedelta(minutes=5),
+            outcome="matched",
+            model_name="SFace",
+            model_version="2021dec",
+        )
+        ev_b = RecognitionEvent(
+            event_uuid=uuid4(),
+            session_id=att.id,
+            device_id=dev_b.id,
+            recognized_student_id=s_cam_b.id,
+            occurred_at=base + timedelta(minutes=6),
+            outcome="matched",
+            model_name="SFace",
+            model_version="2021dec",
+        )
+        session.add_all([ev_a, ev_b])
+        session.flush()
+        session.add(
+            AttendanceRecord(
+                session_id=att.id,
+                student_id=s_cam_a.id,
+                recognition_event_id=ev_a.id,
+                status="present",
+                source="face_recognition",
+                recorded_at=base + timedelta(minutes=5),
+                occurred_at=base + timedelta(minutes=5),
+            )
+        )
+        session.add(
+            AttendanceRecord(
+                session_id=att.id,
+                student_id=s_cam_b.id,
+                recognition_event_id=ev_b.id,
+                status="present",
+                source="face_recognition",
+                recorded_at=base + timedelta(minutes=6),
+                occurred_at=base + timedelta(minutes=6),
+            )
+        )
+        # Manual TERBARU: tidak boleh membajak sorotan kiosk per-perangkat.
+        session.add(
+            AttendanceRecord(
+                session_id=att.id,
+                student_id=s_man.id,
+                recognition_event_id=None,
+                status="present",
+                source="manual",
+                recorded_at=base + timedelta(minutes=10),
+            )
+        )
+    with factory() as session:
+        lab = session.query(Laboratory).one()
+        devs = session.query(Device).order_by(Device.name).all()
+        return lab, devs
+
+
+def test_kiosk_spotlight_only_own_device_scan(
+    stream_database: sessionmaker[Session],
+) -> None:
+    lab, devs = _seed_kiosk_spotlight_scenario(stream_database)
+    dev_a, dev_b = devs[0], devs[1]
+    with stream_database() as session:
+        lab_db = session.get(Laboratory, lab.id)
+        assert lab_db is not None
+        only_a = display_module._build_live_update(lab_db, session, device_id=dev_a.id)
+        assert only_a.spotlight is not None
+        assert only_a.spotlight.full_name == "Kamera A"
+        assert only_a.spotlight.source == "face_recognition"
+        assert only_a.spotlight.recognition_event_id is not None
+        only_b = display_module._build_live_update(lab_db, session, device_id=dev_b.id)
+        assert only_b.spotlight is not None
+        assert only_b.spotlight.full_name == "Kamera B"
+        # Agregat tetap lab-wide meski sorotan per-perangkat.
+        assert only_a.present_count == 3
+        assert only_b.present_count == 3
+        assert only_a.grace_period_minutes == 20
+
+
+def test_lab_spotlight_keeps_manual_with_source_and_grace(
+    stream_database: sessionmaker[Session],
+) -> None:
+    lab, _devs = _seed_kiosk_spotlight_scenario(stream_database)
+    with stream_database() as session:
+        lab_db = session.get(Laboratory, lab.id)
+        assert lab_db is not None
+        lab_wide = display_module._build_live_update(lab_db, session, device_id=None)
+        assert lab_wide.spotlight is not None
+        # Manual terbaru tetap tampil di layar lab, tetapi berlabel manual.
+        assert lab_wide.spotlight.full_name == "Manual M"
+        assert lab_wide.spotlight.source == "manual"
+        assert lab_wide.grace_period_minutes == 20
+
+
+def test_kiosk_generator_uses_per_device_spotlight(
+    stream_database: sessionmaker[Session],
+) -> None:
+    lab, devs = _seed_kiosk_spotlight_scenario(stream_database)
+    dev_a = devs[0]
+    with stream_database() as session:
+        kiosk = session.query(KioskScreen).one()
+        # Pastikan kiosk terikat ke perangkat pertama agar generator lolos.
+        kiosk.device_id = dev_a.id
+        session.commit()
+        gen = display_module._live_event_generator("kiosk", dev_a.id, lab.id)
+        kind, snap = _collect_first_event(gen)
+        asyncio.run(gen.aclose())
+    assert kind == "snapshot"
+    assert snap is not None
+    assert snap["spotlight"] is not None
+    assert snap["spotlight"]["full_name"] == "Kamera A"
+    assert snap["spotlight"]["source"] == "face_recognition"
+    assert snap["grace_period_minutes"] == 20

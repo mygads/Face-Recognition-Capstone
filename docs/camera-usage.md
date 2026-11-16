@@ -9,6 +9,15 @@ dan preview operasional lokal. Edge-agent menyediakan satu preview loopback yang
 bisa dibuka dashboard ADMIN/LABORANT pada host AI_EDGE. Live video tidak dikirim
 ke dashboard guru/komputer lain.
 
+## Satu kamera satu pemilik (PC lab)
+
+Di PC lab yang sama, hanya agent yang membuka kamera fisik (`OpenCVCamera`).
+Browser kiosk dan enrollment mode lab TIDAK memakai `getUserMedia`; keduanya
+membaca `GET /v1/kiosk-stream` (MJPEG loopback) + overlay `FaceOverlay.vue`
+dari `GET /v1/kiosk-hint` (`faces`: box + landmark + kualitas, tanpa identitas).
+Ini mencegah error "device busy" saat 1 kamera diakses dua proses. Perangkat
+operator yang berbeda tetap memakai kamera browsernya sendiri.
+
 ## Model YuNet dan SFace
 
 Setup lokal dan installer AI_EDGE mengunduh model ini secara otomatis. Untuk

@@ -42,16 +42,13 @@ export type TeacherOpeningPreferenceResponse =
 export type SessionRosterEntry = components['schemas']['SessionRosterEntry']
 export type ManualMarkRequest = components['schemas']['ManualMarkRequest']
 export type ManualMarkResponse = components['schemas']['ManualMarkResponse']
-export type AttendanceCorrectionRequest = components['schemas']['AttendanceCorrectionRequest']
-export type AttendanceCorrectionResponse = components['schemas']['AttendanceCorrectionResponse']
-export type AttendanceCorrectionDecisionRequest =
-  components['schemas']['AttendanceCorrectionDecisionRequest']
 export type StaffAccountCreate = components['schemas']['StaffAccountCreateRequest']
 export type StaffAccountCreated = components['schemas']['StaffAccountCreatedResponse']
 export type Account = components['schemas']['AccountResponse']
 export type AccountDetail = components['schemas']['AccountDetailResponse']
 export type StaffAccountUpdate = components['schemas']['StaffAccountUpdateRequest']
 export type StaffPasswordReset = components['schemas']['StaffPasswordResetResponse']
+export type StaffPasswordSet = components['schemas']['StaffPasswordSetResponse']
 export type EwsFollowUp = components['schemas']['EwsFollowUpResponse']
 export type PublicLaboratory = components['schemas']['PublicLaboratory']
 export type PublicDisplay = components['schemas']['PublicDisplayResponse']
@@ -562,39 +559,6 @@ export async function markManualAttendance(
   return unwrap(result)
 }
 
-export async function requestAttendanceCorrection(
-  body: AttendanceCorrectionRequest,
-): Promise<AttendanceCorrectionResponse> {
-  const result = await apiClient.POST('/api/v1/attendance/corrections', { body })
-  return unwrap(result)
-}
-
-export async function listAttendanceCorrections(query?: {
-  decision_status?: 'pending' | 'approved' | 'rejected'
-  session_id?: string
-  limit?: number
-  offset?: number
-}): Promise<{
-  items: AttendanceCorrectionResponse[]
-  pagination: { total: number; limit: number; offset: number }
-}> {
-  const result = await apiClient.GET('/api/v1/attendance/corrections', {
-    params: { query: query ?? {} },
-  })
-  return unwrap(result)
-}
-
-export async function decideAttendanceCorrection(
-  correctionId: string,
-  body: AttendanceCorrectionDecisionRequest,
-): Promise<AttendanceCorrectionResponse> {
-  const result = await apiClient.POST('/api/v1/attendance/corrections/{correction_id}/decision', {
-    params: { path: { correction_id: correctionId } },
-    body,
-  })
-  return unwrap(result)
-}
-
 export async function getStaffAccount(accountId: string): Promise<AccountDetail> {
   const result = await apiClient.GET('/api/v1/accounts/{account_id}', {
     params: { path: { account_id: accountId } },
@@ -618,6 +582,42 @@ export async function resetStaffPassword(accountId: string): Promise<StaffPasswo
     params: { path: { account_id: accountId } },
   })
   return unwrap(result)
+}
+
+export async function setStaffPassword(
+  accountId: string,
+  newPassword: string,
+): Promise<StaffPasswordSet> {
+  const result = await apiClient.POST('/api/v1/accounts/{account_id}/set-password', {
+    params: { path: { account_id: accountId } },
+    body: { new_password: newPassword },
+  })
+  return unwrap(result)
+}
+
+export async function downloadStudentImportTemplate(): Promise<{ blob: Blob; filename: string }> {
+  const headers = new Headers()
+  const token = authHandlers.getAccessToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  let response: Response
+  try {
+    response = await fetchWithTimeout(new Request('/api/v1/students/import/template', { headers }))
+  } catch (error) {
+    throw toTransportError(error)
+  }
+  if (response.status === 401) authHandlers.onUnauthorized()
+  if (!response.ok) {
+    let payload: unknown = null
+    try {
+      payload = await response.json()
+    } catch {
+      // Keep the shared safe error when a proxy returns a non-JSON response.
+    }
+    throw toApiError(response.status, payload)
+  }
+  const disposition = response.headers.get('content-disposition') ?? ''
+  const quoted = disposition.match(/filename="([^"]+)"/i)?.[1]
+  return { blob: await response.blob(), filename: quoted ?? 'template-import-siswa.csv' }
 }
 
 export async function listLabLaborants(laboratoryId: string): Promise<{
@@ -762,6 +762,8 @@ export interface KioskLiveSpotlight {
   full_name: string
   status: string
   recorded_at: string | null
+  recognition_event_id: string | null
+  source: string | null
 }
 
 export interface KioskLiveUpdate {
@@ -776,6 +778,7 @@ export interface KioskLiveUpdate {
   waiting_count: number
   total_roster: number
   spotlight: KioskLiveSpotlight | null
+  grace_period_minutes: number | null
   server_time: string
 }
 
@@ -1011,15 +1014,6 @@ export async function listMyClasses(query: {
 export async function getMyClass(classId: string): Promise<ClassDetails> {
   const result = await apiClient.GET('/api/v1/my-classes/{class_id}', {
     params: { path: { class_id: classId } },
-  })
-  return unwrap(result)
-}
-
-export async function getAttendanceCorrection(
-  correctionId: string,
-): Promise<AttendanceCorrectionResponse> {
-  const result = await apiClient.GET('/api/v1/attendance/corrections/{correction_id}', {
-    params: { path: { correction_id: correctionId } },
   })
   return unwrap(result)
 }

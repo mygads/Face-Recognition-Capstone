@@ -66,7 +66,6 @@ const scheduleLabel = computed(() => {
   if (isTeacher.value) return 'Jadwal Saya'
   return 'Jadwal Laboratorium'
 })
-const correctionLabel = computed(() => (isAdmin.value ? 'Koreksi Kehadiran' : 'Koreksi Saya'))
 const breadcrumbs = computed<string[]>(() => {
   switch (route.name) {
     case 'dashboard':
@@ -101,10 +100,6 @@ const breadcrumbs = computed<string[]>(() => {
       return ['Sesi Presensi', 'Detail Sesi']
     case 'enrollment':
       return ['Pendaftaran Wajah']
-    case 'corrections':
-      return [correctionLabel.value]
-    case 'correction-detail':
-      return [correctionLabel.value, 'Detail Koreksi']
     case 'attendance-policy':
       return ['Pengaturan', 'Kebijakan Presensi']
     case 'audit':

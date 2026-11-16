@@ -219,7 +219,7 @@ def test_display_light_mode_and_rotate(gap_database: sessionmaker[Session]) -> N
     body = opened.json()
     assert body["snapshot"]["students"] == []
     assert body["snapshot"]["total_roster"] == 3
-    assert body["expires_in_seconds"] == 8 * 3600
+    assert body["expires_in_seconds"] == 4 * 3600
     token = body["display_token"]
 
     full = request("GET", f"/api/v1/public/display?token={token}")
@@ -248,9 +248,13 @@ def test_display_light_mode_and_rotate(gap_database: sessionmaker[Session]) -> N
     assert cross.status_code == 401, cross.text
 
 
-def test_issue_display_token_ttl_is_eight_hours() -> None:
+def test_issue_display_token_ttl_follows_env_default_four_hours(monkeypatch) -> None:
+    monkeypatch.setenv("KIOSK_DISPLAY_TOKEN_TTL_HOURS", "2")
     _, ttl = issue_display_token("lab", UUID(int=1), UUID(int=2), TEST_SETTINGS)
-    assert ttl == 8 * 3600
+    assert ttl == 2 * 3600
+    monkeypatch.delenv("KIOSK_DISPLAY_TOKEN_TTL_HOURS", raising=False)
+    _, default_ttl = issue_display_token("lab", UUID(int=1), UUID(int=2), TEST_SETTINGS)
+    assert default_ttl == 4 * 3600
 
 
 def test_laboratory_detail_scoped_for_laboran(

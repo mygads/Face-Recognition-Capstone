@@ -22,7 +22,6 @@ from presensi_api.api.security.request_rate_limit import SlidingWindowRateLimite
 from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
 from presensi_api.db.base import Base
 from presensi_api.db.models import (
-    AttendanceCorrection,
     AttendanceRecord,
     AuditLog,
     ClassLaboratory,
@@ -516,31 +515,24 @@ def test_synthetic_school_day_attendance_regression(
     assert _event_count(harness.factory, present_event_id) == 1
     assert _attendance_count(harness.factory, session_id) == 2
 
-    # 8. Teacher requests a correction; it remains pending and writes an audit row.
+    # 8. Teacher updates the record directly (pengganti alur koreksi yang
+    # dihapus); perubahan tercatat pada audit.
     present_record = _one_attendance_for_student(
         harness.factory, session_id, present_student_id
     )
-    correction = client.post(
-        "/api/v1/attendance/corrections",
-        json={
-            "attendance_record_id": str(present_record.id),
-            "corrected_status": "late",
-            "reason": "Synthetic teacher correction regression case",
-        },
+    direct_update = client.post(
+        f"/api/v1/attendance/sessions/{session_id}/manual-marks",
+        json={"student_id": str(present_student_id), "status": "late"},
     )
-    assert correction.status_code == 201, correction.text
-    correction_id = UUID(correction.json()["id"])
-    assert correction.json()["decision_status"] == "pending"
+    assert direct_update.status_code == 201, direct_update.text
+    assert direct_update.json()["record"]["status"] == "late"
     with harness.factory() as session:
-        saved_correction = session.get(AttendanceCorrection, correction_id)
         audit = session.scalar(
             select(AuditLog).where(
-                AuditLog.action == "attendance.correction.requested",
-                AuditLog.entity_id == correction_id,
+                AuditLog.action == "attendance.manual_updated",
+                AuditLog.entity_id == present_record.id,
             )
         )
-        assert saved_correction is not None
-        assert saved_correction.decision_status == "pending"
         assert audit is not None and audit.actor_user_id == TEACHER_ID
 
     with harness.factory.begin() as session:
@@ -550,15 +542,11 @@ def test_synthetic_school_day_attendance_regression(
     late_record = _one_attendance_for_student(
         harness.factory, session_id, late_student_id
     )
-    unauthorized_correction = client.post(
-        "/api/v1/attendance/corrections",
-        json={
-            "attendance_record_id": str(late_record.id),
-            "corrected_status": "present",
-            "reason": "Synthetic out-of-scope request",
-        },
+    unauthorized_update = client.post(
+        f"/api/v1/attendance/sessions/{session_id}/manual-marks",
+        json={"student_id": str(late_student_id), "status": "present"},
     )
-    assert unauthorized_correction.status_code == 404
+    assert unauthorized_update.status_code == 404
     with harness.factory.begin() as session:
         schedule = session.get(PracticumSchedule, harness.ids["schedule"])
         assert schedule is not None

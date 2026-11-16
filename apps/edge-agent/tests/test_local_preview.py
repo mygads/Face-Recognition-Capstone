@@ -251,6 +251,19 @@ def test_preview_encodes_only_an_in_memory_downscaled_frame(
         preview.stop()
 
 
+def _nth_marker_end(buf: bytes, marker: bytes, count: int) -> int | None:
+    """Offset tepat setelah kemunculan marker ke-count (None bila belum ada)."""
+    if count < 1:
+        raise ValueError("count must be positive.")
+    start = 0
+    for _ in range(count):
+        found = buf.find(marker, start)
+        if found < 0:
+            return None
+        start = found + len(marker)
+    return start
+
+
 def _read_stream_until(
     sock: socket.socket,
     marker: bytes,
@@ -260,13 +273,20 @@ def _read_stream_until(
 ) -> bytes:
     # Stream MJPEG tak-berujung: kumpulkan sampai marker terlihat beberapa
     # kali. http.client tak cocok di sini (read(n) pada body tanpa
-    # Content-Length menunggu EOF, bukan n byte). Sisa byte setelah marker
-    # dipertahankan di buf untuk pembacaan berikutnya.
+    # Content-Length menunggu EOF, bukan n byte). Hanya byte sampai akhir
+    # marker ke-count yang dikembalikan; sisanya dipertahankan di buf untuk
+    # pembacaan berikutnya. Tanpa ini, header HTTP dan frame multipart
+    # pertama yang tiba dalam satu segmen TCP akan saling menelan.
     import time as _time
 
     sock.settimeout(deadline_s)
     deadline = _time.monotonic() + deadline_s
-    while buf.count(marker) < count:
+    while True:
+        end = _nth_marker_end(bytes(buf), marker, count)
+        if end is not None:
+            out = bytes(buf[:end])
+            del buf[:end]
+            return out
         if _time.monotonic() > deadline:
             break
         try:
@@ -320,17 +340,23 @@ def test_preview_stream_serves_multipart_frames_with_query_token(
             head = _read_stream_until(sock, b"\r\n\r\n", 1, buf)
             assert b"200 OK" in head
             assert b"multipart/x-mixed-replace; boundary=presensi-frame" in head
-            first = _read_stream_until(sock, b"--presensi-frame", 1, buf)
-            assert b"--presensi-frame" in first
-            assert b"\xff\xd8synthetic-jpeg\xff\xd9" in first
+            # Batas baca tepat di akhir marker: payload frame pertama
+            # (header part + JPEG) terbaca pada segmen berikutnya, utuh
+            # walau tiba bergabung dengan header HTTP atau boundary kedua.
+            first_boundary = _read_stream_until(sock, b"--presensi-frame", 1, buf)
+            assert first_boundary.endswith(b"--presensi-frame")
             # Frame kedua hanya dikirim setelah ada frame baru (tanpa
             # handshake ulang): simulasikan frame berikutnya dari kamera.
             import time as _time2
 
             _time2.sleep(0.2)
             assert preview.update_frame(Frame()) is True
-            second = _read_stream_until(sock, b"--presensi-frame", 1, buf)
-            assert b"--presensi-frame" in second
+            first_frame = _read_stream_until(sock, b"--presensi-frame", 1, buf)
+            assert b"\xff\xd8synthetic-jpeg\xff\xd9" in first_frame
+            _time2.sleep(0.2)
+            assert preview.update_frame(Frame()) is True
+            second_frame = _read_stream_until(sock, b"--presensi-frame", 1, buf)
+            assert b"\xff\xd8synthetic-jpeg\xff\xd9" in second_frame
         finally:
             sock.close()
 
@@ -563,8 +589,13 @@ def test_kiosk_hint_serves_generic_state_without_token_or_identity(
         serialized = json.dumps(hint)
         assert "Siswa Rahasia" not in serialized
         assert "display_name" not in hint
-        assert "faces" not in hint
+        # Skeleton overlay kiosk: box + landmark + kualitas saja, tanpa identitas.
+        assert isinstance(hint.get("faces"), list) and len(hint["faces"]) == 1
+        face = hint["faces"][0]
+        assert face["acceptable"] is True
+        assert face.get("landmarks") == [] or isinstance(face.get("landmarks"), list)
         assert "embedding" not in serialized.lower()
+        assert "student_name" not in serialized
         assert "diagnostic_candidate" not in hint
         # Poll kiosk-hint menandai konsumen agar diagnostik wajah tetap jalan.
         assert preview.has_kiosk_hint_consumer() is True
@@ -595,6 +626,7 @@ def test_kiosk_hint_hides_stale_face_signal(
             preview._status["updated_at"] = _time.time() - 10.0
         assert preview.kiosk_hint()["face_present"] is False
         assert preview.kiosk_hint()["face_count"] == 2
+        assert preview.kiosk_hint()["faces"] == []
     finally:
         preview.stop()
 
@@ -644,5 +676,152 @@ def test_kiosk_hint_preflight_allows_private_network(
                 "true"
             )
             assert response.headers.get("Access-Control-Allow-Origin") == ORIGIN
+    finally:
+        preview.stop()
+
+
+class _ScriptedSocket:
+    """Socket palsu yang memuntahkan potongan byte sesuai skenario."""
+
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = list(chunks)
+
+    def settimeout(self, _timeout: float) -> None:
+        return None
+
+    def recv(self, _size: int) -> bytes:
+        if not self._chunks:
+            return b""
+        return self._chunks.pop(0)
+
+
+def _drain(sock: _ScriptedSocket, marker: bytes, count: int, buf: bytearray) -> bytes:
+    return _read_stream_until(sock, marker, count, buf)  # type: ignore[arg-type]
+
+
+def test_stream_reader_keeps_unconsumed_bytes_after_marker() -> None:
+    header = b"HTTP/1.1 200 OK\r\nContent-Type: x\r\n\r\n"
+    frame = b"--presensi-frame\r\nContent-Type: image/jpeg\r\n\r\nJPEG1\r\n"
+    # Header + frame pertama tiba dalam SATU segmen TCP: pembacaan header
+    # tidak boleh menelan frame.
+    buf = bytearray()
+    head = _drain(_ScriptedSocket([header + frame]), b"\r\n\r\n", 1, buf)
+    assert head == header
+    first = _drain(_ScriptedSocket([]), b"--presensi-frame", 1, buf)
+    assert first == b"--presensi-frame"
+    rest = _drain(_ScriptedSocket([]), b"\r\n", 1, bytearray())
+    assert rest == b""
+    assert bytes(buf).startswith(b"\r\nContent-Type")
+
+
+def test_stream_reader_survives_header_fragmentation() -> None:
+    header = b"HTTP/1.1 200 OK\r\nContent-Type: x\r\n\r\n"
+    pieces = [header[:10], header[10:20], header[20:], b"--presensi-frame\r\nX"]
+    sock = _ScriptedSocket(pieces)
+    buf = bytearray()
+    head = _drain(sock, b"\r\n\r\n", 1, buf)
+    assert head == header
+    # Reader berhenti tepat saat marker terpenuhi: tidak prefetch.
+    assert bytes(buf) == b""
+    boundary = _drain(sock, b"--presensi-frame", 1, buf)
+    assert boundary == b"--presensi-frame"
+    assert bytes(buf) == b"\r\nX"
+
+
+def test_stream_reader_counts_repeated_markers_across_chunks() -> None:
+    buf = bytearray()
+    sock = _ScriptedSocket([b"--a--", b"b----", b"a--"])
+    out = _drain(sock, b"--", 3, buf)
+    assert out == b"--a--b--"
+    # Loop berhenti tepat saat hitungan terpenuhi (chunk ketiga tak tersentuh).
+    assert bytes(buf) == b"--"
+
+
+def test_stream_reader_returns_partial_on_deadline_without_data() -> None:
+    buf = bytearray(b"incomplete")
+    out = _drain(_ScriptedSocket([]), b"--presensi-frame", 1, buf)
+    assert out == b"incomplete"
+    assert bytes(buf) == b""
+
+
+def test_face_payload_includes_normalized_landmarks() -> None:
+    from presensi_edge_agent.camera_diagnostics import CameraFrameInspector
+    from recognition_core.domain import BoundingBox, FaceDetection, FaceQuality
+
+    inspector = CameraFrameInspector(
+        detector=type(
+            "StubDetector",
+            (),
+            {
+                "detect": lambda self, frame: (
+                    FaceDetection(
+                        box=BoundingBox(100.0, 50.0, 200.0, 200.0),
+                        confidence=0.9,
+                        landmarks=(
+                            (150.0, 120.0),
+                            (250.0, 120.0),
+                            (200.0, 180.0),
+                            (160.0, 240.0),
+                            (240.0, 240.0),
+                        ),
+                    ),
+                )
+            },
+        )(),
+        quality_assessor=type(
+            "StubQuality",
+            (),
+            {
+                "assess": lambda self, frame, detection: FaceQuality(
+                    score=0.8,
+                    acceptable=True,
+                    signals=(("sharpness", 10.0),),
+                    reason_codes=(),
+                ),
+                "min_face_pixels": 80,
+                "min_laplacian_variance": 5.0,
+                "min_brightness": 40.0,
+                "max_brightness": 220.0,
+            },
+        )(),
+    )
+    import numpy as np
+
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    diagnostics = inspector.inspect(frame)
+    assert diagnostics.face_count == 1
+    face = diagnostics.faces[0]
+    assert len(face["landmarks"]) == 5
+    for lx, ly in face["landmarks"]:
+        assert 0.0 <= lx <= 1.0 and 0.0 <= ly <= 1.0
+
+
+def test_kiosk_stream_serves_mjpeg_without_token_loopback_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import numpy as np
+
+    preview, port, _token = _start_preview(monkeypatch, ["ADMIN"])
+    try:
+        preview.update_frame(np.zeros((240, 320, 3), dtype=np.uint8))
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/v1/kiosk-stream", method="GET"
+        )
+        with urllib.request.urlopen(request, timeout=2) as response:
+            assert response.status == 200
+            assert "multipart/x-mixed-replace" in response.headers.get(
+                "Content-Type", ""
+            )
+            chunk = response.read(600)
+            assert b"--presensi-frame" in chunk
+            assert b"Content-Type: image/jpeg" in chunk
+        bad = urllib.request.Request(
+            f"http://127.0.0.1:{port}/v1/kiosk-stream",
+            headers={"Host": "kiosk.sekolah.example"},
+            method="GET",
+        )
+        with pytest.raises(urllib.error.HTTPError) as forbidden:
+            urllib.request.urlopen(bad, timeout=2)
+        assert forbidden.value.code == 403
     finally:
         preview.stop()

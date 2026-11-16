@@ -12,7 +12,16 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
    yang serve MJPEG diagnostik bila split belum lolos uji hardware.
 2. **Hasil di-push** via SSE `GET /public/display/stream` dan
    `/public/kiosk-display/stream` (token display di query, seperti polling).
-   Payload ringan `KioskLiveUpdate`: hitungan + 1 sorotan, **tanpa roster**.
+   Payload ringan `KioskLiveUpdate`: hitungan lab + 1 sorotan, **tanpa roster**,
+   plus `grace_period_minutes` dari sesi aktif (UI memakai nilai ini, bukan
+   hardcode 15 menit).
+   - Stream lab (`display/stream`): sorotan = record terbaru lab (beserta
+     `source` + `recognition_event_id` untuk dedup; record manual tetap
+     berlabel `manual`, bukan hasil scan).
+   - Stream kiosk (`kiosk-display/stream`): sorotan = hanya record
+     `face_recognition` yang event-nya berasal dari perangkat kiosk itu
+     (join `recognition_events.device_id` + `session_id`). Record manual dan
+     record kamera lain tidak pernah menjadi sorotan scan kiosk ini.
    Tick 1 detik, kirim hanya saat hash berubah, komentar `: ping` tiap 15 detik.
    Fallback otomatis ke polling 5 detik bila `EventSource` tak tersedia/gagal.
 3. **Roster dihapus dari layar**: tidak ada daftar nama/NIS; tinggal spotlight
@@ -33,9 +42,9 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
 - Koneksi DB validasi ditutup sebelum stream dimulai; generator membuka sesi
   singkat per tick agar kiosk tidak menahan koneksi pool berjam-jam.
 
-## Token display: TTL 8 jam + rotasi proaktif
+## Token display: TTL 4 jam default + rotasi proaktif
 
-- `DISPLAY_TOKEN_TTL_HOURS = 8` (`api/security/dependencies.py`). Frontend
+- TTL display default 4 jam via `KIOSK_DISPLAY_TOKEN_TTL_HOURS` (env, 1-12 jam, `api/security/dependencies.py`; dibaca dinamis tiap penerbitan token). Frontend
   menjadwalkan rotasi pada `ttl - 1800` detik (min 30 detik) via
   `POST /display/rotate` / `POST /kiosk-display/rotate` (body
   `{display_token}`): PIN tidak diminta ulang, tetapi lab/perangkat
@@ -47,7 +56,7 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
   browser, log server/proxy, sistem pemantauan). PIN pembuka awal dikirim via
   POST body; token di query adalah trade-off `EventSource` (tidak bisa set
   header), jadi endpoint GET snapshot dan GET stream tetap menerima token di
-  query, sedangkan rotasi memakai POST body. Mitigasi: TTL 8 jam + rotasi proaktif, token hanya
+  query, sedangkan rotasi memakai POST body. Mitigasi: TTL default 4 jam + rotasi proaktif, token hanya
   baca kesiapan + hasil tersaring (tanpa roster/gallery/embedding/riwayat),
   revoke menutup layar (401), PIN salah 5x kunci 5 menit. Bila deployment
   memakai proxy yang me-log query string, matikan log query atau pindahkan
@@ -75,13 +84,33 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
 - Target UX: tangkap → konfirmasi tampil < 1 detik. Tanpa perangkat nyata,
   klaim performa bertanda `MANUAL HARDWARE TEST REQUIRED` (AGENTS.md).
 
+## Single-owner kamera + kiosk-stream (tanpa getUserMedia di PC lab)
+
+- Satu kamera satu pemilik: di PC lab, agent (`OpenCVCamera`) memegang kamera
+  fisik untuk inference. Browser kiosk TIDAK memanggil `getUserMedia`; video
+  tampil dari `GET /v1/kiosk-stream` (MJPEG multipart, bind loopback-only,
+  tanpa token, 403 untuk Host non-loopback) yang menyajikan frame agent yang
+  sama dengan inference. `<img>` + `FaceOverlay` (box + skeleton 5 titik,
+  wajah terbesar disorot hijau) memberi rasa realtime tanpa inference pindah
+  ke browser. Tombol "Pakai kamera perangkat (diagnostik)" hanya fallback
+  saat stream lab gagal.
+- Hint `faces` + `face_count` menggerakkan overlay dan badge "1 wajah / N
+  wajah" di kiosk; bila N > 1 tampil imbauan "Satu siswa di depan kamera".
+  Overlay hilang saat frame stale (> 3 detik) atau kamera offline.
+- Aturan yang sama untuk enrollment: sumber "Kamera lab via agent" membaca
+  stream agent + capture via canvas (tanpa membuka kamera kedua); sumber
+  "Kamera perangkat ini" memakai `getUserMedia` untuk perangkat operator yang
+  berbeda. Bingkai panduan statis + skeleton yang sama dipakai agar UI
+  konsisten walau tanpa deteksi live di browser.
+
 ## Sinyal generik "Memverifikasi" (tanpa pindah inference ke browser)
 
 - Agent di PC kiosk yang sama menyajikan `GET /v1/kiosk-hint` (bind
   loopback-only, tanpa token, tanpa Origin allowlist — Host non-loopback
   ditolak 403). Payload hanya status generik: `session_active`,
   `camera_open`, `recognition_state`, `face_present`/`face_count`,
-  `attendance_result`, `updated_at`. TIDAK PERNAH: nama, kotak wajah,
+  `faces` (maks 5: box + landmark ternormalisasi + flag kualitas, TANPA
+  identitas), `attendance_result`, `updated_at`. TIDAK PERNAH: nama,
   embedding, kandidat diagnostik, kalibrasi.
 - `DisplayView.vue` mem-poll hint tiap 1 detik (timeout 900ms, best-effort)
   hanya saat sesi live; saat wajah terdeteksi (`face_present`) atau kirim
@@ -104,7 +133,10 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
 - `apps/web/src/views/DisplayView.vue` (video lokal, EventSource, tanpa
   roster, poll hint generik + chip "Memverifikasi").
 - `apps/edge-agent/src/presensi_edge_agent/local_preview.py`
-  (`/v1/kiosk-hint`, `kiosk_hint()`, `has_kiosk_hint_consumer()`).
+  (`/v1/kiosk-hint`, `/v1/kiosk-stream`, `kiosk_hint()`,
+  `has_kiosk_hint_consumer()`).
+- `apps/web/src/components/FaceOverlay.vue` (box + skeleton dipakai preview,
+  kiosk, dan enrollment).
 - Test: `apps/edge-agent/tests/test_local_preview.py` (hint tanpa identitas,
   freshness, 403 non-loopback, preflight PNA).
 - Test: `apps/api/tests/test_public_display_stream.py`,

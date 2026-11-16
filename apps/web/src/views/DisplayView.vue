@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import FaceOverlay from '../components/FaceOverlay.vue'
 import { UiBadge, UiButton, UiEmptyState, UiInput } from '../components/ui'
 import { shortDisplayName } from '../utils/displayName'
 import { timeFormatterFor } from '../utils/dateFormat'
@@ -28,6 +29,7 @@ const deviceId = ref('')
 const pin = ref('')
 const display = ref<PublicDisplay | null>(null)
 const live = ref<KioskLiveUpdate | null>(null)
+const seenSpotlightIds = ref<Set<string>>(new Set())
 const displayToken = ref('')
 const error = ref<string | null>(null)
 const isLoadingLabs = ref(false)
@@ -35,6 +37,11 @@ const isLoadingDisplay = ref(false)
 const isFullscreen = ref(false)
 const streamState = ref<'off' | 'sse' | 'polling'>('off')
 const cameraState = ref<'idle' | 'active' | 'unavailable' | 'insecure'>('idle')
+const agentStreamState = ref<'idle' | 'live' | 'failed'>('idle')
+const showBrowserCamera = ref(false)
+const agentFaces = computed(() => agentHint.value?.faces ?? [])
+const agentFaceCount = computed(() => agentHint.value?.face_count ?? 0)
+const agentLargestOk = computed(() => agentFaces.value.some((face) => face.acceptable === true))
 const localVideo = ref<HTMLVideoElement | null>(null)
 let pollTimer: ReturnType<typeof setInterval> | undefined
 let rotationTimer: ReturnType<typeof setTimeout> | undefined
@@ -46,12 +53,26 @@ const ROTATE_AHEAD_SECONDS = 1800
 // wajah terlihat / kirim menunggu konfirmasi. Best-effort; SSE tetap
 // sumber kebenaran hasil. Gagal fetch = indikator disembunyikan diam-diam.
 const AGENT_HINT_URL = 'http://127.0.0.1:8765/v1/kiosk-hint'
+const AGENT_STREAM_URL = 'http://127.0.0.1:8765/v1/kiosk-stream'
+
+type AgentHintFace = {
+  x: number
+  y: number
+  width: number
+  height: number
+  landmarks?: number[][] | null
+  acceptable?: boolean | null
+  quality_score?: number | null
+  reason_codes?: string[] | null
+}
+
 interface AgentHint {
   session_active: boolean
   camera_open: boolean
   recognition_state: string | null
   face_present: boolean
   face_count: number
+  faces: AgentHintFace[]
   attendance_result: string | null
 }
 const agentHint = ref<AgentHint | null>(null)
@@ -73,12 +94,19 @@ async function pollAgentHint(): Promise<void> {
     })
     if (!response.ok) throw new Error('hint tidak tersedia')
     const data = (await response.json()) as Partial<AgentHint>
+    const rawFaces = Array.isArray(data.faces) ? data.faces.slice(0, 5) : []
     agentHint.value = {
       session_active: data.session_active === true,
       camera_open: data.camera_open === true,
       recognition_state: typeof data.recognition_state === 'string' ? data.recognition_state : null,
       face_present: data.face_present === true,
       face_count: typeof data.face_count === 'number' ? data.face_count : 0,
+      faces: rawFaces.filter(
+        (face): face is AgentHintFace =>
+          typeof face === 'object' &&
+          face !== null &&
+          typeof (face as AgentHintFace).x === 'number',
+      ),
       attendance_result: typeof data.attendance_result === 'string' ? data.attendance_result : null,
     }
   } catch {
@@ -169,8 +197,11 @@ function toLive(snapshot: PublicDisplay): KioskLiveUpdate {
           full_name: latest.full_name,
           status: latest.status,
           recorded_at: latest.recorded_at ?? null,
+          recognition_event_id: null,
+          source: null,
         }
       : null,
+    grace_period_minutes: null,
     server_time: new Date().toISOString(),
   }
 }
@@ -230,6 +261,25 @@ function connectStream(): void {
     src.addEventListener('snapshot', (ev) => {
       try {
         const update = JSON.parse((ev as MessageEvent).data) as KioskLiveUpdate
+        const prevSession = live.value?.session_id ?? null
+        const prevEvent = live.value?.spotlight?.recognition_event_id ?? null
+        if (
+          prevSession !== null &&
+          update.session_id !== null &&
+          update.session_id !== prevSession
+        ) {
+          seenSpotlightIds.value.clear()
+        }
+        const incomingEvent = update.spotlight?.recognition_event_id ?? null
+        if (incomingEvent !== null) {
+          if (seenSpotlightIds.value.has(incomingEvent) && incomingEvent === prevEvent) {
+            // Duplikat SSE (mis. reconnect mengirim sorotan lama yang sama):
+            // pertahankan agregat terbaru tetapi jangan anggap sebagai scan baru.
+            // Kesegaran tetap dihitung dari recorded_at, bukan waktu tiba.
+            void 0
+          }
+          seenSpotlightIds.value.add(incomingEvent)
+        }
         live.value = update
         // session_id bisa tiba lewat push pertama; segarkan hint generik.
         if (update.session_id) void pollAgentHint()
@@ -290,6 +340,9 @@ function stopLive(): void {
   disconnectStream()
   clearRotation()
   stopHintPolling()
+  stopLocalCamera()
+  agentStreamState.value = 'idle'
+  showBrowserCamera.value = false
   streamState.value = 'off'
 }
 
@@ -305,29 +358,46 @@ async function startLocalCamera(): Promise<void> {
     return
   }
   try {
-    await nextTick()
     const stream = await media.mediaDevices.getUserMedia({
       video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
       audio: false,
     })
     localStream = stream
-    if (localVideo.value) {
-      localVideo.value.srcObject = stream
-      await localVideo.value.play().catch(() => undefined)
-    }
-    cameraState.value = 'active'
+    await attachLocalStream(stream)
   } catch {
+    stopLocalCameraTracks()
     cameraState.value = 'unavailable'
   }
 }
 
-function stopLocalCamera(): void {
+async function attachLocalStream(stream: MediaStream): Promise<void> {
+  // <video> hanya eksis setelah cameraState=active (v-if): render dulu,
+  // baru pasang srcObject. Tanpa ini stream menguap dan preview hitam.
+  cameraState.value = 'active'
+  await nextTick()
+  if (localVideo.value) {
+    localVideo.value.srcObject = stream
+    const play = localVideo.value.play() as unknown as Promise<void> | undefined
+    if (play && typeof play.catch === 'function') await play.catch(() => undefined)
+  }
+}
+
+function stopLocalCameraTracks(): void {
   if (localStream) {
     localStream.getTracks().forEach((track) => track.stop())
     localStream = null
   }
   if (localVideo.value) localVideo.value.srcObject = null
+}
+
+function stopLocalCamera(): void {
+  stopLocalCameraTracks()
   cameraState.value = 'idle'
+}
+
+function enableBrowserFallback(): void {
+  showBrowserCamera.value = true
+  void startLocalCamera()
 }
 
 async function submit(): Promise<void> {
@@ -343,7 +413,10 @@ async function submit(): Promise<void> {
     pin.value = ''
     connectStream()
     scheduleRotation(opened.expires_in_seconds)
-    void startLocalCamera()
+    // Single-owner: browser TIDAK membuka kamera di PC lab. Video tampil
+    // dari stream agent yang sama dengan inference; hint memberi overlay.
+    agentStreamState.value = 'idle'
+    showBrowserCamera.value = false
   } catch (err) {
     error.value = formatError(err)
   } finally {
@@ -454,6 +527,7 @@ function resetSession(): void {
   displayToken.value = ''
   display.value = null
   live.value = null
+  seenSpotlightIds.value.clear()
 }
 
 watch(labId, () => {
@@ -616,45 +690,79 @@ onBeforeUnmount(() => {
               aria-hidden="true"
             />
             {{
-              cameraState === 'active'
-                ? 'Kamera Lokal Aktif'
-                : cameraState === 'insecure'
-                  ? 'Preview Lokal Butuh HTTPS'
-                  : cameraState === 'unavailable'
-                    ? 'Kamera Tidak Tersedia'
-                    : 'Menyiapkan Kamera…'
+              agentStreamState === 'live'
+                ? 'Kamera Lab Aktif (Agent)'
+                : agentStreamState === 'failed'
+                  ? showBrowserCamera && cameraState === 'active'
+                    ? 'Kamera Perangkat (Diagnostik)'
+                    : 'Stream Lab Terputus'
+                  : 'Menghubungkan Kamera Lab…'
             }}
           </p>
           <div class="kiosk__frame">
+            <img
+              v-if="agentStreamState !== 'failed'"
+              :src="AGENT_STREAM_URL"
+              class="kiosk__video"
+              alt="Preview kamera lab dari agent (sumber inference yang sama)"
+              data-testid="display-agent-video"
+              @load="agentStreamState = 'live'"
+              @error="agentStreamState = 'failed'"
+            />
             <video
-              v-if="cameraState === 'active'"
+              v-else-if="showBrowserCamera && cameraState === 'active'"
               ref="localVideo"
               class="kiosk__video"
               playsinline
               autoplay
               muted
-              aria-label="Preview kamera lokal kiosk"
+              aria-label="Preview kamera perangkat (diagnostik)"
               data-testid="display-local-video"
             />
             <span v-else class="kiosk__silhouette" aria-hidden="true"
               >Berdiri di dalam bingkai</span
             >
+            <FaceOverlay
+              v-if="agentStreamState === 'live' && agentFaces.length"
+              :faces="agentFaces"
+              :label="agentFaceCount > 1 ? `Wajah utama · ${agentFaceCount} wajah` : 'Wajah utama'"
+            />
             <span class="kiosk__frame-corner kiosk__frame-corner--tl" aria-hidden="true" />
             <span class="kiosk__frame-corner kiosk__frame-corner--tr" aria-hidden="true" />
             <span class="kiosk__frame-corner kiosk__frame-corner--bl" aria-hidden="true" />
             <span class="kiosk__frame-corner kiosk__frame-corner--br" aria-hidden="true" />
           </div>
           <p class="kiosk__camera-meta">
+            <UiBadge
+              :tone="agentFaceCount > 1 ? 'late' : agentFaceCount === 1 ? 'present' : 'neutral'"
+            >
+              {{
+                agentFaceCount > 1
+                  ? `${agentFaceCount} wajah`
+                  : agentFaceCount === 1
+                    ? '1 wajah'
+                    : 'Belum ada wajah'
+              }}
+            </UiBadge>
+            <span v-if="agentFaceCount > 1" class="kiosk__muted">Satu siswa di depan kamera.</span>
+            <span v-else-if="agentLargestOk" class="kiosk__muted"
+              >Bingkai hijau siap diverifikasi.</span
+            >
+          </p>
+          <p class="kiosk__camera-meta">
             {{ boardTitle }} · Hadir {{ live?.present_count ?? 0 }} · Terlambat
             {{ live?.late_count ?? 0 }} / {{ live?.total_roster ?? 0 }} · Menunggu
             {{ waitingCount }}
           </p>
-          <p v-if="cameraState !== 'active'" class="kiosk__muted" role="note">
-            {{
-              cameraState === 'insecure'
-                ? 'Preview lokal butuh HTTPS atau localhost. Hasil presensi tetap tampil.'
-                : 'Kamera lokal belum tersedia. Hasil presensi tetap tampil.'
-            }}
+          <p
+            v-if="agentStreamState === 'failed' && !showBrowserCamera"
+            class="kiosk__muted"
+            role="note"
+          >
+            Stream kamera lab tidak tersedia di PC ini. Hasil presensi tetap tampil.
+            <UiButton variant="text" type="button" @click="enableBrowserFallback()">
+              Pakai kamera perangkat (diagnostik)
+            </UiButton>
           </p>
           <p v-if="streamState === 'polling'" class="kiosk__muted" role="note">
             Mode polling 5 detik (stream realtime tidak tersedia).
@@ -669,7 +777,8 @@ onBeforeUnmount(() => {
         <div class="kiosk__result">
           <div v-if="spotlight" class="kiosk__result-card" data-testid="display-spotlight">
             <p class="kiosk__eyebrow">
-              Hasil Dikonfirmasi · {{ formatRecordedTime(spotlight.recorded_at) }} WIB
+              {{ spotlightFresh ? 'Hasil Dikonfirmasi' : 'Hasil terakhir' }} ·
+              {{ formatRecordedTime(spotlight.recorded_at) }} WIB
             </p>
             <p class="kiosk__date">{{ dateLine }}</p>
             <p class="kiosk__avatar" aria-hidden="true">
@@ -697,10 +806,16 @@ onBeforeUnmount(() => {
               </div>
             </dl>
             <p v-if="spotlight.status === 'late'" class="kiosk__muted">
-              Presensi tercatat dengan catatan keterlambatan melewati batas toleransi 15 menit.
+              Presensi tercatat dengan catatan keterlambatan melewati batas toleransi
+              {{ live?.grace_period_minutes ?? '—' }} menit.
+            </p>
+            <p v-else-if="spotlight.source === 'manual'" class="kiosk__muted">
+              Dicatat manual oleh petugas pada roster praktikum.
             </p>
             <p v-else class="kiosk__muted">Kehadiran Anda tercatat pada roster praktikum.</p>
-            <p class="kiosk__countdown">Layar kembali ke daftar menunggu otomatis.</p>
+            <p v-if="spotlightFresh" class="kiosk__countdown">
+              Layar kembali ke daftar menunggu otomatis.
+            </p>
           </div>
           <div v-else class="kiosk__result-card kiosk__result-card--waiting">
             <p class="kiosk__eyebrow">Menunggu hasil pindaian</p>

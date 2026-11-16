@@ -39,6 +39,7 @@ from presensi_api.db.models import (
     KioskScreen,
     Laboratory,
     PracticumSchedule,
+    RecognitionEvent,
     SessionStudent,
 )
 from presensi_api.db.session import get_db_session, get_session_factory
@@ -80,6 +81,8 @@ class KioskSpotlight(ApiSchema):
     full_name: str
     status: str
     recorded_at: str | None = None
+    recognition_event_id: UUID | None = None
+    source: str | None = None
 
 
 class KioskLiveUpdate(ApiSchema):
@@ -96,6 +99,7 @@ class KioskLiveUpdate(ApiSchema):
     waiting_count: int = 0
     total_roster: int = 0
     spotlight: KioskSpotlight | None = None
+    grace_period_minutes: int | None = None
     server_time: str
 
 
@@ -216,8 +220,18 @@ def _find_active_session(lab: Laboratory, session: Session) -> AttendanceSession
     return None
 
 
-def _build_live_update(lab: Laboratory, session: Session) -> KioskLiveUpdate:
-    """Agregat ringan untuk SSE: hitungan + 1 hasil terbaru, tanpa roster."""
+def _build_live_update(
+    lab: Laboratory, session: Session, device_id: UUID | None = None
+) -> KioskLiveUpdate:
+    """Agregat ringan untuk SSE: hitungan lab + 1 sorotan, tanpa roster.
+
+    - Agregat (present/late/waiting/total) selalu cakupan laboratorium.
+    - Sorotan kiosk (device_id terisi): hanya record face_recognition yang
+      event-nya berasal dari perangkat itu. Record manual / perangkat lain
+      tidak pernah menjadi sorotan scan kiosk ini.
+    - Sorotan lab (device_id None): hasil terbaru lab apa pun, beserta
+      ``source`` agar UI dapat membedakan hasil scan vs pencatatan manual.
+    """
     active = _find_active_session(lab, session)
     if active is None:
         return KioskLiveUpdate(
@@ -256,32 +270,74 @@ def _build_live_update(lab: Laboratory, session: Session) -> KioskLiveUpdate:
         )
         or 0
     )
-    latest = session.execute(
-        select(
-            SessionStudent.full_name_snapshot,
-            AttendanceRecord.status,
-            AttendanceRecord.recorded_at,
-        )
-        .join(
-            AttendanceRecord,
-            (AttendanceRecord.session_id == SessionStudent.session_id)
-            & (AttendanceRecord.student_id == SessionStudent.student_id),
-        )
-        .where(
-            SessionStudent.session_id == active.id,
-            AttendanceRecord.status.in_(["present", "late"]),
-        )
-        .order_by(AttendanceRecord.recorded_at.desc())
-        .limit(1)
-    ).first()
     spotlight: KioskSpotlight | None = None
-    if latest is not None:
-        name, status, recorded_at = latest
-        spotlight = KioskSpotlight(
-            full_name=name,
-            status=status,
-            recorded_at=as_utc(recorded_at).isoformat() if recorded_at else None,
-        )
+    if device_id is None:
+        latest = session.execute(
+            select(
+                SessionStudent.full_name_snapshot,
+                AttendanceRecord.status,
+                AttendanceRecord.recorded_at,
+                AttendanceRecord.recognition_event_id,
+                AttendanceRecord.source,
+            )
+            .join(
+                AttendanceRecord,
+                (AttendanceRecord.session_id == SessionStudent.session_id)
+                & (AttendanceRecord.student_id == SessionStudent.student_id),
+            )
+            .where(
+                SessionStudent.session_id == active.id,
+                AttendanceRecord.status.in_(["present", "late"]),
+            )
+            .order_by(AttendanceRecord.recorded_at.desc())
+            .limit(1)
+        ).first()
+        if latest is not None:
+            name, status, recorded_at, event_id, source = latest
+            spotlight = KioskSpotlight(
+                full_name=name,
+                status=status,
+                recorded_at=as_utc(recorded_at).isoformat() if recorded_at else None,
+                recognition_event_id=event_id,
+                source=source,
+            )
+    else:
+        latest = session.execute(
+            select(
+                SessionStudent.full_name_snapshot,
+                AttendanceRecord.status,
+                AttendanceRecord.recorded_at,
+                AttendanceRecord.recognition_event_id,
+                AttendanceRecord.source,
+            )
+            .join(
+                AttendanceRecord,
+                (AttendanceRecord.session_id == SessionStudent.session_id)
+                & (AttendanceRecord.student_id == SessionStudent.student_id),
+            )
+            .join(
+                RecognitionEvent,
+                RecognitionEvent.id == AttendanceRecord.recognition_event_id,
+            )
+            .where(
+                SessionStudent.session_id == active.id,
+                AttendanceRecord.status.in_(["present", "late"]),
+                AttendanceRecord.source == "face_recognition",
+                RecognitionEvent.device_id == device_id,
+                RecognitionEvent.session_id == active.id,
+            )
+            .order_by(AttendanceRecord.recorded_at.desc())
+            .limit(1)
+        ).first()
+        if latest is not None:
+            name, status, recorded_at, event_id, source = latest
+            spotlight = KioskSpotlight(
+                full_name=name,
+                status=status,
+                recorded_at=as_utc(recorded_at).isoformat() if recorded_at else None,
+                recognition_event_id=event_id,
+                source=source,
+            )
     return KioskLiveUpdate(
         laboratory_id=lab.id,
         laboratory_name=lab.name,
@@ -294,6 +350,7 @@ def _build_live_update(lab: Laboratory, session: Session) -> KioskLiveUpdate:
         waiting_count=max(total - present - late, 0),
         total_roster=total,
         spotlight=spotlight,
+        grace_period_minutes=active.grace_period_minutes,
         server_time=datetime.now(UTC).isoformat(),
     )
 
@@ -326,7 +383,8 @@ async def _live_event_generator(
                     if kiosk is None or laboratory_id != lab.id:
                         yield 'event: error\ndata: {"code":"kiosk_not_found"}\n\n'
                         return
-                update = _build_live_update(lab, db)
+                device_scope = subject_id if kind == "kiosk" else None
+                update = _build_live_update(lab, db, device_id=device_scope)
             payload = update.model_dump(mode="json")
             digest = _snapshot_digest(payload)
             if digest != last_digest:

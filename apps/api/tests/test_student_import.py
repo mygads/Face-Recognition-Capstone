@@ -242,3 +242,23 @@ def test_blank_identifiers_are_required_but_not_flagged_as_duplicates(
     for row_number in (2, 3):
         assert "NIS/NISN wajib diisi." in row_errors[row_number]
         assert not any("duplikat" in message for message in row_errors[row_number])
+
+
+def test_import_template_returns_csv_with_header_and_examples(
+    api_database: sessionmaker[Session],
+) -> None:
+    async def send() -> httpx.Response:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            return await client.get("/api/v1/students/import/template")
+
+    response = asyncio.run(send())
+    assert response.status_code == 200, response.text
+    assert "text/csv" in response.headers.get("content-type", "")
+    assert "template-import-siswa.csv" in response.headers.get(
+        "content-disposition", ""
+    )
+    lines = response.text.strip().splitlines()
+    assert lines[0] == "student_number,full_name,class_code"
+    assert len(lines) >= 3

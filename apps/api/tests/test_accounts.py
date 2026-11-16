@@ -214,3 +214,79 @@ def test_class_laboratories_not_shadowed_by_account_id_route(
     response = request("GET", "/api/v1/accounts/class-laboratories")
     assert response.status_code == 200, response.text
     assert response.json() == {"items": []}
+
+
+def test_set_password_updates_hash_and_revokes_sessions(
+    api_database: sessionmaker[Session],
+) -> None:
+    from sqlalchemy import select
+
+    with api_database() as session:
+        target = session.scalars(
+            select(User).where(User.email == "teacher@example.test")
+        ).one()
+        target_id = str(target.id)
+    response = asyncio.run(_post_set_password(target_id, "BaruKuat123"))
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["must_change_password"] is False
+    with api_database() as session:
+        updated = session.get(User, UUID(str(target_id)))
+        assert updated is not None
+        assert updated.password_hash != "unused-test-hash"
+        assert updated.must_change_password is False
+
+
+async def _post_set_password(account_id: str, password: str) -> httpx.Response:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        return await client.post(
+            f"/api/v1/accounts/{account_id}/set-password",
+            json={"new_password": password},
+        )
+
+
+def test_set_password_rejects_short_password(
+    api_database: sessionmaker[Session],
+) -> None:
+    from sqlalchemy import select
+
+    with api_database() as session:
+        target = session.scalars(
+            select(User).where(User.email == "teacher@example.test")
+        ).one()
+        target_id = str(target.id)
+    response = asyncio.run(_post_set_password(target_id, "pendek"))
+    assert response.status_code == 422, response.text
+
+
+def test_set_password_forbids_teacher_principal(
+    api_database: sessionmaker[Session],
+) -> None:
+    from sqlalchemy import select
+
+    teacher = AuthenticatedUser(
+        id=UUID(int=44),
+        email="teacher@example.test",
+        full_name="Test Teacher",
+        roles=frozenset({RoleCode.TEACHER}),
+    )
+    with api_database() as session:
+        target = session.scalars(
+            select(User).where(User.email == "teacher@example.test")
+        ).one()
+        target_id = str(target.id)
+    app.dependency_overrides[get_current_user] = lambda: teacher
+
+    async def send() -> httpx.Response:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            return await client.post(
+                f"/api/v1/accounts/{target_id}/set-password",
+                json={"new_password": "BaruKuat123"},
+            )
+
+    response = asyncio.run(send())
+    assert response.status_code == 403, response.text
