@@ -42,6 +42,7 @@ def _to_response(row: KioskScreen) -> KioskResponse:
         laboratory_id=row.laboratory_id,
         display_name=row.display_name,
         camera_label=row.camera_label,
+        token_ttl_hours=row.token_ttl_hours,
         has_pin=bool(row.pin_hash),
         is_active=row.is_active,
         last_seen_at=as_utc(row.last_seen_at) if row.last_seen_at is not None else None,
@@ -125,6 +126,7 @@ def create_kiosk(
         laboratory_id=request.laboratory_id,
         display_name=request.display_name.strip(),
         camera_label=request.camera_label.strip() if request.camera_label else None,
+        token_ttl_hours=request.token_ttl_hours,
     )
     session.add(row)
     session.flush()
@@ -160,11 +162,18 @@ def update_kiosk(
     row = session.get(KioskScreen, kiosk_id)
     if row is None:
         raise ApiProblem(404, "kiosk_not_found", "Layar tidak ditemukan.")
-    before = {"display_name": row.display_name, "is_active": row.is_active}
+    before = {
+        "display_name": row.display_name,
+        "token_ttl_hours": row.token_ttl_hours,
+        "is_active": row.is_active,
+    }
     if request.display_name is not None:
         row.display_name = request.display_name.strip()
     if request.camera_label is not None:
         row.camera_label = request.camera_label.strip() or None
+    if "token_ttl_hours" in request.model_fields_set:
+        # null eksplisit = kembali ke default global (KIOSK_DISPLAY_TOKEN_TTL_HOURS).
+        row.token_ttl_hours = request.token_ttl_hours
     if request.is_active is not None:
         row.is_active = request.is_active
     session.add(
@@ -176,6 +185,7 @@ def update_kiosk(
             before_state=before,
             after_state={
                 "display_name": row.display_name,
+                "token_ttl_hours": row.token_ttl_hours,
                 "is_active": row.is_active,
             },
         )

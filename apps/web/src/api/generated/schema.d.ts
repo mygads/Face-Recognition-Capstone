@@ -2907,6 +2907,8 @@ export interface components {
             display_name: string;
             /** Camera Label */
             camera_label?: string | null;
+            /** Token Ttl Hours */
+            token_ttl_hours?: number | null;
         };
         /** KioskDisplaySessionRequest */
         KioskDisplaySessionRequest: {
@@ -2954,6 +2956,8 @@ export interface components {
             display_name: string;
             /** Camera Label */
             camera_label?: string | null;
+            /** Token Ttl Hours */
+            token_ttl_hours?: number | null;
             /** Has Pin */
             has_pin: boolean;
             /** Is Active */
@@ -2977,6 +2981,8 @@ export interface components {
             display_name?: string | null;
             /** Camera Label */
             camera_label?: string | null;
+            /** Token Ttl Hours */
+            token_ttl_hours?: number | null;
             /** Is Active */
             is_active?: boolean | null;
         };

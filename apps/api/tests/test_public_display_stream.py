@@ -584,3 +584,118 @@ def test_notify_wakes_generator_without_waiting_safety_tick(
     assert payload is not None and payload.get("code") == "laboratory_not_found"
     assert elapsed < 5, "generator tidak dibangunkan push"
     assert lab_id
+
+
+def test_two_lab_streams_are_isolated(
+    stream_database: sessionmaker[Session],
+) -> None:
+    """Isolasi 2-lab: ubah lab A membangunkan kedua generator (versi global),
+    tetapi hanya A yang emit snapshot baru; B tetap diam (digest tak berubah).
+
+    Catatan: pembatalan `__anext__` diserap generator (except CancelledError
+    -> break), jadi ketiadaan event B tidak boleh diassert via
+    `wait_for(..., TimeoutError)`. Sebagai gantinya B dikoleksi task latar
+    dan hitungannya dibandingkan sebelum/sesudah jeda.
+    """
+    from presensi_api.display_notify import notify_display_changed
+
+    with stream_database.begin() as session:
+        lab_b = Laboratory(
+            code="LAB-SSE-B",
+            name="Lab SSE B",
+            display_pin_hash=hash_password("1234"),
+        )
+        session.add(lab_b)
+        session.flush()
+        session.add(
+            Device(
+                laboratory_id=lab_b.id,
+                name="edge-pc-sse-B",
+                device_type="edge_pc",
+                deployment_profile="AI_EDGE",
+            )
+        )
+    with stream_database() as session:
+        lab_a = session.query(Laboratory).filter_by(code="LAB-SSE").one()
+        lab_b = session.query(Laboratory).filter_by(code="LAB-SSE-B").one()
+        lab_a_id, lab_b_id = lab_a.id, lab_b.id
+
+    def parse_event(raw: str) -> tuple[str, dict[str, Any] | None] | None:
+        for block in raw.split("\n\n"):
+            if block.startswith("event: snapshot"):
+                for line in block.splitlines():
+                    if line.startswith("data: "):
+                        return "snapshot", json.loads(line[6:])
+                return "snapshot", None
+            if block.startswith("event: error"):
+                for line in block.splitlines():
+                    if line.startswith("data: "):
+                        return "error", json.loads(line[6:])
+                return "error", None
+        return None
+
+    async def next_event(
+        gen: Any,
+    ) -> tuple[str, dict[str, Any] | None]:
+        async for raw in gen:
+            parsed = parse_event(raw)
+            if parsed is not None:
+                return parsed
+        raise AssertionError("stream berakhir tanpa event")
+
+    async def scenario() -> None:
+        gen_a = display_module._live_event_generator("lab", lab_a_id, lab_a_id)
+        gen_b = display_module._live_event_generator("lab", lab_b_id, lab_b_id)
+        b_events: list[tuple[str, dict[str, Any] | None]] = []
+
+        async def collect_b() -> None:
+            async for raw in gen_b:
+                parsed = parse_event(raw)
+                if parsed is not None:
+                    b_events.append(parsed)
+
+        task_b = asyncio.create_task(collect_b())
+        try:
+            kind_a, snap_a = await asyncio.wait_for(next_event(gen_a), timeout=5)
+            assert kind_a == "snapshot"
+            assert snap_a is not None
+            # Tunggu snapshot pertama B (generator emit langsung di tick 0).
+            for _ in range(100):
+                if b_events:
+                    break
+                await asyncio.sleep(0.05)
+            assert b_events, "generator lab B tidak emit snapshot awal"
+            assert b_events[0][0] == "snapshot"
+            assert b_events[0][1] is not None
+            assert (
+                b_events[0][1]["laboratory_name"] != snap_a["laboratory_name"]
+            )
+            with stream_database() as inner:
+                target = inner.get(Laboratory, lab_a_id)
+                assert target is not None
+                target.name = "Lab SSE A Renamed"
+                inner.commit()
+            notify_display_changed()
+            kind_a2, snap_a2 = await asyncio.wait_for(
+                next_event(gen_a), timeout=5
+            )
+            assert kind_a2 == "snapshot"
+            assert snap_a2 is not None
+            assert snap_a2["laboratory_name"] == "Lab SSE A Renamed"
+            # B sudah bangun (versi global) tetapi digest-nya tak berubah:
+            # diam selama 1,5 dtk (jauh di bawah safety re-query 10 dtk).
+            seen = len(b_events)
+            await asyncio.sleep(1.5)
+            assert len(b_events) == seen, (
+                f"kebocoran antar-lab: {b_events[seen:]}"
+            )
+        finally:
+            task_b.cancel()
+            try:
+                await task_b
+            except (asyncio.CancelledError, StopAsyncIteration):
+                pass
+            await gen_a.aclose()
+            await gen_b.aclose()
+
+    asyncio.run(scenario())

@@ -77,6 +77,101 @@ def post_json(path: str, payload: dict[str, object]) -> httpx.Response:
     return asyncio.run(send())
 
 
+def test_kiosk_token_ttl_hours_crud_and_session(
+    kiosk_database: sessionmaker[Session],
+) -> None:
+    """TTL per kiosk: create/patch validasi 1..12, sesi+rotasi memakainya."""
+    from presensi_api.api.security.config import AuthSettings as _AuthSettings
+    from presensi_api.api.security.dependencies import get_auth_settings as _gas
+
+    app.dependency_overrides[_gas] = lambda: _AuthSettings(signing_secret="k" * 40)
+    try:
+        with kiosk_database() as session:
+            lab = session.query(Laboratory).one()
+            dev = session.query(Device).one()
+            lab_id, dev_id = str(lab.id), str(dev.id)
+
+        bad = post_json(
+            "/api/v1/kiosks",
+            {
+                "device_id": dev_id,
+                "laboratory_id": lab_id,
+                "display_name": "Kiosk TTL",
+                "token_ttl_hours": 99,
+            },
+        )
+        assert bad.status_code == 422, bad.text
+
+        created = post_json(
+            "/api/v1/kiosks",
+            {
+                "device_id": dev_id,
+                "laboratory_id": lab_id,
+                "display_name": "Kiosk TTL",
+                "token_ttl_hours": 2,
+            },
+        )
+        assert created.status_code == 201, created.text
+        assert created.json()["token_ttl_hours"] == 2
+        kiosk_id = created.json()["id"]
+
+        async def call(method: str, path: str, payload: dict | None = None):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+            ) as client:
+                if method == "PATCH":
+                    return await client.patch(path, json=payload)
+                return await client.post(path, json=payload)
+
+        patched = asyncio.run(
+            call("PATCH", f"/api/v1/kiosks/{kiosk_id}", {"token_ttl_hours": 8})
+        )
+        assert patched.status_code == 200, patched.text
+        assert patched.json()["token_ttl_hours"] == 8
+
+        reset = asyncio.run(call("POST", f"/api/v1/kiosks/{kiosk_id}/pin"))
+        assert reset.status_code in (200, 201), reset.text
+        pin = reset.json()["temporary_pin"]
+
+        opened = asyncio.run(
+            call(
+                "POST",
+                "/api/v1/public/kiosk-display/session",
+                {"device_id": dev_id, "pin": pin},
+            )
+        )
+        assert opened.status_code == 200, opened.text
+        assert opened.json()["expires_in_seconds"] == 8 * 3600
+
+        rotated = asyncio.run(
+            call(
+                "POST",
+                "/api/v1/public/kiosk-display/rotate",
+                {"display_token": opened.json()["display_token"]},
+            )
+        )
+        assert rotated.status_code == 200, rotated.text
+        assert rotated.json()["expires_in_seconds"] == 8 * 3600
+
+        cleared = asyncio.run(
+            call("PATCH", f"/api/v1/kiosks/{kiosk_id}", {"token_ttl_hours": None})
+        )
+        assert cleared.status_code == 200, cleared.text
+        assert cleared.json()["token_ttl_hours"] is None
+
+        opened_default = asyncio.run(
+            call(
+                "POST",
+                "/api/v1/public/kiosk-display/session",
+                {"device_id": dev_id, "pin": pin},
+            )
+        )
+        assert opened_default.status_code == 200, opened_default.text
+        assert opened_default.json()["expires_in_seconds"] == 4 * 3600
+    finally:
+        app.dependency_overrides.pop(_gas, None)
+
+
 def test_register_kiosk_writes_audit_with_row_id(
     kiosk_database: sessionmaker[Session],
 ) -> None:

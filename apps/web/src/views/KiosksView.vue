@@ -30,7 +30,8 @@ const isLoading = ref(false)
 const error = ref<string | null>(null)
 const message = ref<string | null>(null)
 const lastPin = ref<string | null>(null)
-const form = ref({ device_id: '', laboratory_id: '', display_name: '', camera_label: '' })
+const form = ref({ device_id: '', laboratory_id: '', display_name: '', camera_label: '',
+  token_ttl_hours: '' as string })
 
 function formatError(err: unknown): string {
   if (err instanceof ApiError) return err.message
@@ -69,8 +70,10 @@ async function submit(): Promise<void> {
       laboratory_id: form.value.laboratory_id,
       display_name: form.value.display_name.trim(),
       camera_label: form.value.camera_label.trim() || null,
+      token_ttl_hours: form.value.token_ttl_hours === '' ? null : Number(form.value.token_ttl_hours),
     })
     form.value.display_name = ''
+    form.value.token_ttl_hours = ''
     message.value = 'Layar terdaftar. Buat PIN lalu aktifkan di komputer lab (/presensi).'
     await load()
   } catch (err) {
@@ -83,6 +86,18 @@ async function makePin(k: Kiosk): Promise<void> {
     const res = await resetKioskPin(k.id)
     lastPin.value = res.temporary_pin
     message.value = `PIN baru layar "${k.display_name}" (sekali tampil).`
+    await load()
+  } catch (err) {
+    error.value = formatError(err)
+  }
+}
+
+async function setTtl(k: Kiosk, raw: string): Promise<void> {
+  try {
+    await updateKiosk(k.id, {
+      token_ttl_hours: raw === '' ? null : Number(raw),
+    })
+    message.value = `TTL token layar "${k.display_name}" diperbarui.`
     await load()
   } catch (err) {
     error.value = formatError(err)
@@ -164,6 +179,17 @@ onMounted(() => void load())
             ><span>Label kamera</span>
             <UiInput v-model="form.camera_label" data-testid="kiosk-camera" maxlength="120" />
           </label>
+          <label class="st-field"
+            ><span>TTL token (jam)</span>
+            <UiSelect v-model="form.token_ttl_hours" data-testid="kiosk-ttl">
+              <option value="">Default global</option>
+              <option value="1">1 jam</option>
+              <option value="2">2 jam</option>
+              <option value="4">4 jam</option>
+              <option value="8">8 jam</option>
+              <option value="12">12 jam</option>
+            </UiSelect>
+          </label>
         </div>
         <div>
           <UiButton type="submit" variant="primary" data-testid="kiosk-create"
@@ -180,6 +206,7 @@ onMounted(() => void load())
               <th>Layar</th>
               <th>Kamera</th>
               <th>PIN</th>
+              <th>TTL token</th>
               <th>Status</th>
               <th><span class="st-table__actions">Aksi</span></th>
             </tr>
@@ -194,6 +221,21 @@ onMounted(() => void load())
                 <UiBadge :tone="k.has_pin ? 'present' : 'neutral'">{{
                   k.has_pin ? 'Terpasang' : 'Belum'
                 }}</UiBadge>
+              </td>
+              <td>
+                <UiSelect
+                  :model-value="k.token_ttl_hours == null ? '' : String(k.token_ttl_hours)"
+                  :aria-label="`TTL token ${k.display_name}`"
+                  data-testid="kiosk-ttl-row"
+                  @update:model-value="(v) => void setTtl(k, String(v ?? ''))"
+                >
+                  <option value="">Default</option>
+                  <option value="1">1 jam</option>
+                  <option value="2">2 jam</option>
+                  <option value="4">4 jam</option>
+                  <option value="8">8 jam</option>
+                  <option value="12">12 jam</option>
+                </UiSelect>
               </td>
               <td>
                 <UiBadge :tone="k.is_active ? 'present' : 'neutral'">{{

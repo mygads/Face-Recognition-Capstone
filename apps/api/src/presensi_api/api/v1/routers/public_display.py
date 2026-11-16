@@ -137,13 +137,16 @@ class PublicKioskOption(ApiSchema):
 class LabDisplaySessionRequest(ApiSchema):
     laboratory_id: UUID
     pin: str
-    light: bool = False
+    # Default ringan: roster tidak pernah keluar untuk kiosk kecuali
+    # diminta eksplisit (?light=false hanya untuk operator).
+    light: bool = True
 
 
 class KioskDisplaySessionRequest(ApiSchema):
     device_id: UUID
     pin: str
-    light: bool = False
+    # Default ringan: lihat LabDisplaySessionRequest.
+    light: bool = True
 
 
 class DisplaySessionResponse(ApiSchema):
@@ -605,7 +608,9 @@ def open_kiosk_display_session(
         raise
     kiosk.last_seen_at = datetime.now(UTC)
     session.commit()
-    token, ttl = issue_display_token("kiosk", device.id, lab.id, settings)
+    token, ttl = issue_display_token(
+        "kiosk", device.id, lab.id, settings, ttl_hours=kiosk.token_ttl_hours
+    )
     return DisplaySessionResponse(
         display_token=token,
         expires_in_seconds=ttl,
@@ -805,8 +810,19 @@ def _rotate_display_token(
     lab = session.get(Laboratory, claims.laboratory_id)
     if lab is None or not lab.is_active:
         raise ApiProblem(404, "laboratory_not_found", "Laboratorium tidak ditemukan.")
+    kiosk_ttl: int | None = None
+    if kind == "kiosk":
+        kiosk_row = session.scalar(
+            select(KioskScreen).where(
+                KioskScreen.device_id == claims.subject_id,
+                KioskScreen.laboratory_id == claims.laboratory_id,
+                KioskScreen.is_active.is_(True),
+            )
+        )
+        if kiosk_row is not None:
+            kiosk_ttl = kiosk_row.token_ttl_hours
     token, ttl = issue_display_token(
-        kind, claims.subject_id, claims.laboratory_id, settings
+        kind, claims.subject_id, claims.laboratory_id, settings, ttl_hours=kiosk_ttl
     )
     return DisplaySessionResponse(
         display_token=token,

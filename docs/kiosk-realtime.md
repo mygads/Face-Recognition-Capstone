@@ -30,18 +30,27 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
    Push dalam proses: write path (tandai manual, keputusan recognition,
    buka/tutup sesi) menaikkan versi via `display_notify`
    sehingga generator bangun dan query ulang segera (< 100 ms, bukan
-   menunggu tick). Jaring pengaman: query ulang tiap ~10 bangun tanpa
-   perubahan (mencakup worker/proses lain) + `NOTIFY presensi_display_changed`
-   best-effort (nama channel dicadangkan; belum ada LISTENer — push sejati
-   tahap dua bila tick terbukti bottleneck). Kirim hanya saat hash berubah
-   (`server_time` dikecualikan), komentar `: ping` tiap 15 tick.
+   menunggu tick). Jaring pengaman: query ulang tiap ~10 detik tanpa
+   perubahan (mencakup worker/proses lain yang NOTIFY-nya hilang) + ping
+   tiap 15 tick. Kirim hanya saat hash berubah (`server_time` dikecualikan).
+   Isolasi antar-lab dijamin digest per-lab: bangun versi bersifat global,
+   tetapi generator hanya emit bila snapshot lab-nya sendiri berubah
+   (diuji `test_two_lab_streams_are_isolated`).
+   Push lintas proses (tahap dua, selesai): tiap proses API memasang satu
+   daemon thread `LISTEN "presensi_display_changed"` (`display_notify.py`:
+   `start/stop_pg_display_listener`, dipasang di lifespan `main.py`,
+   best-effort — tidak pernah crash). Write path yang sama memancarkan
+   `pg_notify_display_changed` saat commit, sehingga generator SSE di proses
+   lain bangun < 1 detik (poll `notifies(timeout=1.0)`, reconnect backoff).
+   Tanpa Postgres (sqlite/dev) listener dilewati; safety tick tetap
+   menjamin delivery.
    Fallback otomatis ke polling 5 detik bila fetch streaming dan
    `EventSource` tak tersedia/gagal.
 3. **Roster dihapus dari layar**: tidak ada daftar nama/NIS; tinggal spotlight
    1 hasil + hitungan menunggu. Memangkas render dan menaikkan privasi.
-4. **Mode ringan (default `light=true`)**: `POST .../session` menerima `light`
-   di body, `GET /display` dan `/kiosk-display` default ringan
-   (`?light=false` eksplisit untuk roster penuh), dan `POST .../rotate`
+4. **Mode ringan (default `light=true` di mana-mana)**: `POST .../session`
+   (body) maupun `GET /display` dan `/kiosk-display` (query) default ringan
+   (`light=false` eksplisit hanya untuk operator), dan `POST .../rotate`
    selalu membalas snapshot ringan. Snapshot ringan
    mengosongkan `students: []` (hitungan + spotlight tetap ada) agar roster
    penuh tidak pernah keluar untuk kiosk — frontend selalu memakai mode ini.
@@ -72,7 +81,11 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
   Mitigasi: TTL default 4 jam + rotasi proaktif, token hanya
   baca kesiapan + hasil tersaring (tanpa roster/gallery/embedding/riwayat),
   revoke menutup layar (401), PIN salah 5x kunci 5 menit. Pengetatan lebih
-  jauh (TTL per kiosk + rotasi) adalah optimasi tahap dua.
+  jauh selesai: kolom nullable `kiosk_screens.token_ttl_hours` (CHECK 1-12,
+  migrasi `c7d2e5a9b1f4`, NULL = pakai default global) + kolom
+  `token_ttl_hours` di skema create/update/response kiosk. `open` dan
+  `rotate` kiosk memakai TTL baris itu; PATCH dengan null eksplisit kembali
+  ke default global. UI `KiosksView` menyediakan pilihan TTL per layar.
 
 ## Operasional kiosk (PC lab)
 
@@ -94,6 +107,13 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
   liveness diaktifkan.
 - Target UX: tangkap → konfirmasi tampil < 1 detik. Tanpa perangkat nyata,
   klaim performa bertanda `MANUAL HARDWARE TEST REQUIRED` (AGENTS.md).
+- Baseline sintetis CPU-only (`scripts/bench_recognition_synthetic.py`,
+  BUKAN klaim hardware): matching NumPy p50/p95 sekitar 90 template 0,37/0,69 ms;
+  300 template 1,3/1,4 ms; 900 template 3,9/4,3 ms (bervariasi per mesin). Temporal 40 frame
+  ~0,5 ms, accept di frame ke-5; ganti orang TANPA jeda terobservasi sebagai
+  identitas `campur` (single track-ID per kamera — keputusan server tetap
+  fail-closed). Angka YuNet/SFace/kamera/FPS/latensi KAI tetap
+  `MANUAL HARDWARE TEST REQUIRED` sampai diukur di PC lab nyata.
 
 ## Single-owner kamera + kiosk-stream (tanpa getUserMedia di PC lab)
 
@@ -151,7 +171,11 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
   kiosk, dan enrollment).
 - Test: `apps/edge-agent/tests/test_local_preview.py` (hint tanpa identitas,
   freshness, 403 non-loopback, preflight PNA).
-- Test: `apps/api/tests/test_public_display_stream.py`,
+- `apps/api/src/presensi_api/display_notify.py` (notify in-process +
+  LISTENer Postgres lintas proses) dan `scripts/bench_recognition_synthetic.py`.
+- Test: `apps/api/tests/test_public_display_stream.py`
+  (termasuk isolasi 2-lab), `apps/api/tests/test_display_notify_push.py`
+  (12 test: NOTIFY lintas proses via stub koneksi),
   `apps/api/tests/test_scope_gaps_p1p3.py` (light + rotate + TTL),
   `apps/web/src/views/DisplayView.test.ts` (termasuk rotasi fake-timer).
 - Kontrak SSE di OpenAPI: `StreamingResponse` tak punya `response_model`,

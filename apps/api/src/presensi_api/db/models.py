@@ -724,6 +724,7 @@ class KioskScreen(UUIDPrimaryKey, TimestampMixin, Base):
         Integer, nullable=False, default=0, server_default=text("0")
     )
     pin_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    token_ttl_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
     )
