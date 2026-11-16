@@ -8,6 +8,7 @@ import SessionsView from './SessionsView.vue'
 const api = vi.hoisted(() => ({
   listOpenableSchedules: vi.fn(),
   listAttendanceSessions: vi.fn(),
+  getSessionOpeningPolicy: vi.fn(async () => ({ default_grace_period_minutes: 20 })),
   getOpeningPreference: vi.fn(),
   saveOpeningPreference: vi.fn(),
   openAttendanceSession: vi.fn(),
@@ -107,6 +108,25 @@ describe('sessions view', () => {
       opening_mode: 'manual',
       updated_at: null,
     })
+  })
+
+  it('memakai grace default dari Kebijakan Presensi dan tetap bisa diubah manual', async () => {
+    const wrapper = mount(SessionsView, { global: { plugins: [teacherPinia()] } })
+    await flushPromises()
+    const input = wrapper.get('[data-testid="open-grace-input"]')
+    expect((input.element as HTMLInputElement).value).toBe('20')
+    await input.setValue('10')
+    await flushPromises()
+    api.openAttendanceSession.mockResolvedValueOnce({
+      ...overrideSession,
+      status: 'active',
+      grace_period_minutes: 10,
+    })
+    await wrapper.get('[data-testid="open-session-schedule-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="confirm-open-session"]').trigger('click')
+    await flushPromises()
+    expect(api.openAttendanceSession).toHaveBeenCalledWith('schedule-1', 10)
   })
 
   it('keeps manual open visible and marks override sessions with a badge', async () => {

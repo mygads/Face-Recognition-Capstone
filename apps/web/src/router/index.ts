@@ -292,7 +292,7 @@ export const routes: RouteRecordRaw[] = [
         component: AuditView,
         meta: {
           title: 'Audit aktivitas',
-          description: 'Jejak perubahan akun, penugasan, koreksi, dan PIN.',
+          description: 'Jejak perubahan akun, penugasan, pembaruan langsung, dan PIN.',
           requiredRoles: ['ADMIN'],
           pageHeaderInView: true,
         },

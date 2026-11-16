@@ -547,7 +547,8 @@ r = c.post(
 )
 assert r.status_code in (200, 201), r.text[:200]
 check("EWS tindak lanjut dibuat", True)
-# Koreksi: ajukan untuk record pertama sesi RPL (jika ada), lalu setujui sebagian
+# Pembaruan langsung (pengganti koreksi berjenjang): ubah record pertama sesi
+# RPL langsung via manual-marks (tanpa persetujuan admin).
 try:
     rr = c.get(
         "/api/v1/attendance", headers=A, params={"session_id": sess_a["id"], "limit": 1}
@@ -555,32 +556,22 @@ try:
     if rr.status_code == 200 and rr.json().get("items"):
         rec = rr.json()["items"][0]
         rk = c.post(
-            "/api/v1/attendance/corrections",
+            f"/api/v1/attendance/sessions/{sess_a['id']}/manual-marks",
             headers=T_DEWI,
             json={
-                "attendance_record_id": rec["id"],
-                "corrected_status": "late",
-                "reason": "Seed: koreksi contoh - seharusnya terlambat",
+                "student_id": rec["student_id"],
+                "status": "late",
+                "note": "Seed: pembaruan langsung contoh - seharusnya terlambat",
             },
         )
         if rk.status_code in (200, 201):
-            cid = rk.json()["id"]
-            rd = c.post(
-                f"/api/v1/attendance/corrections/{cid}/decision",
-                headers=A,
-                json={
-                    "decision": "approved",
-                    "decision_note": "Seed: disetujui contoh",
-                },
-            )
-            assert rd.status_code in (200, 201), rd.text[:200]
-            check("koreksi diajukan + disetujui (contoh)", True)
+            check("pembaruan langsung record (contoh)", True)
         else:
-            print("INFO koreksi seed dilewati:", rk.status_code, rk.text[:150])
+            print("INFO pembaruan langsung seed dilewati:", rk.status_code, rk.text[:150])
     else:
-        print("INFO tidak ada record untuk koreksi seed")
+        print("INFO tidak ada record untuk pembaruan langsung seed")
 except Exception as e:
-    print("INFO koreksi seed dilewati:", e)
+    print("INFO pembaruan langsung seed dilewati:", e)
 
 # 10. Penugasan guru->kelas, relasi kelas<->lab, kiosk layar + PIN (spec 1:1)
 for acc_id, cls in [(dewi_id, cls_rpl), (agus_id, cls_tkj)]:

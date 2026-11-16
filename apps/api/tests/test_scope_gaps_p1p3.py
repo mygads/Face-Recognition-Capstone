@@ -273,6 +273,69 @@ def test_laboratory_detail_scoped_for_laboran(
     assert resp.status_code == 404, resp.text
 
 
+def test_laboran_schedule_manage_grantable_and_enforced(
+    gap_database: sessionmaker[Session],
+) -> None:
+    """SCHEDULE_MANAGE bisa di-grant ke laboran (butuh SCHEDULE_READ) dan
+    mengaktifkan cabang laboran-manager pada validasi jadwal."""
+    from presensi_api.api.security.roles import LABORANT_GRANTABLE_PERMISSIONS
+
+    assert Permission.SCHEDULE_MANAGE in LABORANT_GRANTABLE_PERMISSIONS
+    lab_a, lab_b = _lab_ids(gap_database)
+    with gap_database() as session:
+        from sqlalchemy import select
+
+        class_id = str(session.scalars(select(SchoolClass)).one().id)
+    # Default fixture = admin: grant tanpa prasyarat harus ditolak.
+    alone = request(
+        "POST",
+        f"/api/v1/accounts/{LABORAN_ID}/permission-grants",
+        {"permission": "schedule_manage"},
+    )
+    assert alone.status_code == 422, alone.text
+    assert alone.json()["error"]["code"] == "grant_missing_prerequisite"
+    assert (
+        request(
+            "POST",
+            f"/api/v1/accounts/{LABORAN_ID}/permission-grants",
+            {"permission": "schedule_read"},
+        ).status_code
+        == 201
+    )
+    granted = request(
+        "POST",
+        f"/api/v1/accounts/{LABORAN_ID}/permission-grants",
+        {"permission": "schedule_manage"},
+    )
+    assert granted.status_code == 201, granted.text
+    assert "schedule_manage" in request(
+        "GET", f"/api/v1/accounts/{LABORAN_ID}/permission-grants"
+    ).json()["grantable"]
+
+    def payload(lab: str) -> dict[str, object]:
+        return {
+            "class_id": class_id,
+            "laboratory_id": lab,
+            "teacher_user_id": str(TEACHER_ID),
+            "subject": "Kimia Laboran",
+            "weekday": 3,
+            "start_time": "09:00",
+            "end_time": "10:00",
+            "timezone_name": "Asia/Jakarta",
+            "effective_from": "2026-09-01",
+        }
+
+    _set_principal(
+        LABORAN_ID,
+        frozenset({RoleCode.LABORANT}),
+        frozenset({Permission.SCHEDULE_READ, Permission.SCHEDULE_MANAGE}),
+    )
+    ok_resp = request("POST", "/api/v1/schedules", payload(lab_a))
+    assert ok_resp.status_code == 201, ok_resp.text
+    denied_resp = request("POST", "/api/v1/schedules", payload(lab_b))
+    assert denied_resp.status_code == 403, denied_resp.text
+
+
 def test_laboran_schedule_manage_scoped_to_assigned_labs(
     gap_database: sessionmaker[Session],
 ) -> None:
@@ -331,8 +394,8 @@ def test_autoclose_session_opened_after_schedule_end(
         # hari ini sehingga sesi terbaca berakhir nanti malam. Jangkar
         # seluruh skenario ke satu tanggal agar deterministik.
         ref = wib_now
-        if (wib_now - timedelta(hours=1)).date() != wib_now.date():
-            ref = wib_now - timedelta(hours=2)
+        while (ref - timedelta(hours=2)).date() != ref.date():
+            ref = ref - timedelta(hours=3)
         ended = (ref - timedelta(hours=1)).time().replace(microsecond=0)
         schedule = PracticumSchedule(
             class_id=class_a.id,

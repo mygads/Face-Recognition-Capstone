@@ -69,6 +69,7 @@ ROLE_PERMISSIONS: dict[RoleCode, FrozenSet[Permission]] = {
 LABORANT_GRANTABLE_PERMISSIONS: frozenset[Permission] = frozenset(
     {
         Permission.SCHEDULE_READ,
+        Permission.SCHEDULE_MANAGE,
         Permission.SESSION_VIEW,
         Permission.SESSION_OPERATE,
         Permission.ATTENDANCE_MANUAL,
@@ -81,11 +82,12 @@ LABORANT_GRANTABLE_PERMISSIONS: frozenset[Permission] = frozenset(
 )
 
 # Prasyarat grant (pohon dependensi, 1 level):
+# - Kelola Jadwal butuh Lihat Jadwal.
 # - Operasikan Sesi & Tandai Manual butuh Pantau Sesi.
-# - Ajukan Koreksi butuh Pantau Sesi atau Lihat Laporan.
 # - Ekspor Laporan butuh Lihat Laporan.
 # - Catat Tindak Lanjut butuh Lihat EWS.
 PERMISSION_PREREQUISITES: dict[Permission, tuple[Permission, ...]] = {
+    Permission.SCHEDULE_MANAGE: (Permission.SCHEDULE_READ,),
     Permission.SESSION_OPERATE: (Permission.SESSION_VIEW,),
     Permission.ATTENDANCE_MANUAL: (Permission.SESSION_VIEW,),
     Permission.REPORTS_EXPORT: (Permission.REPORTS_READ,),

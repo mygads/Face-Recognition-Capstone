@@ -85,7 +85,7 @@ ubah tabel saat process startup). Mapping SQLAlchemy 2 di
 | Roster/jadwal | `students`, `classes`, `class_students`, `laboratories`, `devices`, `kiosk_screens`, `practicum_schedules` | Master + device/kiosk (PIN hash) dengan metadata health |
 | Operasi presensi | `attendance_sessions`, `session_students` | Sesi live + snapshot roster immutable |
 | Evidence | `face_templates`, `recognition_events` | Template versi-model + hasil mentah idempoten |
-| Final | `attendance_records`, `attendance_corrections` | Keputusan final + koreksi 2 kasus + putusan ADMIN (`attendance_records.note` = catatan manual-mark guru, tampil di baris laporan/ekspor/UI) |
+| Final | `attendance_records` | Keputusan final (`attendance_records.note` = catatan manual-mark guru, tampil di baris laporan/ekspor/UI). Alur koreksi berjenjang + tabel `attendance_corrections` DIHAPUS (2026-11); pengganti pembaruan langsung via manual-marks. |
 | EWS | `ews_follow_ups` | Tindak lanjut watchlist (`open`/`done`) |
 | Audit | `audit_logs` | Actor/aksi/entity + before/after JSON (tanpa biometrik/secret); dibaca via `GET /api/v1/audit/activity` + `/app/audit` (ADMIN) |
 

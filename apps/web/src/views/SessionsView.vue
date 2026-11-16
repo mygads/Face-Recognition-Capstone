@@ -18,6 +18,7 @@ import {
   ApiError,
   closeAttendanceSession,
   getAttendanceSessionStatus,
+  getSessionOpeningPolicy,
   getSessionRoster,
   listAttendanceSessions,
   listOpenableSchedules,
@@ -39,9 +40,21 @@ const isLaborant = computed(
 const schedules = ref<OpenableSchedule[]>([])
 const sessions = ref<AttendanceSession[]>([])
 // Grace period sesi baru: default 15 menit, dapat diubah per pembukaan.
-// Nilai baku sekolah dikelola tunggal di Kebijakan Presensi (backend
-// menerapkannya saat sesi dibuka tanpa override eksplisit).
+// Nilai baku diambil dari Kebijakan Presensi (satu sumber kebenaran);
+// backend tetap menerapkannya saat sesi dibuka tanpa override eksplisit.
 const gracePeriodMinutes = ref(15)
+
+async function loadPolicyGraceDefault(): Promise<void> {
+  try {
+    const policy = await getSessionOpeningPolicy()
+    const raw = policy.default_grace_period_minutes
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 && raw <= 1440) {
+      gracePeriodMinutes.value = Math.floor(raw)
+    }
+  } catch {
+    // Tanpa akses baca kebijakan (atau backend lama): tetap 15 menit.
+  }
+}
 const openingScheduleId = ref<string | null>(null)
 const closingSessionId = ref<string | null>(null)
 const isLoading = ref(false)
@@ -284,6 +297,7 @@ async function reload(): Promise<void> {
 }
 
 onMounted(async () => {
+  await loadPolicyGraceDefault()
   await reload()
   // Route detail (/app/sessions/:sessionId) harus bisa dibuka ulang langsung:
   // pilih sesi dari URL bila tersedia.
@@ -471,6 +485,7 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
             :model-value="String(gracePeriodMinutes)"
             type="number"
             aria-label="Grace period dalam menit"
+            data-testid="open-grace-input"
             @update:model-value="gracePeriodMinutes = Number($event)"
           />
         </UiField>
