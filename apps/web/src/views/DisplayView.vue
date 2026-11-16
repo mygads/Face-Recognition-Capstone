@@ -8,14 +8,17 @@ import {
   ApiError,
   getKioskDisplay,
   getPublicDisplay,
+  kioskDisplayStreamPath,
   kioskDisplayStreamUrl,
   listPublicKioskScreens,
   listPublicLaboratories,
   openKioskDisplaySession,
   openPublicDisplaySession,
+  publicDisplayStreamPath,
   publicDisplayStreamUrl,
   rotateKioskDisplaySession,
   rotatePublicDisplaySession,
+  streamDisplayUpdates,
   type KioskLiveUpdate,
   type PublicDisplay,
   type PublicKioskOption,
@@ -46,6 +49,7 @@ const localVideo = ref<HTMLVideoElement | null>(null)
 let pollTimer: ReturnType<typeof setInterval> | undefined
 let rotationTimer: ReturnType<typeof setTimeout> | undefined
 let eventSource: EventSource | null = null
+let fetchAbort: AbortController | null = null
 let localStream: MediaStream | null = null
 const ROTATE_AHEAD_SECONDS = 1800
 
@@ -233,6 +237,10 @@ function disconnectStream(): void {
     eventSource.close()
     eventSource = null
   }
+  if (fetchAbort) {
+    fetchAbort.abort()
+    fetchAbort = null
+  }
   if (pollTimer) clearInterval(pollTimer)
   pollTimer = undefined
 }
@@ -244,13 +252,51 @@ function startPolling(): void {
   startHintPolling()
 }
 
-function connectStream(): void {
-  disconnectStream()
-  if (!displayToken.value) return
-  if (typeof EventSource === 'undefined') {
-    startPolling()
-    return
+function applySnapshotEvent(raw: string): void {
+  try {
+    const update = JSON.parse(raw) as KioskLiveUpdate
+    const prevSession = live.value?.session_id ?? null
+    const prevEvent = live.value?.spotlight?.recognition_event_id ?? null
+    if (
+      prevSession !== null &&
+      update.session_id !== null &&
+      update.session_id !== prevSession
+    ) {
+      seenSpotlightIds.value.clear()
+    }
+    const incomingEvent = update.spotlight?.recognition_event_id ?? null
+    if (incomingEvent !== null) {
+      if (seenSpotlightIds.value.has(incomingEvent) && incomingEvent === prevEvent) {
+        // Duplikat SSE (mis. reconnect mengirim sorotan lama yang sama):
+        // pertahankan agregat terbaru tetapi jangan anggap sebagai scan baru.
+        // Kesegaran tetap dihitung dari recorded_at, bukan waktu tiba.
+        void 0
+      }
+      seenSpotlightIds.value.add(incomingEvent)
+    }
+    live.value = update
+    // session_id bisa tiba lewat push pertama; segarkan hint generik.
+    if (update.session_id) void pollAgentHint()
+    if (display.value) {
+      display.value = {
+        ...display.value,
+        laboratory_name: update.laboratory_name,
+        session_id: update.session_id,
+        subject: update.subject,
+        status: update.status,
+        opened_at: update.opened_at,
+        students: [],
+      }
+    }
+    error.value = null
+  } catch {
+    /* abaikan frame rusak */
   }
+}
+
+function connectEventSourceFallback(): void {
+  // Fallback lawas: token di query URL (tercatat di riwayat/proxy).
+  // Dipakai hanya bila fetch streaming tidak tersedia/gagal.
   try {
     const url = deviceId.value
       ? kioskDisplayStreamUrl(displayToken.value)
@@ -259,45 +305,7 @@ function connectStream(): void {
     eventSource = src
     streamState.value = 'sse'
     src.addEventListener('snapshot', (ev) => {
-      try {
-        const update = JSON.parse((ev as MessageEvent).data) as KioskLiveUpdate
-        const prevSession = live.value?.session_id ?? null
-        const prevEvent = live.value?.spotlight?.recognition_event_id ?? null
-        if (
-          prevSession !== null &&
-          update.session_id !== null &&
-          update.session_id !== prevSession
-        ) {
-          seenSpotlightIds.value.clear()
-        }
-        const incomingEvent = update.spotlight?.recognition_event_id ?? null
-        if (incomingEvent !== null) {
-          if (seenSpotlightIds.value.has(incomingEvent) && incomingEvent === prevEvent) {
-            // Duplikat SSE (mis. reconnect mengirim sorotan lama yang sama):
-            // pertahankan agregat terbaru tetapi jangan anggap sebagai scan baru.
-            // Kesegaran tetap dihitung dari recorded_at, bukan waktu tiba.
-            void 0
-          }
-          seenSpotlightIds.value.add(incomingEvent)
-        }
-        live.value = update
-        // session_id bisa tiba lewat push pertama; segarkan hint generik.
-        if (update.session_id) void pollAgentHint()
-        if (display.value) {
-          display.value = {
-            ...display.value,
-            laboratory_name: update.laboratory_name,
-            session_id: update.session_id,
-            subject: update.subject,
-            status: update.status,
-            opened_at: update.opened_at,
-            students: [],
-          }
-        }
-        error.value = null
-      } catch {
-        /* abaikan frame rusak */
-      }
+      applySnapshotEvent((ev as MessageEvent).data)
     })
     src.onerror = () => {
       if (eventSource === src) startPolling()
@@ -308,6 +316,51 @@ function connectStream(): void {
   }
 }
 
+function connectStream(): void {
+  disconnectStream()
+  if (!displayToken.value) return
+  if (typeof EventSource === 'undefined' && typeof ReadableStream === 'undefined') {
+    startPolling()
+    return
+  }
+  // Utama: fetch + ReadableStream agar token lewat header Authorization,
+  // bukan query URL. EventSource (query token) hanya fallback.
+  const path = deviceId.value ? kioskDisplayStreamPath() : publicDisplayStreamPath()
+  const token = displayToken.value
+  if (typeof ReadableStream !== 'undefined' && typeof fetch !== 'undefined') {
+    const controller = new AbortController()
+    fetchAbort = controller
+    streamState.value = 'sse'
+    startHintPolling()
+    void streamDisplayUpdates(
+      path,
+      token,
+      controller.signal,
+      (event, data, done) => {
+        if (event === 'error') {
+          if (data.includes('display_token_invalid')) {
+            done()
+            void loadDisplay(true).then(() => {
+              if (fetchAbort === controller) connectEventSourceFallback()
+            })
+            return
+          }
+          return
+        }
+        if (event === 'snapshot') applySnapshotEvent(data)
+      },
+    ).catch((error: unknown) => {
+      if (fetchAbort !== controller) return
+      fetchAbort = null
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        void loadDisplay(true)
+      }
+      connectEventSourceFallback()
+    })
+    return
+  }
+  connectEventSourceFallback()
+}
 function clearRotation(): void {
   if (rotationTimer) clearTimeout(rotationTimer)
   rotationTimer = undefined
@@ -807,7 +860,7 @@ onBeforeUnmount(() => {
             </dl>
             <p v-if="spotlight.status === 'late'" class="kiosk__muted">
               Presensi tercatat dengan catatan keterlambatan melewati batas toleransi
-              {{ live?.grace_period_minutes ?? '—' }} menit.
+              {{ live?.grace_period_minutes ?? '-' }} menit.
             </p>
             <p v-else-if="spotlight.source === 'manual'" class="kiosk__muted">
               Dicatat manual oleh petugas pada roster praktikum.

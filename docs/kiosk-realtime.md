@@ -3,15 +3,20 @@
 Keputusan arsitektur kiosk (hasil audit performa): browser hanya me-render,
 inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
 
-1. **Video lokal** via `getUserMedia` di `DisplayView.vue` (kamera USB menempel
-   di PC kiosk itu sendiri). Nol network, ~30 FPS, tanpa beban server.
-   Syarat: halaman dibuka dalam **secure context** (HTTPS atau localhost);
-   bila tidak, preview nonaktif dan layar tetap menampilkan hasil.
-   Satu webcam dipakai dua konsumen (browser tampil + agent nalar):
-   gunakan `v4l2loopback` untuk split device di Linux, atau biarkan agent
-   yang serve MJPEG diagnostik bila split belum lolos uji hardware.
+1. **Video dari pemilik tunggal (single-owner)**: di PC lab, agent
+   (`OpenCVCamera`) memegang kamera fisik untuk inference; browser kiosk
+   TIDAK membuka kamera. Video tampil dari `GET /v1/kiosk-stream` (MJPEG
+   multipart agent, loopback-only) — frame yang sama dengan inference,
+   plus `FaceOverlay` (box + skeleton 5 titik). `getUserMedia` hanya
+   fallback diagnostik bila stream agent gagal ("Pakai kamera perangkat").
+   Split webcam via `v4l2loopback` DITOLAK: justru dihindari dengan
+   single-owner; tidak ada rencana overlay browser + inference bersamaan
+   tanpa uji hardware baru.
 2. **Hasil di-push** via SSE `GET /public/display/stream` dan
-   `/public/kiosk-display/stream` (token display di query, seperti polling).
+   `/public/kiosk-display/stream`. Transport utama: `fetch` +
+   `ReadableStream` dengan token di header `Authorization: Bearer`
+   (tidak tercatat di URL/riwayat/proxy); `EventSource` dengan token query
+   hanya fallback lawas bila fetch streaming tak tersedia/gagal.
    Payload ringan `KioskLiveUpdate`: hitungan lab + 1 sorotan, **tanpa roster**,
    plus `grace_period_minutes` dari sesi aktif (UI memakai nilai ini, bukan
    hardcode 15 menit).
@@ -22,17 +27,24 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
      `face_recognition` yang event-nya berasal dari perangkat kiosk itu
      (join `recognition_events.device_id` + `session_id`). Record manual dan
      record kamera lain tidak pernah menjadi sorotan scan kiosk ini.
-   Tick 1 detik, kirim hanya saat hash berubah, komentar `: ping` tiap 15 detik.
-   Fallback otomatis ke polling 5 detik bila `EventSource` tak tersedia/gagal.
+   Push dalam proses: write path (tandai manual, keputusan recognition,
+   buka/tutup sesi) menaikkan versi via `display_notify`
+   sehingga generator bangun dan query ulang segera (< 100 ms, bukan
+   menunggu tick). Jaring pengaman: query ulang tiap ~10 bangun tanpa
+   perubahan (mencakup worker/proses lain) + `NOTIFY presensi_display_changed`
+   best-effort (nama channel dicadangkan; belum ada LISTENer — push sejati
+   tahap dua bila tick terbukti bottleneck). Kirim hanya saat hash berubah
+   (`server_time` dikecualikan), komentar `: ping` tiap 15 tick.
+   Fallback otomatis ke polling 5 detik bila fetch streaming dan
+   `EventSource` tak tersedia/gagal.
 3. **Roster dihapus dari layar**: tidak ada daftar nama/NIS; tinggal spotlight
    1 hasil + hitungan menunggu. Memangkas render dan menaikkan privasi.
-4. **Mode ringan (`light=true`)**: `POST .../session` menerima `light` di body,
-   `GET /display` dan `/kiosk-display` menerima `?light=true`, dan
-   `POST .../rotate` selalu membalas snapshot ringan. Snapshot ringan
+4. **Mode ringan (default `light=true`)**: `POST .../session` menerima `light`
+   di body, `GET /display` dan `/kiosk-display` default ringan
+   (`?light=false` eksplisit untuk roster penuh), dan `POST .../rotate`
+   selalu membalas snapshot ringan. Snapshot ringan
    mengosongkan `students: []` (hitungan + spotlight tetap ada) agar roster
    penuh tidak pernah keluar untuk kiosk — frontend selalu memakai mode ini.
-   Snapshot awal non-light hanya tersisa untuk kompatibilitas; jangan dipakai
-   alur kiosk baru.
 
 ## Keterbatasan yang diketahui
 
@@ -51,17 +63,16 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
   (`_require_lab_stream_target`) dicek ulang sebelum token baru diterbitkan
   (kind/subject/lab sama). Token lama tetap hidup sampai kedaluwarsa;
   rotasi yang gagal diabaikan — stream lama berjalan sampai 401.
-- **Risiko yang diterima (didokumentasikan, bukan diabaikan)**: token display
-  tetap lewat URL query pada endpoint GET/stream (tercatat pada riwayat
-  browser, log server/proxy, sistem pemantauan). PIN pembuka awal dikirim via
-  POST body; token di query adalah trade-off `EventSource` (tidak bisa set
-  header), jadi endpoint GET snapshot dan GET stream tetap menerima token di
-  query, sedangkan rotasi memakai POST body. Mitigasi: TTL default 4 jam + rotasi proaktif, token hanya
+- **Risiko yang diterima (didokumentasikan, bukan diabaikan)**: transport
+  utama (fetch streaming + snapshot) mengirim token via header
+  `Authorization: Bearer` atau cookie `display_token` — tidak tercatat di
+  URL/riwayat/proxy. Query `?token=` dipertahankan hanya sebagai fallback
+  lawas untuk `EventSource` (tidak bisa set header) dan kompatibilitas;
+  jangan pakai di alur baru. PIN pembuka awal dikirim via POST body.
+  Mitigasi: TTL default 4 jam + rotasi proaktif, token hanya
   baca kesiapan + hasil tersaring (tanpa roster/gallery/embedding/riwayat),
-  revoke menutup layar (401), PIN salah 5x kunci 5 menit. Bila deployment
-  memakai proxy yang me-log query string, matikan log query atau pindahkan
-  stream ke header/cookie — dicatat sebagai tindak lanjut deployment, bukan
-  perilaku default kode.
+  revoke menutup layar (401), PIN salah 5x kunci 5 menit. Pengetatan lebih
+  jauh (TTL per kiosk + rotasi) adalah optimasi tahap dua.
 
 ## Operasional kiosk (PC lab)
 
@@ -130,7 +141,8 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
 - `apps/api/src/presensi_api/api/v1/routers/public_display.py`
   (`KioskLiveUpdate`, `_build_live_update`, `_live_event_generator`,
   `/display/stream`, `/kiosk-display/stream`).
-- `apps/web/src/views/DisplayView.vue` (video lokal, EventSource, tanpa
+- `apps/web/src/views/DisplayView.vue` (stream agent primer + FaceOverlay,
+  SSE via fetch-header dengan fallback EventSource-query, tanpa
   roster, poll hint generik + chip "Memverifikasi").
 - `apps/edge-agent/src/presensi_edge_agent/local_preview.py`
   (`/v1/kiosk-hint`, `/v1/kiosk-stream`, `kiosk_hint()`,

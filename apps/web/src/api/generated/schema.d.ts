@@ -355,7 +355,7 @@ export interface paths {
         put?: never;
         /**
          * Set staff password directly (ADMIN only)
-         * @description Admin menetapkan kata sandi baru untuk staf. Sesi lama dicabut dan staf dapat langsung memakai kata sandi baru tanpa wajib ganti.
+         * @description Admin menetapkan kata sandi baru untuk staf.
          */
         post: operations["set_staff_password_api_v1_accounts__account_id__set_password_post"];
         delete?: never;
@@ -638,7 +638,7 @@ export interface paths {
         };
         /**
          * Download student import CSV template
-         * @description Unduh template CSV import siswa berisi header student_number,full_name,class_code dan dua baris contoh.
+         * @description Unduh template CSV import siswa (header + contoh).
          */
         get: operations["download_student_import_template_api_v1_students_import_template_get"];
         put?: never;
@@ -16451,13 +16451,17 @@ export interface operations {
     };
     get_public_display_api_v1_public_display_get: {
         parameters: {
-            query: {
-                token: string;
+            query?: {
+                token?: string | null;
                 light?: boolean;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
-            cookie?: never;
+            cookie?: {
+                display_token?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -16732,13 +16736,17 @@ export interface operations {
     };
     get_kiosk_display_api_v1_public_kiosk_display_get: {
         parameters: {
-            query: {
-                token: string;
+            query?: {
+                token?: string | null;
                 light?: boolean;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
-            cookie?: never;
+            cookie?: {
+                display_token?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -17011,12 +17019,16 @@ export interface operations {
     };
     stream_lab_display_api_v1_public_display_stream_get: {
         parameters: {
-            query: {
-                token: string;
+            query?: {
+                token?: string | null;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
-            cookie?: never;
+            cookie?: {
+                display_token?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -17151,12 +17163,16 @@ export interface operations {
     };
     stream_kiosk_display_api_v1_public_kiosk_display_stream_get: {
         parameters: {
-            query: {
-                token: string;
+            query?: {
+                token?: string | null;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
-            cookie?: never;
+            cookie?: {
+                display_token?: string | null;
+            };
         };
         requestBody?: never;
         responses: {

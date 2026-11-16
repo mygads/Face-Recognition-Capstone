@@ -15,6 +15,7 @@ from uuid import UUID
 
 import httpx
 import pytest
+from fastapi import Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -149,7 +150,10 @@ def test_lab_endpoint_returns_event_stream(
         lab = session.query(Laboratory).one()
         real_token, _ = issue_display_token("lab", lab.id, lab.id, TEST_SETTINGS)
         assert decode_display_token(real_token, TEST_SETTINGS) is not None
-        response = display_module.stream_lab_display(session, TEST_SETTINGS, real_token)
+        request = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
+        response = display_module.stream_lab_display(
+            request, session, TEST_SETTINGS, token=real_token
+        )
     assert isinstance(response, StreamingResponse)
     assert response.media_type == "text/event-stream"
 
@@ -198,12 +202,17 @@ def test_stream_endpoints_reject_mismatched_kind(
         device = session.query(Device).one()
         lab_token, _ = issue_display_token("lab", lab.id, lab.id, TEST_SETTINGS)
         kiosk_token, _ = issue_display_token("kiosk", device.id, lab.id, TEST_SETTINGS)
+        request = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
         with pytest.raises(ApiProblem):
-            display_module.stream_lab_display(session, TEST_SETTINGS, kiosk_token)
+            display_module.stream_lab_display(
+                request, session, TEST_SETTINGS, token=kiosk_token
+            )
         with pytest.raises(ApiProblem):
-            display_module.stream_kiosk_display(session, TEST_SETTINGS, lab_token)
+            display_module.stream_kiosk_display(
+                request, session, TEST_SETTINGS, token=lab_token
+            )
         response = display_module.stream_kiosk_display(
-            session, TEST_SETTINGS, kiosk_token
+            request, session, TEST_SETTINGS, token=kiosk_token
         )
         assert isinstance(response, StreamingResponse)
         assert response.media_type == "text/event-stream"
@@ -428,3 +437,150 @@ def test_kiosk_generator_uses_per_device_spotlight(
     assert snap["spotlight"]["full_name"] == "Kamera A"
     assert snap["spotlight"]["source"] == "face_recognition"
     assert snap["grace_period_minutes"] == 20
+
+
+def _http_get(path: str, **kwargs):  # type: ignore[no-untyped-def]
+    cookies = kwargs.pop("cookies", None)
+
+    async def send() -> httpx.Response:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+            cookies=cookies,
+        ) as client:
+            return await client.get(path, **kwargs)
+
+    return asyncio.run(send())
+
+
+def test_lab_snapshot_accepts_bearer_header_without_query(
+    stream_database: sessionmaker[Session],
+) -> None:
+    with stream_database() as session:
+        lab = session.query(Laboratory).one()
+        token, _ = issue_display_token("lab", lab.id, lab.id, TEST_SETTINGS)
+    resp = _http_get(
+        "/api/v1/public/display", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # Default light=True: hitungan tetap ada, roster tidak keluar untuk kiosk.
+    assert body["laboratory_id"] == str(lab.id)
+    assert body["students"] == []
+    assert body["total_roster"] == 0
+
+
+def test_lab_snapshot_accepts_cookie_without_query(
+    stream_database: sessionmaker[Session],
+) -> None:
+    with stream_database() as session:
+        lab = session.query(Laboratory).one()
+        token, _ = issue_display_token("lab", lab.id, lab.id, TEST_SETTINGS)
+    resp = _http_get("/api/v1/public/display", cookies={"display_token": token})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["laboratory_id"] == str(lab.id)
+
+
+def test_lab_snapshot_rejects_missing_token(
+    stream_database: sessionmaker[Session],
+) -> None:
+    del stream_database
+    resp = _http_get("/api/v1/public/display")
+    assert resp.status_code == 401, resp.text
+
+
+def test_lab_snapshot_light_false_includes_students_key(
+    stream_database: sessionmaker[Session],
+) -> None:
+    with stream_database() as session:
+        lab = session.query(Laboratory).one()
+        token, _ = issue_display_token("lab", lab.id, lab.id, TEST_SETTINGS)
+    resp = _http_get(
+        "/api/v1/public/display?light=false",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert "students" in resp.json()
+
+
+def test_stream_rejects_mismatched_kind_over_header(
+    stream_database: sessionmaker[Session],
+) -> None:
+    with stream_database() as session:
+        lab = session.query(Laboratory).one()
+        kiosk_token, _ = issue_display_token(
+            "kiosk", UUID(int=0), lab.id, TEST_SETTINGS
+        )
+    del lab
+    resp = _http_get(
+        "/api/v1/public/display/stream",
+        headers={"Authorization": f"Bearer {kiosk_token}"},
+    )
+    assert resp.status_code == 401, resp.text
+
+
+def test_notify_wakes_generator_without_waiting_safety_tick(
+    stream_database: sessionmaker[Session],
+) -> None:
+    """Push in-process membangunkan generator (<5 dtk, bukan 10 dtk safety)."""
+    import threading
+    import time
+
+    from presensi_api.display_notify import notify_display_changed
+
+    with stream_database() as session:
+        lab = session.query(Laboratory).one()
+        lab_id = str(lab.id)
+        token, _ = issue_display_token("lab", lab.id, lab.id, TEST_SETTINGS)
+        claims = decode_display_token(token, TEST_SETTINGS)
+        assert claims is not None
+        subject_id, laboratory_id = claims.subject_id, claims.laboratory_id
+
+    def deactivate_and_notify() -> None:
+        time.sleep(0.3)
+        with stream_database() as inner:
+            target = inner.query(Laboratory).one()
+            target.is_active = False
+            inner.commit()
+        notify_display_changed()
+
+    async def scenario() -> tuple[tuple[str, Any], tuple[str, Any], float]:
+        gen = display_module._live_event_generator(
+            "lab", subject_id, laboratory_id
+        )
+        try:
+            first = await _collect_awaited(gen)
+            worker = threading.Thread(target=deactivate_and_notify)
+            started = time.monotonic()
+            worker.start()
+            try:
+                second = await asyncio.wait_for(_collect_awaited(gen), timeout=5)
+            finally:
+                worker.join()
+            return first, second, time.monotonic() - started
+        finally:
+            await gen.aclose()
+
+    async def _collect_awaited(
+        gen: Any,
+    ) -> tuple[str, dict[str, Any] | None]:
+        async for raw in gen:
+            for block in raw.split("\n\n"):
+                if block.startswith("event: snapshot"):
+                    for line in block.splitlines():
+                        if line.startswith("data: "):
+                            return "snapshot", json.loads(line[6:])
+                    return "snapshot", None
+                if block.startswith("event: error"):
+                    for line in block.splitlines():
+                        if line.startswith("data: "):
+                            return "error", json.loads(line[6:])
+                    return "error", None
+        raise AssertionError("stream berakhir tanpa event")
+
+    (kind, _), (kind2, payload), elapsed = asyncio.run(scenario())
+    assert kind == "snapshot"
+    assert kind2 == "error"
+    assert payload is not None and payload.get("code") == "laboratory_not_found"
+    assert elapsed < 5, "generator tidak dibangunkan push"
+    assert lab_id

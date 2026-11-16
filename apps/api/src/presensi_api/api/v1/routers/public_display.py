@@ -10,12 +10,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import time
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Cookie, Depends, Header, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import Field
 from sqlalchemy import func, select
@@ -48,6 +49,30 @@ from presensi_api.session_lifecycle import as_utc
 router = APIRouter(prefix="/public", tags=["public-display"])
 DbSession = Annotated[Session, Depends(get_db_session)]
 AuthDep = Annotated[AuthSettings, Depends(get_auth_settings)]
+
+
+def _resolve_display_token(
+    request: Request,
+    query_token: str | None,
+    authorization: str | None,
+    cookie_token: str | None,
+) -> str:
+    """Ambil token display tanpa mewajibkan query string.
+
+    Prioritas: header ``Authorization: Bearer <token>`` (dipakai fetch
+    streaming FE agar token tidak tercatat di URL/riwayat/proxy),
+    lalu cookie ``display_token`` (deployment same-origin), terakhir
+    query ``?token=`` (kompatibilitas EventSource lama).
+    """
+    header_token: str | None = None
+    if authorization:
+        scheme, _, value = authorization.partition(" ")
+        if scheme.lower() == "bearer" and value.strip():
+            header_token = value.strip()
+    for candidate in (header_token, cookie_token, query_token):
+        if candidate and 16 <= len(candidate) <= 1024:
+            return candidate
+    raise ApiProblem(401, "display_token_invalid", "Sesi layar tidak valid.")
 
 
 class PublicLaboratory(ApiSchema):
@@ -358,11 +383,40 @@ def _build_live_update(
 async def _live_event_generator(
     kind: str, subject_id: UUID, laboratory_id: UUID
 ) -> AsyncGenerator[str, None]:
-    """Stream SSE: kirim snapshot ringan hanya saat berubah (hash), tick 1 dtk."""
+    """Stream SSE: kirim snapshot ringan hanya saat berubah (hash).
+
+    Push dalam proses: write path menaikkan versi via
+    ``display_notify.notify_display_changed`` sehingga generator
+    me-query ulang segera (< 100 ms, bukan tick berikutnya). Jaring
+    pengaman: query ulang tiap ~10 bangun tanpa perubahan (mencakup
+    worker/proses lain) + ping tiap 15 tick agar proksi tidak menutup
+    koneksi idle.
+    """
+    from presensi_api.display_notify import (
+        current_display_version,
+        wait_for_display_version,
+    )
+
     last_digest = ""
     ticks = 0
+    last_seen_version = current_display_version()
+    last_query_at = 0.0
     while True:
         try:
+            version_changed = False
+            if ticks > 0:
+                new_version = await asyncio.to_thread(
+                    wait_for_display_version, last_seen_version, 1.0
+                )
+                version_changed = new_version != last_seen_version
+                last_seen_version = new_version
+            now = time.monotonic()
+            if not (ticks == 0 or version_changed or now - last_query_at >= 10.0):
+                ticks += 1
+                if ticks % 15 == 0:
+                    yield ": ping\n\n"
+                continue
+            last_query_at = now
             with get_session_factory()() as db:
                 lab = db.get(Laboratory, laboratory_id)
                 if lab is None or not lab.is_active:
@@ -393,7 +447,6 @@ async def _live_event_generator(
             ticks += 1
             if ticks % 15 == 0:
                 yield ": ping\n\n"
-            await asyncio.sleep(1)
         except (asyncio.CancelledError, GeneratorExit):
             break
         except Exception:
@@ -501,12 +554,16 @@ def open_lab_display_session(
     summary="Public display snapshot (short-lived token, no login)",
 )
 def get_public_display(
+    request: Request,
     session: DbSession,
     settings: AuthDep,
-    token: Annotated[str, Query(min_length=16, max_length=1024)],
-    light: Annotated[bool, Query()] = False,
+    token: Annotated[str | None, Query(min_length=16, max_length=1024)] = None,
+    light: Annotated[bool, Query()] = True,
+    authorization: Annotated[str | None, Header()] = None,
+    display_token: Annotated[str | None, Cookie()] = None,
 ) -> PublicDisplayResponse:
-    claims = decode_display_token(token, settings)
+    resolved = _resolve_display_token(request, token, authorization, display_token)
+    claims = decode_display_token(resolved, settings)
     if claims is None or claims.kind != "lab":
         raise ApiProblem(401, "display_token_invalid", "Sesi layar tidak valid.")
     lab = session.get(Laboratory, claims.laboratory_id)
@@ -563,12 +620,16 @@ def open_kiosk_display_session(
     summary="Public kiosk snapshot (short-lived token, no login)",
 )
 def get_kiosk_display(
+    request: Request,
     session: DbSession,
     settings: AuthDep,
-    token: Annotated[str, Query(min_length=16, max_length=1024)],
-    light: Annotated[bool, Query()] = False,
+    token: Annotated[str | None, Query(min_length=16, max_length=1024)] = None,
+    light: Annotated[bool, Query()] = True,
+    authorization: Annotated[str | None, Header()] = None,
+    display_token: Annotated[str | None, Cookie()] = None,
 ) -> PublicDisplayResponse:
-    claims = decode_display_token(token, settings)
+    resolved = _resolve_display_token(request, token, authorization, display_token)
+    claims = decode_display_token(resolved, settings)
     if claims is None or claims.kind != "kiosk":
         raise ApiProblem(401, "display_token_invalid", "Sesi layar tidak valid.")
     device = session.get(Device, claims.subject_id)
@@ -665,11 +726,15 @@ def _require_lab_stream_target(
     summary="SSE live kiosk updates (lab token, no login)",
 )
 def stream_lab_display(
+    request: Request,
     session: DbSession,
     settings: AuthDep,
-    token: Annotated[str, Query(min_length=16, max_length=1024)],
+    token: Annotated[str | None, Query(min_length=16, max_length=1024)] = None,
+    authorization: Annotated[str | None, Header()] = None,
+    display_token: Annotated[str | None, Cookie()] = None,
 ) -> StreamingResponse:
-    claims = decode_display_token(token, settings)
+    resolved = _resolve_display_token(request, token, authorization, display_token)
+    claims = decode_display_token(resolved, settings)
     if claims is None or claims.kind != "lab":
         raise ApiProblem(401, "display_token_invalid", "Sesi layar tidak valid.")
     _require_lab_stream_target("lab", claims.subject_id, claims.laboratory_id, session)
@@ -699,11 +764,15 @@ def stream_lab_display(
     summary="SSE live kiosk updates (kiosk token, no login)",
 )
 def stream_kiosk_display(
+    request: Request,
     session: DbSession,
     settings: AuthDep,
-    token: Annotated[str, Query(min_length=16, max_length=1024)],
+    token: Annotated[str | None, Query(min_length=16, max_length=1024)] = None,
+    authorization: Annotated[str | None, Header()] = None,
+    display_token: Annotated[str | None, Cookie()] = None,
 ) -> StreamingResponse:
-    claims = decode_display_token(token, settings)
+    resolved = _resolve_display_token(request, token, authorization, display_token)
+    claims = decode_display_token(resolved, settings)
     if claims is None or claims.kind != "kiosk":
         raise ApiProblem(401, "display_token_invalid", "Sesi layar tidak valid.")
     _require_lab_stream_target(

@@ -13,6 +13,22 @@ const api = vi.hoisted(() => ({
   rotatePublicDisplaySession: vi.fn(),
   publicDisplayStreamUrl: (token: string) => `/api/v1/public/display/stream?token=${token}`,
   kioskDisplayStreamUrl: (token: string) => `/api/v1/public/kiosk-display/stream?token=${token}`,
+  publicDisplayStreamPath: () => '/api/v1/public/display/stream',
+  kioskDisplayStreamPath: () => '/api/v1/public/kiosk-display/stream',
+  streamDisplayUpdates: vi.fn(
+    async (
+      _path: string,
+      _token: string,
+      _signal: AbortSignal,
+      _onEvent: (event: string, data: string, done: () => void) => void,
+    ): Promise<void> => {
+      void _path;
+      void _token;
+      void _signal;
+      void _onEvent;
+      throw new Error('stream off')
+    },
+  ),
 }))
 
 vi.mock('../api/client', () => ({
@@ -99,6 +115,18 @@ describe('DisplayView realtime (SSE + video lokal)', () => {
     const realES = g['EventSource']
     g['EventSource'] = FakeEventSource
     FakeEventSource.instances = []
+    let streamHandler: ((event: string, data: string, done: () => void) => void) | null = null
+    api.streamDisplayUpdates.mockImplementationOnce(
+      async (
+        _path: string,
+        _token: string,
+        _signal: AbortSignal,
+        onEvent: (event: string, data: string, done: () => void) => void,
+      ) => {
+        streamHandler = onEvent
+        await new Promise(() => undefined)
+      },
+    )
     try {
       api.openPublicDisplaySession.mockResolvedValueOnce({
         display_token: 'tok-live',
@@ -109,12 +137,17 @@ describe('DisplayView realtime (SSE + video lokal)', () => {
       await w.find('[data-testid="display-pin-input"]').setValue('1234')
       await w.find('form').trigger('submit.prevent')
       await flushPromises()
-      expect(FakeEventSource.instances).toHaveLength(1)
-      expect(FakeEventSource.instances[0].url).toContain('/display/stream')
+      // Jalur utama: fetch + header Authorization, bukan EventSource query-token.
+      expect(api.streamDisplayUpdates).toHaveBeenCalled()
+      const call = api.streamDisplayUpdates.mock.calls[0] as unknown[]
+      expect(String(call[0])).toContain('/display/stream')
+      expect(call[1]).toBe('tok-live')
+      expect(FakeEventSource.instances).toHaveLength(0)
       // roster tidak lagi dirender di layar kiosk
       expect(w.find('[data-testid="display-board"]').text()).not.toContain('S-001')
       // push snapshot ringan lewat SSE
-      FakeEventSource.instances[0].emit('snapshot', {
+      expect(streamHandler).not.toBeNull()
+      streamHandler!('snapshot', JSON.stringify({
         laboratory_id: 'lab-1',
         laboratory_name: 'Lab Kimia 1',
         session_id: 'ses-1',
@@ -131,7 +164,7 @@ describe('DisplayView realtime (SSE + video lokal)', () => {
           recorded_at: '2026-11-06T06:05:00+07:00',
         },
         server_time: '2026-11-06T06:06:00+07:00',
-      })
+      }), () => undefined)
       await flushPromises()
       const board = w.find('[data-testid="display-board"]')
       expect(board.text()).toContain('Sinta A.')

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from presensi_api.api.errors import ApiProblem
 from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
 from presensi_api.api.v1.schemas.attendance import ManualMarkRequest
+from presensi_api.display_notify import notify_display_changed, pg_notify_display_changed
 from presensi_api.db.models import (
     AttendanceRecord,
     AttendanceSession,
@@ -139,8 +140,10 @@ def mark_manual_attendance(
                 },
             )
         )
+        pg_notify_display_changed(db, schedule.laboratory_id)
         db.commit()
         db.refresh(existing)
+        notify_display_changed()
         return existing
     record: AttendanceRecord | None = None
     try:
@@ -190,6 +193,8 @@ def mark_manual_attendance(
             },
         )
     )
+    pg_notify_display_changed(db, schedule.laboratory_id)
     db.commit()
     db.refresh(record)
+    notify_display_changed()
     return record

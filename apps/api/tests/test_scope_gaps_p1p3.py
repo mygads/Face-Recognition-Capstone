@@ -222,9 +222,15 @@ def test_display_light_mode_and_rotate(gap_database: sessionmaker[Session]) -> N
     assert body["expires_in_seconds"] == 4 * 3600
     token = body["display_token"]
 
+    # Default kini light=true: hitungan ada, roster tidak keluar untuk kiosk.
     full = request("GET", f"/api/v1/public/display?token={token}")
     assert full.status_code == 200, full.text
-    assert len(full.json()["students"]) == 3
+    assert full.json()["students"] == []
+    assert full.json()["total_roster"] == 3
+
+    explicit_full = request("GET", f"/api/v1/public/display?token={token}&light=false")
+    assert explicit_full.status_code == 200, explicit_full.text
+    assert len(explicit_full.json()["students"]) == 3
 
     light = request("GET", f"/api/v1/public/display?token={token}&light=true")
     assert light.status_code == 200, light.text
@@ -320,22 +326,31 @@ def test_autoclose_session_opened_after_schedule_end(
         class_a = session.scalars(select(SchoolClass)).one()
         teacher = session.scalars(select(User).where(User.id == TEACHER_ID)).one()
         wib_now = datetime.now(UTC).astimezone(ZoneInfo("Asia/Jakarta"))
-        ended = (wib_now - timedelta(hours=1)).time().replace(microsecond=0)
+        # scheduled_end_at memakai tanggal opened_at: tepat setelah tengah
+        # malam, "berakhir 1 jam lalu" jatuh kemarin sementara opened_at
+        # hari ini sehingga sesi terbaca berakhir nanti malam. Jangkar
+        # seluruh skenario ke satu tanggal agar deterministik.
+        ref = wib_now
+        if (wib_now - timedelta(hours=1)).date() != wib_now.date():
+            ref = wib_now - timedelta(hours=2)
+        ended = (ref - timedelta(hours=1)).time().replace(microsecond=0)
         schedule = PracticumSchedule(
             class_id=class_a.id,
             laboratory_id=lab.id,
             teacher_user_id=teacher.id,
             subject="Kimia Susulan",
-            weekday=wib_now.weekday(),
-            start_time=(wib_now - timedelta(hours=2)).time().replace(microsecond=0),
+            weekday=ref.weekday(),
+            start_time=(ref - timedelta(hours=2)).time().replace(microsecond=0),
             end_time=ended,
             timezone_name="Asia/Jakarta",
-            effective_from=wib_now.date(),
+            effective_from=ref.date(),
             is_active=True,
         )
         session.add(schedule)
         session.flush()
-        opened_at = datetime.now(UTC).replace(microsecond=0)
+        opened_at = (
+            (ref - timedelta(minutes=30)).astimezone(UTC).replace(microsecond=0)
+        )
         att_session = AttendanceSession(
             practicum_schedule_id=schedule.id,
             opened_by_user_id=teacher.id,

@@ -746,7 +746,7 @@ export async function openPublicDisplaySession(
 
 export async function getPublicDisplay(token: string, light = true): Promise<PublicDisplay> {
   const result = await apiClient.GET('/api/v1/public/display', {
-    params: { query: { token, light } },
+    params: { query: { light }, header: { authorization: `Bearer ${token}` } },
   })
   return unwrap(result)
 }
@@ -784,6 +784,83 @@ export interface KioskLiveUpdate {
 
 export function publicDisplayStreamUrl(token: string): string {
   return `/api/v1/public/display/stream?token=${encodeURIComponent(token)}`
+}
+
+export function publicDisplayStreamPath(): string {
+  return '/api/v1/public/display/stream'
+}
+
+export function kioskDisplayStreamPath(): string {
+  return '/api/v1/public/kiosk-display/stream'
+}
+
+export type DisplayStreamEventHandler = (
+  event: string,
+  data: string,
+  done: () => void,
+) => void
+
+/** SSE via fetch agar token lewat header Authorization, bukan URL. */
+export async function streamDisplayUpdates(
+  path: string,
+  token: string,
+  signal: AbortSignal,
+  onEvent: DisplayStreamEventHandler,
+): Promise<void> {
+  let done = false
+  const finish = (): void => {
+    done = true
+  }
+  const response = await fetch(
+    new Request(path, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' },
+      signal,
+    }),
+    { credentials: 'include' },
+  ).catch((error: unknown) => {
+    throw toTransportError(error)
+  })
+  if (response.status === 401 || response.status === 403) {
+    throw new ApiError(response.status, 'display_token_invalid', 'Sesi layar tidak valid.')
+  }
+  if (!response.ok || !response.body) throw new ApiError(response.status, 'stream_unavailable', 'Stream tidak tersedia.')
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let currentEvent = 'message'
+  const pump = async (): Promise<void> => {
+    for (;;) {
+      if (done || signal.aborted) {
+        await reader.cancel().catch(() => undefined)
+        return
+      }
+      const chunk = await reader.read()
+      if (chunk.done) return
+      buffer += decoder.decode(chunk.value, { stream: true })
+      let boundary = buffer.indexOf('\n')
+      while (boundary !== -1) {
+        const line = buffer.slice(0, boundary).replace(/\r$/, '')
+        buffer = buffer.slice(boundary + 1)
+        if (line === '') {
+          currentEvent = 'message'
+        } else if (line.startsWith(':')) {
+          // komentar/ping SSE: abaikan
+        } else if (line.startsWith('event:')) {
+          currentEvent = line.slice(6).trim() || 'message'
+        } else if (line.startsWith('data:')) {
+          onEvent(currentEvent, line.slice(5).trimStart(), finish)
+          if (done || signal.aborted) {
+            await reader.cancel().catch(() => undefined)
+            return
+          }
+          currentEvent = 'message'
+        }
+        boundary = buffer.indexOf('\n')
+      }
+    }
+  }
+  signal.addEventListener('abort', () => void reader.cancel().catch(() => undefined), { once: true })
+  await pump()
 }
 
 export async function getAttendanceReportSummary(
@@ -1083,7 +1160,7 @@ export async function openKioskDisplaySession(
 
 export async function getKioskDisplay(token: string, light = true): Promise<PublicDisplay> {
   const result = await apiClient.GET('/api/v1/public/kiosk-display', {
-    params: { query: { token, light } },
+    params: { query: { light }, header: { authorization: `Bearer ${token}` } },
   })
   return unwrap(result)
 }
