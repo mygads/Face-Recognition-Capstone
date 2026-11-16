@@ -43,7 +43,13 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
    `pg_notify_display_changed` saat commit, sehingga generator SSE di proses
    lain bangun < 1 detik (poll `notifies(timeout=1.0)`, reconnect backoff).
    Tanpa Postgres (sqlite/dev) listener dilewati; safety tick tetap
-   menjamin delivery.
+   menjamin delivery. Verifikasi nyata (Postgres 16 + 2 proses, DB scratch
+   `presensi_push_e2e`, data sintetis, 2026-11-17): (1) NOTIFY via write-path
+   `pg_notify_display_changed` + commit membangunkan proses LISTEN lain dalam
+   0,13 dtk; (2) dua worker uvicorn (8101 tulis / 8102 SSE): buka sesi via
+   worker A tampil sebagai snapshot SSE di worker B dalam 0,06-0,07 dtk
+   (jauh di bawah safety 10 dtk — terbukti jalur push, bukan jaring).
+   Ulang 2x stabil.
    Fallback otomatis ke polling 5 detik bila fetch streaming dan
    `EventSource` tak tersedia/gagal.
 3. **Roster dihapus dari layar**: tidak ada daftar nama/NIS; tinggal spotlight
