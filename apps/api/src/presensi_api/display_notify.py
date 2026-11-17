@@ -6,14 +6,18 @@ re-queries immediately instead of waiting for the next 1 s tick. The
 generator keeps a periodic safety re-query (multi-worker fallback: an
 event in another uvicorn worker still surfaces at the next safety tick).
 
-Cross-process channel name (reserved, documented): PostgreSQL
-``NOTIFY presensi_display_changed, '<laboratory_id>'``. Emitted
-best-effort by the same write paths; no LISTENer is attached yet. A
-future multi-worker deployment can attach one without touching writers.
+Cross-process push: write paths emit PostgreSQL
+``NOTIFY presensi_display_changed, '<laboratory_id>'`` best-effort, and each
+API process runs a daemon thread (``start_pg_display_listener``, installed
+in ``main.py`` lifespan) that LISTENs on the same channel and bumps the
+in-process version on delivery. Without Postgres the listener is skipped
+and the periodic safety re-query still guarantees delivery.
 """
 
 from __future__ import annotations
 
+import logging
+import os
 import threading
 import time
 
@@ -82,10 +86,7 @@ def pg_notify_display_changed(session: object, laboratory_id: object) -> None:
 # menjamin delivery — tidak pernah crash.
 # ---------------------------------------------------------------------------
 
-import logging as _logging
-import os as _os
-
-_listener_log = _logging.getLogger("presensi_api.display_notify")
+_listener_log = logging.getLogger("presensi_api.display_notify")
 _listener_lock = threading.Lock()
 _listener_state: dict[str, object] = {"thread": None, "stop": None}
 
@@ -102,7 +103,7 @@ def sqlalchemy_url_to_psycopg_dsn(url: str | None) -> str | None:
     text = url.strip()
     for prefix in ("postgresql+psycopg://", "postgres://", "postgresql://"):
         if text.startswith(prefix):
-            return "postgresql://" + text[len(prefix):]
+            return "postgresql://" + text[len(prefix) :]
     return None
 
 
@@ -142,7 +143,10 @@ def _pg_listener_loop(
     try:
         import psycopg as _psycopg
     except Exception as exc:  # pragma: no cover - driver selalu ada di prod
-        _listener_log.warning("psycopg tidak tersedia; push lintas proses nonaktif (%s)", exc)
+        _listener_log.warning(
+            "psycopg tidak tersedia; push lintas proses nonaktif (%s)",
+            exc,
+        )
         return
     while not stop_event.is_set():
         try:
@@ -174,8 +178,10 @@ def start_pg_display_listener(
     with _listener_lock:
         if _listener_state["thread"] is not None:
             return True
-        resolved = dsn if dsn is not None else sqlalchemy_url_to_psycopg_dsn(
-            _os.getenv("DATABASE_URL")
+        resolved = (
+            dsn
+            if dsn is not None
+            else sqlalchemy_url_to_psycopg_dsn(os.getenv("DATABASE_URL"))
         )
         if resolved is None:
             return False

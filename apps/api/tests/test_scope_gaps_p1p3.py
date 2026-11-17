@@ -254,7 +254,9 @@ def test_display_light_mode_and_rotate(gap_database: sessionmaker[Session]) -> N
     assert cross.status_code == 401, cross.text
 
 
-def test_issue_display_token_ttl_follows_env_default_four_hours(monkeypatch) -> None:
+def test_issue_display_token_ttl_follows_env_default_four_hours(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("KIOSK_DISPLAY_TOKEN_TTL_HOURS", "2")
     _, ttl = issue_display_token("lab", UUID(int=1), UUID(int=2), TEST_SETTINGS)
     assert ttl == 2 * 3600
@@ -308,9 +310,12 @@ def test_laboran_schedule_manage_grantable_and_enforced(
         {"permission": "schedule_manage"},
     )
     assert granted.status_code == 201, granted.text
-    assert "schedule_manage" in request(
-        "GET", f"/api/v1/accounts/{LABORAN_ID}/permission-grants"
-    ).json()["grantable"]
+    assert (
+        "schedule_manage"
+        in request("GET", f"/api/v1/accounts/{LABORAN_ID}/permission-grants").json()[
+            "grantable"
+        ]
+    )
 
     def payload(lab: str) -> dict[str, object]:
         return {
@@ -411,9 +416,7 @@ def test_autoclose_session_opened_after_schedule_end(
         )
         session.add(schedule)
         session.flush()
-        opened_at = (
-            (ref - timedelta(minutes=30)).astimezone(UTC).replace(microsecond=0)
-        )
+        opened_at = (ref - timedelta(minutes=30)).astimezone(UTC).replace(microsecond=0)
         att_session = AttendanceSession(
             practicum_schedule_id=schedule.id,
             opened_by_user_id=teacher.id,

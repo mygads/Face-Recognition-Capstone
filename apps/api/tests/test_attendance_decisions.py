@@ -663,3 +663,49 @@ def test_event_within_clock_skew_allowance_is_accepted(
     assert response.json()["decision"] == "attendance_recorded"
     with factory() as db:
         assert db.scalar(select(RecognitionEvent)) is not None
+
+
+def test_retry_after_manual_edit_returns_current_record_not_no_attendance(
+    attendance_database: tuple[sessionmaker[Session], dict[str, UUID]],
+) -> None:
+    """Regresi P0: edit manual melepas tautan event, tetapi retry jaringan
+    dengan event_uuid sama harus tetap idempoten (kembalikan catatan final,
+    bukan no_attendance)."""
+    factory, ids = attendance_database
+    body = event_body(ids, event_id=uuid4())
+
+    async def post_mark(payload: dict[str, object]) -> httpx.Response:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            return await client.post(
+                f"/api/v1/attendance/sessions/{ids['session']}/manual-marks",
+                json=payload,
+            )
+
+    first = post_event(body)
+    assert first.status_code == 200, first.text
+    assert first.json()["decision"] == "attendance_recorded"
+
+    edited = asyncio.run(
+        post_mark(
+            {
+                "student_id": str(ids["student"]),
+                "status": "late",
+                "note": "Koreksi manual pasca-scan.",
+            },
+        )
+    )
+    assert edited.status_code == 201, edited.text
+    assert edited.json()["record"]["source"] == "manual"
+    assert edited.json()["record"]["recognition_event_id"] is None
+
+    retry = post_event(body)
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["replayed"] is True
+    assert retry.json()["decision"] == "attendance_recorded"
+    assert retry.json()["attendance"]["status"] == "late"
+    assert retry.json()["attendance"]["source"] == "manual"
+    with factory() as db:
+        assert len(db.scalars(select(RecognitionEvent)).all()) == 1
+        assert len(db.scalars(select(AttendanceRecord)).all()) == 1

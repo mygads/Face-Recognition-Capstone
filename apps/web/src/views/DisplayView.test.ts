@@ -22,10 +22,10 @@ const api = vi.hoisted(() => ({
       _signal: AbortSignal,
       _onEvent: (event: string, data: string, done: () => void) => void,
     ): Promise<void> => {
-      void _path;
-      void _token;
-      void _signal;
-      void _onEvent;
+      void _path
+      void _token
+      void _signal
+      void _onEvent
       throw new Error('stream off')
     },
   ),
@@ -147,24 +147,28 @@ describe('DisplayView realtime (SSE + video lokal)', () => {
       expect(w.find('[data-testid="display-board"]').text()).not.toContain('S-001')
       // push snapshot ringan lewat SSE
       expect(streamHandler).not.toBeNull()
-      streamHandler!('snapshot', JSON.stringify({
-        laboratory_id: 'lab-1',
-        laboratory_name: 'Lab Kimia 1',
-        session_id: 'ses-1',
-        subject: 'Uji Larutan',
-        status: 'active',
-        opened_at: null,
-        present_count: 2,
-        late_count: 0,
-        waiting_count: 1,
-        total_roster: 3,
-        spotlight: {
-          full_name: 'Sinta Anggraini',
-          status: 'present',
-          recorded_at: '2026-11-06T06:05:00+07:00',
-        },
-        server_time: '2026-11-06T06:06:00+07:00',
-      }), () => undefined)
+      streamHandler!(
+        'snapshot',
+        JSON.stringify({
+          laboratory_id: 'lab-1',
+          laboratory_name: 'Lab Kimia 1',
+          session_id: 'ses-1',
+          subject: 'Uji Larutan',
+          status: 'active',
+          opened_at: null,
+          present_count: 2,
+          late_count: 0,
+          waiting_count: 1,
+          total_roster: 3,
+          spotlight: {
+            full_name: 'Sinta Anggraini',
+            status: 'present',
+            recorded_at: '2026-11-06T06:05:00+07:00',
+          },
+          server_time: '2026-11-06T06:06:00+07:00',
+        }),
+        () => undefined,
+      )
       await flushPromises()
       const board = w.find('[data-testid="display-board"]')
       expect(board.text()).toContain('Sinta A.')
@@ -357,6 +361,106 @@ describe('DisplayView sinyal agent lokal', () => {
       expect(w.find('[data-testid="display-board"]').exists()).toBe(true)
     } finally {
       g['EventSource'] = realES
+      w.unmount()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('menyembunyikan gambar basi saat stream live tetapi hint tak segar', async () => {
+    const g = globalThis as unknown as Record<string, unknown>
+    const realES = g['EventSource']
+    g['EventSource'] = FakeEventSource
+    FakeEventSource.instances = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('agent mati di tengah jalan')
+      }),
+    )
+    api.openPublicDisplaySession.mockResolvedValueOnce({
+      display_token: 'tok-hint-stale',
+      snapshot,
+    })
+    const w = mount(DisplayView)
+    try {
+      await flushPromises()
+      await w.find('[data-testid="display-pin-input"]').setValue('1234')
+      await w.find('form').trigger('submit.prevent')
+      await flushPromises()
+      FakeEventSource.instances[0].emit('snapshot', {
+        laboratory_id: 'lab-1',
+        laboratory_name: 'Lab Kimia 1',
+        session_id: 'ses-1',
+        subject: 'Uji Larutan',
+        status: 'active',
+        opened_at: null,
+        present_count: 0,
+        late_count: 0,
+        waiting_count: 3,
+        total_roster: 3,
+        spotlight: null,
+        server_time: new Date().toISOString(),
+      })
+      await flushPromises()
+      // Gambar masih tampil saat status idle (upaya koneksi awal).
+      expect(w.find('[data-testid="display-agent-video"]').exists()).toBe(true)
+      // Setelah frame pertama, stream diklaim live tetapi hint basi:
+      // gambar beku disembunyikan, bukan disajikan sebagai live.
+      await w.find('[data-testid="display-agent-video"]').trigger('load')
+      await flushPromises()
+      expect(w.find('[data-testid="display-agent-video"]').exists()).toBe(false)
+      expect(w.text()).toContain('Menghubungkan ulang')
+      expect(w.find('[data-testid="face-overlay"]').exists()).toBe(false)
+    } finally {
+      g['EventSource'] = realES
+      w.unmount()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('menambahkan token stream kios ke URL hint/stream bila dikonfigurasi', async () => {
+    window.localStorage.setItem('presensi.kiosk_stream_token', 'kios-token-1')
+    try {
+      const w = await mountLiveBoard({
+        session_active: true,
+        camera_open: true,
+        recognition_state: null,
+        face_present: false,
+        face_count: 0,
+        attendance_result: null,
+      })
+      try {
+        const img = w.find('[data-testid="display-agent-video"]')
+        expect(img.exists()).toBe(true)
+        expect(img.attributes('src') ?? '').toContain('token=kios-token-1')
+        const fetchMock = fetch as unknown as { mock: { calls: unknown[][] } }
+        const hintCall = fetchMock.mock.calls.find((args) => String(args[0]).includes('kiosk-hint'))
+        expect(hintCall).toBeDefined()
+        expect(String(hintCall?.[0])).toContain('token=kios-token-1')
+      } finally {
+        w.unmount()
+        vi.unstubAllGlobals()
+      }
+    } finally {
+      window.localStorage.removeItem('presensi.kiosk_stream_token')
+    }
+  })
+
+  it('menyembunyikan gambar saat kamera lab dilaporkan mati', async () => {
+    const w = await mountLiveBoard({
+      session_active: true,
+      camera_open: false,
+      recognition_state: null,
+      face_present: false,
+      face_count: 0,
+      attendance_result: null,
+    })
+    try {
+      await flushPromises()
+      expect(w.find('[data-testid="display-agent-video"]').exists()).toBe(false)
+      expect(w.text()).toContain('Kamera tidak tersedia')
+      expect(w.find('[data-testid="face-overlay"]').exists()).toBe(false)
+    } finally {
       w.unmount()
       vi.unstubAllGlobals()
     }

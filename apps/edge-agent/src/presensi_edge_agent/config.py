@@ -126,6 +126,7 @@ class PreviewSettings:
     allowed_origins: tuple[str, ...]
     max_width: int
     jpeg_quality: int
+    kiosk_stream_token: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +158,7 @@ class EdgeConfig:
             ("http://127.0.0.1:5173", "http://localhost:5173"),
             640,
             70,
+            "",
         )
     )
 
@@ -274,6 +276,7 @@ _ENVIRONMENT_OVERRIDES: dict[
     "PRESENSI_EDGE_CAMERA_WIDTH": ("camera", "width", int),
     "PRESENSI_EDGE_CAMERA_HEIGHT": ("camera", "height", int),
     "PRESENSI_EDGE_CAMERA_FPS": ("camera", "fps", int),
+    "PRESENSI_EDGE_KIOSK_STREAM_TOKEN": ("preview", "kiosk_stream_token", str),
     "PRESENSI_EDGE_SESSION_ID": ("gateway", "session_id", str),
     "PRESENSI_EDGE_SESSION_STARTS_AT": ("gateway", "session_starts_at", str),
     "PRESENSI_EDGE_SESSION_ENDS_AT": ("gateway", "session_ends_at", str),
@@ -619,6 +622,7 @@ def load_config(
         allowed_origins=tuple(allowed_origins),
         max_width=_integer(preview_raw, "max_width", 640, minimum=160),
         jpeg_quality=_integer(preview_raw, "jpeg_quality", 70),
+        kiosk_stream_token=str(preview_raw.get("kiosk_stream_token", "") or ""),
     )
     if preview.port > 65535 or preview.jpeg_quality > 95:
         raise EdgeConfigError("preview.port or preview.jpeg_quality is out of range.")

@@ -266,6 +266,23 @@ describe('camera preview source switching', () => {
     wrapper.unmount()
   })
 
+  it('meminta fullscreen pada root halaman saat tombol diklik', async () => {
+    stubCompanion({ framesOk: 1 })
+    const wrapper = mount(CameraPreviewView, { global: { plugins: [laborantPinia()] } })
+    await flushPromises()
+    const requestFullscreen = vi.fn(async () => undefined)
+    const root = wrapper.element as HTMLElement
+    Object.defineProperty(root, 'requestFullscreen', { value: requestFullscreen, writable: true })
+    const button = wrapper
+      .findAll('button')
+      .find((candidate) => candidate.text().includes('Tampilan depan kamera'))
+    expect(button?.exists()).toBe(true)
+    await button?.trigger('click')
+    await flushPromises()
+    expect(requestFullscreen).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
   it('warns when the frame freezes', async () => {
     stubCompanion({ framesOk: 2, failStatus: 500 })
     const wrapper = mount(CameraPreviewView, { global: { plugins: [laborantPinia()] } })

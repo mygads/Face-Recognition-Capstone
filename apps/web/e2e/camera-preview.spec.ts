@@ -172,7 +172,8 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
 
   await expect(page.getByRole('heading', { name: 'Preview kamera presensi' })).toBeVisible()
   await expect(page.getByRole('img', { name: 'Preview langsung kamera presensi' })).toBeVisible()
-  await expect(page.locator('.camera-preview-view__face-box.is-ready')).toBeVisible()
+  await expect(page.getByTestId('face-overlay')).toBeVisible()
+  await expect(page.getByTestId('face-box-0')).toBeAttached()
   await expect(page.getByText('Frame siap diperiksa', { exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Yoga' })).toBeVisible()
   await expect(
@@ -195,10 +196,10 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
   recognitionState = 'accepted'
   await expect(page.getByRole('heading', { name: 'Yoga' })).toBeVisible()
   await expect(page.getByText(/Identitas cocok. Mengirim presensi/)).toBeVisible()
-  await expect(page.getByRole('img')).toHaveCount(1)
+  await expect(page.locator('.camera-preview-view__frame-stage img')).toHaveCount(1)
 
   await page.getByRole('button', { name: 'Tampilan depan kamera' }).click()
-  await expect(page.locator('.camera-preview-view')).toBeVisible()
+  await expect(page.locator('.camera-preview-view__layout')).toBeVisible()
   await expect(page.getByText('Kandidat sementara · belum diverifikasi presensi')).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Yoga' })).toBeVisible()
   await expect(page.getByText('Identitas cocok · menunggu konfirmasi server')).toBeVisible()

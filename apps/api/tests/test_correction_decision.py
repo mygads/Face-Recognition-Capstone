@@ -182,10 +182,10 @@ def test_correction_endpoints_are_gone(
     """Fitur koreksi dihapus: endpoint lama tidak lagi ada (404 route)."""
     _, ids = correction_database
     use_role(RoleCode.TEACHER, TEACHER_ID)
-    assert api_post("/api/v1/attendance/corrections", {"reason": "x"}).status_code == 404
     assert (
-        api_get("/api/v1/attendance/corrections").status_code == 404
+        api_post("/api/v1/attendance/corrections", {"reason": "x"}).status_code == 404
     )
+    assert api_get("/api/v1/attendance/corrections").status_code == 404
     assert (
         api_post(
             f"/api/v1/attendance/corrections/{UUID(int=9)}/decision",

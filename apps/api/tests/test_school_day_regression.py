@@ -522,7 +522,11 @@ def test_synthetic_school_day_attendance_regression(
     )
     direct_update = client.post(
         f"/api/v1/attendance/sessions/{session_id}/manual-marks",
-        json={"student_id": str(present_student_id), "status": "late"},
+        json={
+            "student_id": str(present_student_id),
+            "status": "late",
+            "note": "Koreksi keterlambatan oleh guru.",
+        },
     )
     assert direct_update.status_code == 201, direct_update.text
     assert direct_update.json()["record"]["status"] == "late"
@@ -539,14 +543,19 @@ def test_synthetic_school_day_attendance_regression(
         schedule = session.get(PracticumSchedule, harness.ids["schedule"])
         assert schedule is not None
         schedule.teacher_user_id = OTHER_TEACHER_ID
-    late_record = _one_attendance_for_student(
+    late_before = _one_attendance_for_student(
         harness.factory, session_id, late_student_id
     )
+    late_status_before = late_before.status
     unauthorized_update = client.post(
         f"/api/v1/attendance/sessions/{session_id}/manual-marks",
         json={"student_id": str(late_student_id), "status": "present"},
     )
     assert unauthorized_update.status_code == 404
+    late_after = _one_attendance_for_student(
+        harness.factory, session_id, late_student_id
+    )
+    assert late_after.status == late_status_before
     with harness.factory.begin() as session:
         schedule = session.get(PracticumSchedule, harness.ids["schedule"])
         assert schedule is not None

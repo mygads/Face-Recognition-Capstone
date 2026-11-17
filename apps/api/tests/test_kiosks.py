@@ -115,7 +115,9 @@ def test_kiosk_token_ttl_hours_crud_and_session(
         assert created.json()["token_ttl_hours"] == 2
         kiosk_id = created.json()["id"]
 
-        async def call(method: str, path: str, payload: dict | None = None):
+        async def call(
+            method: str, path: str, payload: dict[str, object] | None = None
+        ) -> httpx.Response:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://testserver"
             ) as client:

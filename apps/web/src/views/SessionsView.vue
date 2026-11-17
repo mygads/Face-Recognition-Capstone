@@ -426,6 +426,10 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
     draft.error = 'Catatan maksimal 500 karakter.'
     return
   }
+  if (entry.record_status && !trimmedNote) {
+    draft.error = 'Alasan perubahan wajib diisi saat memperbarui catatan.'
+    return
+  }
   draft.saving = true
   draft.error = null
   manualMarkMessage.value = null

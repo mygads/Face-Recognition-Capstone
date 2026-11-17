@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import json
 import math
 import secrets
@@ -106,6 +107,7 @@ class LocalCameraPreview:
         }
         self._sessions: dict[str, float] = {}
         self._last_kiosk_hint_at = 0.0
+        self._last_kiosk_stream_at = 0.0
         self._calibration_students: tuple[tuple[str, str], ...] = ()
         self._calibration_gallery_identity_count = 0
         self._calibration_request: dict[str, str | None] | None = None
@@ -152,6 +154,34 @@ class LocalCameraPreview:
         """True when the kiosk screen polled the hint within 3 seconds."""
         with self._lock:
             return time.monotonic() - self._last_kiosk_hint_at < 3.0
+
+    def note_kiosk_stream_hit(self) -> None:
+        """Record a kiosk-stream connection/frame so JPEG encoding stays on.
+
+        Terpisah dari sesi preview operator: kios publik tidak memegang
+        token staf dan tidak boleh membuat sesi operator palsu. Cukup
+        dengan menandai konsumen sah, service mengisi buffer JPEG.
+        """
+        with self._lock:
+            self._last_kiosk_stream_at = time.monotonic()
+
+    def has_kiosk_stream_consumer(self) -> bool:
+        """True when a kiosk screen consumed the MJPEG stream < 3 detik."""
+        with self._lock:
+            return time.monotonic() - self._last_kiosk_stream_at < 3.0
+
+    def kiosk_token_ok(self, supplied: str) -> bool:
+        """Validate the optional kiosk token (query string, MJPEG-friendly).
+
+        Default kosong = perilaku lama (loopback-only, tanpa token) agar
+        instalasi yang sudah jalan tidak rusak. Bila operator mengisi
+        ``preview.kiosk_stream_token``/``PRESENSI_EDGE_KIOSK_STREAM_TOKEN``,
+        kios wajib mengirim ``?token=`` yang cocok (hmac compare).
+        """
+        expected = self.settings.kiosk_stream_token
+        if not expected:
+            return True
+        return bool(supplied) and hmac.compare_digest(supplied, expected)
 
     def kiosk_hint(self) -> dict[str, object]:
         """Build the unauthenticated kiosk hint: generic state, no identity.
@@ -592,10 +622,15 @@ class LocalCameraPreview:
                 self.end_headers()
 
             def _serve_kiosk_hint(self) -> None:
-                # Tanpa token dan tanpa Origin allowlist: hanya Host
-                # loopback yang diterima, dan payload tidak memuat identitas.
+                # Tanpa Origin allowlist: hanya Host loopback yang diterima,
+                # dan payload tidak memuat identitas. Bila kiosk_stream_token
+                # dikonfigurasi, wajib ?token= yang cocok (401 bila salah).
                 if not self._loopback_host_ok():
                     self.send_error(403)
+                    return
+                supplied = dict(parse_qsl(urlsplit(self.path).query)).get("token", "")
+                if not preview.kiosk_token_ok(supplied):
+                    self.send_error(401)
                     return
                 preview.note_kiosk_hint_hit()
                 body = json.dumps(preview.kiosk_hint(), separators=(",", ":")).encode(
@@ -609,18 +644,29 @@ class LocalCameraPreview:
                 self.wfile.write(body)
 
             def _serve_kiosk_stream(self) -> None:
-                # MJPEG loopback tanpa token untuk layar kiosk di PC yang sama.
+                # MJPEG loopback untuk layar kiosk di PC yang sama.
                 # Single-owner: browser kiosk TIDAK membuka kamera sendiri;
                 # frame yang ditampilkan adalah frame agent yang sama dengan
                 # inference. Tidak memuat identitas; hanya piksel JPEG.
+                # Token opsional: bila kiosk_stream_token dikonfigurasi,
+                # kios wajib ?token= yang cocok (401 bila salah).
                 if not self._loopback_host_ok():
                     self.send_error(403)
+                    return
+                supplied = dict(parse_qsl(urlsplit(self.path).query)).get("token", "")
+                if not preview.kiosk_token_ok(supplied):
+                    self.send_error(401)
                     return
                 with preview._lock:
                     jpeg = preview._jpeg_frame
                 if jpeg is None:
+                    # Belum ada frame: tetap tandai konsumen agar service
+                    # mulai mengisi buffer; kios coba lagi (retry di FE).
+                    preview.note_kiosk_stream_hit()
+                    preview.note_kiosk_hint_hit()
                     self.send_error(503)
                     return
+                preview.note_kiosk_stream_hit()
                 preview.note_kiosk_hint_hit()
                 self.send_response(200)
                 self.send_header(
@@ -659,6 +705,7 @@ class LocalCameraPreview:
                         self.wfile.write(part)
                         self.wfile.flush()
                         last_sent_at = frame_at
+                        preview.note_kiosk_stream_hit()
                         preview.note_kiosk_hint_hit()
                 except (BrokenPipeError, ConnectionResetError):
                     return

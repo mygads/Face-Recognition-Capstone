@@ -347,10 +347,17 @@ def test_manual_mark_updates_existing_record_directly_without_correction_flow(
             )
         )
     over_recognition = post_mark(
-        ids["session"], {"student_id": str(ids["second"]), "status": "late"}
+        ids["session"],
+        {
+            "student_id": str(ids["second"]),
+            "status": "late",
+            "note": "ralat langsung oleh guru",
+        },
     )
     assert over_recognition.status_code == 201, over_recognition.text
     assert over_recognition.json()["record"]["status"] == "late"
+    assert over_recognition.json()["record"]["source"] == "manual"
+    assert over_recognition.json()["record"]["recognition_event_id"] is None
 
 
 def test_manual_mark_on_inactive_session_conflicts(
@@ -494,3 +501,129 @@ def test_manual_mark_note_surfaces_in_response_roster_and_list(
             str(ids["first"]): "Surat dokter dari TU",
             str(ids["second"]): None,
         }
+
+
+def _seed_ai_record(
+    factory: sessionmaker[Session],
+    session_id: UUID,
+    student_id: UUID,
+    lab_id: UUID,
+) -> tuple[UUID, datetime]:
+    """Sisipkan record face_recognition + event seperti hasil edge."""
+    occurred = datetime.now(UTC).replace(microsecond=0)
+    with factory.begin() as db:
+        device = Device(
+            laboratory_id=lab_id,
+            name="edge-ai-01",
+            device_type="edge_pc",
+            deployment_profile="AI_EDGE",
+        )
+        db.add(device)
+        db.flush()
+        event_row = RecognitionEvent(
+            event_uuid=uuid4(),
+            session_id=session_id,
+            device_id=device.id,
+            recognized_student_id=student_id,
+            occurred_at=occurred,
+            outcome="matched",
+            model_name="SFace",
+            model_version="2021dec",
+        )
+        db.add(event_row)
+        db.flush()
+        db.add(
+            AttendanceRecord(
+                session_id=session_id,
+                student_id=student_id,
+                recognition_event_id=event_row.id,
+                status="present",
+                source="face_recognition",
+                recorded_at=occurred,
+                occurred_at=occurred,
+            )
+        )
+    return event_row.id, occurred
+
+
+def test_direct_update_ai_record_flips_source_keeps_event_and_occurred_at(
+    manual_marks_database: tuple[sessionmaker[Session], dict[str, UUID]],
+) -> None:
+    """Regresi P0 provenance: edit record AI -> source manual, event tetap
+    tertaut (replay idempoten), occurred_at tidak terhapus bila tak dikirim."""
+    factory, ids = manual_marks_database
+    with factory() as db:
+        lab = db.query(Laboratory).one()
+        lab_id = lab.id
+    event_id, occurred = _seed_ai_record(factory, ids["session"], ids["first"], lab_id)
+    response = post_mark(
+        ids["session"],
+        {
+            "student_id": str(ids["first"]),
+            "status": "late",
+            "note": "Siswa datang setelah bel, koreksi guru.",
+        },
+    )
+    assert response.status_code == 201, response.text
+    record = response.json()["record"]
+    assert record["source"] == "manual"
+    assert record["recognition_event_id"] is None
+    assert record["status"] == "late"
+    assert record["occurred_at"] is not None
+    with factory() as db:
+        row = db.scalar(
+            select(AttendanceRecord).where(
+                AttendanceRecord.session_id == ids["session"],
+                AttendanceRecord.student_id == ids["first"],
+            )
+        )
+        assert row is not None
+        assert row.source == "manual"
+        assert row.recognition_event_id is None
+        assert row.occurred_at is not None
+        assert row.occurred_at.replace(tzinfo=UTC) == occurred
+        audit = db.scalar(
+            select(AuditLog).where(AuditLog.action == "attendance.manual_updated")
+        )
+        assert audit is not None
+        assert audit.before_state is not None
+        assert audit.after_state is not None
+        assert audit.before_state["source"] == "face_recognition"
+        assert audit.before_state["status"] == "present"
+        assert audit.before_state["recognition_event_id"] == str(event_id)
+        assert audit.after_state["source"] == "manual"
+        assert audit.after_state["status"] == "late"
+        assert audit.after_state["recognition_event_id"] is None
+
+
+def test_direct_update_requires_reason(
+    manual_marks_database: tuple[sessionmaker[Session], dict[str, UUID]],
+) -> None:
+    """Update tanpa alasan -> 422; catatan tidak berubah."""
+    factory, ids = manual_marks_database
+    created = post_mark(
+        ids["session"],
+        {"student_id": str(ids["second"]), "status": "present"},
+    )
+    assert created.status_code == 201, created.text
+    denied = post_mark(
+        ids["session"],
+        {"student_id": str(ids["second"]), "status": "late"},
+    )
+    assert denied.status_code == 422
+    assert denied.json()["error"]["code"] == "reason_required"
+    denied_blank = post_mark(
+        ids["session"],
+        {"student_id": str(ids["second"]), "status": "late", "note": "   "},
+    )
+    assert denied_blank.status_code == 422
+    with factory() as db:
+        row = db.scalar(
+            select(AttendanceRecord).where(
+                AttendanceRecord.session_id == ids["session"],
+                AttendanceRecord.student_id == ids["second"],
+            )
+        )
+        assert row is not None
+        assert row.status == "present"
+        assert row.source == "manual"

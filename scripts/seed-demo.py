@@ -567,7 +567,11 @@ try:
         if rk.status_code in (200, 201):
             check("pembaruan langsung record (contoh)", True)
         else:
-            print("INFO pembaruan langsung seed dilewati:", rk.status_code, rk.text[:150])
+            print(
+                "INFO pembaruan langsung seed dilewati:",
+                rk.status_code,
+                rk.text[:150],
+            )
     else:
         print("INFO tidak ada record untuk pembaruan langsung seed")
 except Exception as e:

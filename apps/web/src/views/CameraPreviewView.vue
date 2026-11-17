@@ -78,6 +78,7 @@ type DiagnosticCandidate = {
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
+const pageRoot = ref<HTMLElement | null>(null)
 const previewToken = ref<string | null>(null)
 const openedRemotely = ref(false)
 const devices = ref<Device[]>([])
@@ -571,7 +572,7 @@ async function refreshStatus(): Promise<void> {
 }
 
 async function toggleFullscreen(): Promise<void> {
-  const preview = document.querySelector<HTMLElement>('.camera-preview-view')
+  const preview = pageRoot.value
   if (!preview) return
   try {
     if (document.fullscreenElement) {
@@ -676,7 +677,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="st-page" aria-label="Preview kamera AI_EDGE">
+  <div ref="pageRoot" class="st-page" aria-label="Preview kamera AI_EDGE">
     <UiPageHeader
       eyebrow="AI_EDGE · pilih perangkat & lab"
       title="Preview Kamera Presensi"

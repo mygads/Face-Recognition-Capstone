@@ -17,17 +17,19 @@ from __future__ import annotations
 
 import os
 import platform
-import statistics
 import sys
 import time
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "libs", "recognition-core", "src"))
+RECOGNITION_CORE_SRC = os.path.join(
+    os.path.dirname(__file__), "..", "libs", "recognition-core", "src"
+)
+sys.path.insert(0, RECOGNITION_CORE_SRC)
 
-import random
+import random  # noqa: E402
 
-from recognition_core.domain import (
+from recognition_core.domain import (  # noqa: E402
     CandidateMatch,
     FaceEmbedding,
     FaceQuality,
@@ -35,8 +37,11 @@ from recognition_core.domain import (
     GalleryEntry,
     LivenessDecision,
 )
-from recognition_core.matching import CosineSimilarityMatcher
-from recognition_core.temporal import MultiFrameDecisionEngine, TemporalDecisionConfig
+from recognition_core.matching import CosineSimilarityMatcher  # noqa: E402
+from recognition_core.temporal import (  # noqa: E402
+    MultiFrameDecisionEngine,
+    TemporalDecisionConfig,
+)
 
 
 def _unit_vector(rng: random.Random, dim: int) -> tuple[float, ...]:
@@ -111,9 +116,15 @@ def _decide_frames(
         who = student if switch_at is None or i < switch_at else other
         top = (
             CandidateMatch(student_id=who, similarity=0.9),
-            CandidateMatch(student_id=other if who == student else student, similarity=0.3),
+            CandidateMatch(
+                student_id=other if who == student else student,
+                similarity=0.3,
+            ),
         )
-        obs = FrameObservation(track_id="track-sintetis", captured_at=start + timedelta(milliseconds=66 * i))
+        obs = FrameObservation(
+            track_id="track-sintetis",
+            captured_at=start + timedelta(milliseconds=66 * i),
+        )
         decision = engine.decide(
             obs,
             top,
@@ -126,8 +137,10 @@ def _decide_frames(
         if decision.state == "accepted" and decision.decision.student_id is not None:
             identities.append(str(decision.decision.student_id))
     identity_note = (
-        f"tetap {identities[-1]}" if identities and len(set(identities)) == 1
-        else f"campur {sorted(set(identities))}" if identities
+        f"tetap {identities[-1]}"
+        if identities and len(set(identities)) == 1
+        else f"campur {sorted(set(identities))}"
+        if identities
         else "tak ada accept"
     )
     return accepted_at, last_state, identity_note
@@ -149,13 +162,19 @@ def bench_temporal() -> dict[str, float | int | str]:
 
     engine2 = MultiFrameDecisionEngine(config)
     t0 = time.perf_counter()
-    accepted_switch, state_switch, identity_switch = _decide_frames(engine2, alice, bob, 40, 6, start)
+    accepted_switch, state_switch, identity_switch = _decide_frames(
+        engine2, alice, bob, 40, 6, start
+    )
     switch_ms = (time.perf_counter() - t0) * 1000.0
     return {
-        "temporal_same_person_accept_frame": accepted_at if accepted_at is not None else -1,
+        "temporal_same_person_accept_frame": accepted_at
+        if accepted_at is not None
+        else -1,
         "temporal_same_person_identity": identity_same,
         "temporal_same_person_40frames_ms": round(same_ms, 3),
-        "temporal_switch_person_accept_frame": accepted_switch if accepted_switch is not None else -1,
+        "temporal_switch_person_accept_frame": (
+            accepted_switch if accepted_switch is not None else -1
+        ),
         "temporal_switch_person_final_state": state_switch,
         "temporal_switch_identity": identity_switch,
         "temporal_switch_40frames_ms": round(switch_ms, 3),
@@ -164,7 +183,10 @@ def bench_temporal() -> dict[str, float | int | str]:
 
 def main() -> int:
     print("BENCHMARK SINTETIS recognition-core (BUKAN pengukuran kamera/hardware)")
-    print(f"mesin={platform.machine()} cpu_logis={os.cpu_count()} python={platform.python_version()}")
+    print(
+        f"mesin={platform.machine()} cpu_logis={os.cpu_count()} "
+        f"python={platform.python_version()}"
+    )
     result: dict[str, float | int | str] = {}
     result.update(bench_matching())
     result.update(bench_temporal())

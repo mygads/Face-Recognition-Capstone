@@ -825,3 +825,60 @@ def test_kiosk_stream_serves_mjpeg_without_token_loopback_only(
         assert forbidden.value.code == 403
     finally:
         preview.stop()
+
+
+def test_kiosk_token_optional_but_enforced_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import numpy as np
+
+    config = load_config(EXAMPLE_CONFIG)
+    config = replace(
+        config,
+        preview=replace(
+            config.preview, port=_free_port(), kiosk_stream_token="kios-token-1"
+        ),
+    )
+    monkeypatch.setattr(
+        httpx,
+        "get",
+        lambda *_args, **_kwargs: FakeOperatorResponse(["ADMIN"]),
+    )
+    preview = LocalCameraPreview(config)
+    preview.start()
+    port = config.preview.port
+    try:
+        preview.update_frame(np.zeros((240, 320, 3), dtype=np.uint8))
+
+        def _code(path: str) -> int:
+            try:
+                with urllib.request.urlopen(
+                    urllib.request.Request(
+                        f"http://127.0.0.1:{port}{path}", method="GET"
+                    ),
+                    timeout=2,
+                ) as response:
+                    return int(response.status)
+            except urllib.error.HTTPError as exc:
+                return int(exc.code)
+
+        # Tanpa token dan token salah: 401 (hint maupun stream).
+        assert _code("/v1/kiosk-hint") == 401
+        assert _code("/v1/kiosk-hint?token=salah") == 401
+        assert _code("/v1/kiosk-stream") == 401
+        assert _code("/v1/kiosk-stream?token=salah") == 401
+        # Token benar: 200.
+        assert _code("/v1/kiosk-hint?token=kios-token-1") == 200
+        assert _code("/v1/kiosk-stream?token=kios-token-1") == 200
+        # Konsumen bertoken tetap menandai stream agar buffer JPEG terisi.
+        assert preview.has_kiosk_stream_consumer() is True
+        assert preview.has_kiosk_hint_consumer() is True
+    finally:
+        preview.stop()
+
+
+def test_kiosk_token_defaults_to_loopback_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = load_config(EXAMPLE_CONFIG)
+    assert config.preview.kiosk_stream_token == ""
