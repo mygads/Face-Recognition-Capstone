@@ -29,6 +29,7 @@ async function signInAsTeacher(page: Page): Promise<void> {
           'attendance_read',
           'attendance_correct',
           'reports_read',
+          'reports_export',
         ],
       },
     })
@@ -41,6 +42,13 @@ async function signInAsTeacher(page: Page): Promise<void> {
 }
 
 test('teacher can filter attendance and download a CSV report', async ({ page }) => {
+  // Fallback generik DULU agar request yang belum di-stub tidak jatuh ke API dev lokal (401 -> logout).
+  await page.route('**/api/v1/**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      json: { items: [], pagination: { total: 0, limit: 100, offset: 0 } },
+    })
+  })
   const row = {
     attendance_record_id: '281718b7-d74f-4fd4-9a55-110f0a4ed1c2',
     session_id: sessionId,
@@ -181,10 +189,11 @@ test('teacher can filter attendance and download a CSV report', async ({ page })
   await page.getByTestId('reports-link').click()
   await expect(page).toHaveURL(/\/app\/reports$/)
   await expect(page.getByRole('heading', { name: 'Laporan kehadiran' })).toBeVisible()
-  await page.getByLabel('Filter siswa').fill('S-001')
+  await page.getByLabel('Siswa · NIS/NISN').fill('S-001')
   await page.getByRole('button', { name: 'Terapkan filter' }).click()
   await expect(page.getByText('Synthetic Student', { exact: true })).toBeVisible()
-  await expect(page.locator('.reports__status')).toHaveText('Hadir')
+  const studentRow = page.getByRole('row', { name: /Synthetic Student/ })
+  await expect(studentRow.getByText('Hadir', { exact: true })).toBeVisible()
 
   const downloadPromise = page.waitForEvent('download')
   await page.getByTestId('export-csv').click()

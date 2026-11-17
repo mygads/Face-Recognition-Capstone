@@ -82,6 +82,14 @@ async function stubMasterDataApi(page: Page): Promise<void> {
   let nextId = 1
   const now = '2026-10-01T00:00:00Z'
 
+  // Fallback generik DULU agar request yang belum di-stub tidak jatuh ke API dev lokal (401 -> logout).
+  await page.route('**/api/v1/**', (route) =>
+    route.fulfill({
+      status: 200,
+      json: { items: [], pagination: { total: 0, limit: 100, offset: 0 } },
+    }),
+  )
+
   await page.route('**/api/v1/students**', async (route) => {
     const request = route.request()
     const url = new URL(request.url())
@@ -282,6 +290,21 @@ async function stubMasterDataApi(page: Page): Promise<void> {
     return route.fallback()
   })
 
+  await page.route('**/api/v1/accounts/classes/*/teacher-assignments', (route) => {
+    return route.fulfill({ status: 200, json: { items: [] } })
+  })
+
+  await page.route('**/api/v1/students/import/template', (route) => {
+    return route.fulfill({
+      status: 200,
+      body: 'NIS,Nama,Kelas\n',
+      headers: {
+        'content-type': 'text/csv; charset=utf-8',
+        'content-disposition': 'attachment; filename="template-siswa.csv"',
+      },
+    })
+  })
+
   await page.route('**/api/v1/students/import/preview', (route) =>
     route.fulfill({
       status: 200,
@@ -322,59 +345,69 @@ async function stubMasterDataApi(page: Page): Promise<void> {
 test('administrator creates, searches, edits, and links master data', async ({ page }) => {
   await stubMasterDataApi(page)
   await loginAsAdmin(page)
-  await page.getByTestId('master-data-link').click()
-  await expect(page.getByRole('heading', { name: 'Data master' })).toBeVisible()
+  // Grup Data Master terbuka default; anak tanpa testid -> klik link "Siswa".
+  await page.getByRole('link', { name: 'Siswa', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Siswa', exact: true })).toBeVisible()
 
-  await page.getByRole('button', { name: 'Tambah siswa' }).click()
-  await page.getByRole('textbox', { name: 'NIS/NISN' }).fill('S-100')
-  await page.getByRole('textbox', { name: 'Nama lengkap' }).fill('Dinda Sintetis')
+  await page.getByRole('button', { name: 'Tambah Siswa' }).click()
+  await page.getByLabel('Nomor Siswa (NIS/NISN)').fill('S-100')
+  await page.getByLabel('Nama Lengkap Siswa').fill('Dinda Sintetis')
   await page.getByRole('button', { name: 'Simpan', exact: true }).click()
   await expect(page.getByRole('cell', { name: 'Dinda Sintetis' })).toBeVisible()
-  await page.getByRole('searchbox', { name: 'Cari siswa' }).fill('Dinda')
+  await page.getByLabel('Cari siswa').fill('Dinda')
   await page.getByRole('button', { name: 'Cari' }).click()
   await expect(page.getByRole('cell', { name: 'Dinda Sintetis' })).toBeVisible()
 
-  await page.getByTestId('tab-classes').click()
-  await page.getByRole('button', { name: 'Tambah kelas' }).click()
-  await page.getByRole('textbox', { name: 'Kode kelas' }).fill('XI-IPA-1')
-  await page.getByRole('textbox', { name: 'Nama kelas' }).fill('Kelas XI IPA 1')
-  await page.getByRole('spinbutton', { name: 'Tingkat' }).fill('11')
-  await page.getByRole('textbox', { name: 'Tahun ajaran' }).fill('2026-2027')
+  await page.getByRole('tab', { name: 'Kelas' }).click()
+  await expect(page.getByRole('heading', { name: 'Kelas', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Tambah Kelas' }).click()
+  await page.getByLabel('Kode Kelas').fill('XI-IPA-1')
+  await page.getByLabel('Nama Kelas').fill('Kelas XI IPA 1')
+  await page.getByLabel('Tahun Ajaran').fill('2026-2027')
   await page.getByRole('button', { name: 'Simpan', exact: true }).click()
   await expect(page.getByRole('cell', { name: 'Kelas XI IPA 1' })).toBeVisible()
-  await page.getByRole('button', { name: 'Detail' }).click()
+  await page.getByRole('button', { name: /Detail Kelas/ }).click()
+  await expect(page.getByRole('heading', { name: 'XI-IPA-1' })).toBeVisible()
   await page.getByLabel('Pilih siswa untuk ditambahkan').selectOption('student-1')
-  await page.getByRole('button', { name: 'Tambah siswa' }).click()
+  await page.getByRole('button', { name: 'Tambah Anggota' }).click()
   await expect(page.getByText('Dinda Sintetis', { exact: true })).toBeVisible()
 
-  await page.getByTestId('tab-students').click()
-  await page.getByRole('button', { name: 'Ubah' }).click()
-  await page.getByRole('textbox', { name: 'Nama lengkap' }).fill('Dinda Update')
-  await page.getByRole('button', { name: 'Simpan perubahan' }).click()
-  await expect(page.getByRole('cell', { name: 'Dinda Update' })).toBeVisible()
-  await page.getByRole('button', { name: 'Ubah' }).click()
-  await page.getByLabel('Data aktif').uncheck()
-  await page.getByRole('button', { name: 'Simpan perubahan' }).click()
-  await expect(page.getByRole('cell', { name: 'Nonaktif' })).toBeVisible()
-
-  await page.getByTestId('tab-laboratories').click()
-  await page.getByRole('button', { name: 'Tambah laboratorium' }).click()
-  await page.getByRole('textbox', { name: 'Kode laboratorium' }).fill('LAB-BIO')
-  await page.getByRole('textbox', { name: 'Nama laboratorium' }).fill('Laboratorium Biologi')
-  await page.getByRole('textbox', { name: 'Lokasi (opsional)' }).fill('Gedung B')
+  await page.getByRole('button', { name: /Kembali ke daftar kelas/ }).click()
+  await page.getByRole('tab', { name: 'Siswa' }).click()
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  await page.getByLabel('Nama Lengkap Siswa').fill('Dinda Update')
   await page.getByRole('button', { name: 'Simpan', exact: true }).click()
-  await expect(page.getByRole('cell', { name: 'Laboratorium Biologi' })).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'Dinda Update' })).toBeVisible()
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  await page.locator('input[name="is_active"][value="false"]').check()
+  await page.getByRole('button', { name: 'Simpan', exact: true }).click()
+  await expect(page.getByRole('table').getByText('Nonaktif', { exact: true })).toBeVisible()
 
-  await page.getByTestId('tab-students').click()
-  await page.getByTestId('open-student-import').click()
+  await page.getByRole('tab', { name: 'Laboratorium' }).click()
+  await expect(page.getByRole('heading', { name: 'Laboratorium', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Tambah Laboratorium' }).click()
+  await page.getByLabel('Kode Laboratorium').fill('LAB-BIO')
+  await page.getByLabel('Nama Laboratorium').fill('Laboratorium Biologi')
+  await page.getByLabel('Lokasi').fill('Gedung B')
+  await page.getByRole('button', { name: 'Simpan', exact: true }).click()
+  await expect(page.getByRole('button', { name: /Laboratorium Biologi/ })).toBeVisible()
+
+  await page.getByRole('tab', { name: 'Siswa' }).click()
+  await page.getByRole('button', { name: 'Impor Siswa' }).click()
+  const templatePromise = page.waitForEvent('download')
+  await page.getByTestId('download-import-template').click()
+  const template = await templatePromise
+  expect(template.suggestedFilename()).toMatch(/\.csv$/i)
   await page.locator('input[type="file"]').setInputFiles({
     name: 'students.csv',
     mimeType: 'text/csv',
     buffer: Buffer.from('NIS,Nama,Kelas\nS-200,Imported Synthetic Student,XI-IPA-1'),
   })
-  await page.getByRole('button', { name: 'Preview data' }).click()
-  await expect(page.getByTestId('import-row-2')).toContainText('Valid')
-  await page.getByTestId('commit-student-import').click()
-  await expect(page.getByRole('status')).toContainText('1 siswa berhasil diimpor')
+  await page.getByRole('button', { name: 'Validasi Format' }).click()
+  await expect(page.getByRole('row', { name: /S-200/ })).toContainText('Valid')
+  await page.getByRole('button', { name: 'Konfirmasi Impor' }).click()
+  await expect(page.locator('p.st-alert--success')).toContainText(
+    'siswa berhasil diimpor bersama relasi kelasnya',
+  )
   await expect(page.getByRole('cell', { name: 'Imported Synthetic Student' })).toBeVisible()
 })

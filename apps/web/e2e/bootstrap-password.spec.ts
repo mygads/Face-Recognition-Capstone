@@ -7,6 +7,12 @@ const newPassword = 'synthetic-long-password-123'
 test('bootstrap admin changes its temporary password before entering the app', async ({ page }) => {
   let changeRequest: Record<string, string> | undefined
   await stubNoActiveBrowserSession(page)
+  await page.route('**/api/v1/**', (route) =>
+    route.fulfill({
+      status: 200,
+      json: { items: [], pagination: { total: 0, limit: 100, offset: 0 } },
+    }),
+  )
   await page.route('**/api/v1/auth/login', (route) =>
     route.fulfill({
       status: 200,
@@ -33,9 +39,9 @@ test('bootstrap admin changes its temporary password before entering the app', a
 
   await expect(page).toHaveURL(/\/auth\/change-password$/)
   await expect(page.getByRole('heading', { name: 'Buat kata sandi baru' })).toBeVisible()
-  await page.getByLabel('Kata sandi sementara').fill(temporaryPassword)
-  await page.getByLabel('Kata sandi baru', { exact: true }).fill(newPassword)
-  await page.getByLabel('Ulangi kata sandi baru').fill(newPassword)
+  await page.locator('#profile-current-password').fill(temporaryPassword)
+  await page.locator('#profile-new-password').fill(newPassword)
+  await page.locator('#profile-confirm-password').fill(newPassword)
   await page.getByRole('button', { name: 'Simpan kata sandi baru' }).click()
 
   await expect(page).toHaveURL(/\/auth\/login\?passwordChanged=1$/)
@@ -49,6 +55,12 @@ test('bootstrap admin changes its temporary password before entering the app', a
 test('profile offers password change to an authenticated user', async ({ page }) => {
   let changeRequest: Record<string, string> | undefined
   await stubNoActiveBrowserSession(page)
+  await page.route('**/api/v1/**', (route) =>
+    route.fulfill({
+      status: 200,
+      json: { items: [], pagination: { total: 0, limit: 100, offset: 0 } },
+    }),
+  )
   await page.route('**/api/v1/sessions**', (route) =>
     route.fulfill({
       status: 200,
@@ -106,11 +118,11 @@ test('profile offers password change to an authenticated user', async ({ page })
   await page.getByLabel('Kata sandi').fill('synthetic-current-password')
   await page.getByRole('button', { name: 'Masuk' }).click()
   await expect(page).toHaveURL(/\/app\/dashboard$/)
-  await page.getByRole('link', { name: 'Profil' }).click()
+  await page.getByRole('link', { name: 'Profil', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Profil akun' })).toBeVisible()
-  await page.getByLabel('Kata sandi saat ini').fill('synthetic-current-password')
-  await page.getByLabel('Kata sandi baru', { exact: true }).fill(newPassword)
-  await page.getByLabel('Ulangi kata sandi baru').fill(newPassword)
+  await page.locator('#profile-current-password').fill('synthetic-current-password')
+  await page.locator('#profile-new-password').fill(newPassword)
+  await page.locator('#profile-confirm-password').fill(newPassword)
   await page.getByRole('button', { name: 'Simpan kata sandi baru' }).click()
 
   await expect(page).toHaveURL(/\/auth\/login\?passwordChanged=1$/)

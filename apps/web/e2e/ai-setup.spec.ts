@@ -53,6 +53,8 @@ async function loginAsAdmin(page: Page): Promise<void> {
   await page.getByLabel('Kata sandi').fill('synthetic-password')
   await page.getByRole('button', { name: 'Masuk' }).click()
   await expect(page).toHaveURL(/\/app\/dashboard$/)
+  // Navigasi SPA (bukan page.goto): token akses hanya di memori, full reload
+  // akan membuang sesi dan memaksa logout pada stub refresh 401.
   await page.getByTestId('ai-setup-link').click()
   await expect(page).toHaveURL(/\/app\/ai-setup$/)
 }
@@ -98,6 +100,12 @@ async function stubSettingsApi(
     max_brightness: 235,
   }
 
+  await page.route('**/api/v1/**', (route) =>
+    route.fulfill({
+      status: 200,
+      json: { items: [], pagination: { total: 0, limit: 100, offset: 0 } },
+    }),
+  )
   await page.route('**/api/v1/admin/system/ai-readiness', (route) =>
     route.fulfill({
       status: 200,
@@ -206,7 +214,7 @@ test('admin can publish enrollment quality settings from the dashboard', async (
   await stubSettingsApi(page)
   await loginAsAdmin(page)
 
-  await expect(page.getByRole('heading', { name: 'AI & kamera' }).first()).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Konfigurasi AI' })).toBeVisible()
   await page.getByLabel('Ukuran wajah minimum (piksel)').fill('96')
   await page.getByRole('button', { name: 'Simpan kualitas capture' }).click()
 
@@ -219,8 +227,14 @@ test('central thresholds require a calibration reference before publish', async 
   await loginAsAdmin(page)
   await page.getByRole('button', { name: 'AI Central' }).click()
 
-  await page.getByLabel('Top-1 similarity').fill('0.74')
-  await page.getByLabel('Margin Top-1 − Top-2').fill('0.08')
+  // Input threshold memakai v-model string agar ketikan utuh tidak ditimpa render ulang.
+  async function setThreshold(label: string, value: string): Promise<void> {
+    const box = page.getByLabel(label)
+    await box.fill(value)
+    await expect(box).toHaveValue(value)
+  }
+  await setThreshold('Top-1 similarity', '0.74')
+  await setThreshold('Margin Top-1 − Top-2', '0.08')
   await page.getByRole('button', { name: 'Simpan dan terapkan' }).click()
   await expect(page.getByRole('alert')).toContainText('laporan kalibrasi')
 
@@ -306,10 +320,10 @@ test('edge profile hides central settings and lists only active edge devices', a
   await expect(page.getByText('Quality awal')).toHaveCount(0)
   await expect(page.getByLabel('Ukuran wajah minimum (piksel)')).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Pratinjau konfigurasi' })).toBeVisible()
-  await expect(page.getByText('Belum aktif — menunggu kalibrasi')).toBeVisible()
+  await expect(page.getByText('Belum aktif - menunggu kalibrasi')).toBeVisible()
   await page.getByRole('button', { name: 'Terapkan ke perangkat' }).click()
   await expect(
     page.getByText('Konfigurasi perangkat diterbitkan. Perangkat menerapkannya saat tersambung.'),
   ).toBeVisible()
-  await expect(page.getByText('Belum aktif — menunggu kalibrasi')).toBeVisible()
+  await expect(page.getByText('Belum aktif - menunggu kalibrasi')).toBeVisible()
 })

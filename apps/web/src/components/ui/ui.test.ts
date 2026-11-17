@@ -5,6 +5,7 @@ import UiBadge from './UiBadge.vue'
 import UiCard from './UiCard.vue'
 import UiInput from './UiInput.vue'
 import UiEmptyState from './UiEmptyState.vue'
+import UiAvatar from './UiAvatar.vue'
 
 describe('stitch ui kit', () => {
   it('tombol primer memakai token stitch', () => {
@@ -26,6 +27,11 @@ describe('stitch ui kit', () => {
     const w = mount(UiInput, { props: { modelValue: '' } })
     await w.setValue('nama@sekolah.edu')
     expect(w.emitted('update:modelValue')?.[0]).toEqual(['nama@sekolah.edu'])
+  })
+
+  it('avatar tanpa nama tidak crash dan render kosong', () => {
+    const w = mount(UiAvatar, { props: { name: undefined } })
+    expect(w.text()).toBe('')
   })
 
   it('empty state tanpa penugasan memakai pesan ramah', () => {

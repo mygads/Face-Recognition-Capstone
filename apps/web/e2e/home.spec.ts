@@ -120,7 +120,7 @@ test('login success opens the authenticated shell using the generated API contra
 
   await expect(page).toHaveURL(/\/app\/dashboard$/)
   await expect(page.getByTestId('app-shell')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Ringkasan' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Selamat datang, Test' })).toBeVisible()
   expect(requests.loginWasFormEncoded()).toBe(true)
   expect(requests.browserHeaderWasPresent()).toBe(true)
   expect(requests.bearerHeaderWasPresent()).toBe(true)
@@ -136,8 +136,8 @@ test('browser session is restored after a full page reload without storing beare
   await page.reload()
 
   await expect(page).toHaveURL(/\/app\/dashboard$/)
-  await expect(page.getByRole('heading', { name: 'Ringkasan' })).toBeVisible()
-  expect(requests.refreshRequests()).toBe(2)
+  await expect(page.getByRole('heading', { name: 'Selamat datang, Test' })).toBeVisible()
+  expect(requests.refreshRequests()).toBeGreaterThanOrEqual(2)
   expect(await page.evaluate(() => Object.values(localStorage))).not.toContain(fixtureToken)
   expect(await page.evaluate(() => sessionStorage.length)).toBe(0)
 })

@@ -53,6 +53,13 @@ async function loginAsAdmin(page: Page): Promise<void> {
 }
 
 test('shows schedule conflict and saves a corrected schedule', async ({ page }) => {
+  // Fallback generik DULU agar request yang belum di-stub tidak jatuh ke API dev lokal (401 -> logout).
+  await page.route('**/api/v1/**', (route) => {
+    return route.fulfill({
+      status: 200,
+      json: { items: [], pagination: { total: 0, limit: 100, offset: 0 } },
+    })
+  })
   let schedule: Record<string, unknown> | null = null
   let createAttempt = 0
   const timestamp = '2026-10-01T00:00:00Z'
@@ -146,20 +153,20 @@ test('shows schedule conflict and saves a corrected schedule', async ({ page }) 
   await loginAsAdmin(page)
   await page.getByTestId('schedules-link').click()
   await expect(page.getByRole('heading', { name: 'Jadwal praktikum' })).toBeVisible()
-  await page.getByTestId('create-schedule').click()
-  await page.getByLabel('Mata pelajaran').fill('Praktikum Biologi')
-  await page.getByLabel('Kelas').selectOption('class-1')
-  await page.getByLabel('Laboratorium').selectOption('lab-1')
+  await page.getByRole('button', { name: 'Tambah Jadwal' }).click()
+  await page.getByLabel('Nama Pertemuan / Praktikum').fill('Praktikum Biologi')
+  await page.getByLabel('Pilih Kelas Praktikum').selectOption('class-1')
+  await page.getByLabel('Pilihan Laboratorium').selectOption('lab-1')
   await page.getByLabel('Guru').selectOption('teacher-1')
-  await page.getByLabel('Jam mulai').fill('09:00')
-  await page.getByLabel('Jam selesai').fill('10:00')
+  await page.getByLabel('Jam Mulai').fill('09:00')
+  await page.getByLabel('Jam Selesai').fill('10:00')
 
   await page.getByRole('button', { name: 'Simpan jadwal' }).click()
   await expect(page.getByRole('alert')).toContainText('Jadwal bertabrakan')
-  await page.getByLabel('Jam mulai').fill('10:00')
-  await page.getByLabel('Jam selesai').fill('11:00')
+  await page.getByLabel('Jam Mulai').fill('10:00')
+  await page.getByLabel('Jam Selesai').fill('11:00')
   await page.getByRole('button', { name: 'Simpan jadwal' }).click()
 
-  await expect(page.getByRole('cell', { name: 'Praktikum Biologi' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Praktikum Biologi' })).toBeVisible()
   await expect(page.getByRole('alert')).toHaveCount(0)
 })

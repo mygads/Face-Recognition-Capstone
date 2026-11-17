@@ -228,6 +228,11 @@ function setTab(next: string): void {
   search.value = ''
   classFilter.value = ''
   statusFilter.value = ''
+  // Kosongkan baris sebelum navigasi: rows bertipe union (siswa/kelas/lab) dan
+  // fetch pengganti bersifat async, sehingga baris tab lama sempat ter-render
+  // sebagai tipe tab baru (mis. UiAvatar menerima name undefined lalu crash).
+  rows.value = []
+  total.value = 0
   void router.push(tabPaths[nextTab])
 }
 
