@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-const props = defineProps<{ name: string }>()
+const props = defineProps<{ name?: string | null }>()
 const initials = computed(() =>
-  props.name
+  (props.name ?? '')
     .split(' ')
     .filter(Boolean)
     .slice(0, 2)

@@ -96,6 +96,16 @@ export function sanitizeOptionalNumber(value: number | null | undefined): number
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+export function formatThresholdText(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value) ? String(value) : ''
+}
+
+export function parseThresholdText(text: string): number | null {
+  if (text.trim() === '') return null
+  const parsed = Number(text.trim())
+  return Number.isNaN(parsed) ? Number.NaN : parsed
+}
+
 export function sanitizeRecognitionForm(form: RecognitionConfiguration): string | null {
   for (const value of [
     form.min_top1_similarity,

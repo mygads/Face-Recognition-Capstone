@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   factorySafeThresholds,
+  formatThresholdText,
   isFactoryDefaultReference,
+  parseThresholdText,
   recognitionDefaults,
   recognitionFrom,
   sanitizeRecognitionForm,
@@ -72,5 +74,16 @@ describe('recognition configuration helpers', () => {
   it('keeps requiring top-1 and margin together', () => {
     const form = formWith({ min_top1_similarity: 0.6 })
     expect(sanitizeRecognitionForm(form)).toContain('bersamaan')
+  })
+
+  it('parses threshold text without wiping partial input', () => {
+    expect(parseThresholdText('')).toBeNull()
+    expect(parseThresholdText('   ')).toBeNull()
+    expect(parseThresholdText('0.74')).toBe(0.74)
+    expect(parseThresholdText('0.')).toBe(0)
+    expect(parseThresholdText('abc')).toBeNaN()
+    expect(formatThresholdText(null)).toBe('')
+    expect(formatThresholdText(undefined)).toBe('')
+    expect(formatThresholdText(0.74)).toBe('0.74')
   })
 })

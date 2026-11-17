@@ -22,8 +22,10 @@ import {
 } from '../api/client'
 import {
   factorySafeThresholds,
+  formatThresholdText,
   isFactoryDefaultReference,
   numeric,
+  parseThresholdText,
   recognitionDefaults,
   recognitionFrom,
   sanitizeRecognitionForm,
@@ -87,11 +89,26 @@ const gatewayForm = ref<StbGatewayConfiguration>({
   min_sharpness: 8,
 })
 
+// Teks mentah input threshold: v-model string agar ketikan tidak hilang saat
+// komponen me-render ulang (:value satu arah + parse number menimpa DOM).
+// Nilai angka resmi tetap di centralForm/edgeForm dan diisi saat simpan.
+const centralTop1Text = ref('')
+const centralMarginText = ref('')
+const edgeTop1Text = ref('')
+const edgeMarginText = ref('')
+
+function syncThresholdTexts(): void {
+  centralTop1Text.value = formatThresholdText(centralForm.value.min_top1_similarity)
+  centralMarginText.value = formatThresholdText(centralForm.value.min_top1_top2_margin)
+  edgeTop1Text.value = formatThresholdText(edgeForm.value.min_top1_similarity)
+  edgeMarginText.value = formatThresholdText(edgeForm.value.min_top1_top2_margin)
+}
+
 const selectedDevice = computed(
   () => devices.value.find((device) => device.device_id === selectedDeviceId.value) ?? null,
 )
 const edgeThresholdsConfigured = computed(
-  () => edgeForm.value.min_top1_similarity !== null && edgeForm.value.min_top1_top2_margin !== null,
+  () => edgeTop1Text.value !== '' && edgeMarginText.value !== '',
 )
 const centralUsesFactoryDefaults = computed(() =>
   isFactoryDefaultReference(centralForm.value.calibration_reference),
@@ -104,6 +121,7 @@ function applyFactoryDefaults(): void {
   const safe = factorySafeThresholds()
   centralForm.value = { ...centralForm.value, ...safe }
   edgeForm.value = { ...edgeForm.value, ...safe }
+  syncThresholdTexts()
   successMessage.value =
     'Default aman sementara terisi. Simpan untuk mengaktifkan, lalu WAJIB kalibrasi lokal sebelum produksi.'
 }
@@ -188,6 +206,7 @@ async function refreshReadiness(forceSettings = false): Promise<void> {
     if (central) {
       centralForm.value = recognitionFrom(central.settings as UnknownSettings)
       loadedCentralSettings = true
+      syncThresholdTexts()
     }
     if (!devices.value.some((item) => item.device_id === selectedDeviceId.value)) {
       selectedDeviceId.value = devices.value[0]?.device_id ?? ''
@@ -226,6 +245,7 @@ async function loadDeviceConfiguration(deviceId: string): Promise<void> {
     if (result.deployment_profile === 'AI_EDGE') {
       edgeForm.value = recognitionFrom(result.settings as UnknownSettings)
       copyEnrollmentQualityToEdge()
+      syncThresholdTexts()
     } else {
       gatewayForm.value = gatewayFrom(result.settings as UnknownSettings)
     }
@@ -236,6 +256,9 @@ async function loadDeviceConfiguration(deviceId: string): Promise<void> {
 }
 
 async function saveEnrollment(): Promise<void> {
+  // Sinkronkan ketikan threshold edge sebelum ikut tersimpan bersama kualitas enrollment.
+  edgeForm.value.min_top1_similarity = parseThresholdText(edgeTop1Text.value)
+  edgeForm.value.min_top1_top2_margin = parseThresholdText(edgeMarginText.value)
   await saveSettings(async () => {
     const saved = await saveEnrollmentQualityConfiguration(enrollmentForm.value)
     if (readiness.value) readiness.value.enrollment_quality_revision = saved.revision
@@ -262,6 +285,8 @@ async function saveEnrollment(): Promise<void> {
 }
 
 async function saveCentral(): Promise<void> {
+  centralForm.value.min_top1_similarity = parseThresholdText(centralTop1Text.value)
+  centralForm.value.min_top1_top2_margin = parseThresholdText(centralMarginText.value)
   const invalid = sanitizeRecognitionForm(centralForm.value)
   if (invalid) {
     errorMessage.value = invalid
@@ -276,6 +301,8 @@ async function saveCentral(): Promise<void> {
 async function saveDevice(): Promise<void> {
   if (!selectedDevice.value) return
   if (selectedDevice.value.deployment_profile === 'AI_EDGE') {
+    edgeForm.value.min_top1_similarity = parseThresholdText(edgeTop1Text.value)
+    edgeForm.value.min_top1_top2_margin = parseThresholdText(edgeMarginText.value)
     const invalid = sanitizeRecognitionForm(edgeForm.value)
     if (invalid) {
       errorMessage.value = invalid
@@ -306,27 +333,6 @@ async function saveSettings(action: () => Promise<void>, message: string): Promi
   } finally {
     isSaving.value = false
   }
-}
-
-function parseOptionalNumber(event: Event): number | null {
-  const value = (event.target as HTMLInputElement).value
-  return value === '' ? null : Number(value)
-}
-
-function setCentralTop1(event: Event): void {
-  centralForm.value.min_top1_similarity = parseOptionalNumber(event)
-}
-
-function setCentralMargin(event: Event): void {
-  centralForm.value.min_top1_top2_margin = parseOptionalNumber(event)
-}
-
-function setEdgeTop1(event: Event): void {
-  edgeForm.value.min_top1_similarity = parseOptionalNumber(event)
-}
-
-function setEdgeMargin(event: Event): void {
-  edgeForm.value.min_top1_top2_margin = parseOptionalNumber(event)
 }
 
 function statusLabel(status: boolean | null): string {
@@ -601,23 +607,21 @@ onBeforeUnmount(() => {
           <form class="master-data__form ai-setup-view__form" @submit.prevent="saveDevice">
             <label
               >Top-1 similarity<UiInput
-                :value="edgeForm.min_top1_similarity ?? ''"
+                v-model="edgeTop1Text"
                 type="number"
                 min="-1"
                 max="1"
                 step="any"
-                :required="edgeForm.min_top1_top2_margin !== null"
-                @input="setEdgeTop1"
+                :required="edgeMarginText !== ''"
             /></label>
             <label
               >Margin Top-1 − Top-2<UiInput
-                :value="edgeForm.min_top1_top2_margin ?? ''"
+                v-model="edgeMarginText"
                 type="number"
                 min="0"
                 max="2"
                 step="any"
-                :required="edgeForm.min_top1_similarity !== null"
-                @input="setEdgeMargin"
+                :required="edgeTop1Text !== ''"
             /></label>
             <label
               >YuNet score threshold<UiInput
@@ -900,23 +904,21 @@ onBeforeUnmount(() => {
           /></label>
           <label
             >Top-1 similarity<UiInput
-              :value="centralForm.min_top1_similarity ?? ''"
+              v-model="centralTop1Text"
               type="number"
               min="-1"
               max="1"
               step="any"
-              :required="centralForm.min_top1_top2_margin !== null"
-              @input="setCentralTop1"
+              :required="centralMarginText !== ''"
           /></label>
           <label
             >Margin Top-1 − Top-2<UiInput
-              :value="centralForm.min_top1_top2_margin ?? ''"
+              v-model="centralMarginText"
               type="number"
               min="0"
               max="2"
               step="any"
-              :required="centralForm.min_top1_similarity !== null"
-              @input="setCentralMargin"
+              :required="centralTop1Text !== ''"
           /></label>
           <label
             >YuNet score threshold<UiInput

@@ -1,4 +1,4 @@
-import { expect, test, type Page, type WebSocketRoute } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { stubNoActiveBrowserSession } from './session-fixture'
 
 const timestamp = '2026-10-01T10:00:00Z'
@@ -28,6 +28,7 @@ async function loginAsTeacher(page: Page): Promise<void> {
           'laboratory_read',
           'schedule_read',
           'schedule_manage',
+          'session_view',
           'session_operate',
           'attendance_read',
           'attendance_correct',
@@ -43,126 +44,101 @@ async function loginAsTeacher(page: Page): Promise<void> {
   await expect(page).toHaveURL(/\/app\/dashboard$/)
 }
 
-function sessionSnapshot(present: number, late: number, isOnline: boolean) {
-  return {
-    session_id: 'session-1',
-    session_status: 'active',
-    generated_at: timestamp,
-    summary: {
-      total_roster: 3,
-      present,
-      late,
-      excused: 0,
-      absent: 0,
-      not_present: 3 - present - late,
-    },
-    devices: [
-      {
-        id: 'device-1',
-        name: 'Kamera Lab Biologi',
-        device_type: 'edge_pc',
-        is_online: isOnline,
-        last_seen_at: timestamp,
-      },
-    ],
-    recent_activity: [
-      {
-        id: `event-${present}-${late}`,
-        occurred_at: timestamp,
-        kind: 'recognition',
-        student_name: late > 0 ? 'Siswa Dua' : 'Siswa Satu',
-        recognition_outcome: 'matched',
-        attendance_status: late > 0 ? 'late' : 'present',
-        decision_reason: null,
-      },
-    ],
-  }
-}
+test('teacher sees live roster counts on the active session card and detail', async ({ page }) => {
+  // Fallback generik DULU agar request yang belum di-stub tidak jatuh ke API dev lokal (401 -> logout).
+  await page.route('**/api/v1/**', (route) => {
+    return route.fulfill({
+      status: 200,
+      json: { items: [], pagination: { total: 0, limit: 100, offset: 0 } },
+    })
+  })
 
-test('teacher dashboard applies mocked realtime attendance and device updates', async ({
-  page,
-}) => {
-  let sessionListRequests = 0
-  let snapshotRequests = 0
-  const socketState: { route: WebSocketRoute | null } = { route: null }
-  let authenticationFrame: unknown
-  let websocketUrl = ''
+  let presentCount = 1
+  const session = {
+    id: 'session-1',
+    practicum_schedule_id: 'schedule-1',
+    status: 'active',
+    opened_at: timestamp,
+    closed_at: null,
+    opened_automatically: false,
+    grace_period_minutes: 15,
+    student_count: 3,
+    subject: 'Praktikum Biologi',
+    class_name: 'Kelas X A',
+    laboratory_name: 'Lab Biologi',
+    teacher_name: 'Guru Praktikum',
+    teacher_user_id: 'teacher-1',
+    weekday: 3,
+    start_time: '09:00:00',
+    end_time: '11:00:00',
+    timezone_name: 'Asia/Jakarta',
+    scheduled_end_at: timestamp,
+  }
+  const rosterEntries = () =>
+    [
+      { student_id: 'student-1', student_number: 'S-001', full_name: 'Siswa Satu' },
+      { student_id: 'student-2', student_number: 'S-002', full_name: 'Siswa Dua' },
+      { student_id: 'student-3', student_number: 'S-003', full_name: 'Siswa Tiga' },
+    ].map((entry, index) => ({
+      ...entry,
+      record_status: index < presentCount ? 'present' : null,
+      record_note: null,
+      recorded_at: index < presentCount ? timestamp : null,
+      minutes_late: null,
+      attendance_record_id: index < presentCount ? `record-${index}` : null,
+    }))
 
   await page.route('**/api/v1/sessions**', async (route) => {
     const url = new URL(route.request().url())
-    if (url.pathname === '/api/v1/sessions' && route.request().method() === 'GET') {
-      sessionListRequests += 1
+    if (url.pathname.endsWith('/policy')) {
       return route.fulfill({
         status: 200,
-        json: {
-          items: [
-            {
-              id: 'session-1',
-              practicum_schedule_id: 'schedule-1',
-              status: 'active',
-              opened_at: timestamp,
-              closed_at: null,
-              grace_period_minutes: 15,
-              student_count: 3,
-              subject: 'Praktikum Biologi',
-              class_name: 'Kelas X A',
-              laboratory_name: 'Lab Biologi',
-              teacher_name: 'Guru Praktikum',
-              weekday: 3,
-              start_time: '09:00:00',
-              end_time: '11:00:00',
-              timezone_name: 'Asia/Jakarta',
-              scheduled_end_at: timestamp,
-            },
-          ],
-          pagination: { total: 1, limit: 100, offset: 0 },
-        },
+        json: { mode: 'manual', default_grace_period_minutes: 15 },
       })
     }
-    if (url.pathname.endsWith('/session-1/dashboard')) {
-      snapshotRequests += 1
-      return route.fulfill({ status: 200, json: sessionSnapshot(1, 0, true) })
+    if (url.pathname.endsWith('/openable-schedules')) {
+      return route.fulfill({ status: 200, json: [] })
+    }
+    if (url.pathname.endsWith('/session-1/roster') && route.request().method() === 'GET') {
+      return route.fulfill({ status: 200, json: rosterEntries() })
+    }
+    if (url.pathname.endsWith('/sessions/session-1') && route.request().method() === 'GET') {
+      return route.fulfill({ status: 200, json: session })
+    }
+    if (url.pathname === '/api/v1/sessions' && route.request().method() === 'GET') {
+      return route.fulfill({
+        status: 200,
+        json: { items: [session], pagination: { total: 1, limit: 50, offset: 0 } },
+      })
     }
     return route.fulfill({ status: 404, json: { error: { code: 'not_found' } } })
   })
 
-  await page.routeWebSocket(
-    (url) => {
-      websocketUrl = url.toString()
-      return url.pathname === '/api/v1/sessions/session-1/updates'
-    },
-    (websocket) => {
-      websocket.onMessage((message) => {
-        authenticationFrame = JSON.parse(message.toString())
-        socketState.route = websocket
-        websocket.send(JSON.stringify({ type: 'snapshot', data: sessionSnapshot(1, 0, true) }))
-      })
-    },
-  )
-
   await loginAsTeacher(page)
+  await page.getByTestId('sessions-link').click()
+  await expect(page.getByRole('heading', { name: 'Sesi Presensi' })).toBeVisible()
 
-  await expect(page.getByTestId('realtime-status')).toHaveText('Live')
-  await expect(page.getByTestId('metric-roster').locator('strong')).toHaveText('3')
-  await expect(page.getByTestId('metric-present').locator('strong')).toHaveText('1')
-  await expect(page.getByTestId('metric-late').locator('strong')).toHaveText('0')
-  await expect(page.getByTestId('metric-not-present').locator('strong')).toHaveText('2')
-  await expect(page.getByText('Kamera Lab Biologi')).toBeVisible()
-  await expect(page.getByText('Siswa Satu')).toBeVisible()
-  expect(authenticationFrame).toEqual({
-    type: 'authenticate',
-    access_token: 'session-test-token',
-  })
-  expect(new URL(websocketUrl).search).toBe('')
+  const livePanel = page.getByLabel('Roster langsung')
+  await expect(livePanel).toContainText('Live roster kehadiran')
+  await expect(livePanel).toContainText('1 / 3 Terdata')
 
-  socketState.route?.send(JSON.stringify({ type: 'snapshot', data: sessionSnapshot(1, 1, false) }))
+  await page.getByTestId('show-status-session-1').click()
+  await expect(page.getByRole('heading', { name: 'Detail Sesi: Praktikum Biologi' })).toBeVisible()
+  await expect(page.getByTestId('roster-filter-present')).toHaveText('Hadir (1)')
+  await expect(page.getByTestId('roster-filter-unmarked')).toHaveText('Belum tercatat (2)')
+  await expect(
+    page.getByTestId('roster-table').getByText('Siswa Satu', { exact: true }),
+  ).toBeVisible()
 
-  await expect(page.getByTestId('metric-late').locator('strong')).toHaveText('1')
-  await expect(page.getByTestId('metric-not-present').locator('strong')).toHaveText('1')
-  await expect(page.getByText('Siswa Dua')).toBeVisible()
-  await expect(page.getByText('Offline')).toBeVisible()
-  // Daftar sesi diambil 2x saat pemuatan awal: sesi aktif + sesi override manual.
-  expect(sessionListRequests).toBe(2)
-  expect(snapshotRequests).toBe(1)
+  // Data roster diambil ulang setiap panel dibuka: simulasi siswa kedua terdata.
+  presentCount = 2
+  await page.getByRole('button', { name: /Kembali ke daftar sesi/ }).click()
+  await page.getByTestId('show-status-session-1').click()
+  await expect(page.getByTestId('roster-filter-present')).toHaveText('Hadir (2)')
+  await expect(
+    page.getByTestId('roster-table').getByText('Siswa Dua', { exact: true }),
+  ).toBeVisible()
+  // Kartu sesi me-refresh saat halaman dimuat; panel detail mengambil ulang setiap dibuka.
+  await expect(page.getByTestId('roster-filter-unmarked')).toHaveText('Belum tercatat (1)')
   await expect(page.getByText(/embedding|foto wajah/i)).toHaveCount(0)
 })

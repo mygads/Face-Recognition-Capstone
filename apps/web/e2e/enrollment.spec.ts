@@ -20,6 +20,16 @@ const roster = [
   },
 ]
 
+async function stubFallbackFirst(page: Page): Promise<void> {
+  // Fallback generik DULU agar request yang belum di-stub tidak jatuh ke API dev lokal (401 -> logout).
+  await page.route('**/api/v1/**', (route) =>
+    route.fulfill({
+      status: 200,
+      json: { items: [], pagination: { total: 0, limit: 100, offset: 0 } },
+    }),
+  )
+}
+
 async function loginAsLaborant(page: Page): Promise<void> {
   await stubNoActiveBrowserSession(page)
   await page.route('**/api/v1/sessions?**', (route) =>
@@ -76,6 +86,7 @@ test('laborant captures a student, confirms identity, and advances to the next s
     })
   })
 
+  await stubFallbackFirst(page)
   const templateStatus: Record<string, 'not_enrolled' | 'enrolled' | 'needs_reenrollment'> = {
     [roster[0].id]: 'not_enrolled',
     [roster[1].id]: 'needs_reenrollment',
@@ -167,14 +178,14 @@ test('laborant captures a student, confirms identity, and advances to the next s
   await page.getByLabel(/Saya memastikan siswa di kamera adalah Synthetic Student One/).check()
   await confirmButton.click()
 
-  await expect(page.getByTestId(`enrollment-student-${roster[1].id}`)).toHaveAttribute(
-    'aria-pressed',
-    'true',
+  await expect(page.getByTestId(`enrollment-student-${roster[1].id}`)).toHaveClass(
+    /st-list__item--active/,
   )
-  await expect(page.getByRole('status')).toContainText('Synthetic Student Two dipilih')
+  await expect(page.locator('p.st-alert--success')).toContainText('Synthetic Student Two dipilih')
 })
 
 test('laborant can revoke an active template before re-enrollment', async ({ page }) => {
+  await stubFallbackFirst(page)
   const enrolledId = roster[2].id
   let status: 'enrolled' | 'needs_reenrollment' = 'enrolled'
   await page.route('**/api/v1/classes?**', (route) =>
@@ -243,11 +254,13 @@ test('laborant can revoke an active template before re-enrollment', async ({ pag
   await loginAsLaborant(page)
   await page.getByTestId('enrollment-link').click()
   const enrolledStudent = page.getByTestId(`enrollment-student-${enrolledId}`)
-  await enrolledStudent.click()
+  await enrolledStudent.getByRole('button', { name: 'Ambil Ulang' }).click()
   const revokeButton = page.getByTestId('revoke-enrollment-template')
   await expect(revokeButton).toBeEnabled()
   await revokeButton.click()
+  await page.getByTestId('revoke-reason-input').fill('Kualitas tangkapan lama kurang baik')
+  await page.getByTestId('confirm-revoke-template').click()
   await expect(enrolledStudent).toContainText('Perlu daftar ulang')
-  await expect(page.getByRole('status')).toContainText('template dicabut')
+  await expect(page.locator('p.st-alert--success')).toContainText('template dicabut')
   await expect(page.getByTestId('start-enrollment-capture')).toHaveText('Daftar ulang siswa')
 })

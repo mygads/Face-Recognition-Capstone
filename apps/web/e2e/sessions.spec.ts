@@ -26,9 +26,10 @@ async function loginAsTeacher(page: Page): Promise<void> {
           'laboratory_read',
           'schedule_read',
           'schedule_manage',
+          'session_view',
           'session_operate',
+          'attendance_manual',
           'attendance_read',
-          'attendance_correct',
           'reports_read',
         ],
       },
@@ -52,6 +53,14 @@ test('teacher opens and manually closes a session with a roster snapshot', async
     updated_at: null,
   }
   let session: Record<string, unknown> | null = null
+  // Fallback generik DULU agar tidak menutupi stub spesifik di bawah:
+  // request yang belum di-stub tidak boleh jatuh ke API dev lokal (401 -> logout).
+  await page.route('**/api/v1/**', (route) =>
+    route.fulfill({
+      status: 200,
+      json: { items: [], pagination: { total: 0, limit: 100, offset: 0 } },
+    }),
+  )
   await page.route('**/api/v1/sessions**', async (route) => {
     const request = route.request()
     const url = new URL(request.url())
@@ -106,6 +115,9 @@ test('teacher opens and manually closes a session with a roster snapshot', async
       }
       return route.fulfill({ status: 200, json: session })
     }
+    if (request.method() === 'GET' && url.pathname.endsWith('/roster')) {
+      return route.fulfill({ status: 200, json: [] })
+    }
     if (request.method() === 'GET' && url.pathname.endsWith('/session-1')) {
       return route.fulfill({ status: 200, json: session })
     }
@@ -123,35 +135,34 @@ test('teacher opens and manually closes a session with a roster snapshot', async
   await expect(page.getByRole('heading', { name: 'Sesi presensi' })).toBeVisible()
   await page.getByLabel('Grace period dalam menit').fill('5')
   await page.getByTestId('open-session-schedule-1').click()
-  await expect(page.getByRole('status')).toContainText('2 siswa di roster')
-  await expect(page.getByRole('cell', { name: /Praktikum Biologi/ })).toBeVisible()
-  await expect(page.getByRole('cell', { name: /grace 5 menit/ })).toBeVisible()
+  await page.getByTestId('confirm-open-session').click()
+  await expect(page.locator('p.st-alert--success')).toContainText('2 siswa di roster')
+  // Sesi aktif tampil di kartu "Sedang Berlangsung", bukan di tabel riwayat.
+  await expect(page.getByTestId('close-session-session-1')).toBeVisible()
 
-  await page.getByRole('button', { name: 'Tutup sesi' }).click()
+  await page.getByTestId('close-session-session-1').click()
+  await page.getByTestId('confirm-close-session').click()
+  await expect(page.locator('p.st-alert--success')).toContainText('telah ditutup')
+  // Sesi yang ditutup pindah ke tabel "Riwayat Sesi Terakhir".
+  await expect(page.getByRole('cell', { name: /Praktikum Biologi/ })).toBeVisible()
+  await expect(page.getByRole('cell', { name: /grace 5 mnt/ })).toBeVisible()
   await expect(page.getByRole('cell', { name: 'Ditutup' })).toBeVisible()
-  await expect(page.getByRole('status')).toContainText('telah ditutup')
 })
 
 test('admin can configure the automatic opening window', async ({ page }) => {
   const timestamp = '2026-10-05T02:05:00Z'
-  const schedule = {
-    id: 'schedule-1',
-    subject: 'Praktikum Biologi',
-    class_name: 'Kelas X A',
-    laboratory_name: 'Lab Biologi',
-    teacher_name: 'Guru Praktikum',
-    weekday: 0,
-    start_time: '09:00:00',
-    end_time: '11:00:00',
-    timezone_name: 'Asia/Jakarta',
-  }
   let policy: Record<string, unknown> = {
-    mode: 'automatic',
+    mode: 'manual',
     auto_open_minutes_before: 0,
     auto_open_minutes_after: 15,
     default_grace_period_minutes: 15,
     revision: 0,
     updated_at: null,
+  }
+  let ewsPolicy: Record<string, unknown> = {
+    window_days: 30,
+    absence_pct_threshold: 20,
+    late_count_threshold: 3,
   }
 
   await stubNoActiveBrowserSession(page)
@@ -182,55 +193,49 @@ test('admin can configure the automatic opening window', async ({ page }) => {
           'device_operate',
           'schedule_read',
           'schedule_manage',
+          'session_view',
           'session_operate',
           'enrollment_manage',
+          'attendance_manual',
           'attendance_read',
-          'attendance_correct',
           'reports_read',
         ],
       },
     }),
   )
-  await page.route('**/api/v1/sessions**', async (route) => {
+  await page.route('**/api/v1/sessions/policy', async (route) => {
     const request = route.request()
-    const url = new URL(request.url())
-    if (url.pathname.endsWith('/policy')) {
-      if (request.method() === 'PUT') {
-        policy = {
-          ...(request.postDataJSON() as Record<string, unknown>),
-          revision: Number(policy.revision) + 1,
-          updated_at: timestamp,
-        }
+    if (request.method() === 'PUT') {
+      policy = {
+        ...(request.postDataJSON() as Record<string, unknown>),
+        revision: Number(policy['revision']) + 1,
+        updated_at: timestamp,
       }
-      return route.fulfill({ status: 200, json: policy })
     }
-    if (url.pathname.endsWith('/openable-schedules')) {
-      return route.fulfill({ status: 200, json: [schedule] })
+    return route.fulfill({ status: 200, json: policy })
+  })
+  await page.route('**/api/v1/reports/attendance/at-risk/policy', async (route) => {
+    const request = route.request()
+    if (request.method() === 'PUT') {
+      ewsPolicy = { ...(request.postDataJSON() as Record<string, unknown>) }
     }
-    return route.fulfill({
-      status: 200,
-      json: { items: [], pagination: { total: 0, limit: 50, offset: 0 } },
-    })
+    return route.fulfill({ status: 200, json: ewsPolicy })
   })
 
-  await page.goto('/auth/login?redirect=/app/sessions')
+  await page.goto('/auth/login?redirect=/app/attendance-policy')
   await page.getByLabel('Email sekolah').fill('admin@example.test')
   await page.getByLabel('Kata sandi').fill('synthetic-password')
   await page.getByRole('button', { name: 'Masuk' }).click()
-  await expect(page).toHaveURL(/\/app\/sessions$/)
-  await expect(page.getByRole('heading', { name: 'Cara membuka presensi' })).toBeVisible()
+  await expect(page).toHaveURL(/\/app\/attendance-policy$/)
+  await expect(page.getByRole('heading', { name: 'Kebijakan Presensi Laboratorium' })).toBeVisible()
 
-  await page.getByLabel('Buka sebelum jadwal').fill('15')
-  await page.getByLabel('Buka setelah jadwal mulai').fill('5')
-  await page.getByRole('button', { name: 'Simpan kebijakan' }).click()
+  await page.getByTestId('policy-before').fill('10')
+  await page.getByTestId('policy-after').fill('5')
+  await page.getByTestId('policy-save').click()
 
-  await expect(page.locator('.master-data__success')).toContainText(
-    'Jendela buka otomatis dan grace period tersimpan',
-  )
-  await expect(page.getByText('Pembukaan otomatis aktif')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Buka sesi' })).toHaveCount(1)
+  await expect(page.getByRole('status')).toContainText('Kebijakan tersimpan')
   expect(policy).toMatchObject({
-    auto_open_minutes_before: 15,
+    auto_open_minutes_before: 10,
     auto_open_minutes_after: 5,
   })
 })

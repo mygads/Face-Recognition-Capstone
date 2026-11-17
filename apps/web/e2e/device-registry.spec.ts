@@ -58,6 +58,13 @@ async function loginAsAdmin(page: Page): Promise<void> {
 test('AI_EDGE admin confirms device removal and can inspect the inactive device', async ({
   page,
 }) => {
+  // Fallback generik DULU agar request yang belum di-stub tidak jatuh ke API dev lokal (401 -> logout).
+  await page.route('**/api/v1/**', (route) => {
+    return route.fulfill({
+      status: 200,
+      json: { items: [], pagination: { total: 0, limit: 100, offset: 0 } },
+    })
+  })
   let isActive = true
   let deleteRequests = 0
   const device = {
@@ -153,6 +160,13 @@ test('AI_EDGE admin confirms device removal and can inspect the inactive device'
 test('AI_EDGE admin can pause and reactivate the camera without removing the device', async ({
   page,
 }) => {
+  // Fallback generik DULU agar request yang belum di-stub tidak jatuh ke API dev lokal (401 -> logout).
+  await page.route('**/api/v1/**', (route) => {
+    return route.fulfill({
+      status: 200,
+      json: { items: [], pagination: { total: 0, limit: 100, offset: 0 } },
+    })
+  })
   let cameraEnabled = true
   const cameraCommands: boolean[] = []
   const device = {
