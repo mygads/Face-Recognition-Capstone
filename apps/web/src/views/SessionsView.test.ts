@@ -79,7 +79,7 @@ function laboranPinia() {
   return pinia
 }
 
-function teacherPinia() {
+function teacherPinia(extraPermissions: string[] = []) {
   const pinia = createPinia()
   useAuthStore(pinia).$patch({
     accessToken: 'unit-test-token',
@@ -90,7 +90,7 @@ function teacherPinia() {
       full_name: 'Test Teacher',
       roles: ['TEACHER'],
       must_change_password: false,
-      permissions: ['schedule_read', 'session_view', 'attendance_manual'],
+      permissions: ['schedule_read', 'session_view', 'attendance_manual', ...extraPermissions],
     },
   })
   return pinia
@@ -160,7 +160,9 @@ describe('sessions view', () => {
     api.getAttendanceSessionStatus.mockResolvedValue(overrideSession)
     api.getSessionRoster.mockResolvedValue([rosterEntry])
     api.markManualAttendance.mockResolvedValue({ record: {} })
-    const wrapper = mount(SessionsView, { global: { plugins: [teacherPinia()] } })
+    const wrapper = mount(SessionsView, {
+      global: { plugins: [teacherPinia(['attendance_correct_closed'])] },
+    })
     await flushPromises()
 
     await wrapper.get('[data-testid^="show-status-"]').trigger('click')
@@ -192,7 +194,9 @@ describe('sessions view', () => {
     api.getAttendanceSessionStatus.mockResolvedValue({ ...overrideSession, status: 'closed' })
     api.getSessionRoster.mockResolvedValue([rosterEntry])
     api.markManualAttendance.mockResolvedValue({ record: {} })
-    const wrapper = mount(SessionsView, { global: { plugins: [teacherPinia()] } })
+    const wrapper = mount(SessionsView, {
+      global: { plugins: [teacherPinia(['attendance_correct_closed'])] },
+    })
     await flushPromises()
 
     await wrapper.get('[data-testid^="show-status-"]').trigger('click')
@@ -212,6 +216,49 @@ describe('sessions view', () => {
       status: 'present',
       note: 'ralat TU',
     })
+  })
+
+  it('menyembunyikan form koreksi sesi tertutup tanpa izin koreksi', async () => {
+    const rosterEntry = {
+      student_id: 'student-9',
+      student_number: 'S-009',
+      full_name: 'Siswa Sela',
+      record_status: null,
+    }
+    api.getAttendanceSessionStatus.mockResolvedValue({ ...overrideSession, status: 'closed' })
+    api.getSessionRoster.mockResolvedValue([rosterEntry])
+    const wrapper = mount(SessionsView, { global: { plugins: [teacherPinia()] } })
+    await flushPromises()
+
+    await wrapper.get('[data-testid^="show-status-"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Koreksi Sesi Tertutup')
+    expect(wrapper.find('[data-testid="manual-mark-student-9"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="direct-update-panel"]').exists()).toBe(false)
+  })
+
+  it('menampilkan pemberitahuan sesi dibatalkan tanpa form koreksi', async () => {
+    const rosterEntry = {
+      student_id: 'student-9',
+      student_number: 'S-009',
+      full_name: 'Siswa Sela',
+      record_status: null,
+    }
+    api.getAttendanceSessionStatus.mockResolvedValue({
+      ...overrideSession,
+      status: 'cancelled',
+    })
+    api.getSessionRoster.mockResolvedValue([rosterEntry])
+    const wrapper = mount(SessionsView, {
+      global: { plugins: [teacherPinia(['attendance_correct_closed'])] },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-testid^="show-status-"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('dibatalkan')
+    expect(wrapper.find('[data-testid="manual-mark-student-9"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="direct-update-panel"]').exists()).toBe(false)
   })
 
   it('reloads lists when opening races with another opener', async () => {

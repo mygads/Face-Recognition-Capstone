@@ -37,8 +37,12 @@ DbSession = Annotated[Session, Depends(get_db_session)]
 AttendanceOperator = Annotated[
     AuthenticatedUser, Depends(require_permissions(Permission.SESSION_OPERATE))
 ]
+# Tandai manual (sesi berjalan) vs koreksi pascasesi (sesi closed) memakai
+# izin berbeda; pemeriksaan granular ada di mark_manual_attendance
+# (state-aware). Guard di sini hanya mensyaratkan izin baca sesi agar
+# pemegang izin koreksi-saja tidak ditolak 403 sebelum mencapai logika 409.
 ManualMarkOperator = Annotated[
-    AuthenticatedUser, Depends(require_permissions(Permission.ATTENDANCE_MANUAL))
+    AuthenticatedUser, Depends(require_permissions(Permission.SESSION_VIEW))
 ]
 
 

@@ -806,3 +806,77 @@ def test_direct_update_requires_reason(
         assert row is not None
         assert row.status == "present"
         assert row.source == "manual"
+
+
+def test_closed_session_correction_grant_alone_suffices_without_manual_permission(
+    manual_marks_database: tuple[sessionmaker[Session], dict[str, UUID]],
+) -> None:
+    """Regresi P1: laboran koreksi-saja (tanpa ATTENDANCE_MANUAL) boleh
+    mengoreksi sesi closed — sebelumnya ditolak 403 di guard router."""
+    factory, ids = manual_marks_database
+    laboran_id = uuid4()
+    with factory.begin() as db:
+        laboratory = db.scalars(select(Laboratory)).one()
+        db.add(
+            User(
+                id=laboran_id,
+                email="laboran-correct-only@example.test",
+                full_name="Laboran Correct Only",
+                password_hash="unused-test-hash",
+            )
+        )
+        db.flush()
+        db.add(LaborantLabAssignment(user_id=laboran_id, laboratory_id=laboratory.id))
+    lab_id = _lab_id(factory)
+    _seed_ai_record(factory, ids["session"], ids["first"], lab_id)
+    _close_session(factory, ids["session"])
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        id=laboran_id,
+        email="laboran-correct-only@example.test",
+        full_name="Laboran Correct Only",
+        roles=frozenset({RoleCode.LABORANT}),
+        extra_permissions=frozenset(
+            {
+                Permission.SESSION_VIEW,
+                Permission.ATTENDANCE_CORRECT_CLOSED,
+            }
+        ),
+    )
+    try:
+        corrected = post_mark(
+            ids["session"],
+            {
+                "student_id": str(ids["first"]),
+                "status": "absent",
+                "note": "koreksi pascasesi tanpa izin manual",
+            },
+        )
+    finally:
+        del app.dependency_overrides[get_current_user]
+    assert corrected.status_code == 201, corrected.text
+    assert corrected.json()["record"]["source"] == "manual"
+
+
+def test_cancelled_session_rejects_correction_even_with_grant(
+    manual_marks_database: tuple[sessionmaker[Session], dict[str, UUID]],
+) -> None:
+    """Regresi P1: sesi cancelled tidak dapat dikoreksi siapa pun —
+    pemegang izin koreksi pun tetap 409 session_inactive."""
+    factory, ids = manual_marks_database
+    lab_id = _lab_id(factory)
+    _seed_ai_record(factory, ids["session"], ids["first"], lab_id)
+    _close_session(factory, ids["session"], status="cancelled")
+    app.dependency_overrides[get_current_user] = _teacher_with_correction_grant
+    try:
+        teacher_attempt = post_mark(
+            ids["session"],
+            {
+                "student_id": str(ids["first"]),
+                "status": "present",
+                "note": "upaya koreksi sesi batal",
+            },
+        )
+    finally:
+        del app.dependency_overrides[get_current_user]
+    assert teacher_attempt.status_code == 409, teacher_attempt.text
+    assert teacher_attempt.json()["error"]["code"] == "session_inactive"

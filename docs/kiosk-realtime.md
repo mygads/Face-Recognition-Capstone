@@ -143,8 +143,9 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
 ## Sinyal generik "Memverifikasi" (tanpa pindah inference ke browser)
 
 - Agent di PC kiosk yang sama menyajikan `GET /v1/kiosk-hint` (bind
-  loopback-only, token opsional bila dikonfigurasi, tanpa Origin allowlist — Host non-loopback
-  ditolak 403). Payload hanya status generik: `session_active`,
+  loopback-only, token opsional bila dikonfigurasi; Host non-loopback
+  ditolak 403; bila `preview.kiosk_allowed_origins` diisi, hanya origin
+  dalam daftar yang menerima header ACAO). Payload hanya status generik: `session_active`,
   `camera_open`, `recognition_state`, `face_present`/`face_count`,
   `faces` (maks 5: box + landmark ternormalisasi + flag kualitas, TANPA
   identitas), `attendance_result`, `updated_at`. TIDAK PERNAH: nama,
@@ -167,6 +168,12 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
   (atau `PRESENSI_EDGE_KIOSK_STREAM_REQUIRE_TOKEN=1`) agar akses anonim
   ditolak meski dari loopback; default false demi kompatibilitas instalasi
   lama. Param `retry=N` milik FE diabaikan server (bukan token).
+  Opsional: `preview.kiosk_allowed_origins` (file config saja, mis.
+  `["https://presensi.sekolah.id"]`) membatasi origin browser yang boleh
+  membaca hint/stream kios — origin di luar daftar tidak menerima header
+  ACAO sehingga diblokir browser; preflight-nya dijawab 403. Bila kosong,
+  berlaku mode kompatibel lama (origin direfleksikan) + warning saat
+  service start.
   Token staf preview TIDAK PERNAH dibagikan ke browser kios; konsumen stream
   kios (`has_kiosk_stream_consumer`, jendela 3 detik) terpisah dari sesi
   preview operator dan ikut mengaktifkan encoding JPEG (jadi kiosk tetap
@@ -175,11 +182,23 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
   saat buffer JPEG belum ada) dijadwalkan ulang otomatis dengan backoff
   1s,2s,4s,8s lalu 15s via cache-buster `?retry=N`; hitungan direset saat
   frame termuat. Timer dibersihkan saat sesi berhenti/unmount.
-- Koreksi pascasesi: sesi closed/cancelled hanya bisa diubah dengan izin
+- Pairing fail-closed di FE: kios yang dipasangkan ke device hanya
+  menampilkan video setelah hint loopback segar dan `device_id`-nya cocok;
+  bila berbeda -> banner "Kamera Tidak Sesuai", bila belum terverifikasi ->
+  banner "Memverifikasi Kamera…". Hint terakhir dipertahankan saat poll
+  sesaat gagal (hanya tandai stale >3 dtk) agar status mismatch tidak hilang.
+  Layar rekap tanpa device terpilih mempertahankan perilaku lama.
+- Koreksi pascasesi: sesi closed hanya bisa diubah dengan izin
   `attendance_correct_closed` (grantable ke laboran/guru, butuh pantau sesi;
-  409 `session_inactive` bila tanpa izin). Catatan baru pada sesi tertutup
-  wajib beralasan (422), pembaruan tetap wajib `note`, dan audit menyimpan
-  `session_status` untuk membedakan koreksi pascasesi.
+  409 `session_inactive` bila tanpa izin; TANPA mensyaratkan izin tandai
+  manual — guard router hanya mensyaratkan pantau sesi, pemeriksaan granular
+  state-aware ada di `mark_manual_attendance`). Sesi cancelled TIDAK dapat
+  ditulis lewat jalur ini oleh siapa pun (409 `session_inactive` meski
+  pemegang izin koreksi). Catatan baru pada sesi tertutup wajib beralasan
+  (422), pembaruan tetap wajib `note`, dan audit menyimpan
+  `session_status` untuk membedakan koreksi pascasesi. Di UI, form koreksi
+  sesi closed hanya tampil bila pemegang izin koreksi; sesi cancelled
+  menampilkan pemberitahuan "tidak dapat dikoreksi".
 - Provenance edit manual: update catatan via guru/aslab wajib `note`
   (alasan, 422 bila kosong), `source` menjadi `manual` dan
   `recognition_event_id` dilepas (kontrak CHECK manual->event NULL);

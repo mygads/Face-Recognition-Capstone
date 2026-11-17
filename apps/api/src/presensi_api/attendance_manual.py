@@ -52,11 +52,11 @@ def mark_manual_attendance(
     schedule = db.get(PracticumSchedule, attendance_session.practicum_schedule_id)
     if schedule is None:
         raise ApiProblem(404, "session_not_found", "Sesi presensi tidak ditemukan.")
+    session_running = attendance_session.status in RUNNING_SESSION_STATUSES
+    session_closed = attendance_session.status == "closed"
+    session_cancelled = attendance_session.status == "cancelled"
     if RoleCode.ADMIN not in principal.roles:
         from presensi_api.api.security.roles import Permission as _Perm
-        from presensi_api.api.security.scope import (
-            is_substitute_teacher as _is_sub,
-        )
         from presensi_api.api.security.scope import (
             laborant_lab_ids as _mll,
         )
@@ -64,36 +64,61 @@ def mark_manual_attendance(
             teacher_class_ids as _mtc,
         )
 
+        # Otorisasi dibedakan per status sesi (state-aware):
+        # - sesi berjalan -> butuh izin tandai manual + cakupan;
+        # - sesi closed -> butuh izin koreksi sesi tertutup + cakupan
+        #   (TANPA mensyaratkan izin tandai manual);
+        # - sesi cancelled -> tidak dapat ditulis lewat jalur ini.
         _ok = False
-        if RoleCode.TEACHER in principal.roles:
-            if schedule.teacher_user_id == principal.id:
-                _ok = True
-            elif schedule.class_id in _mtc(db, principal.id):
-                _ok = _is_sub(db, principal.id, schedule.class_id) or True
-                # Baca roster boleh via penugasan; tulis manual butuh
-                # guru jadwal/pengganti — pengganti lolos, penugasan biasa
-                # tanpa status pengganti tetap boleh menandai manual sesi
-                # yang ia ampu (disamakan dengan guru jadwal di MVP 1:1).
-                _ok = True
-        elif RoleCode.LABORANT in principal.roles:
-            if _Perm.ATTENDANCE_MANUAL in principal.permissions and (
-                schedule.laboratory_id in _mll(db, principal.id)
-            ):
-                _ok = True
+        if session_closed or session_cancelled:
+            if RoleCode.TEACHER in principal.roles:
+                # MVP 1:1: guru jadwal atau guru mana pun yang ditugaskan
+                # di kelas tersebut boleh mengoreksi (termasuk pengganti).
+                if schedule.teacher_user_id == principal.id:
+                    _ok = True
+                elif schedule.class_id in _mtc(db, principal.id):
+                    _ok = True
+            elif RoleCode.LABORANT in principal.roles:
+                if _Perm.ATTENDANCE_CORRECT_CLOSED in principal.permissions and (
+                    schedule.laboratory_id in _mll(db, principal.id)
+                ):
+                    _ok = True
+        elif session_running:
+            if RoleCode.TEACHER in principal.roles:
+                if _Perm.ATTENDANCE_MANUAL not in principal.permissions:
+                    _ok = False
+                elif schedule.teacher_user_id == principal.id:
+                    _ok = True
+                elif schedule.class_id in _mtc(db, principal.id):
+                    _ok = True
+            elif RoleCode.LABORANT in principal.roles:
+                if _Perm.ATTENDANCE_MANUAL in principal.permissions and (
+                    schedule.laboratory_id in _mll(db, principal.id)
+                ):
+                    _ok = True
         if not _ok:
             raise ApiProblem(404, "session_not_found", "Sesi presensi tidak ditemukan.")
-    session_closed = attendance_session.status not in RUNNING_SESSION_STATUSES
+    if session_cancelled:
+        # Sesi yang dibatalkan berarti praktikum tidak dilaksanakan:
+        # tolak untuk semua role (termasuk pemegang izin koreksi/admin)
+        # agar tidak tercipta catatan kehadiran pada sesi batal.
+        raise ApiProblem(
+            409,
+            "session_inactive",
+            "Sesi presensi dibatalkan dan tidak dapat dikoreksi. "
+            "Buat jadwal pengganti bila praktikum tetap dilaksanakan.",
+        )
     if (
         session_closed
         and Permission.ATTENDANCE_CORRECT_CLOSED not in principal.permissions
     ):
-        # Sesi tertutup/dibatalkan hanya bisa dikoreksi lewat izin terpisah
+        # Sesi tertutup hanya bisa dikoreksi lewat izin terpisah
         # (koreksi pascasesi): alasan wajib dan tercatat pada audit log.
         # Validasi ini TIDAK dikendurkan agar kontrak 409 lama tetap berlaku.
         raise ApiProblem(
             409,
             "session_inactive",
-            "Sesi presensi sudah ditutup atau dibatalkan. "
+            "Sesi presensi sudah ditutup. "
             "Koreksi pascasesi memerlukan izin koreksi sesi tertutup.",
         )
 

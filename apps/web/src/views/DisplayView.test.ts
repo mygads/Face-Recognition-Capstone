@@ -512,6 +512,67 @@ describe('DisplayView sinyal agent lokal', () => {
     }
   })
 
+  it('menahan video kios terpasang sampai identitas kamera terverifikasi', async () => {
+    const g = globalThis as unknown as Record<string, unknown>
+    const realES = g['EventSource']
+    g['EventSource'] = FakeEventSource
+    FakeEventSource.instances = []
+    try {
+      // Satu kiosk terpasang -> deviceId terpilih otomatis (dev-A),
+      // tetapi hint belum membawa device_id -> unverified (fail-closed).
+      api.listPublicKioskScreens.mockResolvedValueOnce([
+        { device_id: 'dev-A', display_name: 'Kiosk A', camera_label: 'Pintu 01' },
+      ])
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({
+          ok: true,
+          json: async () => ({
+            device_id: null,
+            session_active: true,
+            camera_open: true,
+            recognition_state: null,
+            face_present: false,
+            face_count: 0,
+            attendance_result: null,
+          }),
+        })),
+      )
+      api.openKioskDisplaySession.mockResolvedValueOnce({
+        display_token: 'tok-kiosk',
+        snapshot,
+      })
+      const w = mount(DisplayView)
+      await flushPromises()
+      await w.find('[data-testid="display-pin-input"]').setValue('1234')
+      await w.find('form').trigger('submit.prevent')
+      await flushPromises()
+      FakeEventSource.instances[0].emit('snapshot', {
+        laboratory_id: 'lab-1',
+        laboratory_name: 'Lab Kimia 1',
+        session_id: 'ses-1',
+        subject: 'Uji Larutan',
+        status: 'active',
+        opened_at: null,
+        present_count: 1,
+        late_count: 0,
+        waiting_count: 2,
+        total_roster: 3,
+        spotlight: null,
+        server_time: new Date().toISOString(),
+      })
+      await flushPromises()
+      await flushPromises()
+      expect(w.find('[data-testid="display-board"]').exists()).toBe(true)
+      // Fail-closed: tidak ada gambar sebelum identitas terverifikasi.
+      expect(w.find('[data-testid="display-agent-video"]').exists()).toBe(false)
+      expect(w.text()).toContain('Memverifikasi Kamera')
+    } finally {
+      g['EventSource'] = realES
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('menyembunyikan gambar saat kamera lab dilaporkan mati', async () => {
     const w = await mountLiveBoard({
       session_active: true,

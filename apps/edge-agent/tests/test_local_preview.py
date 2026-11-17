@@ -927,3 +927,58 @@ def test_kiosk_token_defaults_to_loopback_only(
 ) -> None:
     config = load_config(EXAMPLE_CONFIG)
     assert config.preview.kiosk_stream_token == ""
+
+
+def test_kiosk_cors_allowlist_enforced_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regresi P1 keamanan: bila preview.kiosk_allowed_origins diisi, hanya
+    origin dalam daftar yang menerima ACAO; preflight origin lain -> 403."""
+    from presensi_edge_agent.config import load_config as _load
+
+    config = _load(EXAMPLE_CONFIG)
+    allowed = "https://presensi.sekolah.example"
+    config = replace(
+        config,
+        preview=replace(
+            config.preview, port=_free_port(), kiosk_allowed_origins=(allowed,)
+        ),
+    )
+    monkeypatch.setattr(
+        httpx,
+        "get",
+        lambda *_args, **_kwargs: FakeOperatorResponse(["ADMIN"]),
+    )
+    preview = LocalCameraPreview(config)
+    preview.start()
+    try:
+        preflight_ok = urllib.request.Request(
+            f"http://127.0.0.1:{config.preview.port}/v1/kiosk-hint",
+            headers={"Origin": allowed},
+            method="OPTIONS",
+        )
+        with urllib.request.urlopen(preflight_ok, timeout=2) as response:
+            assert response.status == 204
+            assert response.headers.get("Access-Control-Allow-Origin") == allowed
+
+        preflight_bad = urllib.request.Request(
+            f"http://127.0.0.1:{config.preview.port}/v1/kiosk-hint",
+            headers={"Origin": ORIGIN},
+            method="OPTIONS",
+        )
+        with pytest.raises(urllib.error.HTTPError) as forbidden:
+            urllib.request.urlopen(preflight_bad, timeout=2)
+        assert forbidden.value.code == 403
+
+        with urllib.request.urlopen(
+            urllib.request.Request(
+                f"http://127.0.0.1:{config.preview.port}/v1/kiosk-hint",
+                headers={"Origin": ORIGIN},
+                method="GET",
+            ),
+            timeout=2,
+        ) as hint_bad:
+            assert hint_bad.status == 200
+            assert hint_bad.headers.get("Access-Control-Allow-Origin") is None
+    finally:
+        preview.stop()

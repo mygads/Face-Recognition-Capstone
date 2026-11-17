@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import logging
 import math
 import secrets
 import threading
@@ -516,6 +517,15 @@ class LocalCameraPreview:
         if not self.settings.enabled or self._server is not None:
             return
         preview = self
+        if not preview.settings.kiosk_stream_require_token or (
+            not preview.settings.kiosk_stream_token
+        ):
+            logging.getLogger(__name__).warning(
+                "Endpoint kios berjalan tanpa token wajib "
+                "(preview.kiosk_stream_require_token=false atau "
+                "preview.kiosk_stream_token kosong). Aktifkan token + "
+                "preview.kiosk_allowed_origins untuk deployment sekolah."
+            )
 
         class Handler(BaseHTTPRequestHandler):
             server_version = "PresensiLocalPreview"
@@ -614,18 +624,33 @@ class LocalCameraPreview:
                 return hostname in {"localhost", "127.0.0.1", "::1"}
 
             def _kiosk_cors_headers(self, origin: str | None) -> None:
-                # Kiosk hint boleh dipanggil browser tanpa Origin allowlist
-                # karena bind loopback-only sudah membatasi ke PC ini.
-                self.send_header(
-                    "Access-Control-Allow-Origin", origin if origin else "*"
-                )
-                self.send_header("Vary", "Origin")
+                # Bila preview.kiosk_allowed_origins dikonfigurasi (deployment
+                # sekolah), hanya origin dalam daftar yang menerima ACAO;
+                # origin lain tidak menerima header sehingga diblokir browser.
+                # Bila kosong (legacy): refleksikan origin karena bind
+                # loopback-only sudah membatasi ke PC ini.
+                allowlist = preview.settings.kiosk_allowed_origins
+                if allowlist:
+                    if origin in allowlist:
+                        self.send_header("Access-Control-Allow-Origin", origin)
+                        self.send_header("Vary", "Origin")
+                elif origin:
+                    self.send_header("Access-Control-Allow-Origin", origin)
+                    self.send_header("Vary", "Origin")
+                else:
+                    # Tanpa Origin (tag <img>/curl): CORS tidak relevan.
+                    self.send_header("Access-Control-Allow-Origin", "*")
                 self.send_header("Access-Control-Allow-Private-Network", "true")
                 self.send_header("Cache-Control", "no-store, max-age=0")
 
             def _send_kiosk_preflight(self) -> None:
+                origin = self.headers.get("Origin")
+                allowlist = preview.settings.kiosk_allowed_origins
+                if allowlist and origin not in allowlist:
+                    self.send_error(403)
+                    return
                 self.send_response(204)
-                self._kiosk_cors_headers(self.headers.get("Origin"))
+                self._kiosk_cors_headers(origin)
                 self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
                 self.send_header("Access-Control-Max-Age", "600")
                 self.send_header("Content-Length", "0")

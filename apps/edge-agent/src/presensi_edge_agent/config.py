@@ -131,6 +131,13 @@ class PreviewSettings:
     # token yang cocok meskipun dari loopback (default False agar instalasi
     # yang sudah jalan tidak rusak; aktifkan untuk deployment sekolah).
     kiosk_stream_require_token: bool = False
+    # Allowlist origin browser untuk endpoint kios (default kosong = mode
+    # kompatibel lama: origin apa pun direfleksikan karena bind loopback-only
+    # sudah membatasi ke PC ini). Untuk deployment sekolah, isi dengan origin
+    # aplikasi web (mis. ["https://presensi.sekolah.id"]) agar browser dari
+    # origin lain tidak bisa membaca stream; origin di luar daftar tidak
+    # menerima header ACAO sehingga diblokir browser.
+    kiosk_allowed_origins: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -431,6 +438,41 @@ def _integer(
     return result
 
 
+def _kiosk_allowed_origins(preview_raw: object) -> list[str]:
+    """Parse preview.kiosk_allowed_origins (file-only, opsional)."""
+    if not isinstance(preview_raw, dict):
+        return []
+    raw = preview_raw.get("kiosk_allowed_origins", [])
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise EdgeConfigError("preview.kiosk_allowed_origins must be a list.")
+    origins: list[str] = []
+    for origin in raw:
+        if not isinstance(origin, str):
+            raise EdgeConfigError("preview.kiosk_allowed_origins entries must be URLs.")
+        parsed = urlsplit(origin)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+            or parsed.username
+            or parsed.password
+        ):
+            raise EdgeConfigError(
+                "preview.kiosk_allowed_origins must be canonical origins."
+            )
+        normalized = f"{parsed.scheme}://{parsed.netloc}"
+        if normalized != origin.rstrip("/"):
+            raise EdgeConfigError(
+                "preview.kiosk_allowed_origins must be canonical origins."
+            )
+        origins.append(normalized)
+    return origins
+
+
 def load_config(
     path: str | Path,
     *,
@@ -650,6 +692,7 @@ def load_config(
         kiosk_stream_require_token=_boolean(
             preview_raw, "kiosk_stream_require_token", False
         ),
+        kiosk_allowed_origins=tuple(_kiosk_allowed_origins(preview_raw)),
     )
     if preview.port > 65535 or preview.jpeg_quality > 95:
         raise EdgeConfigError("preview.port or preview.jpeg_quality is out of range.")

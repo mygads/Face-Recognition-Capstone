@@ -73,7 +73,11 @@ const agentCameraDown = computed(
 )
 const agentVideoStale = computed(() => agentStreamState.value === 'live' && !hintFresh.value)
 const agentVideoVisible = computed(
-  () => agentStreamState.value !== 'failed' && !agentCameraDown.value && !agentDeviceMismatch.value,
+  () =>
+    agentStreamState.value !== 'failed' &&
+    !agentCameraDown.value &&
+    !agentDeviceMismatch.value &&
+    !agentPairingUnverified.value,
 )
 function onAgentStreamLoad(): void {
   agentStreamState.value = 'live'
@@ -155,16 +159,27 @@ interface AgentHint {
   faces: AgentHintFace[]
   attendance_result: string | null
 }
-// Verifikasi pairing: layar kios (deviceId) harus menampilkan video dari
-// agent yang sama. Bila hint loopback membawa device_id berbeda, video +
-// overlay disembunyikan dan tampil kesalahan konfigurasi (bukan video
-// kamera lain yang menyesatkan). Tanpa device_id di kedua sisi = tak bisa
-// diverifikasi -> lanjut seperti biasa (loopback sudah membatasi ke PC ini).
+// Verifikasi pairing (fail-closed): layar kios (deviceId) hanya menampilkan
+// video setelah hint loopback membawa identitas agent lokal yang cocok.
+// - device_id berbeda -> mismatch: video disembunyikan + kesalahan konfigurasi
+//   (bukan video kamera lain yang menyesatkan).
+// - hint belum segar / tanpa device_id padahal kios dipasangkan -> unverified:
+//   video disembunyikan sampai identitas terverifikasi.
+// - tanpa deviceId terpilih (layar rekap / belum memilih kamera) -> tidak ada
+//   target pairing; video mengikuti perilaku lama (loopback PC yang sama).
 const agentDeviceMismatch = computed(() => {
   if (!deviceId.value) return false
   const hinted = agentHint.value?.device_id
   if (typeof hinted !== 'string' || !hinted) return false
   return hinted.toLowerCase() !== deviceId.value.toLowerCase()
+})
+const agentPairingUnverified = computed(() => {
+  // Hanya untuk kios yang dipasangkan eksplisit ke device. Layar rekap tanpa
+  // device terpilih (mode lama) mempertahankan perilaku sebelumnya.
+  if (!deviceId.value) return false
+  if (!hintFresh.value) return true
+  const hinted = agentHint.value?.device_id
+  return typeof hinted !== 'string' || !hinted
 })
 const agentHint = ref<AgentHint | null>(null)
 let hintTimer: ReturnType<typeof setInterval> | undefined
@@ -204,7 +219,9 @@ async function pollAgentHint(): Promise<void> {
       attendance_result: typeof data.attendance_result === 'string' ? data.attendance_result : null,
     }
   } catch {
-    agentHint.value = null
+    // Gagal poll sesaat: PERTAHANKAN hint terakhir agar status mismatch tidak
+    // hilang (fail-open) saat jaringan loopback tersendat; hanya tandai stale
+    // bila jeda >3 dtk. Hint hanya dikosongkan saat tidak ada sesi aktif.
     if (Date.now() - lastHintOkAt > 3000) hintFresh.value = false
   } finally {
     clearTimeout(timer)
@@ -833,17 +850,19 @@ onBeforeUnmount(() => {
             {{
               agentDeviceMismatch
                 ? 'Kamera Tidak Sesuai'
-                : agentCameraDown
-                  ? 'Kamera Lab Tidak Tersedia'
-                  : agentVideoStale
-                    ? 'Menghubungkan Ulang Kamera Lab…'
-                    : agentStreamState === 'live'
-                      ? 'Kamera Lab Aktif (Agent)'
-                      : agentStreamState === 'failed'
-                        ? showBrowserCamera && cameraState === 'active'
-                          ? 'Kamera Perangkat (Diagnostik)'
-                          : 'Stream Lab Terputus'
-                        : 'Menghubungkan Kamera Lab…'
+                : agentPairingUnverified
+                  ? 'Memverifikasi Kamera…'
+                  : agentCameraDown
+                    ? 'Kamera Lab Tidak Tersedia'
+                    : agentVideoStale
+                      ? 'Menghubungkan Ulang Kamera Lab…'
+                      : agentStreamState === 'live'
+                        ? 'Kamera Lab Aktif (Agent)'
+                        : agentStreamState === 'failed'
+                          ? showBrowserCamera && cameraState === 'active'
+                            ? 'Kamera Perangkat (Diagnostik)'
+                            : 'Stream Lab Terputus'
+                          : 'Menghubungkan Kamera Lab…'
             }}
           </p>
           <div class="kiosk__frame">
@@ -892,6 +911,10 @@ onBeforeUnmount(() => {
           <p v-if="agentDeviceMismatch" class="kiosk__muted" role="alert">
             Layar ini dipasangkan ke kamera lain. Video disembunyikan agar tidak menyesatkan.
             Hubungi operator untuk memasangkan ulang perangkat yang benar.
+          </p>
+          <p v-else-if="agentPairingUnverified" class="kiosk__muted" role="note">
+            Memverifikasi identitas kamera lab sebelum menampilkan video. Pastikan agent di PC ini
+            dikonfigurasi dengan device yang sama dengan layar kios.
           </p>
           <p class="kiosk__camera-meta">
             <UiBadge

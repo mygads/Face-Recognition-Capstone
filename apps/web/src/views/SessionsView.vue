@@ -73,18 +73,24 @@ const staffPermissions = computed(() => (auth.account?.permissions ?? []) as str
 const canOperateSessions = computed(
   () => isAdmin.value || isTeacher.value || staffPermissions.value.includes('session_operate'),
 )
-const canManualMark = computed(
-  () =>
-    isAdmin.value ||
-    isTeacher.value ||
-    staffPermissions.value.includes('attendance_manual') ||
-    staffPermissions.value.includes('attendance_correct_closed'),
+// Izin dibedakan per status sesi (selaras dengan backend state-aware):
+// sesi berjalan -> izin tandai manual; sesi closed -> izin koreksi khusus;
+// sesi cancelled -> tidak dapat ditulis lewat jalur ini (untuk semua role).
+const canManualMarkActive = computed(
+  () => isAdmin.value || isTeacher.value || staffPermissions.value.includes('attendance_manual'),
 )
-// Sesi terpilih yang sudah ditutup/dibatalkan: form manual menjadi
-// koreksi pascasesi (alasan wajib, tercatat audit, butuh izin khusus).
-const isClosedSelected = computed(
-  () => selected.value?.status === 'closed' || selected.value?.status === 'cancelled',
+const canCorrectClosed = computed(
+  () => isAdmin.value || staffPermissions.value.includes('attendance_correct_closed'),
 )
+// Sesi terpilih yang sudah closed: form manual menjadi koreksi pascasesi
+// (alasan wajib, tercatat audit, butuh izin khusus).
+const isClosedSelected = computed(() => selected.value?.status === 'closed')
+const isCancelledSelected = computed(() => selected.value?.status === 'cancelled')
+const canManualMark = computed(() => {
+  if (isCancelledSelected.value) return false
+  if (isClosedSelected.value) return canCorrectClosed.value
+  return canManualMarkActive.value
+})
 
 function formatError(error: unknown): string {
   return formatApiError(error, 'Permintaan tidak dapat diproses. Coba lagi.')
@@ -96,6 +102,8 @@ function manualMarkError(error: unknown): string {
       return 'Presensi siswa ini sudah tercatat. Muat ulang daftar.'
     }
     if (error.code === 'session_inactive') {
+      if (isCancelledSelected.value)
+        return 'Sesi dibatalkan dan tidak dapat dikoreksi. Buat jadwal pengganti bila perlu.'
       return 'Sesi sudah ditutup. Koreksi pascasesi memerlukan izin Koreksi Sesi Tertutup.'
     }
     if (error.code === 'reason_required') {
@@ -935,9 +943,14 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
           {{ draftFor(unmarkedRoster[0].student_id).error }}
         </p>
       </div>
-      <p v-else class="st-table__muted">
-        Tandai manual membutuhkan izin Tandai Kehadiran Manual atau Koreksi Sesi Tertutup.
+      <p v-else-if="isCancelledSelected" class="st-alert" role="note">
+        Sesi dibatalkan dan tidak dapat dikoreksi. Buat jadwal pengganti bila praktikum tetap
+        dilaksanakan.
       </p>
+      <p v-else-if="isClosedSelected" class="st-table__muted">
+        Sesi sudah ditutup: koreksi pascasesi membutuhkan izin Koreksi Sesi Tertutup.
+      </p>
+      <p v-else class="st-table__muted">Tandai manual membutuhkan izin Tandai Kehadiran Manual.</p>
 
       <div v-if="canManualMark" class="st-card" data-testid="direct-update-panel">
         <h3 class="st-card__title">Ubah kehadiran langsung</h3>
