@@ -280,21 +280,35 @@ def _seed_kiosk_spotlight_scenario(
         )
         session.add(cls)
         session.flush()
+        # Jendela jadwal dinamis mengikuti tanggal lokal Asia/Jakarta agar
+        # sesi tidak dianggap kedaluwarsa oleh close_expired_sessions pada jam
+        # berapa pun pengujian dijalankan (regresi flake time-of-day: window
+        # statis 09:00-10:00 membuat sesi auto-closed bila dijalankan siang).
+        from zoneinfo import ZoneInfo
+
+        _tz = ZoneInfo("Asia/Jakarta")
+        _local_today = datetime.now(UTC).astimezone(_tz).date()
+        _day_start_utc = datetime.combine(
+            _local_today, dtime(0, 0), tzinfo=_tz
+        ).astimezone(UTC)
+        _opened_candidate = datetime.now(UTC).replace(microsecond=0) - timedelta(
+            minutes=30
+        )
+        opened_at = max(_opened_candidate, _day_start_utc + timedelta(minutes=1))
         sched = PracticumSchedule(
             class_id=cls.id,
             laboratory_id=lab.id,
             teacher_user_id=teacher.id,
             subject="Kimia",
-            weekday=0,
-            start_time=dtime(9, 0),
-            end_time=dtime(10, 0),
+            weekday=_local_today.weekday(),
+            start_time=dtime(0, 0),
+            end_time=dtime(23, 59, 59),
             timezone_name="Asia/Jakarta",
-            effective_from=datetime.now(UTC).date(),
+            effective_from=_local_today,
             is_active=True,
         )
         session.add(sched)
         session.flush()
-        opened_at = datetime.now(UTC).replace(microsecond=0) - timedelta(minutes=30)
         att = AttendanceSession(
             practicum_schedule_id=sched.id,
             opened_by_user_id=teacher.id,
