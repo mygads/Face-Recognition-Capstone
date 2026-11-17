@@ -26,6 +26,7 @@ import {
   UiTextarea,
 } from '../components/ui'
 import FaceOverlay from '../components/FaceOverlay.vue'
+import { agentStreamUrl, readKioskStreamToken } from '../utils/agentPreview'
 
 type CapturePhase = 'ready' | 'countdown' | 'capturing' | 'processing' | 'confirming' | 'complete'
 
@@ -52,8 +53,10 @@ const pendingCount = computed(
 const videoElement = ref<HTMLVideoElement | null>(null)
 const labImageElement = ref<HTMLImageElement | null>(null)
 const cameraSource = ref<'device' | 'lab'>('device')
-const AGENT_STREAM_URL = 'http://127.0.0.1:8765/v1/kiosk-stream'
+const labStreamKey = ref(0)
 const labStreamFailed = ref(false)
+const devicePreviewError = ref<string | null>(null)
+const labStreamSrc = computed(() => agentStreamUrl(readKioskStreamToken()))
 const capturePhase = ref<CapturePhase>('ready')
 const countdownValue = ref(3)
 const captureIndex = ref(0)
@@ -108,6 +111,42 @@ function stopCamera(): void {
   if (videoElement.value) videoElement.value.srcObject = null
 }
 
+async function startDevicePreview(): Promise<void> {
+  if (cameraSource.value !== 'device' || stream.value) return
+  if (!navigator.mediaDevices?.getUserMedia) {
+    devicePreviewError.value = 'Browser ini tidak dapat membuka kamera.'
+    return
+  }
+  const currentFlow = ++flowVersion
+  devicePreviewError.value = null
+  try {
+    const cameraStream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+    })
+    if (currentFlow !== flowVersion) {
+      cameraStream.getTracks().forEach((track) => track.stop())
+      return
+    }
+    stream.value = cameraStream
+    if (!videoElement.value) throw new Error('Preview kamera tidak tersedia.')
+    videoElement.value.srcObject = stream.value
+    await videoElement.value.play()
+  } catch (error) {
+    if (currentFlow !== flowVersion) return
+    stopCamera()
+    devicePreviewError.value =
+      error instanceof DOMException && error.name === 'NotAllowedError'
+        ? 'Akses kamera belum diizinkan. Izinkan kamera pada browser lalu muat ulang preview.'
+        : 'Preview kamera tidak dapat dibuka. Periksa kamera lalu coba lagi.'
+  }
+}
+
+function retryLabStream(): void {
+  labStreamFailed.value = false
+  labStreamKey.value += 1
+}
+
 async function loadClasses(): Promise<void> {
   isLoading.value = true
   pageError.value = null
@@ -145,9 +184,21 @@ async function loadRoster(classId: string): Promise<void> {
   } finally {
     isLoading.value = false
   }
+  if (cameraSource.value === 'device') void startDevicePreview()
 }
 
-onMounted(() => void loadClasses())
+onMounted(() => {
+  void loadClasses()
+  void startDevicePreview()
+})
+
+watch(cameraSource, () => {
+  flowVersion += 1
+  stopCamera()
+  labStreamFailed.value = false
+  if (cameraSource.value === 'device') void startDevicePreview()
+  else labStreamKey.value += 1
+})
 
 watch(selectedClassId, (classId, previousClassId) => {
   if (classId && classId !== previousClassId) void loadRoster(classId)
@@ -209,21 +260,11 @@ async function startEnrollment(): Promise<void> {
         throw new Error('Stream kamera lab belum tersedia di perangkat ini.')
       }
     } else {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error('Browser ini tidak dapat membuka kamera.')
+      if (!stream.value) await startDevicePreview()
+      if (currentFlow !== flowVersion) return
+      if (!stream.value || !videoElement.value) {
+        throw new Error(devicePreviewError.value ?? 'Preview kamera belum siap. Tunggu sebentar.')
       }
-      const cameraStream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
-      })
-      if (currentFlow !== flowVersion) {
-        cameraStream.getTracks().forEach((track) => track.stop())
-        return
-      }
-      stream.value = cameraStream
-      if (!videoElement.value) throw new Error('Preview kamera tidak tersedia.')
-      videoElement.value.srcObject = stream.value
-      await videoElement.value.play()
     }
     capturePhase.value = 'countdown'
     for (let remaining = 3; remaining > 0; remaining -= 1) {
@@ -271,6 +312,7 @@ function cancelCapture(): void {
   identityConfirmed.value = false
   captureIndex.value = 0
   stopCamera()
+  if (cameraSource.value === 'device') void startDevicePreview()
 }
 
 function selectStudent(student: EnrollmentStudentStatus): void {
@@ -361,6 +403,7 @@ function confirmIdentityAndContinue(): void {
   captureResult.value = null
   identityConfirmed.value = false
   stopCamera()
+  if (cameraSource.value === 'device') void startDevicePreview()
 
   const nextStudent =
     students.value
@@ -555,9 +598,10 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             data-testid="enrollment-camera"
           />
           <img
-            v-else
+            v-else-if="!labStreamFailed"
             ref="labImageElement"
-            :src="AGENT_STREAM_URL"
+            :key="labStreamKey"
+            :src="labStreamSrc"
             class="enrollment-view__camera"
             alt="Stream kamera lab dari agent"
             data-testid="enrollment-lab-stream"
@@ -583,7 +627,7 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             label="Sejajarkan wajah"
           />
           <div
-            v-if="cameraSource === 'device' && !stream"
+            v-if="(cameraSource === 'device' && !stream) || labStreamFailed"
             class="enrollment-view__camera-placeholder"
           >
             <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
@@ -591,7 +635,29 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
               <path d="m33 19 10-6v22l-10-6" />
               <circle cx="19" cy="24" r="6" />
             </svg>
-            <span>Preview kamera akan tampil di sini</span>
+            <span v-if="cameraSource === 'device' && devicePreviewError">{{
+              devicePreviewError
+            }}</span>
+            <span v-else-if="cameraSource === 'device'">Membuka preview kamera…</span>
+            <span v-else>Stream lab tidak terjangkau dari perangkat ini.</span>
+            <UiButton
+              v-if="cameraSource === 'lab'"
+              variant="secondary"
+              size="sm"
+              type="button"
+              @click="retryLabStream"
+            >
+              Coba lagi
+            </UiButton>
+            <UiButton
+              v-else-if="devicePreviewError"
+              variant="secondary"
+              size="sm"
+              type="button"
+              @click="startDevicePreview"
+            >
+              Muat ulang preview
+            </UiButton>
           </div>
           <span
             v-if="capturePhase === 'countdown'"

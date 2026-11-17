@@ -1181,8 +1181,9 @@ onBeforeUnmount(() => {
         <p>
           <strong>{{ cameraControlTarget.name }}</strong>
           <template v-if="cameraControlTarget.camera_enabled">
-            akan berhenti mengambil frame dan mengirim presensi. Perangkat tetap terdaftar dan dapat
-            diaktifkan kembali dari halaman ini.
+            akan berhenti mengambil frame dan mengirim presensi. Preview kamera, stream kiosk, dan
+            pendaftaran via lab ikut mati; presensi manual tetap bisa dicatat. Perangkat tetap
+            terdaftar dan dapat diaktifkan kembali dari halaman ini.
           </template>
           <template v-else>
             akan mulai mengambil frame kembali saat agent menerima pengaturan ini.

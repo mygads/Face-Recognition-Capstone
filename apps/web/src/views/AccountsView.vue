@@ -3,7 +3,6 @@ import { onMounted, ref } from 'vue'
 import UiDrawer from '../components/ui/UiDrawer.vue'
 import { UiButton, UiInput, UiPageHeader, UiSelect } from '../components/ui'
 import {
-  addClassLaboratory,
   addLaborantAssignment,
   addTeacherAssignment,
   ApiError,
@@ -12,12 +11,10 @@ import {
   grantOptionalPermission,
   listAccounts,
   listClasses,
-  listClassLaboratories,
   listLaboratories,
   listLaborantAssignments,
   listPermissionGrants,
   listTeacherAssignments,
-  removeClassLaboratory,
   removeLaborantAssignment,
   removeTeacherAssignment,
   resetStaffPassword,
@@ -70,6 +67,26 @@ const grantGroups = (permList: string[]): { group: string; perms: string[] }[] =
 const allOperationalSelected = (permList: string[]): boolean =>
   permList.length > 0 && permList.every((p) => grants.value.extra_permissions.includes(p))
 
+type ManagedRole = 'ADMIN' | 'TEACHER' | 'LABORANT'
+const managedRole = (detail: AccountDetail | null): ManagedRole => {
+  if (!detail) return 'TEACHER'
+  if (detail.roles.includes('ADMIN')) return 'ADMIN'
+  if (detail.roles.includes('LABORANT')) return 'LABORANT'
+  return 'TEACHER'
+}
+const isTeacherAccount = (detail: AccountDetail | null): boolean =>
+  managedRole(detail) === 'TEACHER'
+const isLaborantAccount = (detail: AccountDetail | null): boolean =>
+  managedRole(detail) === 'LABORANT'
+const isAdminAccount = (detail: AccountDetail | null): boolean => managedRole(detail) === 'ADMIN'
+const manageSubtitle = (detail: AccountDetail | null): string => {
+  const role = managedRole(detail)
+  if (role === 'TEACHER') return 'Kelola guru: status, penugasan kelas, mode sesi, dan kata sandi.'
+  if (role === 'LABORANT')
+    return 'Kelola laboran: status, penugasan lab, izin tambahan, dan kata sandi.'
+  return 'Kelola admin: status akun dan kata sandi.'
+}
+
 async function toggleAllOperational(permList: string[], enabled: boolean): Promise<void> {
   for (const perm of permList) {
     const active = grants.value.extra_permissions.includes(perm)
@@ -93,10 +110,7 @@ const teacherAssignments = ref<
     is_substitute: boolean
   }[]
 >([])
-const classLaboratories = ref<{ class_id: string; laboratory_id: string }[]>([])
 const selectedTeacherClass = ref('')
-const selectedClassLabClass = ref('')
-const selectedClassLabLab = ref('')
 const resetResult = ref<string | null>(null)
 const manageMessage = ref<string | null>(null)
 const managingId = ref<string | null>(null)
@@ -144,14 +158,21 @@ async function selectAccount(account: Account): Promise<void> {
     editOpeningMode.value =
       selectedDetail.value.opening_mode === 'automatic' ? 'automatic' : 'manual'
     editRole.value = selectedDetail.value.roles.includes('TEACHER') ? 'TEACHER' : 'LABORANT'
-    const [assignRes, grantRes, teacherRes] = await Promise.all([
-      listLaborantAssignments(account.id).catch(() => ({ items: [] })),
-      listPermissionGrants(account.id).catch(() => ({ extra_permissions: [], grantable: [] })),
-      listTeacherAssignments(account.id).catch(() => ({ items: [] })),
-    ])
-    assignments.value = (assignRes as { items: typeof assignments.value }).items
-    grants.value = grantRes as typeof grants.value
-    teacherAssignments.value = (teacherRes as { items: typeof teacherAssignments.value }).items
+    const role = managedRole(selectedDetail.value)
+    assignments.value = []
+    grants.value = { extra_permissions: [], grantable: [] }
+    teacherAssignments.value = []
+    if (role === 'LABORANT') {
+      const [assignRes, grantRes] = await Promise.all([
+        listLaborantAssignments(account.id).catch(() => ({ items: [] })),
+        listPermissionGrants(account.id).catch(() => ({ extra_permissions: [], grantable: [] })),
+      ])
+      assignments.value = (assignRes as { items: typeof assignments.value }).items
+      grants.value = grantRes as typeof grants.value
+    } else if (role === 'TEACHER') {
+      const teacherRes = await listTeacherAssignments(account.id).catch(() => ({ items: [] }))
+      teacherAssignments.value = (teacherRes as { items: typeof teacherAssignments.value }).items
+    }
     editDeactivationReason.value = ''
   } catch (error) {
     detailError.value = formatError(error)
@@ -170,20 +191,24 @@ function closeManage(): void {
 async function saveAccount(): Promise<void> {
   if (!selectedDetail.value) return
   try {
-    const currentRole = selectedDetail.value.roles.includes('TEACHER') ? 'TEACHER' : 'LABORANT'
+    const roleForSave = managedRole(selectedDetail.value)
+    const currentRole = roleForSave === 'ADMIN' ? 'ADMIN' : roleForSave
     selectedDetail.value = await updateStaffAccount(selectedDetail.value.id, {
       full_name: editName.value.trim() || undefined,
       is_active: editActive.value,
-      opening_mode: editOpeningMode.value,
-      role: editRole.value === currentRole ? undefined : editRole.value,
+      opening_mode: roleForSave === 'TEACHER' ? editOpeningMode.value : undefined,
+      role: roleForSave === 'ADMIN' || editRole.value === currentRole ? undefined : editRole.value,
       deactivation_reason:
         editActive.value || !editDeactivationReason.value.trim()
           ? undefined
           : editDeactivationReason.value.trim(),
     })
     manageMessage.value =
-      'Akun diperbarui: aktif/nonaktif, nama, mode pembukaan, role ' +
-      '(ganti role melepas penugasan & izin yang tidak relevan).'
+      roleForSave === 'TEACHER'
+        ? 'Akun guru diperbarui: aktif/nonaktif, nama, penugasan kelas, dan mode pembukaan sesi.'
+        : roleForSave === 'LABORANT'
+          ? 'Akun laboran diperbarui: aktif/nonaktif, nama, penugasan lab, dan izin tambahan.'
+          : 'Akun admin diperbarui: aktif/nonaktif dan nama.'
     void loadAccounts()
   } catch (error) {
     detailError.value = formatError(error)
@@ -261,12 +286,8 @@ async function unassignLab(labId: string): Promise<void> {
 
 async function loadClassOptions(): Promise<void> {
   try {
-    const [classPage, classLab] = await Promise.all([
-      listClasses({ limit: 100, offset: 0 }),
-      listClassLaboratories().catch(() => ({ items: [] })),
-    ])
+    const classPage = await listClasses({ limit: 100, offset: 0 })
     schoolClasses.value = classPage.items
-    classLaboratories.value = (classLab as { items: typeof classLaboratories.value }).items
   } catch {
     // optional
   }
@@ -305,38 +326,6 @@ async function unassignTeacherClass(classId: string): Promise<void> {
   } catch (error) {
     detailError.value = formatError(error)
   }
-}
-
-async function addClassLabMapping(): Promise<void> {
-  if (!selectedClassLabClass.value || !selectedClassLabLab.value) return
-  try {
-    await addClassLaboratory(selectedClassLabClass.value, selectedClassLabLab.value)
-    const res = await listClassLaboratories()
-    classLaboratories.value = res.items
-    manageMessage.value = 'Relasi kelas-lab diperbarui.'
-  } catch (error) {
-    detailError.value = formatError(error)
-  }
-}
-
-async function removeClassLabMapping(classId: string, labId: string): Promise<void> {
-  try {
-    await removeClassLaboratory(classId, labId)
-    const res = await listClassLaboratories()
-    classLaboratories.value = res.items
-    manageMessage.value = 'Relasi kelas-lab diperbarui.'
-  } catch (error) {
-    detailError.value = formatError(error)
-  }
-}
-
-function classNameOf(classId: string): string {
-  return schoolClasses.value.find((c) => c.id === classId)?.name ?? classId
-}
-
-function labNameOf(labId: string): string {
-  const lab = laboratories.value.find((l) => l.id === labId)
-  return lab ? `${lab.code} - ${lab.name}` : labId
 }
 
 onMounted(() => {
@@ -543,7 +532,7 @@ async function copyTemporaryPassword(): Promise<void> {
     <UiDrawer
       v-if="selectedDetail"
       :title="`${selectedDetail.full_name} · ${selectedDetail.email}`"
-      subtitle="Kelola staf: status, role, penugasan, izin, dan kata sandi."
+      :subtitle="manageSubtitle(selectedDetail)"
       data-testid="account-manage"
       @close="closeManage"
     >
@@ -574,24 +563,31 @@ async function copyTemporaryPassword(): Promise<void> {
             placeholder="mis. mutasi / masa tugas selesai"
           />
         </label>
-        <label>
+        <label v-if="!isAdminAccount(selectedDetail)">
           Role akun
           <UiSelect v-model="editRole" data-testid="edit-role">
             <option value="TEACHER">Guru</option>
             <option value="LABORANT">Laboran</option>
           </UiSelect>
         </label>
-        <p class="accounts-view__hint">
+        <p v-if="!isAdminAccount(selectedDetail)" class="accounts-view__hint">
           Ganti role melepas penugasan &amp; izin yang tidak relevan (dicatat audit). Role admin
           tidak dapat diubah di sini.
         </p>
-        <label>
+        <p v-else class="accounts-view__hint">
+          Akun admin: pengelola utama sistem. Penugasan kelas/lab dan izin tambahan hanya berlaku
+          untuk guru dan laboran.
+        </p>
+        <label v-if="isTeacherAccount(selectedDetail)">
           Mode pembukaan sesi (guru)
           <UiSelect v-model="editOpeningMode">
             <option value="manual">Saya membuka sesi sendiri</option>
             <option value="automatic">Sesi saya dibuka otomatis sesuai jadwal</option>
           </UiSelect>
         </label>
+        <p v-if="isTeacherAccount(selectedDetail)" class="accounts-view__hint">
+          Mode otomatis hanya membuka jadwal milik guru ini. Laboran tidak membuka sesi.
+        </p>
         <div class="master-data__form-actions">
           <UiButton variant="primary" type="submit">Simpan perubahan</UiButton>
           <UiButton variant="secondary" type="button" @click="doReset"> Reset kata sandi </UiButton>
@@ -634,153 +630,117 @@ async function copyTemporaryPassword(): Promise<void> {
       <p v-if="setPasswordError" class="master-data__alert" role="alert">
         {{ setPasswordError }}
       </p>
-      <h3>Penugasan guru → kelas</h3>
-      <p class="accounts-view__hint">
-        Hanya kelas yang ditugaskan yang bisa dibaca guru di Kelas Saya, laporan, dan EWS.
-      </p>
-      <ul>
-        <li v-for="t in teacherAssignments" :key="t.class_id">
-          {{ t.code }} - {{ t.name }}
-          <small v-if="t.is_substitute">(pengganti)</small>
-          <UiButton variant="text" type="button" @click="unassignTeacherClass(t.class_id)">
-            Lepas
-          </UiButton>
-        </li>
-        <li v-if="!teacherAssignments.length" class="accounts-view__hint">
-          Belum ada penugasan kelas.
-        </li>
-      </ul>
-      <form class="master-data__form" @submit.prevent="assignTeacherClass">
-        <label>
-          Tambah penugasan kelas
-          <UiSelect v-model="selectedTeacherClass" aria-label="Pilih kelas untuk guru">
-            <option value="">Pilih kelas…</option>
-            <option v-for="c in schoolClasses" :key="c.id" :value="c.id">
-              {{ c.code }} - {{ c.name }}
-            </option>
-          </UiSelect>
-        </label>
-        <div class="master-data__form-actions">
-          <UiButton variant="secondary" type="submit" :disabled="!selectedTeacherClass">
-            Tugaskan
-          </UiButton>
-        </div>
-      </form>
-      <h3>Relasi kelas ↔ laboratorium (cakupan enrollment laboran)</h3>
-      <p class="accounts-view__hint">
-        Laboran hanya melihat enrollment kelas yang dilayani lab penugasannya.
-      </p>
-      <ul>
-        <li v-for="m in classLaboratories" :key="`${m.class_id}-${m.laboratory_id}`">
-          {{ classNameOf(m.class_id) }} ↔ {{ labNameOf(m.laboratory_id) }}
-          <UiButton
-            variant="text"
-            type="button"
-            @click="removeClassLabMapping(m.class_id, m.laboratory_id)"
-          >
-            Lepas
-          </UiButton>
-        </li>
-        <li v-if="!classLaboratories.length" class="accounts-view__hint">
-          Belum ada relasi kelas-lab.
-        </li>
-      </ul>
-      <form class="master-data__form" @submit.prevent="addClassLabMapping">
-        <label>
-          Kelas
-          <UiSelect v-model="selectedClassLabClass" aria-label="Pilih kelas untuk relasi lab">
-            <option value="">Pilih kelas…</option>
-            <option v-for="c in schoolClasses" :key="c.id" :value="c.id">
-              {{ c.code }} - {{ c.name }}
-            </option>
-          </UiSelect>
-        </label>
-        <label>
-          Laboratorium
-          <UiSelect v-model="selectedClassLabLab" aria-label="Pilih lab untuk relasi kelas">
-            <option value="">Pilih lab…</option>
-            <option v-for="lab in laboratories" :key="lab.id" :value="lab.id">
-              {{ lab.code }} - {{ lab.name }}
-            </option>
-          </UiSelect>
-        </label>
-        <div class="master-data__form-actions">
-          <UiButton
-            variant="secondary"
-            type="submit"
-            :disabled="!selectedClassLabClass || !selectedClassLabLab"
-          >
-            Tautkan
-          </UiButton>
-        </div>
-      </form>
-      <h3>Penugasan laboran → lab</h3>
-      <ul>
-        <li v-for="a in assignments" :key="a.laboratory_id">
-          {{ a.code }} - {{ a.name }}
-          <UiButton variant="text" type="button" @click="unassignLab(a.laboratory_id)">
-            Lepas
-          </UiButton>
-        </li>
-      </ul>
-      <form @submit.prevent="">
-        <label>
-          Tambah penugasan lab
-          <UiSelect
-            aria-label="Pilih lab untuk laboran"
-            @change="(e: Event) => assignLab((e.target as HTMLSelectElement | null)?.value ?? '')"
-          >
-            <option value="">Pilih lab…</option>
-            <option v-for="lab in laboratories" :key="lab.id" :value="lab.id">
-              {{ lab.code }} - {{ lab.name }}
-            </option>
-          </UiSelect>
-        </label>
-      </form>
-      <h3>Hak akses opsional laboran (checklist)</h3>
-      <p class="accounts-view__hint">
-        Default laboran: perangkat, preview kamera, pendaftaran wajah. Centang untuk memberi akses
-        guru (jadwal/sesi/koreksi/laporan/EWS). Laboran full ≈ admin kecuali buat staf &amp; AI.
-      </p>
-      <div v-for="group in grantGroups(grants.grantable)" :key="group.group">
-        <h4>{{ group.group }}</h4>
-        <label>
-          <input
-            type="checkbox"
-            :checked="allOperationalSelected(group.perms)"
-            @change="
-              (e) => toggleAllOperational(group.perms, (e.target as HTMLInputElement).checked)
-            "
-          />
-          Pilih semua {{ group.group }}
-        </label>
+      <template v-if="isTeacherAccount(selectedDetail)">
+        <h3>Penugasan guru → kelas</h3>
+        <p class="accounts-view__hint">
+          Hanya kelas yang ditugaskan yang bisa dibaca guru di Kelas Saya, laporan, dan EWS.
+        </p>
         <ul>
-          <li v-for="perm in group.perms" :key="perm">
-            <label>
-              <input
-                type="checkbox"
-                :checked="grants.extra_permissions.includes(perm)"
-                @change="(e) => toggleGrant(perm, (e.target as HTMLInputElement).checked)"
-              />
-              {{ PERMISSION_META[perm]?.label ?? perm }}
-            </label>
-            <small class="accounts-view__hint">
-              {{ PERMISSION_META[perm]?.hint ?? '' }}
-              <span v-if="PERMISSION_META[perm]?.needs">
-                Butuh: {{ PERMISSION_META[perm]?.needs }}.
-              </span>
-            </small>
+          <li v-for="t in teacherAssignments" :key="t.class_id">
+            {{ t.code }} - {{ t.name }}
+            <small v-if="t.is_substitute">(pengganti)</small>
+            <UiButton variant="text" type="button" @click="unassignTeacherClass(t.class_id)">
+              Lepas
+            </UiButton>
+          </li>
+          <li v-if="!teacherAssignments.length" class="accounts-view__hint">
+            Belum ada penugasan kelas.
           </li>
         </ul>
-      </div>
+        <form class="master-data__form" @submit.prevent="assignTeacherClass">
+          <label>
+            Tambah penugasan kelas
+            <UiSelect v-model="selectedTeacherClass" aria-label="Pilih kelas untuk guru">
+              <option value="">Pilih kelas…</option>
+              <option v-for="c in schoolClasses" :key="c.id" :value="c.id">
+                {{ c.code }} - {{ c.name }}
+              </option>
+            </UiSelect>
+          </label>
+          <div class="master-data__form-actions">
+            <UiButton variant="secondary" type="submit" :disabled="!selectedTeacherClass">
+              Tugaskan
+            </UiButton>
+          </div>
+        </form>
+      </template>
       <p class="accounts-view__hint">
-        Aktif saat ini: {{ grants.extra_permissions.join(', ') || '-' }}
+        Pemetaan kelas-lab kini dikelola di Data Master → detail laboratorium (“Kelas yang
+        Dilayani”), bukan per akun.
       </p>
-      <p class="accounts-view__hint" data-testid="grant-impact">
-        Dampak menu bila disimpan: laboran dasar hanya melihat workspace teknis. Setiap izin yang
-        dicentang membuka menu terkait (Jadwal → Sesi → Koreksi → Laporan/EWS). Tanpa lab yang
-        ditugaskan, data lab tetap kosong (“Belum ada penugasan laboratorium”).
-      </p>
+      <template v-if="isLaborantAccount(selectedDetail)">
+        <h3>Penugasan laboran → lab</h3>
+        <p class="accounts-view__hint">
+          Satu laboran dapat ditugaskan ke beberapa lab; akses datanya dibatasi pada lab penugasan.
+          Izin tambahan di bawah bersifat per akun ini, bukan global.
+        </p>
+        <ul>
+          <li v-for="a in assignments" :key="a.laboratory_id">
+            {{ a.code }} - {{ a.name }}
+            <UiButton variant="text" type="button" @click="unassignLab(a.laboratory_id)">
+              Lepas
+            </UiButton>
+          </li>
+        </ul>
+        <form @submit.prevent="">
+          <label>
+            Tambah penugasan lab
+            <UiSelect
+              aria-label="Pilih lab untuk laboran"
+              @change="(e: Event) => assignLab((e.target as HTMLSelectElement | null)?.value ?? '')"
+            >
+              <option value="">Pilih lab…</option>
+              <option v-for="lab in laboratories" :key="lab.id" :value="lab.id">
+                {{ lab.code }} - {{ lab.name }}
+              </option>
+            </UiSelect>
+          </label>
+        </form>
+        <h3>Hak akses opsional laboran (checklist)</h3>
+        <p class="accounts-view__hint">
+          Default laboran: perangkat, preview kamera, pendaftaran wajah. Centang untuk memberi akses
+          guru (jadwal/sesi/koreksi/laporan/EWS). Laboran full ≈ admin kecuali buat staf &amp; AI.
+        </p>
+        <div v-for="group in grantGroups(grants.grantable)" :key="group.group">
+          <h4>{{ group.group }}</h4>
+          <label>
+            <input
+              type="checkbox"
+              :checked="allOperationalSelected(group.perms)"
+              @change="
+                (e) => toggleAllOperational(group.perms, (e.target as HTMLInputElement).checked)
+              "
+            />
+            Pilih semua {{ group.group }}
+          </label>
+          <ul>
+            <li v-for="perm in group.perms" :key="perm">
+              <label>
+                <input
+                  type="checkbox"
+                  :checked="grants.extra_permissions.includes(perm)"
+                  @change="(e) => toggleGrant(perm, (e.target as HTMLInputElement).checked)"
+                />
+                {{ PERMISSION_META[perm]?.label ?? perm }}
+              </label>
+              <small class="accounts-view__hint">
+                {{ PERMISSION_META[perm]?.hint ?? '' }}
+                <span v-if="PERMISSION_META[perm]?.needs">
+                  Butuh: {{ PERMISSION_META[perm]?.needs }}.
+                </span>
+              </small>
+            </li>
+          </ul>
+        </div>
+        <p class="accounts-view__hint">
+          Aktif saat ini: {{ grants.extra_permissions.join(', ') || '-' }}
+        </p>
+        <p class="accounts-view__hint" data-testid="grant-impact">
+          Dampak menu bila disimpan: laboran dasar hanya melihat workspace teknis. Setiap izin yang
+          dicentang membuka menu terkait (Jadwal → Sesi → Koreksi → Laporan/EWS). Tanpa lab yang
+          ditugaskan, data lab tetap kosong (“Belum ada penugasan laboratorium”).
+        </p>
+      </template>
     </UiDrawer>
   </div>
 </template>
