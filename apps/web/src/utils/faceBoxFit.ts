@@ -56,12 +56,19 @@ export function mapFaceToBox<T extends OverlayFace>(
   const offsetY = (boxHeight - renderedHeight) / 2
   const project = (value: number, rendered: number, offset: number, box: number) =>
     clamp01((value * rendered + offset) / box)
+  // Jepit sebagai irisan kotak: x2/y2 dijepit dulu, baru lebar/tinggi dihitung
+  // dari selisihnya. Menjepit posisi dan ukuran secara terpisah membuat kotak
+  // di tepi tampak lebih lebar daripada bagian wajah yang benar-benar terlihat.
+  const x1 = project(face.x, renderedWidth, offsetX, boxWidth)
+  const y1 = project(face.y, renderedHeight, offsetY, boxHeight)
+  const x2 = project(face.x + face.width, renderedWidth, offsetX, boxWidth)
+  const y2 = project(face.y + face.height, renderedHeight, offsetY, boxHeight)
   const mapped: OverlayFace = {
     ...face,
-    x: project(face.x, renderedWidth, offsetX, boxWidth),
-    y: project(face.y, renderedHeight, offsetY, boxHeight),
-    width: clamp01((face.width * renderedWidth) / boxWidth),
-    height: clamp01((face.height * renderedHeight) / boxHeight),
+    x: x1,
+    y: y1,
+    width: Math.max(0, x2 - x1),
+    height: Math.max(0, y2 - y1),
   }
   if (Array.isArray(face.landmarks)) {
     mapped.landmarks = face.landmarks.map((point) =>

@@ -71,6 +71,8 @@ describe('drawer kelola staf per role', () => {
       expect(wrapper.text()).toContain('Mode pembukaan sesi (guru)')
       expect(wrapper.text()).not.toContain('Penugasan laboran')
       expect(wrapper.text()).not.toContain('Hak akses opsional')
+      expect(wrapper.text()).toContain('Hak akses tambahan guru')
+      expect(api.listPermissionGrants).toHaveBeenCalled()
       expect(wrapper.text()).not.toContain('Tautkan')
     } finally {
       wrapper.unmount()

@@ -138,7 +138,7 @@ const largestIndex = computed(() => {
 }
 .face-overlay__tag {
   fill: #ffffff;
-  font-size: 0.028px;
+  font-size: 0.036px;
   font-weight: 700;
   paint-order: stroke;
   stroke: rgb(0 0 0 / 0.65);

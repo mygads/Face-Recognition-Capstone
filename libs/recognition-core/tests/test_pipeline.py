@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from recognition_core.domain import (
@@ -16,6 +16,10 @@ from recognition_core.domain import (
 )
 from recognition_core.liveness import LivenessConfig
 from recognition_core.pipeline import RecognitionPipeline
+from recognition_core.temporal import (
+    MultiFrameDecisionEngine,
+    TemporalDecisionConfig,
+)
 from recognition_core.testing import (
     FakeFaceAligner,
     FakeFaceDetector,
@@ -31,6 +35,8 @@ from recognition_core.testing import (
 
 TEACHER_TRACK = "track-17"
 STUDENT_ID = UUID(int=77)
+SWITCH_PERSON_A = UUID(int=101)
+SWITCH_PERSON_B = UUID(int=202)
 
 
 def test_pipeline_invokes_stages_in_order_and_delegates_temporal_decision() -> None:
@@ -465,6 +471,105 @@ def test_truncated_runner_up_triggers_wider_matcher_requery() -> None:
         STUDENT_ID,
         other_student,
     }
+
+
+class _ScriptedMatcher:
+    """Kandidat berbeda per frame: 3 frame orang A, lalu langsung orang B."""
+
+    def __init__(self, per_frame: list[tuple[CandidateMatch, ...]]) -> None:
+        self._per_frame = per_frame
+        self.calls = 0
+
+    def match(
+        self,
+        probe: FaceEmbedding,
+        gallery: object,
+        *,
+        limit: int = 2,
+    ) -> tuple[CandidateMatch, ...]:
+        results = self._per_frame[min(self.calls, len(self._per_frame) - 1)]
+        self.calls += 1
+        return tuple(results)[:limit]
+
+
+def _matches_for(student: UUID, other: UUID) -> tuple[CandidateMatch, ...]:
+    return (
+        CandidateMatch(student, 0.93),
+        CandidateMatch(other, 0.30),
+    )
+
+
+def test_fast_person_switch_requires_fresh_consensus_without_gap() -> None:
+    """Siswa B langsung menggantikan A tanpa frame kosong di antaranya.
+
+    track_id kamera tetap sama (seperti LocalRecognizer); bukti A wajib
+    dibuang saat Top-1 berbalik dan B wajib membangun konsensus segar
+    sebelum diterima. Tidak boleh ada accept tercampur dari dua orang.
+    """
+    calls: list[str] = []
+    face = FaceDetection(
+        box=BoundingBox(10, 20, 80, 90),
+        confidence=0.99,
+        landmarks=((30, 45), (65, 45), (48, 60), (35, 82), (62, 82)),
+    )
+    script = [
+        _matches_for(SWITCH_PERSON_A, SWITCH_PERSON_B),
+        _matches_for(SWITCH_PERSON_A, SWITCH_PERSON_B),
+        _matches_for(SWITCH_PERSON_A, SWITCH_PERSON_B),
+        _matches_for(SWITCH_PERSON_B, SWITCH_PERSON_A),
+        _matches_for(SWITCH_PERSON_B, SWITCH_PERSON_A),
+        _matches_for(SWITCH_PERSON_B, SWITCH_PERSON_A),
+    ]
+    pipeline = RecognitionPipeline(
+        preprocessor=FakePreprocessor(calls),
+        detector=FakeFaceDetector(calls, (face,)),
+        quality_assessor=FakeFaceQualityAssessor(
+            calls, FaceQuality(score=0.95, acceptable=True)
+        ),
+        aligner=FakeFaceAligner(calls),
+        liveness_config=LivenessConfig(enabled=False, required=False),
+        liveness_model=None,
+        embedder=FakeFaceEmbedder(
+            calls,
+            FaceEmbedding((0.6, 0.8), "fake-embedder", "test", True),
+        ),
+        matcher=_ScriptedMatcher(script),
+        temporal_decision=MultiFrameDecisionEngine(
+            TemporalDecisionConfig(
+                min_top1_similarity=0.8,
+                min_top1_top2_margin=0.2,
+                minimum_agreeing_frames=3,
+                sample_every_n_frames=1,
+                best_frame_count=3,
+                max_history_frames=5,
+            )
+        ),
+    )
+    observations = [
+        FrameObservation(
+            track_id="camera-fixed",
+            captured_at=datetime(2026, 1, 1, tzinfo=UTC)
+            + timedelta(milliseconds=100 * i),
+        )
+        for i in range(6)
+    ]
+    decisions = [pipeline.process(any_frame(), (), obs) for obs in observations]
+
+    assert [d.state for d in decisions[:3]] == [
+        "collecting",
+        "collecting",
+        "accepted",
+    ]
+    assert decisions[2].decision is not None
+    assert decisions[2].decision.student_id == SWITCH_PERSON_A
+    # Tepat setelah berbalik: konsensus segar, belum boleh accept siapa pun.
+    assert decisions[3].state == "collecting"
+    assert decisions[3].observation_count == 1
+    assert decisions[4].state == "collecting"
+    # Bukti penuh B -> diterima sebagai B, bukan A yang tercampur.
+    assert decisions[5].state == "accepted"
+    assert decisions[5].decision is not None
+    assert decisions[5].decision.student_id == SWITCH_PERSON_B
 
 
 def test_pipeline_replay_skips_inference_and_replays_prior_decision() -> None:

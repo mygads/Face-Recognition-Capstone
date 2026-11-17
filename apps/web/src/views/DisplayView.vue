@@ -46,6 +46,19 @@ const isFullscreen = ref(false)
 const streamState = ref<'off' | 'sse' | 'polling'>('off')
 const cameraState = ref<'idle' | 'active' | 'unavailable' | 'insecure'>('idle')
 const agentStreamState = ref<'idle' | 'live' | 'failed'>('idle')
+// Upaya koneksi ulang stream MJPEG kios (cache-buster `retry=N` memaksa
+// <img> request ulang). 503 awal = buffer JPEG agent belum ada, bukan kamera
+// mati: tanpa retry, kios gagal permanen saat dibuka sebelum frame pertama.
+const agentStreamAttempt = ref(0)
+let agentStreamRetryTimer: ReturnType<typeof setTimeout> | undefined
+const AGENT_STREAM_RETRY_BASE_MS = 1000
+const AGENT_STREAM_RETRY_MAX_MS = 15000
+function clearAgentStreamRetry(): void {
+  if (agentStreamRetryTimer) {
+    clearTimeout(agentStreamRetryTimer)
+    agentStreamRetryTimer = undefined
+  }
+}
 const showBrowserCamera = ref(false)
 // Resolusi natural frame MJPEG (default = operasi 640x480); dikoreksi saat
 // frame pertama termuat agar overlay bbox selaras dengan crop object-fit cover.
@@ -60,10 +73,14 @@ const agentCameraDown = computed(
 )
 const agentVideoStale = computed(() => agentStreamState.value === 'live' && !hintFresh.value)
 const agentVideoVisible = computed(
-  () => agentStreamState.value !== 'failed' && !agentCameraDown.value,
+  () => agentStreamState.value !== 'failed' && !agentCameraDown.value && !agentDeviceMismatch.value,
 )
 function onAgentStreamLoad(): void {
   agentStreamState.value = 'live'
+  // Frame tersedia kembali: reset hitungan retry agar error berikutnya
+  // mulai dari backoff awal, bukan dari jeda maksimum.
+  agentStreamAttempt.value = 0
+  clearAgentStreamRetry()
   const img = agentImage.value
   if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
     agentFrameSize.value = { width: img.naturalWidth, height: img.naturalHeight }
@@ -90,7 +107,29 @@ const ROTATE_AHEAD_SECONDS = 1800
 // disimpan di localStorage; backend default kosong = loopback-only).
 const agentStreamToken = ref('')
 const agentHintUrl = computed(() => buildAgentHintUrl(agentStreamToken.value))
-const agentStreamSrc = computed(() => buildAgentStreamUrl(agentStreamToken.value))
+const agentStreamSrc = computed(() => {
+  const base = buildAgentStreamUrl(agentStreamToken.value)
+  if (agentStreamAttempt.value <= 0) return base
+  const sep = base.includes('?') ? '&' : '?'
+  return `${base}${sep}retry=${agentStreamAttempt.value}`
+})
+function onAgentStreamError(): void {
+  agentStreamState.value = 'failed'
+  if (!live.value) return
+  // Reconnect otomatis berjadwal: kembali ke 'idle' agar <img> dipasang ulang
+  // dengan URL berbeda (cache-buster). Backoff 1s,2s,4s,8s lalu 15s, tanpa
+  // batas upaya karena kios berjalan seharian; dibersihkan saat sesi berhenti.
+  clearAgentStreamRetry()
+  const attempt = agentStreamAttempt.value + 1
+  const backoff = Math.min(
+    AGENT_STREAM_RETRY_BASE_MS * 2 ** Math.min(attempt - 1, 4),
+    AGENT_STREAM_RETRY_MAX_MS,
+  )
+  agentStreamRetryTimer = setTimeout(() => {
+    agentStreamAttempt.value = attempt
+    agentStreamState.value = 'idle'
+  }, backoff)
+}
 function loadKioskStreamToken(): void {
   agentStreamToken.value = captureKioskStreamTokenFromQuery()
 }
@@ -107,6 +146,7 @@ type AgentHintFace = {
 }
 
 interface AgentHint {
+  device_id: string | null
   session_active: boolean
   camera_open: boolean
   recognition_state: string | null
@@ -115,6 +155,17 @@ interface AgentHint {
   faces: AgentHintFace[]
   attendance_result: string | null
 }
+// Verifikasi pairing: layar kios (deviceId) harus menampilkan video dari
+// agent yang sama. Bila hint loopback membawa device_id berbeda, video +
+// overlay disembunyikan dan tampil kesalahan konfigurasi (bukan video
+// kamera lain yang menyesatkan). Tanpa device_id di kedua sisi = tak bisa
+// diverifikasi -> lanjut seperti biasa (loopback sudah membatasi ke PC ini).
+const agentDeviceMismatch = computed(() => {
+  if (!deviceId.value) return false
+  const hinted = agentHint.value?.device_id
+  if (typeof hinted !== 'string' || !hinted) return false
+  return hinted.toLowerCase() !== deviceId.value.toLowerCase()
+})
 const agentHint = ref<AgentHint | null>(null)
 let hintTimer: ReturnType<typeof setInterval> | undefined
 let hintAbort: AbortController | null = null
@@ -138,6 +189,7 @@ async function pollAgentHint(): Promise<void> {
     const data = (await response.json()) as Partial<AgentHint>
     const rawFaces = Array.isArray(data.faces) ? data.faces.slice(0, 5) : []
     agentHint.value = {
+      device_id: typeof data.device_id === 'string' ? data.device_id : null,
       session_active: data.session_active === true,
       camera_open: data.camera_open === true,
       recognition_state: typeof data.recognition_state === 'string' ? data.recognition_state : null,
@@ -424,6 +476,8 @@ function stopLive(): void {
   clearRotation()
   stopHintPolling()
   stopLocalCamera()
+  clearAgentStreamRetry()
+  agentStreamAttempt.value = 0
   agentStreamState.value = 'idle'
   showBrowserCamera.value = false
   streamState.value = 'off'
@@ -498,6 +552,8 @@ async function submit(): Promise<void> {
     scheduleRotation(opened.expires_in_seconds)
     // Single-owner: browser TIDAK membuka kamera di PC lab. Video tampil
     // dari stream agent yang sama dengan inference; hint memberi overlay.
+    clearAgentStreamRetry()
+    agentStreamAttempt.value = 0
     agentStreamState.value = 'idle'
     showBrowserCamera.value = false
   } catch (err) {
@@ -775,17 +831,19 @@ onBeforeUnmount(() => {
               aria-hidden="true"
             />
             {{
-              agentCameraDown
-                ? 'Kamera Lab Tidak Tersedia'
-                : agentVideoStale
-                  ? 'Menghubungkan Ulang Kamera Lab…'
-                  : agentStreamState === 'live'
-                    ? 'Kamera Lab Aktif (Agent)'
-                    : agentStreamState === 'failed'
-                      ? showBrowserCamera && cameraState === 'active'
-                        ? 'Kamera Perangkat (Diagnostik)'
-                        : 'Stream Lab Terputus'
-                      : 'Menghubungkan Kamera Lab…'
+              agentDeviceMismatch
+                ? 'Kamera Tidak Sesuai'
+                : agentCameraDown
+                  ? 'Kamera Lab Tidak Tersedia'
+                  : agentVideoStale
+                    ? 'Menghubungkan Ulang Kamera Lab…'
+                    : agentStreamState === 'live'
+                      ? 'Kamera Lab Aktif (Agent)'
+                      : agentStreamState === 'failed'
+                        ? showBrowserCamera && cameraState === 'active'
+                          ? 'Kamera Perangkat (Diagnostik)'
+                          : 'Stream Lab Terputus'
+                        : 'Menghubungkan Kamera Lab…'
             }}
           </p>
           <div class="kiosk__frame">
@@ -797,7 +855,7 @@ onBeforeUnmount(() => {
               alt="Preview kamera lab dari agent (sumber inference yang sama)"
               data-testid="display-agent-video"
               @load="onAgentStreamLoad"
-              @error="agentStreamState = 'failed'"
+              @error="onAgentStreamError"
             />
             <span
               v-else-if="agentCameraDown || agentVideoStale"
@@ -831,6 +889,10 @@ onBeforeUnmount(() => {
             <span class="kiosk__frame-corner kiosk__frame-corner--bl" aria-hidden="true" />
             <span class="kiosk__frame-corner kiosk__frame-corner--br" aria-hidden="true" />
           </div>
+          <p v-if="agentDeviceMismatch" class="kiosk__muted" role="alert">
+            Layar ini dipasangkan ke kamera lain. Video disembunyikan agar tidak menyesatkan.
+            Hubungi operator untuk memasangkan ulang perangkat yang benar.
+          </p>
           <p class="kiosk__camera-meta">
             <UiBadge
               :tone="agentFaceCount > 1 ? 'late' : agentFaceCount === 1 ? 'present' : 'neutral'"
@@ -858,7 +920,8 @@ onBeforeUnmount(() => {
             class="kiosk__muted"
             role="note"
           >
-            Stream kamera lab tidak tersedia di PC ini. Hasil presensi tetap tampil.
+            Stream kamera lab tidak tersedia di PC ini. Mencoba menghubungkan ulang otomatis. Hasil
+            presensi tetap tampil.
             <UiButton variant="text" type="button" @click="enableBrowserFallback()">
               Pakai kamera perangkat (diagnostik)
             </UiButton>

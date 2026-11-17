@@ -9,7 +9,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from presensi_api.api.errors import ApiProblem
-from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
+from presensi_api.api.security.roles import (
+    AuthenticatedUser,
+    Permission,
+    RoleCode,
+)
 from presensi_api.api.v1.schemas.attendance import ManualMarkRequest
 from presensi_api.db.models import (
     AttendanceRecord,
@@ -78,9 +82,19 @@ def mark_manual_attendance(
                 _ok = True
         if not _ok:
             raise ApiProblem(404, "session_not_found", "Sesi presensi tidak ditemukan.")
-    if attendance_session.status not in RUNNING_SESSION_STATUSES:
+    session_closed = attendance_session.status not in RUNNING_SESSION_STATUSES
+    if (
+        session_closed
+        and Permission.ATTENDANCE_CORRECT_CLOSED not in principal.permissions
+    ):
+        # Sesi tertutup/dibatalkan hanya bisa dikoreksi lewat izin terpisah
+        # (koreksi pascasesi): alasan wajib dan tercatat pada audit log.
+        # Validasi ini TIDAK dikendurkan agar kontrak 409 lama tetap berlaku.
         raise ApiProblem(
-            409, "session_inactive", "Sesi presensi sudah ditutup atau dibatalkan."
+            409,
+            "session_inactive",
+            "Sesi presensi sudah ditutup atau dibatalkan. "
+            "Koreksi pascasesi memerlukan izin koreksi sesi tertutup.",
         )
 
     student = db.get(Student, request.student_id)
@@ -105,6 +119,14 @@ def mark_manual_attendance(
     )
     note = request.note.strip() if request.note else None
     occurred = request.occurred_at if request.occurred_at is not None else None
+    if existing is None and session_closed and not note:
+        # Catatan baru pada sesi tertutup adalah koreksi pascasesi:
+        # alasan wajib agar dapat diaudit (aturan sama seperti pembaruan).
+        raise ApiProblem(
+            422,
+            "reason_required",
+            "Alasan perubahan wajib diisi untuk koreksi sesi tertutup.",
+        )
     if existing is not None:
         # Pengganti alur koreksi: guru/aslab berwenang langsung memperbarui
         # catatan (termasuk milik face recognition) tanpa persetujuan admin.
@@ -152,6 +174,7 @@ def mark_manual_attendance(
                 before_state={
                     "session_id": str(attendance_session.id),
                     "student_id": str(request.student_id),
+                    "session_status": attendance_session.status,
                     **before,
                 },
                 after_state={
@@ -205,6 +228,7 @@ def mark_manual_attendance(
             before_state={
                 "session_id": str(attendance_session.id),
                 "student_id": str(request.student_id),
+                "session_status": attendance_session.status,
                 "student_number_snapshot": roster_entry.student_number_snapshot,
                 "full_name_snapshot": roster_entry.full_name_snapshot,
             },

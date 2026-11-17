@@ -26,6 +26,12 @@ export const PERMISSION_META: Record<
     hint: 'Tandai manual pada sesi aktif.',
     needs: 'session_view',
   },
+  attendance_correct_closed: {
+    group: 'Sesi dan Kehadiran',
+    label: 'Koreksi Sesi Tertutup',
+    hint: 'Koreksi catatan pada sesi yang sudah ditutup/dibatalkan. Alasan wajib dan tercatat audit.',
+    needs: 'session_view',
+  },
   attendance_read: {
     group: 'Sesi dan Kehadiran',
     label: 'Baca Kehadiran',

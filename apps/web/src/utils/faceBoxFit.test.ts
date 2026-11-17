@@ -33,6 +33,19 @@ describe('mapFaceToBox', () => {
     expect(mapped.y).toBeCloseTo(0.5, 5)
   })
 
+  it('cover menjepit wajah tepi sebagai irisan, bukan kotak meluber', () => {
+    // Frame 640x480 di box 360x440 (cover): wajah x=0.75-0.95 frame,
+    // tepi kanan keluar crop -> kotak dipotong tepat di batas box.
+    const mapped = mapFaceToBox({ ...FACE, x: 0.75 }, 640, 480, 360, 440, 'cover')
+    expect(mapped.x).toBeCloseTo(0.9074, 3)
+    expect(mapped.x + mapped.width).toBeCloseTo(1, 5)
+    expect(mapped.width).toBeLessThan(0.2)
+    // Sepenuhnya di luar crop -> lebar nol, bukan kotak hantu.
+    const outside = mapFaceToBox({ ...FACE, x: 1.5 }, 640, 480, 360, 440, 'cover')
+    expect(outside.x).toBeCloseTo(1, 5)
+    expect(outside.width).toBe(0)
+  })
+
   it('aman untuk dimensi tak valid', () => {
     expect(mapFaceToBox(FACE, 0, 480, 360, 440, 'cover')).toEqual(FACE)
     expect(mapFaceToBox(FACE, 640, 480, 0, 440, 'cover')).toEqual(FACE)
