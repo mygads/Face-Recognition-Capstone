@@ -27,6 +27,8 @@ const api = vi.hoisted(() => ({
   previewStudentImport: vi.fn(),
   commitStudentImport: vi.fn(),
   downloadStudentImportTemplate: vi.fn(),
+  addClassLaboratory: vi.fn(),
+  removeClassLaboratory: vi.fn(),
 }))
 
 vi.mock('../api/client', () => ({
@@ -138,6 +140,8 @@ beforeEach(() => {
   api.listClassTeachers.mockResolvedValue({ items: [] })
   api.listLabLaborants.mockResolvedValue({ items: [] })
   api.listClassLaboratories.mockResolvedValue({ items: [] })
+  api.addClassLaboratory.mockResolvedValue({ ok: true })
+  api.removeClassLaboratory.mockResolvedValue({ ok: true })
   api.getStudent.mockResolvedValue({ ...student, classes: student.classes })
   api.getClass.mockResolvedValue({ ...kelas, students: [] })
   api.getLaboratory.mockResolvedValue(lab)
@@ -308,5 +312,35 @@ describe('master data view (Stitch B02)', () => {
     expect(api.listDevices).toHaveBeenCalled()
     expect(detail.wrapper.text()).toContain('Detail Lab Kimia 1')
     detail.wrapper.unmount()
+  })
+
+  it('admin menautkan dan melepas relasi kelas-lab dari detail laboratorium', async () => {
+    api.listClassLaboratories.mockResolvedValue({ items: [] })
+    const { wrapper } = await mountAt('/app/master-data/laboratories/lab-1', 'ADMIN')
+    expect(wrapper.text()).toContain('Kelas yang Dilayani')
+    expect(wrapper.text()).toContain('Belum ada pemetaan kelas.')
+
+    const selects = wrapper.findAll('select')
+    const classSelect = selects.find(
+      (el) => el.attributes('aria-label') === 'Pilih kelas untuk dilayani lab ini',
+    )
+    expect(classSelect?.exists()).toBe(true)
+    await classSelect!.setValue('class-1')
+    const forms = wrapper.findAll('form')
+    const mapForm = forms.find((form) => form.text().includes('Tautkan'))
+    expect(mapForm?.exists()).toBe(true)
+    await mapForm!.trigger('submit.prevent')
+    await flushPromises()
+    expect(api.addClassLaboratory).toHaveBeenCalledWith('class-1', 'lab-1')
+    expect(wrapper.text()).toContain('Relasi kelas-lab diperbarui.')
+    wrapper.unmount()
+  })
+
+  it('guru tidak melihat form relasi kelas-lab', async () => {
+    const { wrapper } = await mountAt('/app/master-data/laboratories/lab-1', 'TEACHER')
+    expect(wrapper.text()).toContain('Kelas yang Dilayani')
+    expect(wrapper.find('button.st-link--danger').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Tautkan')
+    wrapper.unmount()
   })
 })

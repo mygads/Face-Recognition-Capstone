@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { deviceHealthLabel } from '../utils/attendanceStatus'
 import {
+  addClassLaboratory,
   ApiError,
   commitStudentImport,
   createClass,
@@ -15,6 +16,7 @@ import {
   getStudent,
   listClassLaboratories,
   listClassTeachers,
+  removeClassLaboratory,
   listClasses,
   listDevices,
   listLabLaborants,
@@ -134,6 +136,10 @@ const isDetailLoading = ref(false)
 const labDetail = ref<Laboratory | null>(null)
 const labDevices = ref<Device[]>([])
 const labClasses = ref<SchoolClass[]>([])
+const classOptionsForLab = ref<SchoolClass[]>([])
+const selectedLabClassId = ref('')
+const labMappingMessage = ref<string | null>(null)
+const labMappingError = ref<string | null>(null)
 const labStaff = ref<{ user_id: string; full_name: string | null; email: string | null }[]>([])
 
 const tabs = [
@@ -445,10 +451,59 @@ async function openLabDetail(labId: string): Promise<void> {
       items: [] as SchoolClass[],
     }))
     labClasses.value = clsPage.items.filter((c) => classIds.has(c.id))
+    classOptionsForLab.value = clsPage.items.filter((c) => !classIds.has(c.id))
   } catch (error) {
     errorMessage.value = formatError(error)
   } finally {
     isDetailLoading.value = false
+  }
+}
+
+async function refreshLabClassMapping(labId: string): Promise<void> {
+  try {
+    const [mapping, clsPage] = await Promise.all([
+      listClassLaboratories(),
+      listClasses({ limit: 100, offset: 0 }).catch(() => ({
+        items: [] as SchoolClass[],
+      })),
+    ])
+    const classIds = new Set(
+      mapping.items.filter((m) => m.laboratory_id === labId).map((m) => m.class_id),
+    )
+    labClasses.value = clsPage.items.filter((c) => classIds.has(c.id))
+    classOptionsForLab.value = clsPage.items.filter((c) => !classIds.has(c.id))
+    classOptionsForLab.value = clsPage.items.filter((c) => !classIds.has(c.id))
+  } catch (error) {
+    labMappingError.value = error instanceof ApiError ? error.message : 'Gagal memuat relasi.'
+  }
+}
+
+async function addLabClassMapping(): Promise<void> {
+  if (!labDetail.value || !selectedLabClassId.value) return
+  labMappingError.value = null
+  labMappingMessage.value = null
+  try {
+    await addClassLaboratory(selectedLabClassId.value, labDetail.value.id)
+    selectedLabClassId.value = ''
+    labMappingMessage.value = 'Relasi kelas-lab diperbarui.'
+    await refreshLabClassMapping(labDetail.value.id)
+  } catch (error) {
+    labMappingError.value =
+      error instanceof ApiError ? error.message : 'Gagal menambah relasi kelas-lab.'
+  }
+}
+
+async function removeLabClassMapping(classId: string): Promise<void> {
+  if (!labDetail.value) return
+  labMappingError.value = null
+  labMappingMessage.value = null
+  try {
+    await removeClassLaboratory(classId, labDetail.value.id)
+    labMappingMessage.value = 'Relasi kelas-lab diperbarui.'
+    await refreshLabClassMapping(labDetail.value.id)
+  } catch (error) {
+    labMappingError.value =
+      error instanceof ApiError ? error.message : 'Gagal melepas relasi kelas-lab.'
   }
 }
 
@@ -952,12 +1007,46 @@ function labStatusTone(lab: Laboratory): 'present' | 'neutral' {
               </li>
             </ul>
             <h3 class="st-section">3. Kelas yang Dilayani</h3>
+            <p class="st-table__muted">
+              Laboran hanya melihat enrollment kelas yang dilayani lab penugasannya.
+            </p>
+            <p v-if="labMappingMessage" class="st-alert st-alert--success" role="status">
+              {{ labMappingMessage }}
+            </p>
+            <p v-if="labMappingError" class="st-alert st-alert--error" role="alert">
+              {{ labMappingError }}
+            </p>
             <ul class="st-chips">
-              <li v-for="cls in labClasses" :key="cls.id" class="st-chip">{{ cls.code }}</li>
+              <li v-for="cls in labClasses" :key="cls.id" class="st-chip">
+                {{ cls.code }}
+                <button
+                  v-if="canManage"
+                  type="button"
+                  class="st-link st-link--danger"
+                  :aria-label="`Lepas relasi ${cls.code}`"
+                  @click="removeLabClassMapping(cls.id)"
+                >
+                  Lepas
+                </button>
+              </li>
               <li v-if="labClasses.length === 0" class="st-table__muted">
                 Belum ada pemetaan kelas.
               </li>
             </ul>
+            <form v-if="canManage" class="st-toolbar" @submit.prevent="addLabClassMapping">
+              <UiSelect
+                v-model="selectedLabClassId"
+                aria-label="Pilih kelas untuk dilayani lab ini"
+              >
+                <option value="">Pilih kelas…</option>
+                <option v-for="cls in classOptionsForLab" :key="cls.id" :value="cls.id">
+                  {{ cls.code }} - {{ cls.name }}
+                </option>
+              </UiSelect>
+              <UiButton variant="secondary" type="submit" :disabled="!selectedLabClassId">
+                Tautkan
+              </UiButton>
+            </form>
             <h3 class="st-section">4. Petugas Laboran</h3>
             <ul class="st-list">
               <li v-for="staff in labStaff" :key="staff.user_id" class="st-list__item">

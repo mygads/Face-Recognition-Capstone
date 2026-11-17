@@ -3,6 +3,11 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FaceOverlay from '../components/FaceOverlay.vue'
 import { UiBadge, UiButton, UiEmptyState, UiInput } from '../components/ui'
 import { shortDisplayName } from '../utils/displayName'
+import {
+  agentHintUrl as buildAgentHintUrl,
+  agentStreamUrl as buildAgentStreamUrl,
+  captureKioskStreamTokenFromQuery,
+} from '../utils/agentPreview'
 import { timeFormatterFor } from '../utils/dateFormat'
 import {
   ApiError,
@@ -81,34 +86,13 @@ const ROTATE_AHEAD_SECONDS = 1800
 // Sinyal generik dari agent di PC kiosk yang sama (tanpa identitas):
 // wajah terlihat / kirim menunggu konfirmasi. Best-effort; SSE tetap
 // sumber kebenaran hasil. Gagal fetch = indikator disembunyikan diam-diam.
-const AGENT_HINT_URL = 'http://127.0.0.1:8765/v1/kiosk-hint'
-const AGENT_STREAM_URL = 'http://127.0.0.1:8765/v1/kiosk-stream'
 // Token stream kios opsional (diset operator sekali via ?stream_token= lalu
 // disimpan di localStorage; backend default kosong = loopback-only).
-const KIOSK_STREAM_TOKEN_KEY = 'presensi.kiosk_stream_token'
 const agentStreamToken = ref('')
-function agentUrlWithToken(base: string): string {
-  if (!agentStreamToken.value) return base
-  const sep = base.includes('?') ? '&' : '?'
-  return base + sep + 'token=' + encodeURIComponent(agentStreamToken.value)
-}
-const agentHintUrl = computed(() => agentUrlWithToken(AGENT_HINT_URL))
-const agentStreamSrc = computed(() => agentUrlWithToken(AGENT_STREAM_URL))
+const agentHintUrl = computed(() => buildAgentHintUrl(agentStreamToken.value))
+const agentStreamSrc = computed(() => buildAgentStreamUrl(agentStreamToken.value))
 function loadKioskStreamToken(): void {
-  try {
-    const params = new URLSearchParams(window.location.search)
-    const viaQuery = (params.get('stream_token') ?? '').trim()
-    if (viaQuery) {
-      window.localStorage.setItem(KIOSK_STREAM_TOKEN_KEY, viaQuery)
-      params.delete('stream_token')
-      const rest = params.toString()
-      const clean = window.location.pathname + (rest ? '?' + rest : '')
-      window.history.replaceState(null, '', clean)
-    }
-    agentStreamToken.value = (window.localStorage.getItem(KIOSK_STREAM_TOKEN_KEY) ?? '').trim()
-  } catch {
-    agentStreamToken.value = ''
-  }
+  agentStreamToken.value = captureKioskStreamTokenFromQuery()
 }
 
 type AgentHintFace = {
