@@ -42,8 +42,33 @@ const streamState = ref<'off' | 'sse' | 'polling'>('off')
 const cameraState = ref<'idle' | 'active' | 'unavailable' | 'insecure'>('idle')
 const agentStreamState = ref<'idle' | 'live' | 'failed'>('idle')
 const showBrowserCamera = ref(false)
-const agentFaces = computed(() => agentHint.value?.faces ?? [])
-const agentFaceCount = computed(() => agentHint.value?.face_count ?? 0)
+// Resolusi natural frame MJPEG (default = operasi 640x480); dikoreksi saat
+// frame pertama termuat agar overlay bbox selaras dengan crop object-fit cover.
+const agentFrameSize = ref({ width: 640, height: 480 })
+const agentImage = ref<HTMLImageElement | null>(null)
+// Kesegaran hint: poll gagal >3 dtk berarti agent tak menjawab (frame <img>
+// bisa beku menampilkan gambar lama) -> tandai stale, jangan percaya gambar.
+const hintFresh = ref(true)
+let lastHintOkAt = 0
+const agentCameraDown = computed(
+  () => agentHint.value !== null && agentHint.value.camera_open === false,
+)
+const agentVideoStale = computed(() => agentStreamState.value === 'live' && !hintFresh.value)
+const agentVideoVisible = computed(
+  () => agentStreamState.value !== 'failed' && !agentCameraDown.value,
+)
+function onAgentStreamLoad(): void {
+  agentStreamState.value = 'live'
+  const img = agentImage.value
+  if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
+    agentFrameSize.value = { width: img.naturalWidth, height: img.naturalHeight }
+  }
+}
+const agentFaces = computed(() => {
+  if (!hintFresh.value) return []
+  return agentHint.value?.faces ?? []
+})
+const agentFaceCount = computed(() => (hintFresh.value ? agentHint.value?.face_count : 0) ?? 0)
 const agentLargestOk = computed(() => agentFaces.value.some((face) => face.acceptable === true))
 const localVideo = ref<HTMLVideoElement | null>(null)
 let pollTimer: ReturnType<typeof setInterval> | undefined
@@ -58,6 +83,33 @@ const ROTATE_AHEAD_SECONDS = 1800
 // sumber kebenaran hasil. Gagal fetch = indikator disembunyikan diam-diam.
 const AGENT_HINT_URL = 'http://127.0.0.1:8765/v1/kiosk-hint'
 const AGENT_STREAM_URL = 'http://127.0.0.1:8765/v1/kiosk-stream'
+// Token stream kios opsional (diset operator sekali via ?stream_token= lalu
+// disimpan di localStorage; backend default kosong = loopback-only).
+const KIOSK_STREAM_TOKEN_KEY = 'presensi.kiosk_stream_token'
+const agentStreamToken = ref('')
+function agentUrlWithToken(base: string): string {
+  if (!agentStreamToken.value) return base
+  const sep = base.includes('?') ? '&' : '?'
+  return base + sep + 'token=' + encodeURIComponent(agentStreamToken.value)
+}
+const agentHintUrl = computed(() => agentUrlWithToken(AGENT_HINT_URL))
+const agentStreamSrc = computed(() => agentUrlWithToken(AGENT_STREAM_URL))
+function loadKioskStreamToken(): void {
+  try {
+    const params = new URLSearchParams(window.location.search)
+    const viaQuery = (params.get('stream_token') ?? '').trim()
+    if (viaQuery) {
+      window.localStorage.setItem(KIOSK_STREAM_TOKEN_KEY, viaQuery)
+      params.delete('stream_token')
+      const rest = params.toString()
+      const clean = window.location.pathname + (rest ? '?' + rest : '')
+      window.history.replaceState(null, '', clean)
+    }
+    agentStreamToken.value = (window.localStorage.getItem(KIOSK_STREAM_TOKEN_KEY) ?? '').trim()
+  } catch {
+    agentStreamToken.value = ''
+  }
+}
 
 type AgentHintFace = {
   x: number
@@ -92,11 +144,13 @@ async function pollAgentHint(): Promise<void> {
   hintAbort = new AbortController()
   const timer = setTimeout(() => hintAbort?.abort(), 900)
   try {
-    const response = await fetch(AGENT_HINT_URL, {
+    const response = await fetch(agentHintUrl.value, {
       cache: 'no-store',
       signal: hintAbort.signal,
     })
     if (!response.ok) throw new Error('hint tidak tersedia')
+    lastHintOkAt = Date.now()
+    hintFresh.value = true
     const data = (await response.json()) as Partial<AgentHint>
     const rawFaces = Array.isArray(data.faces) ? data.faces.slice(0, 5) : []
     agentHint.value = {
@@ -115,6 +169,7 @@ async function pollAgentHint(): Promise<void> {
     }
   } catch {
     agentHint.value = null
+    if (Date.now() - lastHintOkAt > 3000) hintFresh.value = false
   } finally {
     clearTimeout(timer)
   }
@@ -257,11 +312,7 @@ function applySnapshotEvent(raw: string): void {
     const update = JSON.parse(raw) as KioskLiveUpdate
     const prevSession = live.value?.session_id ?? null
     const prevEvent = live.value?.spotlight?.recognition_event_id ?? null
-    if (
-      prevSession !== null &&
-      update.session_id !== null &&
-      update.session_id !== prevSession
-    ) {
+    if (prevSession !== null && update.session_id !== null && update.session_id !== prevSession) {
       seenSpotlightIds.value.clear()
     }
     const incomingEvent = update.spotlight?.recognition_event_id ?? null
@@ -332,24 +383,19 @@ function connectStream(): void {
     fetchAbort = controller
     streamState.value = 'sse'
     startHintPolling()
-    void streamDisplayUpdates(
-      path,
-      token,
-      controller.signal,
-      (event, data, done) => {
-        if (event === 'error') {
-          if (data.includes('display_token_invalid')) {
-            done()
-            void loadDisplay(true).then(() => {
-              if (fetchAbort === controller) connectEventSourceFallback()
-            })
-            return
-          }
+    void streamDisplayUpdates(path, token, controller.signal, (event, data, done) => {
+      if (event === 'error') {
+        if (data.includes('display_token_invalid')) {
+          done()
+          void loadDisplay(true).then(() => {
+            if (fetchAbort === controller) connectEventSourceFallback()
+          })
           return
         }
-        if (event === 'snapshot') applySnapshotEvent(data)
-      },
-    ).catch((error: unknown) => {
+        return
+      }
+      if (event === 'snapshot') applySnapshotEvent(data)
+    }).catch((error: unknown) => {
       if (fetchAbort !== controller) return
       fetchAbort = null
       if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
@@ -559,6 +605,7 @@ const spotlightFresh = computed(() => {
 const showVerifying = computed(() => {
   if (!live.value?.session_id || streamState.value === 'off') return false
   if (spotlightFresh.value) return false
+  if (!hintFresh.value) return false
   const hint = agentHint.value
   if (!hint || !hint.session_active) return false
   return hint.face_present || hint.attendance_result === 'pending'
@@ -590,6 +637,7 @@ watch(labId, () => {
 watch(deviceId, () => resetSession())
 
 onMounted(() => {
+  loadKioskStreamToken()
   void loadLabs()
   clockTimer = setInterval(() => {
     now.value = new Date()
@@ -743,25 +791,36 @@ onBeforeUnmount(() => {
               aria-hidden="true"
             />
             {{
-              agentStreamState === 'live'
-                ? 'Kamera Lab Aktif (Agent)'
-                : agentStreamState === 'failed'
-                  ? showBrowserCamera && cameraState === 'active'
-                    ? 'Kamera Perangkat (Diagnostik)'
-                    : 'Stream Lab Terputus'
-                  : 'Menghubungkan Kamera Lab…'
+              agentCameraDown
+                ? 'Kamera Lab Tidak Tersedia'
+                : agentVideoStale
+                  ? 'Menghubungkan Ulang Kamera Lab…'
+                  : agentStreamState === 'live'
+                    ? 'Kamera Lab Aktif (Agent)'
+                    : agentStreamState === 'failed'
+                      ? showBrowserCamera && cameraState === 'active'
+                        ? 'Kamera Perangkat (Diagnostik)'
+                        : 'Stream Lab Terputus'
+                      : 'Menghubungkan Kamera Lab…'
             }}
           </p>
           <div class="kiosk__frame">
             <img
-              v-if="agentStreamState !== 'failed'"
-              :src="AGENT_STREAM_URL"
+              v-if="agentVideoVisible && !agentVideoStale"
+              ref="agentImage"
+              :src="agentStreamSrc"
               class="kiosk__video"
               alt="Preview kamera lab dari agent (sumber inference yang sama)"
               data-testid="display-agent-video"
-              @load="agentStreamState = 'live'"
+              @load="onAgentStreamLoad"
               @error="agentStreamState = 'failed'"
             />
+            <span
+              v-else-if="agentCameraDown || agentVideoStale"
+              class="kiosk__silhouette"
+              aria-hidden="true"
+              >{{ agentCameraDown ? 'Kamera tidak tersedia' : 'Menghubungkan ulang…' }}</span
+            >
             <video
               v-else-if="showBrowserCamera && cameraState === 'active'"
               ref="localVideo"
@@ -776,8 +835,11 @@ onBeforeUnmount(() => {
               >Berdiri di dalam bingkai</span
             >
             <FaceOverlay
-              v-if="agentStreamState === 'live' && agentFaces.length"
+              v-if="agentVideoVisible && !agentVideoStale && agentFaces.length"
               :faces="agentFaces"
+              :image-width="agentFrameSize.width"
+              :image-height="agentFrameSize.height"
+              fit="cover"
               :label="agentFaceCount > 1 ? `Wajah utama · ${agentFaceCount} wajah` : 'Wajah utama'"
             />
             <span class="kiosk__frame-corner kiosk__frame-corner--tl" aria-hidden="true" />

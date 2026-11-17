@@ -30,8 +30,13 @@ const isLoading = ref(false)
 const error = ref<string | null>(null)
 const message = ref<string | null>(null)
 const lastPin = ref<string | null>(null)
-const form = ref({ device_id: '', laboratory_id: '', display_name: '', camera_label: '',
-  token_ttl_hours: '' as string })
+const form = ref({
+  device_id: '',
+  laboratory_id: '',
+  display_name: '',
+  camera_label: '',
+  token_ttl_hours: '' as string,
+})
 
 function formatError(err: unknown): string {
   if (err instanceof ApiError) return err.message
@@ -70,7 +75,8 @@ async function submit(): Promise<void> {
       laboratory_id: form.value.laboratory_id,
       display_name: form.value.display_name.trim(),
       camera_label: form.value.camera_label.trim() || null,
-      token_ttl_hours: form.value.token_ttl_hours === '' ? null : Number(form.value.token_ttl_hours),
+      token_ttl_hours:
+        form.value.token_ttl_hours === '' ? null : Number(form.value.token_ttl_hours),
     })
     form.value.display_name = ''
     form.value.token_ttl_hours = ''

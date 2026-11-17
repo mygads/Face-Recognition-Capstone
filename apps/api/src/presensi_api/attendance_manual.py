@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 from presensi_api.api.errors import ApiProblem
 from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
 from presensi_api.api.v1.schemas.attendance import ManualMarkRequest
-from presensi_api.display_notify import notify_display_changed, pg_notify_display_changed
 from presensi_api.db.models import (
     AttendanceRecord,
     AttendanceSession,
@@ -19,6 +18,10 @@ from presensi_api.db.models import (
     PracticumSchedule,
     SessionStudent,
     Student,
+)
+from presensi_api.display_notify import (
+    notify_display_changed,
+    pg_notify_display_changed,
 )
 from presensi_api.session_lifecycle import (
     RUNNING_SESSION_STATUSES,
@@ -105,9 +108,21 @@ def mark_manual_attendance(
     if existing is not None:
         # Pengganti alur koreksi: guru/aslab berwenang langsung memperbarui
         # catatan (termasuk milik face recognition) tanpa persetujuan admin.
+        # Alasan wajib: tanpa note, perubahan tidak dapat diaudit.
+        if not note:
+            raise ApiProblem(
+                422,
+                "reason_required",
+                "Alasan perubahan wajib diisi saat memperbarui catatan.",
+            )
         before = {
             "status": existing.status,
             "source": existing.source,
+            "recognition_event_id": (
+                str(existing.recognition_event_id)
+                if existing.recognition_event_id is not None
+                else None
+            ),
             "note": existing.note,
             "occurred_at": (
                 as_utc(existing.occurred_at).isoformat()
@@ -115,9 +130,17 @@ def mark_manual_attendance(
                 else None
             ),
         }
+        # Provenance: keputusan akhir di tangan manusia -> sumber menjadi
+        # manual dan tautan event DILEPAS (kontrak CHECK: manual -> event
+        # NULL; baris event AI asli tidak berubah/immutable dan tetap
+        # diaudit via before_state). Replay event (retry edge) tetap
+        # idempoten lewat fallback sesi+siswa di attendance_decision.
         existing.status = request.status
+        existing.source = "manual"
+        existing.recognition_event_id = None
         existing.note = note
-        existing.occurred_at = occurred
+        if request.occurred_at is not None:
+            existing.occurred_at = request.occurred_at
         existing.recorded_by_user_id = principal.id
         existing.recorded_at = datetime.now(UTC)
         db.add(
@@ -133,7 +156,8 @@ def mark_manual_attendance(
                 },
                 after_state={
                     "status": request.status,
-                    "source": existing.source,
+                    "source": "manual",
+                    "recognition_event_id": None,
                     "note": note,
                     "recorded_by_user_id": str(principal.id),
                     "recorded_at": as_utc(existing.recorded_at).isoformat(),

@@ -126,7 +126,7 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
 - Satu kamera satu pemilik: di PC lab, agent (`OpenCVCamera`) memegang kamera
   fisik untuk inference. Browser kiosk TIDAK memanggil `getUserMedia`; video
   tampil dari `GET /v1/kiosk-stream` (MJPEG multipart, bind loopback-only,
-  tanpa token, 403 untuk Host non-loopback) yang menyajikan frame agent yang
+  token opsional, 403 untuk Host non-loopback) yang menyajikan frame agent yang
   sama dengan inference. `<img>` + `FaceOverlay` (box + skeleton 5 titik,
   wajah terbesar disorot hijau) memberi rasa realtime tanpa inference pindah
   ke browser. Tombol "Pakai kamera perangkat (diagnostik)" hanya fallback
@@ -143,7 +143,7 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
 ## Sinyal generik "Memverifikasi" (tanpa pindah inference ke browser)
 
 - Agent di PC kiosk yang sama menyajikan `GET /v1/kiosk-hint` (bind
-  loopback-only, tanpa token, tanpa Origin allowlist — Host non-loopback
+  loopback-only, token opsional bila dikonfigurasi, tanpa Origin allowlist — Host non-loopback
   ditolak 403). Payload hanya status generik: `session_active`,
   `camera_open`, `recognition_state`, `face_present`/`face_count`,
   `faces` (maks 5: box + landmark ternormalisasi + flag kualitas, TANPA
@@ -157,6 +157,24 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
 - Poll hint menandai konsumen (`has_kiosk_hint_consumer`, jendela 3 detik)
   sehingga `CameraFrameInspector` (deteksi + quality saja, tanpa identitas)
   tetap berjalan walau tidak ada operator membuka preview staf.
+- Token stream kios opsional: `preview.kiosk_stream_token` (config) atau
+  `PRESENSI_EDGE_KIOSK_STREAM_TOKEN` (env). Default kosong = perilaku lama
+  (loopback-only, tanpa token). Bila diisi, `/v1/kiosk-stream` dan
+  `/v1/kiosk-hint` wajib `?token=` yang cocok (hmac compare, 401 bila
+  salah). FE menyimpan token sekali via `?stream_token=` ke
+  `localStorage[presensi.kiosk_stream_token]` lalu menghapusnya dari URL.
+  Token staf preview TIDAK PERNAH dibagikan ke browser kios; konsumen stream
+  kios (`has_kiosk_stream_consumer`, jendela 3 detik) terpisah dari sesi
+  preview operator dan ikut mengaktifkan encoding JPEG (jadi kiosk tetap
+  tampil tanpa halaman preview staf terbuka).
+- Provenance edit manual: update catatan via guru/aslab wajib `note`
+  (alasan, 422 bila kosong), `source` menjadi `manual` dan
+  `recognition_event_id` dilepas (kontrak CHECK manual->event NULL);
+  `occurred_at` lama dipertahankan bila tidak dikirim. Replay edge dengan
+  `event_uuid` sama tetap idempoten lewat fallback sesi+siswa HANYA bila
+  metadata event sendiri `attendance_recorded`. Spotlight SSE difilter
+  `recognition_events.device_id` sehingga edit manual tidak disajikan
+  sebagai scan kamera lain.
 - Preflight Private Network Access dijawab `204` +
   `Access-Control-Allow-Private-Network: true` khusus path ini.
 - Target UX tetap: tangkap → konfirmasi tampil < 1 detik; chip generik
@@ -172,11 +190,13 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
   roster, poll hint generik + chip "Memverifikasi").
 - `apps/edge-agent/src/presensi_edge_agent/local_preview.py`
   (`/v1/kiosk-hint`, `/v1/kiosk-stream`, `kiosk_hint()`,
-  `has_kiosk_hint_consumer()`).
+  `has_kiosk_hint_consumer()`, `has_kiosk_stream_consumer()`,
+  `kiosk_token_ok()`).
 - `apps/web/src/components/FaceOverlay.vue` (box + skeleton dipakai preview,
   kiosk, dan enrollment).
 - Test: `apps/edge-agent/tests/test_local_preview.py` (hint tanpa identitas,
-  freshness, 403 non-loopback, preflight PNA).
+  freshness, 403 non-loopback, preflight PNA, token kios opsional 401/200,
+  konsumen stream mengisi JPEG tanpa viewer operator).
 - `apps/api/src/presensi_api/display_notify.py` (notify in-process +
   LISTENer Postgres lintas proses) dan `scripts/bench_recognition_synthetic.py`.
 - Test: `apps/api/tests/test_public_display_stream.py`

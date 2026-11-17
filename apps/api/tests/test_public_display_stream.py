@@ -545,9 +545,7 @@ def test_notify_wakes_generator_without_waiting_safety_tick(
         notify_display_changed()
 
     async def scenario() -> tuple[tuple[str, Any], tuple[str, Any], float]:
-        gen = display_module._live_event_generator(
-            "lab", subject_id, laboratory_id
-        )
+        gen = display_module._live_event_generator("lab", subject_id, laboratory_id)
         try:
             first = await _collect_awaited(gen)
             worker = threading.Thread(target=deactivate_and_notify)
@@ -667,18 +665,14 @@ def test_two_lab_streams_are_isolated(
             assert b_events, "generator lab B tidak emit snapshot awal"
             assert b_events[0][0] == "snapshot"
             assert b_events[0][1] is not None
-            assert (
-                b_events[0][1]["laboratory_name"] != snap_a["laboratory_name"]
-            )
+            assert b_events[0][1]["laboratory_name"] != snap_a["laboratory_name"]
             with stream_database() as inner:
                 target = inner.get(Laboratory, lab_a_id)
                 assert target is not None
                 target.name = "Lab SSE A Renamed"
                 inner.commit()
             notify_display_changed()
-            kind_a2, snap_a2 = await asyncio.wait_for(
-                next_event(gen_a), timeout=5
-            )
+            kind_a2, snap_a2 = await asyncio.wait_for(next_event(gen_a), timeout=5)
             assert kind_a2 == "snapshot"
             assert snap_a2 is not None
             assert snap_a2["laboratory_name"] == "Lab SSE A Renamed"
@@ -686,9 +680,7 @@ def test_two_lab_streams_are_isolated(
             # diam selama 1,5 dtk (jauh di bawah safety re-query 10 dtk).
             seen = len(b_events)
             await asyncio.sleep(1.5)
-            assert len(b_events) == seen, (
-                f"kebocoran antar-lab: {b_events[seen:]}"
-            )
+            assert len(b_events) == seen, f"kebocoran antar-lab: {b_events[seen:]}"
         finally:
             task_b.cancel()
             try:
@@ -699,3 +691,58 @@ def test_two_lab_streams_are_isolated(
             await gen_b.aclose()
 
     asyncio.run(scenario())
+
+
+def test_kiosk_spotlight_drops_ai_record_after_manual_edit(
+    stream_database: sessionmaker[Session],
+) -> None:
+    """Regresi P0 provenance: record AI yang diedit manual (source manual,
+    event dilepas) tidak lagi tampil sebagai sorotan scan kios perangkat,
+    tetapi tetap tampil di layar lab berlabel manual."""
+    from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
+    from presensi_api.api.v1.schemas.attendance import ManualMarkRequest
+    from presensi_api.attendance_manual import mark_manual_attendance
+    from presensi_api.db.models import AttendanceSession, Student, User
+
+    lab, devs = _seed_kiosk_spotlight_scenario(stream_database)
+    dev_a = devs[0]
+    with stream_database() as session:
+        teacher = session.query(User).filter_by(email="guru-kiosk@example.test").one()
+        cam_a = session.query(Student).filter_by(student_number="K-A").one()
+        cam_a_id = cam_a.id
+        att = session.query(AttendanceSession).one()
+        session_id = att.id
+    principal = AuthenticatedUser(
+        id=teacher.id,
+        email=teacher.email,
+        full_name="Guru Kiosk",
+        roles=frozenset({RoleCode.TEACHER}),
+    )
+    with stream_database() as session:
+        record = mark_manual_attendance(
+            session,
+            session_id,
+            ManualMarkRequest(
+                student_id=cam_a_id,
+                status="late",
+                note="Koreksi keterlambatan oleh guru.",
+            ),
+            principal,
+        )
+        assert record.source == "manual"
+        assert record.recognition_event_id is None
+    with stream_database() as session:
+        lab_db = session.get(Laboratory, lab.id)
+        assert lab_db is not None
+        # Perangkat A: sorotan scan-nya hilang (record AI dilepas).
+        only_a = display_module._build_live_update(lab_db, session, device_id=dev_a.id)
+        assert only_a.spotlight is None or (
+            only_a.spotlight.full_name != "Kamera A"
+            or only_a.spotlight.source != "face_recognition"
+        )
+        # Lab-wide: record editan (terbaru) tetap tampil, berlabel manual.
+        lab_wide = display_module._build_live_update(lab_db, session, device_id=None)
+        assert lab_wide.spotlight is not None
+        assert lab_wide.spotlight.full_name == "Kamera A"
+        assert lab_wide.spotlight.source == "manual"
+        assert lab_wide.spotlight.recognition_event_id is None

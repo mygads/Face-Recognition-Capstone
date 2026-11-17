@@ -51,3 +51,42 @@ describe('FaceOverlay', () => {
     expect(wrapper.findAll('[data-testid^="face-box-"]')).toHaveLength(0)
   })
 })
+
+describe('FaceOverlay cover mapping', () => {
+  it('memetakan koordinat mengikuti crop object-fit cover', async () => {
+    Object.defineProperty(Element.prototype, 'clientWidth', {
+      value: 360,
+      configurable: true,
+    })
+    Object.defineProperty(Element.prototype, 'clientHeight', {
+      value: 440,
+      configurable: true,
+    })
+    try {
+      const wrapper = mount(FaceOverlay, {
+        props: {
+          faces: [{ x: 0.5, y: 0.5, width: 0.2, height: 0.2 }],
+          imageWidth: 640,
+          imageHeight: 480,
+          fit: 'cover',
+        },
+      })
+      // Pengukuran box terjadi di onMounted; beri kesempatan re-render reaktif.
+      await wrapper.vm.$nextTick()
+      const rect = wrapper.find('[data-testid="face-box-0"] rect')
+      // Tengah frame tetap di tengah box; lebar 0.2 frame -> ~0.326 box.
+      expect(Number(rect.attributes('x'))).toBeCloseTo(0.5, 5)
+      expect(Number(rect.attributes('y'))).toBeCloseTo(0.5, 5)
+      expect(Number(rect.attributes('width'))).toBeCloseTo(0.3259, 3)
+    } finally {
+      Object.defineProperty(Element.prototype, 'clientWidth', {
+        value: 0,
+        configurable: true,
+      })
+      Object.defineProperty(Element.prototype, 'clientHeight', {
+        value: 0,
+        configurable: true,
+      })
+    }
+  })
+})

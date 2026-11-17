@@ -1,23 +1,54 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { mapFaceToBox, type BoxFit, type OverlayFace } from '../utils/faceBoxFit'
 
-export type OverlayFace = {
-  x: number
-  y: number
-  width: number
-  height: number
-  landmarks?: number[][] | null
-  acceptable?: boolean | null
-  quality_score?: number | null
-  reason_codes?: string[] | null
+export type { OverlayFace }
+
+const props = withDefaults(
+  defineProps<{
+    faces?: OverlayFace[] | null
+    label?: string | null
+    /** Resolusi natural frame kamera (px). Tanpa ini = fill 1:1 (lama). */
+    imageWidth?: number | null
+    imageHeight?: number | null
+    /** Samakan dengan object-fit CSS elemen gambar di bawah overlay. */
+    fit?: BoxFit
+  }>(),
+  {
+    faces: () => [],
+    label: null,
+    imageWidth: null,
+    imageHeight: null,
+    fit: 'fill',
+  },
+)
+
+const svgRef = ref<SVGSVGElement | null>(null)
+const boxSize = ref({ width: 0, height: 0 })
+let observer: ResizeObserver | null = null
+
+function measure(): void {
+  const el = svgRef.value
+  if (el) boxSize.value = { width: el.clientWidth, height: el.clientHeight }
 }
 
-const props = withDefaults(defineProps<{ faces?: OverlayFace[] | null; label?: string | null }>(), {
-  faces: () => [],
-  label: null,
+onMounted(() => {
+  measure()
+  if (typeof ResizeObserver !== 'undefined' && svgRef.value) {
+    observer = new ResizeObserver(() => measure())
+    observer.observe(svgRef.value)
+  }
 })
 
-const boxes = computed(() => (Array.isArray(props.faces) ? props.faces.slice(0, 5) : []))
+onBeforeUnmount(() => observer?.disconnect())
+
+const boxes = computed(() => {
+  const list = Array.isArray(props.faces) ? props.faces.slice(0, 5) : []
+  const { imageWidth, imageHeight, fit } = props
+  const { width, height } = boxSize.value
+  if (fit === 'fill' || !imageWidth || !imageHeight || !width || !height) return list
+  return list.map((face) => mapFaceToBox(face, imageWidth, imageHeight, width, height, fit))
+})
 const largestIndex = computed(() => {
   let best = -1
   let bestArea = 0
@@ -34,6 +65,7 @@ const largestIndex = computed(() => {
 
 <template>
   <svg
+    ref="svgRef"
     class="face-overlay"
     viewBox="0 0 1 1"
     preserveAspectRatio="none"

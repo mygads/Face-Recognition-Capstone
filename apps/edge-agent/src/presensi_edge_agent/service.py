@@ -327,7 +327,10 @@ class EdgeService:
                         self.performance.increment("camera_frames")
                     self.camera_metrics.record_frame(frame)
                     self._publish_camera_metrics()
-                    if self.preview is not None and self.preview.has_active_viewer():
+                    if self.preview is not None and (
+                        self.preview.has_active_viewer()
+                        or self.preview.has_kiosk_stream_consumer()
+                    ):
                         preview_started = time.perf_counter_ns()
                         if (
                             self.preview.update_frame(frame)

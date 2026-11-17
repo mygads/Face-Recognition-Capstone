@@ -794,11 +794,7 @@ export function kioskDisplayStreamPath(): string {
   return '/api/v1/public/kiosk-display/stream'
 }
 
-export type DisplayStreamEventHandler = (
-  event: string,
-  data: string,
-  done: () => void,
-) => void
+export type DisplayStreamEventHandler = (event: string, data: string, done: () => void) => void
 
 /** SSE via fetch agar token lewat header Authorization, bukan URL. */
 export async function streamDisplayUpdates(
@@ -823,7 +819,8 @@ export async function streamDisplayUpdates(
   if (response.status === 401 || response.status === 403) {
     throw new ApiError(response.status, 'display_token_invalid', 'Sesi layar tidak valid.')
   }
-  if (!response.ok || !response.body) throw new ApiError(response.status, 'stream_unavailable', 'Stream tidak tersedia.')
+  if (!response.ok || !response.body)
+    throw new ApiError(response.status, 'stream_unavailable', 'Stream tidak tersedia.')
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
@@ -859,7 +856,9 @@ export async function streamDisplayUpdates(
       }
     }
   }
-  signal.addEventListener('abort', () => void reader.cancel().catch(() => undefined), { once: true })
+  signal.addEventListener('abort', () => void reader.cancel().catch(() => undefined), {
+    once: true,
+  })
   await pump()
 }
 

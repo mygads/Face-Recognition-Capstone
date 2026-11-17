@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Generator
 
 import pytest
 
-from presensi_api import display_notify
 from presensi_api.display_notify import (
     _drain_pg_notifies,
     current_display_version,
@@ -20,7 +20,7 @@ from presensi_api.display_notify import (
 
 
 @pytest.fixture(autouse=True)
-def _stop_listener():
+def _stop_listener() -> Generator[None, None, None]:
     yield
     stop_pg_display_listener()
 
@@ -50,7 +50,7 @@ def test_drain_stub_connection_handles_notifies() -> None:
         def __init__(self) -> None:
             self.calls = 0
 
-        def notifies(self, timeout: float = 0.0):
+        def notifies(self, timeout: float = 0.0) -> Generator[object, None, None]:
             assert timeout == 0.0
             self.calls += 1
             if self.calls == 1:
@@ -99,7 +99,7 @@ def test_listener_start_stop_with_failing_connection(
 ) -> None:
     import psycopg
 
-    def boom(*args: object, **kwargs: object):
+    def boom(*args: object, **kwargs: object) -> None:
         raise ConnectionError("no pg here")
 
     monkeypatch.setattr(psycopg, "connect", boom)

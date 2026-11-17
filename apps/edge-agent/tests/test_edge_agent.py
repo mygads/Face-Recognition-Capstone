@@ -2381,3 +2381,85 @@ def test_full_outbox_does_not_suppress_walkthrough_retry(tmp_path: Path) -> None
         assert outbox.counts() == (1, 0)
     finally:
         outbox.close()
+
+
+def test_kiosk_stream_consumer_fills_jpeg_without_operator_viewer(
+    tmp_path: Path,
+) -> None:
+    """Regresi P0: kios tanpa sesi operator tetap mengisi buffer JPEG.
+
+    Jalur integrasi penuh: frame sintetis mengalir lewat
+    ``EdgeService._capture_loop`` (bukan ``update_frame`` manual).
+    Tanpa konsumen -> buffer kosong (hemat CPU/encode). Setelah kios
+    menandai konsumen stream -> buffer terisi -> /v1/kiosk-stream 200.
+    """
+    import threading
+
+    import numpy as np
+
+    config = load_config(
+        EXAMPLE_CONFIG, environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)}
+    )
+
+    class FakeCamera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            return True, np.zeros((480, 640, 3), dtype=np.uint8)
+
+        def close(self) -> None: ...
+
+    class FakeApi:
+        def close(self) -> None: ...
+
+    class NeverRecognizer:
+        def process(self, *_args: object, **_kwargs: object) -> object:
+            raise AssertionError("capture loop tidak memakai recognizer.")
+
+        def reset(self) -> None: ...
+
+    outbox = EventOutbox(tmp_path / "kiosk-stream-outbox.sqlite3", max_pending=10)
+    service = EdgeService(
+        config,
+        FakeCamera(),
+        FakeApi(),  # type: ignore[arg-type]
+        outbox,
+        NeverRecognizer(),  # type: ignore[arg-type]
+        lambda: {},
+    )
+    assert service.preview is not None
+    assert not service.preview.has_active_viewer()
+    assert not service.preview.has_kiosk_stream_consumer()
+
+    def run_loop(seconds: float) -> None:
+        service.stop_event.clear()
+        worker = threading.Thread(target=service._capture_loop, daemon=True)
+        worker.start()
+        try:
+            deadline = time.monotonic() + seconds
+            while time.monotonic() < deadline:
+                time.sleep(0.05)
+        finally:
+            service.stop_event.set()
+            worker.join(timeout=10)
+
+    try:
+        run_loop(0.6)
+        assert service.preview._jpeg_frame is None
+
+        service.stop_event.clear()
+        service.preview.note_kiosk_stream_hit()
+        worker = threading.Thread(target=service._capture_loop, daemon=True)
+        worker.start()
+        try:
+            deadline = time.monotonic() + 2.0
+            while service.preview._jpeg_frame is None and time.monotonic() < deadline:
+                service.preview.note_kiosk_stream_hit()
+                time.sleep(0.05)
+        finally:
+            service.stop_event.set()
+            worker.join(timeout=10)
+        assert service.preview._jpeg_frame is not None
+        assert service.preview.has_kiosk_stream_consumer()
+    finally:
+        outbox.close()

@@ -22,7 +22,6 @@ from presensi_api.api.v1.schemas.attendance import (
     RecognitionEventRequest,
     RecognitionOutcome,
 )
-from presensi_api.display_notify import notify_display_changed, pg_notify_display_changed
 from presensi_api.db.models import (
     AttendanceRecord,
     AttendanceSession,
@@ -31,6 +30,10 @@ from presensi_api.db.models import (
     RecognitionEvent,
     SessionStudent,
     Student,
+)
+from presensi_api.display_notify import (
+    notify_display_changed,
+    pg_notify_display_changed,
 )
 from presensi_api.session_lifecycle import (
     as_utc,
@@ -70,6 +73,12 @@ def _metadata(event: RecognitionEvent) -> dict[str, object]:
     return dict(event.quality_metadata)
 
 
+def _recorded_decision(metadata: dict[str, object]) -> bool:
+    """True bila metadata event sendiri mencatat kehadiran (idempoten aman)."""
+    decision = cast(dict[str, object], metadata.get("attendance_decision", {}))
+    return decision.get("decision") == "attendance_recorded"
+
+
 def _response_for_event(
     session: Session,
     event: RecognitionEvent,
@@ -84,6 +93,19 @@ def _response_for_event(
             AttendanceRecord.recognition_event_id == event.id
         )
     )
+    if record is None and event.recognized_student_id is not None:
+        # Edit manual melepas tautan event (kontrak: manual -> event NULL).
+        # Retry edge dengan event_uuid sama harus tetap idempoten, tetapi
+        # HANYA bila event ini sendiri yang mencatat kehadiran: event yang
+        # memang no_attendance tidak boleh mengklaim record milik event lain.
+        recorded = _recorded_decision(metadata)
+        if recorded:
+            record = session.scalar(
+                select(AttendanceRecord).where(
+                    AttendanceRecord.session_id == event.session_id,
+                    AttendanceRecord.student_id == event.recognized_student_id,
+                )
+            )
     if record is not None:
         attendance = AttendanceRecordResponse(
             id=record.id,
@@ -336,7 +358,7 @@ def decide_recognition_event(
         }
     event.quality_metadata = dict(metadata)
     flag_modified(event, "quality_metadata")
-    recorded = metadata.get("attendance_decision", {}).get("decision") == "attendance_recorded"
+    recorded = _recorded_decision(metadata)
     if recorded:
         pg_notify_display_changed(db, schedule.laboratory_id)
     db.commit()

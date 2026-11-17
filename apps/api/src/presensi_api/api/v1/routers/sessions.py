@@ -29,7 +29,6 @@ from presensi_api.api.v1.schemas.sessions import (
     TeacherOpeningPreference,
     TeacherOpeningPreferenceResponse,
 )
-from presensi_api.display_notify import notify_display_changed, pg_notify_display_changed
 from presensi_api.db.models import (
     AttendanceRecord,
     AttendanceSession,
@@ -43,6 +42,10 @@ from presensi_api.db.models import (
     User,
 )
 from presensi_api.db.session import get_db_session
+from presensi_api.display_notify import (
+    notify_display_changed,
+    pg_notify_display_changed,
+)
 from presensi_api.runtime_configuration import (
     SESSION_OPENING_POLICY_SCOPE,
     save_configuration,
