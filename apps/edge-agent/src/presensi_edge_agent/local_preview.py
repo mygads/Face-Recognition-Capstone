@@ -180,7 +180,11 @@ class LocalCameraPreview:
         """
         expected = self.settings.kiosk_stream_token
         if not expected:
-            return True
+            # Tanpa token terkonfigurasi: tolak bila deployment mengharuskan
+            # token (preview.kiosk_stream_require_token /
+            # PRESENSI_EDGE_KIOSK_STREAM_REQUIRE_TOKEN), selain itu tetap
+            # loopback-only seperti perilaku lama.
+            return not self.settings.kiosk_stream_require_token
         return bool(supplied) and hmac.compare_digest(supplied, expected)
 
     def kiosk_hint(self) -> dict[str, object]:
@@ -191,6 +195,10 @@ class LocalCameraPreview:
         Faces carry normalized box + landmarks + quality flags only, so the
         kiosk can draw the same skeleton overlay as the operator preview.
         Up to 5 faces; empty when the observation is stale.
+
+        ``device_id`` identifies THIS agent so the kiosk screen can verify it
+        is paired to the right camera (operational identifier, not personal
+        data). None when the agent is not provisioned with a device id.
         """
         with self._lock:
             status = dict(self._status)
@@ -228,7 +236,9 @@ class LocalCameraPreview:
                             else [],
                         }
                     )
+        local_device_id = self.config.device_id
         return {
+            "device_id": str(local_device_id) if local_device_id is not None else None,
             "session_active": status.get("session_active") is True,
             "camera_open": status.get("camera_open") is True,
             "recognition_state": state if isinstance(state, str) else None,

@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Mapping, cast
+from typing import Callable, Mapping, cast
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -127,6 +127,10 @@ class PreviewSettings:
     max_width: int
     jpeg_quality: int
     kiosk_stream_token: str = ""
+    # Bila True, /v1/kiosk-hint dan /v1/kiosk-stream menolak akses tanpa
+    # token yang cocok meskipun dari loopback (default False agar instalasi
+    # yang sudah jalan tidak rusak; aktifkan untuk deployment sekolah).
+    kiosk_stream_require_token: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,8 +262,23 @@ class EdgeConfig:
             )
 
 
+def _parse_bool(value: str) -> bool:
+    """Konverter env boolean: 1/true/yes/on -> True, 0/false/no/off -> False."""
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"Invalid boolean value: {value!r}.")
+
+
 _ENVIRONMENT_OVERRIDES: dict[
-    str, tuple[str, str, type[str] | type[int] | type[float]]
+    str,
+    tuple[
+        str,
+        str,
+        type[str] | type[int] | type[float] | Callable[[str], bool],
+    ],
 ] = {
     "PRESENSI_EDGE_DEVICE_ID": ("", "device_id", str),
     "PRESENSI_EDGE_MODE": ("", "mode", str),
@@ -277,6 +296,11 @@ _ENVIRONMENT_OVERRIDES: dict[
     "PRESENSI_EDGE_CAMERA_HEIGHT": ("camera", "height", int),
     "PRESENSI_EDGE_CAMERA_FPS": ("camera", "fps", int),
     "PRESENSI_EDGE_KIOSK_STREAM_TOKEN": ("preview", "kiosk_stream_token", str),
+    "PRESENSI_EDGE_KIOSK_STREAM_REQUIRE_TOKEN": (
+        "preview",
+        "kiosk_stream_require_token",
+        _parse_bool,
+    ),
     "PRESENSI_EDGE_SESSION_ID": ("gateway", "session_id", str),
     "PRESENSI_EDGE_SESSION_STARTS_AT": ("gateway", "session_starts_at", str),
     "PRESENSI_EDGE_SESSION_ENDS_AT": ("gateway", "session_ends_at", str),
@@ -623,6 +647,9 @@ def load_config(
         max_width=_integer(preview_raw, "max_width", 640, minimum=160),
         jpeg_quality=_integer(preview_raw, "jpeg_quality", 70),
         kiosk_stream_token=str(preview_raw.get("kiosk_stream_token", "") or ""),
+        kiosk_stream_require_token=_boolean(
+            preview_raw, "kiosk_stream_require_token", False
+        ),
     )
     if preview.port > 65535 or preview.jpeg_quality > 95:
         raise EdgeConfigError("preview.port or preview.jpeg_quality is out of range.")

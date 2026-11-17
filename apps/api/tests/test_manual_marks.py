@@ -13,7 +13,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from presensi_api.api.security.dependencies import get_current_user
-from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
+from presensi_api.api.security.roles import (
+    AuthenticatedUser,
+    Permission,
+    RoleCode,
+)
 from presensi_api.db.base import Base
 from presensi_api.db.models import (
     AttendanceRecord,
@@ -21,6 +25,7 @@ from presensi_api.db.models import (
     AuditLog,
     ClassStudent,
     Device,
+    LaborantLabAssignment,
     Laboratory,
     PracticumSchedule,
     RecognitionEvent,
@@ -358,6 +363,180 @@ def test_manual_mark_updates_existing_record_directly_without_correction_flow(
     assert over_recognition.json()["record"]["status"] == "late"
     assert over_recognition.json()["record"]["source"] == "manual"
     assert over_recognition.json()["record"]["recognition_event_id"] is None
+
+
+def _close_session(
+    factory: sessionmaker[Session], session_id: UUID, status: str = "closed"
+) -> None:
+    with factory.begin() as db:
+        attendance_session = db.get(AttendanceSession, session_id)
+        assert attendance_session is not None
+        attendance_session.status = status
+
+
+def _lab_id(factory: sessionmaker[Session]) -> UUID:
+    with factory() as db:
+        return db.query(Laboratory).one().id
+
+
+def _teacher_with_correction_grant() -> AuthenticatedUser:
+    return AuthenticatedUser(
+        id=TEACHER_ID,
+        email="teacher@example.test",
+        full_name="Synthetic Teacher",
+        roles=frozenset({RoleCode.TEACHER}),
+        extra_permissions=frozenset({Permission.ATTENDANCE_CORRECT_CLOSED}),
+    )
+
+
+def test_closed_session_correction_with_grant_updates_ai_record(
+    manual_marks_database: tuple[sessionmaker[Session], dict[str, UUID]],
+) -> None:
+    """Koreksi pascasesi berizin: catatan AI diperbarui, provenance manual."""
+    factory, ids = manual_marks_database
+    lab_id = _lab_id(factory)
+    _seed_ai_record(factory, ids["session"], ids["first"], lab_id)
+    _close_session(factory, ids["session"])
+    app.dependency_overrides[get_current_user] = _teacher_with_correction_grant
+    try:
+        corrected = post_mark(
+            ids["session"],
+            {
+                "student_id": str(ids["first"]),
+                "status": "late",
+                "note": "ralat pascasesi oleh guru",
+            },
+        )
+    finally:
+        del app.dependency_overrides[get_current_user]
+    assert corrected.status_code == 201, corrected.text
+    record = corrected.json()["record"]
+    assert record["status"] == "late"
+    assert record["source"] == "manual"
+    assert record["recognition_event_id"] is None
+    with factory() as db:
+        audit = db.scalar(
+            select(AuditLog).where(AuditLog.action == "attendance.manual_updated")
+        )
+        assert audit is not None
+        assert audit.actor_user_id == TEACHER_ID
+        assert audit.before_state is not None
+        assert audit.before_state["session_status"] == "closed"
+        assert audit.before_state["source"] == "face_recognition"
+
+
+def test_closed_session_new_mark_requires_reason(
+    manual_marks_database: tuple[sessionmaker[Session], dict[str, UUID]],
+) -> None:
+    """Catatan baru pada sesi tertutup wajib beralasan (422), lalu 201."""
+    factory, ids = manual_marks_database
+    _close_session(factory, ids["session"])
+    app.dependency_overrides[get_current_user] = _teacher_with_correction_grant
+    try:
+        without_reason = post_mark(
+            ids["session"],
+            {"student_id": str(ids["second"]), "status": "present"},
+        )
+        assert without_reason.status_code == 422
+        assert without_reason.json()["error"]["code"] == "reason_required"
+        with_reason = post_mark(
+            ids["session"],
+            {
+                "student_id": str(ids["second"]),
+                "status": "present",
+                "note": "siswa menyusul setelah sesi ditutup",
+            },
+        )
+    finally:
+        del app.dependency_overrides[get_current_user]
+    assert with_reason.status_code == 201, with_reason.text
+    assert with_reason.json()["record"]["source"] == "manual"
+
+
+def test_closed_session_correction_grant_requires_session_view_grant(
+    manual_marks_database: tuple[sessionmaker[Session], dict[str, UUID]],
+) -> None:
+    """Izin koreksi sesi tertutup dapat di-grant (butuh pantau sesi)."""
+    _, ids = manual_marks_database
+    _ = ids
+    from presensi_api.api.security.roles import LABORANT_GRANTABLE_PERMISSIONS
+
+    assert Permission.ATTENDANCE_CORRECT_CLOSED in LABORANT_GRANTABLE_PERMISSIONS
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        id=TEACHER_ID,
+        email="admin-grant@example.test",
+        full_name="Grant Admin",
+        roles=frozenset({RoleCode.ADMIN}),
+    )
+    try:
+        grants_url = f"/api/v1/accounts/{TEACHER_ID}/permission-grants"
+        alone = httpx.Response(500)
+        # Tanpa prasyarat pantau sesi -> ditolak 422.
+        import asyncio as _asyncio
+
+        async def grant(permission: str) -> httpx.Response:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+            ) as client:
+                return await client.post(grants_url, json={"permission": permission})
+
+        alone = _asyncio.run(grant("attendance_correct_closed"))
+        assert alone.status_code == 422, alone.text
+        assert alone.json()["error"]["code"] == "grant_missing_prerequisite"
+        assert _asyncio.run(grant("session_view")).status_code == 201
+        granted = _asyncio.run(grant("attendance_correct_closed"))
+        assert granted.status_code == 201, granted.text
+    finally:
+        del app.dependency_overrides[get_current_user]
+
+
+def test_closed_session_laborant_with_grant_and_lab_scope_succeeds(
+    manual_marks_database: tuple[sessionmaker[Session], dict[str, UUID]],
+) -> None:
+    """Laboran ber-grant + satu lab cakupan bisa mengoreksi sesi tertutup."""
+    factory, ids = manual_marks_database
+    laboran_id = uuid4()
+    with factory.begin() as db:
+        laboratory = db.scalars(select(Laboratory)).one()
+        db.add(
+            User(
+                id=laboran_id,
+                email="laboran-closed@example.test",
+                full_name="Laboran Closed",
+                password_hash="unused-test-hash",
+            )
+        )
+        db.flush()
+        db.add(LaborantLabAssignment(user_id=laboran_id, laboratory_id=laboratory.id))
+    lab_id = _lab_id(factory)
+    _seed_ai_record(factory, ids["session"], ids["first"], lab_id)
+    _close_session(factory, ids["session"])
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        id=laboran_id,
+        email="laboran-closed@example.test",
+        full_name="Laboran Closed",
+        roles=frozenset({RoleCode.LABORANT}),
+        extra_permissions=frozenset(
+            {
+                Permission.SESSION_VIEW,
+                Permission.ATTENDANCE_MANUAL,
+                Permission.ATTENDANCE_CORRECT_CLOSED,
+            }
+        ),
+    )
+    try:
+        corrected = post_mark(
+            ids["session"],
+            {
+                "student_id": str(ids["first"]),
+                "status": "absent",
+                "note": "koreksi laboran pascasesi",
+            },
+        )
+    finally:
+        del app.dependency_overrides[get_current_user]
+    assert corrected.status_code == 201, corrected.text
+    assert corrected.json()["record"]["source"] == "manual"
 
 
 def test_manual_mark_on_inactive_session_conflicts(

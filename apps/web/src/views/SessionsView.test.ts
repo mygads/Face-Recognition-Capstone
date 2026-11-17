@@ -182,6 +182,38 @@ describe('sessions view', () => {
     expect(wrapper.text()).toContain('sudah tercatat')
   })
 
+  it('meminta alasan wajib saat sesi sudah ditutup (koreksi pascasesi)', async () => {
+    const rosterEntry = {
+      student_id: 'student-9',
+      student_number: 'S-009',
+      full_name: 'Siswa Sela',
+      record_status: null,
+    }
+    api.getAttendanceSessionStatus.mockResolvedValue({ ...overrideSession, status: 'closed' })
+    api.getSessionRoster.mockResolvedValue([rosterEntry])
+    api.markManualAttendance.mockResolvedValue({ record: {} })
+    const wrapper = mount(SessionsView, { global: { plugins: [teacherPinia()] } })
+    await flushPromises()
+
+    await wrapper.get('[data-testid^="show-status-"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('koreksi pascasesi')
+
+    await wrapper.get('[data-testid="manual-mark-student-9"]').trigger('click')
+    await flushPromises()
+    expect(api.markManualAttendance).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('alasan wajib diisi')
+
+    await wrapper.get('[aria-label="Catatan untuk Siswa Sela"]').setValue('ralat TU')
+    await wrapper.get('[data-testid="manual-mark-student-9"]').trigger('click')
+    await flushPromises()
+    expect(api.markManualAttendance).toHaveBeenCalledWith('session-1', {
+      student_id: 'student-9',
+      status: 'present',
+      note: 'ralat TU',
+    })
+  })
+
   it('reloads lists when opening races with another opener', async () => {
     const wrapper = mount(SessionsView, { global: { plugins: [teacherPinia()] } })
     await flushPromises()

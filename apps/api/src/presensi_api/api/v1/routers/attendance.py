@@ -69,7 +69,9 @@ def ingest_recognition_event(
     description=(
         "Stores a final attendance record for a roster member, or directly "
         "updates the existing record (pengganti alur koreksi: tanpa "
-        "persetujuan admin). Never accepts image or embedding fields."
+        "persetujuan admin). Closed sessions accept a separate post-session "
+        "correction permission (alasan wajib, tercatat audit). "
+        "Never accepts image or embedding fields."
     ),
 )
 def create_manual_mark(

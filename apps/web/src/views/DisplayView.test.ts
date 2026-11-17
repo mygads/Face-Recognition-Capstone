@@ -5,7 +5,11 @@ import DisplayView from './DisplayView.vue'
 const api = vi.hoisted(() => ({
   getKioskDisplay: vi.fn(),
   getPublicDisplay: vi.fn(),
-  listPublicKioskScreens: vi.fn(async () => []),
+  listPublicKioskScreens: vi.fn(
+    async (): Promise<
+      { device_id: string; display_name: string; camera_label: string | null }[]
+    > => [],
+  ),
   listPublicLaboratories: vi.fn(async () => [{ id: 'lab-1', code: 'LAB-1', name: 'Lab Kimia 1' }]),
   openKioskDisplaySession: vi.fn(),
   openPublicDisplaySession: vi.fn(),
@@ -446,6 +450,68 @@ describe('DisplayView sinyal agent lokal', () => {
     }
   })
 
+  it('menyembunyikan video saat hint berasal dari perangkat berbeda', async () => {
+    const g = globalThis as unknown as Record<string, unknown>
+    const realES = g['EventSource']
+    g['EventSource'] = FakeEventSource
+    FakeEventSource.instances = []
+    try {
+      // Satu kiosk terpasang -> deviceId terpilih otomatis (dev-A).
+      api.listPublicKioskScreens.mockResolvedValueOnce([
+        { device_id: 'dev-A', display_name: 'Kiosk A', camera_label: 'Pintu 01' },
+      ])
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({
+          ok: true,
+          json: async () => ({
+            device_id: 'dev-B',
+            session_active: true,
+            camera_open: true,
+            recognition_state: null,
+            face_present: false,
+            face_count: 0,
+            attendance_result: null,
+          }),
+        })),
+      )
+      api.openKioskDisplaySession.mockResolvedValueOnce({
+        display_token: 'tok-kiosk',
+        snapshot,
+      })
+      const w = mount(DisplayView)
+      await flushPromises()
+      await w.find('[data-testid="display-pin-input"]').setValue('1234')
+      await w.find('form').trigger('submit.prevent')
+      await flushPromises()
+      FakeEventSource.instances[0].emit('snapshot', {
+        laboratory_id: 'lab-1',
+        laboratory_name: 'Lab Kimia 1',
+        session_id: 'ses-1',
+        subject: 'Uji Larutan',
+        status: 'active',
+        opened_at: null,
+        present_count: 1,
+        late_count: 0,
+        waiting_count: 2,
+        total_roster: 3,
+        spotlight: null,
+        server_time: new Date().toISOString(),
+      })
+      await flushPromises()
+      await flushPromises()
+      expect(w.find('[data-testid="display-board"]').exists()).toBe(true)
+      // Pairing dev-A vs hint dev-B: tidak ada gambar, ada peringatan.
+      expect(w.find('[data-testid="display-agent-video"]').exists()).toBe(false)
+      expect(w.find('[data-testid="face-overlay"]').exists()).toBe(false)
+      expect(w.text()).toContain('Kamera Tidak Sesuai')
+      expect(w.text()).toContain('dipasangkan ke kamera lain')
+    } finally {
+      g['EventSource'] = realES
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('menyembunyikan gambar saat kamera lab dilaporkan mati', async () => {
     const w = await mountLiveBoard({
       session_active: true,
@@ -463,6 +529,60 @@ describe('DisplayView sinyal agent lokal', () => {
     } finally {
       w.unmount()
       vi.unstubAllGlobals()
+    }
+  })
+
+  it('mencoba ulang stream agent otomatis lalu pulih saat frame tersedia', async () => {
+    vi.useFakeTimers()
+    try {
+      const w = await mountLiveBoard({
+        session_active: true,
+        camera_open: true,
+        recognition_state: null,
+        face_present: false,
+        face_count: 0,
+        attendance_result: null,
+      })
+      try {
+        const first = w.find('[data-testid="display-agent-video"]')
+        expect(first.exists()).toBe(true)
+        expect(first.attributes('src') ?? '').not.toContain('retry=')
+        // 503 awal (buffer JPEG belum ada) -> error -> gambar dilepas.
+        await first.trigger('error')
+        await flushPromises()
+        expect(w.find('[data-testid="display-agent-video"]').exists()).toBe(false)
+        expect(w.text()).toContain('Stream Lab Terputus')
+        // Backoff pertama 1 detik: belum ada upaya ulang sebelum waktunya.
+        await vi.advanceTimersByTimeAsync(999)
+        expect(w.find('[data-testid="display-agent-video"]').exists()).toBe(false)
+        await vi.advanceTimersByTimeAsync(1)
+        const retry1 = w.find('[data-testid="display-agent-video"]')
+        expect(retry1.exists()).toBe(true)
+        expect(retry1.attributes('src') ?? '').toContain('retry=1')
+        // Gagal lagi -> backoff kedua 2 detik.
+        await retry1.trigger('error')
+        await flushPromises()
+        await vi.advanceTimersByTimeAsync(1999)
+        expect(w.find('[data-testid="display-agent-video"]').exists()).toBe(false)
+        await vi.advanceTimersByTimeAsync(1)
+        const retry2 = w.find('[data-testid="display-agent-video"]')
+        expect(retry2.exists()).toBe(true)
+        expect(retry2.attributes('src') ?? '').toContain('retry=2')
+        // Frame tersedia -> live dan hitungan retry direset ke backoff awal.
+        await retry2.trigger('load')
+        await flushPromises()
+        await retry2.trigger('error')
+        await flushPromises()
+        await vi.advanceTimersByTimeAsync(1000)
+        const retryAgain = w.find('[data-testid="display-agent-video"]')
+        expect(retryAgain.exists()).toBe(true)
+        expect(retryAgain.attributes('src') ?? '').toContain('retry=1')
+      } finally {
+        w.unmount()
+        vi.unstubAllGlobals()
+      }
+    } finally {
+      vi.useRealTimers()
     }
   })
 })

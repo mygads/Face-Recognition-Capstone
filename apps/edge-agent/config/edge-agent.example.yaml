@@ -75,6 +75,11 @@ preview:
     - http://localhost:5173
   max_width: 640
   jpeg_quality: 70
+  # Token opsional untuk /v1/kiosk-hint dan /v1/kiosk-stream (?token=).
+  # kiosk_stream_token: ""
+  # Bila true, akses tanpa token yang cocok ditolak meski dari loopback.
+  # Aktifkan untuk deployment sekolah (default false = loopback-only).
+  # kiosk_stream_require_token: false
 
 runtime:
   outbox_path: ../data/camera-queue/edge-events.sqlite3

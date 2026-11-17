@@ -29,6 +29,7 @@ class Permission(StrEnum):
     SESSION_VIEW = "session_view"
     SESSION_OPERATE = "session_operate"
     ATTENDANCE_MANUAL = "attendance_manual"
+    ATTENDANCE_CORRECT_CLOSED = "attendance_correct_closed"
     ENROLLMENT_MANAGE = "enrollment_manage"
     ATTENDANCE_READ = "attendance_read"
     REPORTS_READ = "reports_read"
@@ -73,6 +74,7 @@ LABORANT_GRANTABLE_PERMISSIONS: frozenset[Permission] = frozenset(
         Permission.SESSION_VIEW,
         Permission.SESSION_OPERATE,
         Permission.ATTENDANCE_MANUAL,
+        Permission.ATTENDANCE_CORRECT_CLOSED,
         Permission.ATTENDANCE_READ,
         Permission.REPORTS_READ,
         Permission.REPORTS_EXPORT,
@@ -83,13 +85,14 @@ LABORANT_GRANTABLE_PERMISSIONS: frozenset[Permission] = frozenset(
 
 # Prasyarat grant (pohon dependensi, 1 level):
 # - Kelola Jadwal butuh Lihat Jadwal.
-# - Operasikan Sesi & Tandai Manual butuh Pantau Sesi.
+# - Operasikan Sesi, Tandai Manual, & Koreksi Sesi Tertutup butuh Pantau Sesi.
 # - Ekspor Laporan butuh Lihat Laporan.
 # - Catat Tindak Lanjut butuh Lihat EWS.
 PERMISSION_PREREQUISITES: dict[Permission, tuple[Permission, ...]] = {
     Permission.SCHEDULE_MANAGE: (Permission.SCHEDULE_READ,),
     Permission.SESSION_OPERATE: (Permission.SESSION_VIEW,),
     Permission.ATTENDANCE_MANUAL: (Permission.SESSION_VIEW,),
+    Permission.ATTENDANCE_CORRECT_CLOSED: (Permission.SESSION_VIEW,),
     Permission.REPORTS_EXPORT: (Permission.REPORTS_READ,),
     Permission.EWS_FOLLOW_UP: (Permission.EWS_READ,),
 }

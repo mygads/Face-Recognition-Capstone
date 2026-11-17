@@ -163,10 +163,23 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
   `/v1/kiosk-hint` wajib `?token=` yang cocok (hmac compare, 401 bila
   salah). FE menyimpan token sekali via `?stream_token=` ke
   `localStorage[presensi.kiosk_stream_token]` lalu menghapusnya dari URL.
+  Untuk deployment sekolah, set `preview.kiosk_stream_require_token: true`
+  (atau `PRESENSI_EDGE_KIOSK_STREAM_REQUIRE_TOKEN=1`) agar akses anonim
+  ditolak meski dari loopback; default false demi kompatibilitas instalasi
+  lama. Param `retry=N` milik FE diabaikan server (bukan token).
   Token staf preview TIDAK PERNAH dibagikan ke browser kios; konsumen stream
   kios (`has_kiosk_stream_consumer`, jendela 3 detik) terpisah dari sesi
   preview operator dan ikut mengaktifkan encoding JPEG (jadi kiosk tetap
   tampil tanpa halaman preview staf terbuka).
+- Retry stream kios di FE (`DisplayView.vue`): error `<img>` (mis. 503 awal
+  saat buffer JPEG belum ada) dijadwalkan ulang otomatis dengan backoff
+  1s,2s,4s,8s lalu 15s via cache-buster `?retry=N`; hitungan direset saat
+  frame termuat. Timer dibersihkan saat sesi berhenti/unmount.
+- Koreksi pascasesi: sesi closed/cancelled hanya bisa diubah dengan izin
+  `attendance_correct_closed` (grantable ke laboran/guru, butuh pantau sesi;
+  409 `session_inactive` bila tanpa izin). Catatan baru pada sesi tertutup
+  wajib beralasan (422), pembaruan tetap wajib `note`, dan audit menyimpan
+  `session_status` untuk membedakan koreksi pascasesi.
 - Provenance edit manual: update catatan via guru/aslab wajib `note`
   (alasan, 422 bila kosong), `source` menjadi `manual` dan
   `recognition_event_id` dilepas (kontrak CHECK manual->event NULL);

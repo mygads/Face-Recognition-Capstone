@@ -74,7 +74,16 @@ const canOperateSessions = computed(
   () => isAdmin.value || isTeacher.value || staffPermissions.value.includes('session_operate'),
 )
 const canManualMark = computed(
-  () => isAdmin.value || isTeacher.value || staffPermissions.value.includes('attendance_manual'),
+  () =>
+    isAdmin.value ||
+    isTeacher.value ||
+    staffPermissions.value.includes('attendance_manual') ||
+    staffPermissions.value.includes('attendance_correct_closed'),
+)
+// Sesi terpilih yang sudah ditutup/dibatalkan: form manual menjadi
+// koreksi pascasesi (alasan wajib, tercatat audit, butuh izin khusus).
+const isClosedSelected = computed(
+  () => selected.value?.status === 'closed' || selected.value?.status === 'cancelled',
 )
 
 function formatError(error: unknown): string {
@@ -87,7 +96,10 @@ function manualMarkError(error: unknown): string {
       return 'Presensi siswa ini sudah tercatat. Muat ulang daftar.'
     }
     if (error.code === 'session_inactive') {
-      return 'Sesi sudah ditutup, muat ulang halaman.'
+      return 'Sesi sudah ditutup. Koreksi pascasesi memerlukan izin Koreksi Sesi Tertutup.'
+    }
+    if (error.code === 'reason_required') {
+      return 'Alasan wajib diisi untuk koreksi sesi tertutup.'
     }
     if (error.code === 'student_not_in_session_roster') {
       return 'Siswa tidak termasuk roster sesi ini.'
@@ -424,6 +436,10 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
   const trimmedNote = draft.note.trim()
   if (trimmedNote.length > 500) {
     draft.error = 'Catatan maksimal 500 karakter.'
+    return
+  }
+  if (isClosedSelected.value && !trimmedNote) {
+    draft.error = 'Sesi sudah ditutup: alasan wajib diisi untuk koreksi pascasesi.'
     return
   }
   if (entry.record_status && !trimmedNote) {
@@ -860,6 +876,10 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
 
       <div v-if="canManualMark" class="st-card">
         <h3 class="st-card__title">Tandai kehadiran manual</h3>
+        <p v-if="isClosedSelected" class="st-alert" role="note">
+          Sesi sudah ditutup: penandaan di sini adalah koreksi pascasesi. Alasan wajib diisi dan
+          tercatat pada audit.
+        </p>
         <p class="st-table__muted">
           Hanya untuk siswa roster yang belum memiliki catatan presensi. Pilihan guru langsung
           menjadi status akhir tanpa ambang batas otomatis.
@@ -915,10 +935,16 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
           {{ draftFor(unmarkedRoster[0].student_id).error }}
         </p>
       </div>
-      <p v-else class="st-table__muted">Tandai manual membutuhkan izin Tandai Kehadiran Manual.</p>
+      <p v-else class="st-table__muted">
+        Tandai manual membutuhkan izin Tandai Kehadiran Manual atau Koreksi Sesi Tertutup.
+      </p>
 
       <div v-if="canManualMark" class="st-card" data-testid="direct-update-panel">
         <h3 class="st-card__title">Ubah kehadiran langsung</h3>
+        <p v-if="isClosedSelected" class="st-alert" role="note">
+          Sesi sudah ditutup: perubahan di sini adalah koreksi pascasesi. Alasan wajib diisi dan
+          tercatat pada audit.
+        </p>
         <p class="st-table__muted">
           Pengganti koreksi berjenjang: guru/aslab berwenang langsung memperbarui catatan yang sudah
           ada (termasuk hasil face recognition) tanpa persetujuan admin. Setiap perubahan dicatat

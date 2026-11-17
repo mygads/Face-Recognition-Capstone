@@ -603,6 +603,22 @@ def test_kiosk_hint_serves_generic_state_without_token_or_identity(
         preview.stop()
 
 
+def test_kiosk_hint_reports_local_device_id_for_pairing_check() -> None:
+    """Hint memuat device_id agent lokal (None bila belum diprovision)."""
+    config = load_config(EXAMPLE_CONFIG)
+    preview = LocalCameraPreview(config)
+    try:
+        assert preview.kiosk_hint()["device_id"] is None
+        provisioned = replace(config, device_id=UUID(int=4242))
+        preview_provisioned = LocalCameraPreview(provisioned)
+        try:
+            assert preview_provisioned.kiosk_hint()["device_id"] == str(UUID(int=4242))
+        finally:
+            preview_provisioned.stop()
+    finally:
+        preview.stop()
+
+
 def test_kiosk_hint_hides_stale_face_signal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -627,6 +643,35 @@ def test_kiosk_hint_hides_stale_face_signal(
         assert preview.kiosk_hint()["face_present"] is False
         assert preview.kiosk_hint()["face_count"] == 2
         assert preview.kiosk_hint()["faces"] == []
+    finally:
+        preview.stop()
+
+
+def test_kiosk_stream_require_token_rejects_anonymous_loopback() -> None:
+    """Deployment sekolah: tanpa token terkonfigurasi + require_token=True,
+    hint dan stream kios menolak akses anonim meski dari loopback."""
+    config = load_config(EXAMPLE_CONFIG)
+    config = replace(
+        config,
+        preview=replace(
+            config.preview, port=_free_port(), kiosk_stream_require_token=True
+        ),
+    )
+    preview = LocalCameraPreview(config)
+    preview.start()
+    try:
+        with pytest.raises(urllib.error.HTTPError) as hint_denied:
+            urllib.request.urlopen(
+                f"http://127.0.0.1:{config.preview.port}/v1/kiosk-hint", timeout=2
+            )
+        assert hint_denied.value.code == 401
+        # Param cache-buster retry=N milik FE diabaikan server (bukan token).
+        with pytest.raises(urllib.error.HTTPError) as stream_denied:
+            urllib.request.urlopen(
+                f"http://127.0.0.1:{config.preview.port}/v1/kiosk-stream?retry=1",
+                timeout=2,
+            )
+        assert stream_denied.value.code == 401
     finally:
         preview.stop()
 

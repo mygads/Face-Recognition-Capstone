@@ -170,8 +170,12 @@ async function selectAccount(account: Account): Promise<void> {
       assignments.value = (assignRes as { items: typeof assignments.value }).items
       grants.value = grantRes as typeof grants.value
     } else if (role === 'TEACHER') {
-      const teacherRes = await listTeacherAssignments(account.id).catch(() => ({ items: [] }))
+      const [teacherRes, grantRes] = await Promise.all([
+        listTeacherAssignments(account.id).catch(() => ({ items: [] })),
+        listPermissionGrants(account.id).catch(() => ({ extra_permissions: [], grantable: [] })),
+      ])
       teacherAssignments.value = (teacherRes as { items: typeof teacherAssignments.value }).items
+      grants.value = grantRes as typeof grants.value
     }
     editDeactivationReason.value = ''
   } catch (error) {
@@ -696,10 +700,21 @@ async function copyTemporaryPassword(): Promise<void> {
             </UiSelect>
           </label>
         </form>
-        <h3>Hak akses opsional laboran (checklist)</h3>
+      </template>
+      <template v-if="isLaborantAccount(selectedDetail) || isTeacherAccount(selectedDetail)">
+        <h3>
+          {{
+            isTeacherAccount(selectedDetail)
+              ? 'Hak akses tambahan guru'
+              : 'Hak akses opsional laboran (checklist)'
+          }}
+        </h3>
         <p class="accounts-view__hint">
-          Default laboran: perangkat, preview kamera, pendaftaran wajah. Centang untuk memberi akses
-          guru (jadwal/sesi/koreksi/laporan/EWS). Laboran full ≈ admin kecuali buat staf &amp; AI.
+          {{
+            isTeacherAccount(selectedDetail)
+              ? 'Izin tambahan per akun ini, di luar bawaan peran guru. Contoh: Koreksi Sesi Tertutup untuk memperbaiki catatan setelah sesi ditutup.'
+              : 'Default laboran: perangkat, preview kamera, pendaftaran wajah. Centang untuk memberi akses guru (jadwal/sesi/koreksi/laporan/EWS). Laboran full ≈ admin kecuali buat staf & AI.'
+          }}
         </p>
         <div v-for="group in grantGroups(grants.grantable)" :key="group.group">
           <h4>{{ group.group }}</h4>
@@ -736,9 +751,11 @@ async function copyTemporaryPassword(): Promise<void> {
           Aktif saat ini: {{ grants.extra_permissions.join(', ') || '-' }}
         </p>
         <p class="accounts-view__hint" data-testid="grant-impact">
-          Dampak menu bila disimpan: laboran dasar hanya melihat workspace teknis. Setiap izin yang
-          dicentang membuka menu terkait (Jadwal → Sesi → Koreksi → Laporan/EWS). Tanpa lab yang
-          ditugaskan, data lab tetap kosong (“Belum ada penugasan laboratorium”).
+          {{
+            isTeacherAccount(selectedDetail)
+              ? 'Koreksi Sesi Tertutup memungkinkan perbaikan catatan setelah sesi ditutup/dibatalkan, dengan alasan wajib dan jejak audit.'
+              : 'Dampak menu bila disimpan: laboran dasar hanya melihat workspace teknis. Setiap izin yang dicentang membuka menu terkait (Jadwal → Sesi → Koreksi → Laporan/EWS). Tanpa lab yang ditugaskan, data lab tetap kosong (“Belum ada penugasan laboratorium”).'
+          }}
         </p>
       </template>
     </UiDrawer>
