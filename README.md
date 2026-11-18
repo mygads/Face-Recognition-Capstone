@@ -52,6 +52,8 @@ python3 scripts/start-local.py
 
 Buka `http://127.0.0.1:5173` (API `http://127.0.0.1:8000`). Login awal:
 `admin@local.test` / `1234abcd`, wajib ganti password (min 12 karakter).
+Panduan membuat akun guru/laboran dan mengatur akses awal ada di
+[docs/first-run-access.md](docs/first-run-access.md).
 
 Login gagal — cek tiga hal ini dulu:
 
