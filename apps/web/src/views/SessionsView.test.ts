@@ -110,23 +110,21 @@ describe('sessions view', () => {
     })
   })
 
-  it('memakai grace default dari Kebijakan Presensi dan tetap bisa diubah manual', async () => {
+  it('memakai toleransi dari Kebijakan Presensi tanpa input duplikat di halaman sesi', async () => {
     const wrapper = mount(SessionsView, { global: { plugins: [teacherPinia()] } })
     await flushPromises()
-    const input = wrapper.get('[data-testid="open-grace-input"]')
-    expect((input.element as HTMLInputElement).value).toBe('20')
-    await input.setValue('10')
-    await flushPromises()
+    expect(wrapper.find('[data-testid="open-grace-input"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Toleransi sesi mengikuti Kebijakan Presensi')
     api.openAttendanceSession.mockResolvedValueOnce({
       ...overrideSession,
       status: 'active',
-      grace_period_minutes: 10,
+      grace_period_minutes: 20,
     })
     await wrapper.get('[data-testid="open-session-schedule-1"]').trigger('click')
     await flushPromises()
     await wrapper.get('[data-testid="confirm-open-session"]').trigger('click')
     await flushPromises()
-    expect(api.openAttendanceSession).toHaveBeenCalledWith('schedule-1', 10)
+    expect(api.openAttendanceSession).toHaveBeenCalledWith('schedule-1', 20)
   })
 
   it('keeps manual open visible and marks override sessions with a badge', async () => {
@@ -169,7 +167,11 @@ describe('sessions view', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Siswa Satu')
 
-    await wrapper.get('[data-testid="manual-mark-student-1"]').trigger('click')
+    await wrapper.get('[data-testid="edit-attendance-student-1"]').trigger('click')
+    expect(wrapper.get('[data-testid="attendance-edit-drawer"]').text()).toContain(
+      'Tandai kehadiran manual',
+    )
+    await wrapper.get('[data-testid="submit-attendance-edit"]').trigger('click')
     await flushPromises()
     expect(api.markManualAttendance).toHaveBeenCalledWith('session-1', {
       student_id: 'student-1',
@@ -179,7 +181,8 @@ describe('sessions view', () => {
 
     const duplicate = new ApiError(409, 'attendance_already_recorded', 'duplikat')
     api.markManualAttendance.mockRejectedValueOnce(duplicate)
-    await wrapper.get('[data-testid="manual-mark-student-1"]').trigger('click')
+    await wrapper.get('[data-testid="edit-attendance-student-1"]').trigger('click')
+    await wrapper.get('[data-testid="submit-attendance-edit"]').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('sudah tercatat')
   })
@@ -201,20 +204,59 @@ describe('sessions view', () => {
 
     await wrapper.get('[data-testid^="show-status-"]').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('koreksi pascasesi')
-
-    await wrapper.get('[data-testid="manual-mark-student-9"]').trigger('click')
+    await wrapper.get('[data-testid="edit-attendance-student-9"]').trigger('click')
+    expect(wrapper.get('[data-testid="attendance-edit-drawer"]').text()).toContain(
+      'koreksi pascasesi',
+    )
+    await wrapper.get('[data-testid="submit-attendance-edit"]').trigger('click')
     await flushPromises()
     expect(api.markManualAttendance).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('alasan wajib diisi')
 
-    await wrapper.get('[aria-label="Catatan untuk Siswa Sela"]').setValue('ralat TU')
-    await wrapper.get('[data-testid="manual-mark-student-9"]').trigger('click')
+    await wrapper.get('[aria-label="Alasan atau keterangan"]').setValue('ralat TU')
+    await wrapper.get('[data-testid="submit-attendance-edit"]').trigger('click')
     await flushPromises()
     expect(api.markManualAttendance).toHaveBeenCalledWith('session-1', {
       student_id: 'student-9',
       status: 'present',
       note: 'ralat TU',
+    })
+  })
+
+  it('membuka koreksi catatan roster dari tombol Edit di drawer kanan', async () => {
+    const rosterEntry = {
+      student_id: 'student-8',
+      student_number: 'S-008',
+      full_name: 'Siswa Delapan',
+      record_status: 'late' as const,
+    }
+    api.getAttendanceSessionStatus.mockResolvedValue(overrideSession)
+    api.getSessionRoster.mockResolvedValue([rosterEntry])
+    api.markManualAttendance.mockResolvedValue({ record: {} })
+    const wrapper = mount(SessionsView, {
+      global: { plugins: [teacherPinia()] },
+    })
+    await flushPromises()
+    await wrapper.get('[data-testid^="show-status-"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="edit-attendance-student-8"]').trigger('click')
+    const drawer = wrapper.get('[data-testid="attendance-edit-drawer"]')
+    expect(drawer.text()).toContain('Status saat ini: Terlambat')
+    expect(
+      (wrapper.get('[aria-label="Status kehadiran"]').element as HTMLSelectElement).value,
+    ).toBe('late')
+
+    await wrapper.get('[data-testid="submit-attendance-edit"]').trigger('click')
+    await flushPromises()
+    expect(drawer.text()).toContain('Alasan perubahan wajib diisi')
+    await wrapper.get('[aria-label="Alasan atau keterangan"]').setValue('ralat input guru')
+    await wrapper.get('[data-testid="submit-attendance-edit"]').trigger('click')
+    await flushPromises()
+    expect(api.markManualAttendance).toHaveBeenCalledWith('session-1', {
+      student_id: 'student-8',
+      status: 'late',
+      note: 'ralat input guru',
     })
   })
 
@@ -233,7 +275,7 @@ describe('sessions view', () => {
     await wrapper.get('[data-testid^="show-status-"]').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('Koreksi Sesi Tertutup')
-    expect(wrapper.find('[data-testid="manual-mark-student-9"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="edit-attendance-student-9"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="direct-update-panel"]').exists()).toBe(false)
   })
 
@@ -257,7 +299,7 @@ describe('sessions view', () => {
     await wrapper.get('[data-testid^="show-status-"]').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('dibatalkan')
-    expect(wrapper.find('[data-testid="manual-mark-student-9"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="edit-attendance-student-9"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="direct-update-panel"]').exists()).toBe(false)
   })
 

@@ -205,6 +205,67 @@ describe('master data view (Stitch B02)', () => {
     wrapper.unmount()
   })
 
+  it('menautkan kelas yang dipilih saat membuat siswa', async () => {
+    api.createStudent.mockResolvedValue({ ...student, id: 'student-2', classes: [] })
+    const { wrapper } = await mountAt('/app/master-data/students', 'ADMIN')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('Tambah Siswa'))!
+      .trigger('click')
+    await flushPromises()
+    await wrapper.find('input[name="student_number"]').setValue('S-002')
+    await wrapper.find('input[name="full_name"]').setValue('Student With Class')
+    await wrapper.get('select[aria-label="Rombongan Belajar (Kelas)"]').setValue('class-1')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === 'Simpan')!
+      .trigger('click')
+    await flushPromises()
+
+    expect(api.createStudent).toHaveBeenCalledWith({
+      student_number: 'S-002',
+      full_name: 'Student With Class',
+    })
+    expect(api.enrollStudent).toHaveBeenCalledWith('class-1', 'student-2')
+    wrapper.unmount()
+  })
+
+  it('mengisi kelas siswa saat edit dan mengganti hanya keanggotaan terbaru', async () => {
+    const classNow = { ...kelas, id: 'class-2', code: 'X MIPA 2', name: 'Kelas X MIPA 2' }
+    const priorYear = { ...kelas, id: 'class-0', academic_year: '2025-2026' }
+    const row = { ...student, classes: [kelas, priorYear] }
+    api.listStudents.mockResolvedValue({
+      items: [row],
+      pagination: { total: 1, limit: 10, offset: 0 },
+    })
+    api.listClasses.mockResolvedValue({
+      items: [classNow],
+      pagination: { total: 1, limit: 100, offset: 0 },
+    })
+    api.enrollStudent.mockResolvedValue({})
+    api.removeStudentFromClass.mockResolvedValue(undefined)
+    const { wrapper } = await mountAt('/app/master-data/students', 'ADMIN')
+
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === 'Edit')!
+      .trigger('click')
+    await flushPromises()
+    const classSelect = wrapper.get('select[aria-label="Rombongan Belajar (Kelas)"]')
+    expect((classSelect.element as HTMLSelectElement).value).toBe('class-1')
+    await classSelect.setValue('class-2')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === 'Simpan')!
+      .trigger('click')
+    await flushPromises()
+
+    expect(api.enrollStudent).toHaveBeenCalledWith('class-2', 'student-1')
+    expect(api.removeStudentFromClass).toHaveBeenCalledWith('class-1', 'student-1')
+    expect(api.removeStudentFromClass).not.toHaveBeenCalledWith('class-0', 'student-1')
+    wrapper.unmount()
+  })
+
   it('impor menampilkan baris bermasalah dan menahan konfirmasi', async () => {
     const { wrapper } = await mountAt('/app/master-data/students', 'ADMIN')
     await wrapper

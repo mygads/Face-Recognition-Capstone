@@ -123,6 +123,8 @@ test('teacher sees live roster counts on the active session card and detail', as
   await expect(livePanel).toContainText('1 / 3 Terdata')
 
   await page.getByTestId('show-status-session-1').click()
+  await expect(page).toHaveURL(/\/app\/sessions\/session-1$/)
+  await expect(page.getByRole('heading', { name: 'Sesi Presensi' })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Detail Sesi: Praktikum Biologi' })).toBeVisible()
   await expect(page.getByTestId('roster-filter-present')).toHaveText('Hadir (1)')
   await expect(page.getByTestId('roster-filter-unmarked')).toHaveText('Belum tercatat (2)')
@@ -133,6 +135,7 @@ test('teacher sees live roster counts on the active session card and detail', as
   // Data roster diambil ulang setiap panel dibuka: simulasi siswa kedua terdata.
   presentCount = 2
   await page.getByRole('button', { name: /Kembali ke daftar sesi/ }).click()
+  await expect(page).toHaveURL(/\/app\/sessions$/)
   await page.getByTestId('show-status-session-1').click()
   await expect(page.getByTestId('roster-filter-present')).toHaveText('Hadir (2)')
   await expect(
@@ -141,4 +144,13 @@ test('teacher sees live roster counts on the active session card and detail', as
   // Kartu sesi me-refresh saat halaman dimuat; panel detail mengambil ulang setiap dibuka.
   await expect(page.getByTestId('roster-filter-unmarked')).toHaveText('Belum tercatat (1)')
   await expect(page.getByText(/embedding|foto wajah/i)).toHaveCount(0)
+
+  await page.getByTestId('edit-attendance-student-1').click()
+  const attendanceDrawer = page.getByRole('dialog', { name: 'Ubah kehadiran' })
+  await expect(attendanceDrawer).toBeVisible()
+  await expect(attendanceDrawer).toContainText('Status saat ini: Hadir')
+  await page.getByTestId('submit-attendance-edit').click()
+  await expect(attendanceDrawer).toContainText('Alasan perubahan wajib diisi')
+  await page.getByRole('button', { name: 'Batal' }).click()
+  await expect(attendanceDrawer).toHaveCount(0)
 })

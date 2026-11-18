@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import UiAvatar from '../components/ui/UiAvatar.vue'
 import UiBadge from '../components/ui/UiBadge.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiCard from '../components/ui/UiCard.vue'
+import UiDrawer from '../components/ui/UiDrawer.vue'
 import UiField from '../components/ui/UiField.vue'
 import UiInput from '../components/ui/UiInput.vue'
 import UiModal from '../components/ui/UiModal.vue'
@@ -11,7 +12,7 @@ import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import { formatApiError } from '../utils/apiError'
 import UiSearchInput from '../components/ui/UiSearchInput.vue'
 import UiSelect from '../components/ui/UiSelect.vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { formatDateTime } from '../utils/dateFormat'
 import { useAuthStore } from '../stores/auth'
 import {
@@ -33,6 +34,8 @@ import {
 const weekdays = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu']
 const auth = useAuthStore()
 const route = useRoute() as unknown as { params: Record<string, unknown> } | undefined
+const router = useRouter() as ReturnType<typeof useRouter> | undefined
+const isSessionDetailRoute = computed(() => typeof route?.params.sessionId === 'string')
 const isTeacher = computed(() => auth.account?.roles.includes('TEACHER') ?? false)
 const isLaborant = computed(
   () => !isAdmin.value && (auth.account?.roles ?? []).includes('LABORANT'),
@@ -58,12 +61,17 @@ async function loadPolicyGraceDefault(): Promise<void> {
 const openingScheduleId = ref<string | null>(null)
 const closingSessionId = ref<string | null>(null)
 const isLoading = ref(false)
+const isSessionDetailLoading = ref(false)
 const pageError = ref<string | null>(null)
 const successMessage = ref<string | null>(null)
 const selected = ref<AttendanceSession | null>(null)
 const roster = ref<SessionRosterEntry[]>([])
 const isRosterLoading = ref(false)
 const rosterError = ref<string | null>(null)
+const editingRosterStudentId = ref<string | null>(null)
+const editingRosterEntry = computed(
+  () => roster.value.find((entry) => entry.student_id === editingRosterStudentId.value) ?? null,
+)
 const markDrafts = reactive<
   Record<string, { status: string; note: string; saving: boolean; error: string | null }>
 >({})
@@ -169,11 +177,6 @@ function draftFor(studentId: string): {
   }
   return draft
 }
-
-const unmarkedRoster = computed(() => roster.value.filter((entry) => entry.record_status === null))
-const markedRoster = computed(() =>
-  roster.value.filter((entry) => entry.record_status !== null && entry.record_status !== undefined),
-)
 
 type RosterStatusFilter = 'all' | 'unmarked' | 'present' | 'late' | 'absent' | 'excused'
 const rosterSearch = ref('')
@@ -300,12 +303,19 @@ async function reload(): Promise<void> {
   isLoading.value = true
   pageError.value = null
   try {
+    const rawSessionId = route?.params.sessionId
+    if (typeof rawSessionId === 'string') {
+      await loadSessionDetail(rawSessionId)
+      return
+    }
+
     const [available, page] = await Promise.all([
       listOpenableSchedules(),
       listAttendanceSessions({ limit: 50, offset: 0 }),
     ])
     schedules.value = available
     sessions.value = page.items
+    await loadPolicyGraceDefault()
     void refreshLiveRoster(
       page.items.filter((s) => s.status !== 'closed' && s.status !== 'cancelled'),
     )
@@ -317,17 +327,21 @@ async function reload(): Promise<void> {
 }
 
 onMounted(async () => {
-  await loadPolicyGraceDefault()
   await reload()
-  // Route detail (/app/sessions/:sessionId) harus bisa dibuka ulang langsung:
-  // pilih sesi dari URL bila tersedia.
-  const rawSessionId = route?.params.sessionId
-  const routeSessionId = typeof rawSessionId === 'string' ? rawSessionId : ''
-  if (routeSessionId) {
-    const match = sessions.value.find((item) => item.id === routeSessionId)
-    if (match) await showStatus(match)
-  }
 })
+
+watch(
+  () => route?.params.sessionId,
+  (rawSessionId) => {
+    editingRosterStudentId.value = null
+    if (typeof rawSessionId === 'string') {
+      void loadSessionDetail(rawSessionId)
+    } else {
+      selected.value = null
+      roster.value = []
+    }
+  },
+)
 
 function askOpenSession(schedule: OpenableSchedule): void {
   pageError.value = null
@@ -383,11 +397,8 @@ async function askClose(item: AttendanceSession): Promise<void> {
   confirmCloseId.value = item.id
   confirmUnmarked.value = null
   try {
-    if (selected.value?.id !== item.id) {
-      selected.value = await getAttendanceSessionStatus(item.id)
-      await loadRoster(item.id)
-    }
-    confirmUnmarked.value = roster.value.filter((entry) => entry.record_status === null).length
+    const entries = selected.value?.id === item.id ? roster.value : await getSessionRoster(item.id)
+    confirmUnmarked.value = entries.filter((entry) => entry.record_status === null).length
   } catch {
     confirmUnmarked.value = null
   }
@@ -398,7 +409,7 @@ async function closeSession(item: AttendanceSession): Promise<void> {
   pageError.value = null
   confirmCloseId.value = null
   try {
-    selected.value = await closeAttendanceSession(item.id)
+    await closeAttendanceSession(item.id)
     successMessage.value = 'Sesi ' + item.subject + ' telah ditutup.'
     await reload()
   } catch (error) {
@@ -409,14 +420,53 @@ async function closeSession(item: AttendanceSession): Promise<void> {
 }
 
 async function showStatus(item: AttendanceSession): Promise<void> {
+  if (router && route?.params.sessionId !== item.id) {
+    await router.push({ name: 'session-detail', params: { sessionId: item.id } })
+    return
+  }
+  await loadSessionDetail(item.id)
+}
+
+async function loadSessionDetail(sessionId: string): Promise<void> {
+  isSessionDetailLoading.value = true
   pageError.value = null
   manualMarkMessage.value = null
+  editingRosterStudentId.value = null
   try {
-    selected.value = await getAttendanceSessionStatus(item.id)
-    await loadRoster(item.id)
+    selected.value = await getAttendanceSessionStatus(sessionId)
+    await loadRoster(sessionId)
   } catch (error) {
     pageError.value = formatError(error)
+  } finally {
+    isSessionDetailLoading.value = false
   }
+}
+
+async function returnToSessionList(): Promise<void> {
+  if (router) {
+    await router.push({ name: 'sessions' })
+  } else {
+    selected.value = null
+    roster.value = []
+  }
+}
+
+function openAttendanceEditor(entry: SessionRosterEntry): void {
+  if (!canManualMark.value) return
+  const draft = draftFor(entry.student_id)
+  draft.status = entry.record_status ?? 'present'
+  draft.note = ''
+  draft.error = null
+  manualMarkMessage.value = null
+  editingRosterStudentId.value = entry.student_id
+}
+
+function closeAttendanceEditor(): void {
+  editingRosterStudentId.value = null
+}
+
+async function submitEditedAttendance(): Promise<void> {
+  if (editingRosterEntry.value) await submitManualMark(editingRosterEntry.value)
 }
 
 async function loadRoster(sessionId: string): Promise<void> {
@@ -469,6 +519,7 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
       entry.full_name +
       (entry.record_status ? ' diperbarui langsung.' : ' ditandai manual.')
     await loadRoster(selected.value.id)
+    closeAttendanceEditor()
   } catch (error) {
     draft.error = manualMarkError(error)
   } finally {
@@ -480,8 +531,9 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
 <template>
   <div class="st-page">
     <UiPageHeader
+      v-if="!isSessionDetailRoute"
       title="Sesi Presensi"
-      description="Kelola sesi presensi praktikum: yang sedang berjalan, siap dibuka hari ini, dan riwayat sesi."
+      description="Pantau sesi berjalan, buka jadwal yang memenuhi syarat, dan lihat riwayat presensi."
     >
       <template #actions>
         <UiButton variant="secondary" @click="reload">Muat ulang</UiButton>
@@ -493,7 +545,24 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
       {{ successMessage }}
     </p>
 
-    <div v-if="isTeacher" class="st-card" data-testid="teacher-opening-preference">
+    <p v-if="isSessionDetailRoute && isSessionDetailLoading" class="st-table__muted" role="status">
+      Memuat detail sesi…
+    </p>
+    <UiButton
+      v-if="isSessionDetailRoute && !selected"
+      variant="text"
+      size="sm"
+      type="button"
+      @click="returnToSessionList"
+    >
+      ← Kembali ke daftar sesi
+    </UiButton>
+
+    <div
+      v-if="!isSessionDetailRoute && isTeacher"
+      class="st-card"
+      data-testid="teacher-opening-preference"
+    >
       <h2 class="st-card__title">Mode pembukaan sesi saya</h2>
       <p class="st-table__muted">
         Pilihan mode (“Saya membuka sesi sendiri” / “Sesi saya dibuka otomatis sesuai jadwal”)
@@ -502,21 +571,14 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
     </div>
 
     <!-- Siap dibuka hari ini -->
-    <section aria-labelledby="openable-title">
+    <section v-if="!isSessionDetailRoute" aria-labelledby="openable-title">
       <div class="st-sectionrow">
         <h2 id="openable-title" class="st-section">Siap Dibuka Hari Ini</h2>
-        <p class="st-table__muted">Jadwal terverifikasi · kamera siaga</p>
-      </div>
-      <div class="st-toolbar">
-        <UiField label="Grace period (menit)">
-          <UiInput
-            :model-value="String(gracePeriodMinutes)"
-            type="number"
-            aria-label="Grace period dalam menit"
-            data-testid="open-grace-input"
-            @update:model-value="gracePeriodMinutes = Number($event)"
-          />
-        </UiField>
+        <p class="st-table__muted">
+          Toleransi sesi mengikuti Kebijakan Presensi<span v-if="isAdmin">
+            · <RouterLink to="/app/attendance-policy">Atur kebijakan</RouterLink></span
+          >
+        </p>
       </div>
       <div v-if="schedules.length" class="st-grid2">
         <article v-for="schedule in schedules" :key="schedule.id" class="st-card st-schedule">
@@ -559,7 +621,7 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
     </section>
 
     <!-- Sedang berlangsung -->
-    <section aria-labelledby="active-title">
+    <section v-if="!isSessionDetailRoute" aria-labelledby="active-title">
       <div class="st-sectionrow">
         <h2 id="active-title" class="st-section">Sedang Berlangsung</h2>
         <p class="st-table__muted">Real-time sinkronisasi kamera laboratorium</p>
@@ -682,7 +744,7 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
     </section>
 
     <!-- Riwayat -->
-    <section aria-labelledby="history-title">
+    <section v-if="!isSessionDetailRoute" aria-labelledby="history-title">
       <div class="st-sectionrow">
         <h2 id="history-title" class="st-section">Riwayat Sesi Terakhir</h2>
         <RouterLink class="st-link" to="/app/reports">Lihat Semua Laporan →</RouterLink>
@@ -745,7 +807,7 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
 
     <!-- Detail sesi -->
     <section v-if="selected" aria-labelledby="session-detail-title">
-      <UiButton variant="text" size="sm" @click="selected = null"
+      <UiButton variant="text" size="sm" @click="returnToSessionList"
         >← Kembali ke daftar sesi</UiButton
       >
       <div
@@ -772,7 +834,13 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
       <UiPageHeader
         :title="`Detail Sesi: ${selected.subject}`"
         :description="`${selected.laboratory_name} · ${selected.class_name} · Pengampu ${selected.teacher_name}`"
-      />
+      >
+        <template #actions>
+          <UiButton variant="secondary" type="button" @click="loadSessionDetail(selected.id)">
+            Muat ulang
+          </UiButton>
+        </template>
+      </UiPageHeader>
       <div class="st-grid3">
         <UiCard title="Total Siswa" :subtitle="`${selected.student_count} Kadet`">
           <p class="st-kpi">{{ selected.student_count }}</p>
@@ -831,6 +899,7 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
                 <th scope="col">Waktu Presensi</th>
                 <th scope="col">Verifikasi</th>
                 <th scope="col">Status</th>
+                <th v-if="canManualMark" scope="col" class="st-table__actions">Aksi</th>
               </tr>
             </thead>
             <tbody>
@@ -876,147 +945,119 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
                     {{ rosterStatusLabel(entry.record_status) }}
                   </UiBadge>
                 </td>
+                <td v-if="canManualMark" class="st-table__actions">
+                  <UiButton
+                    variant="secondary"
+                    size="sm"
+                    :data-testid="'edit-attendance-' + entry.student_id"
+                    :aria-label="'Edit kehadiran ' + entry.full_name"
+                    @click="openAttendanceEditor(entry)"
+                  >
+                    Edit
+                  </UiButton>
+                </td>
               </tr>
             </tbody>
           </table>
         </div>
       </div>
 
-      <div v-if="canManualMark" class="st-card">
-        <h3 class="st-card__title">Tandai kehadiran manual</h3>
-        <p v-if="isClosedSelected" class="st-alert" role="note">
-          Sesi sudah ditutup: penandaan di sini adalah koreksi pascasesi. Alasan wajib diisi dan
-          tercatat pada audit.
-        </p>
-        <p class="st-table__muted">
-          Hanya untuk siswa roster yang belum memiliki catatan presensi. Pilihan guru langsung
-          menjadi status akhir tanpa ambang batas otomatis.
-        </p>
-        <p v-if="manualMarkMessage" class="st-alert st-alert--success" role="status">
-          {{ manualMarkMessage }}
-        </p>
-        <p v-if="unmarkedRoster.length === 0" class="st-table__muted">
-          Semua siswa roster sudah memiliki catatan presensi.
-        </p>
-        <ul v-else class="st-list">
-          <li v-for="entry in unmarkedRoster" :key="entry.student_id" class="st-list__item">
-            <span class="st-identity">
-              <UiAvatar :name="entry.full_name" />
-              <span
-                ><strong>{{ entry.full_name }}</strong
-                ><br /><span class="st-table__muted">{{ entry.student_number }}</span></span
-              >
-            </span>
-            <UiSelect
-              v-model="draftFor(entry.student_id).status"
-              :disabled="draftFor(entry.student_id).saving"
-              :aria-label="'Status untuk ' + entry.full_name"
-            >
-              <option value="present">Hadir</option>
-              <option value="late">Terlambat</option>
-              <option value="absent">Absen</option>
-              <option value="excused">Izin</option>
-            </UiSelect>
-            <UiInput
-              v-model="draftFor(entry.student_id).note"
-              type="text"
-              maxlength="500"
-              placeholder="Alasan atau keterangan"
-              :disabled="draftFor(entry.student_id).saving"
-              :aria-label="'Catatan untuk ' + entry.full_name"
-            />
-            <UiButton
-              variant="secondary"
-              :disabled="draftFor(entry.student_id).saving"
-              :data-testid="'manual-mark-' + entry.student_id"
-              @click="submitManualMark(entry)"
-            >
-              {{ draftFor(entry.student_id).saving ? 'Menyimpan…' : 'Tandai manual' }}
-            </UiButton>
-          </li>
-        </ul>
-        <p
-          v-if="unmarkedRoster.length && draftFor(unmarkedRoster[0].student_id).error"
-          class="st-alert st-alert--error"
-          role="alert"
-        >
-          {{ draftFor(unmarkedRoster[0].student_id).error }}
-        </p>
-      </div>
-      <p v-else-if="isCancelledSelected" class="st-alert" role="note">
+      <p v-if="manualMarkMessage" class="st-alert st-alert--success" role="status">
+        {{ manualMarkMessage }}
+      </p>
+      <p v-if="!canManualMark && isCancelledSelected" class="st-alert" role="note">
         Sesi dibatalkan dan tidak dapat dikoreksi. Buat jadwal pengganti bila praktikum tetap
         dilaksanakan.
       </p>
-      <p v-else-if="isClosedSelected" class="st-table__muted">
+      <p v-else-if="!canManualMark && isClosedSelected" class="st-table__muted">
         Sesi sudah ditutup: koreksi pascasesi membutuhkan izin Koreksi Sesi Tertutup.
       </p>
-      <p v-else class="st-table__muted">Tandai manual membutuhkan izin Tandai Kehadiran Manual.</p>
+      <p v-else-if="!canManualMark" class="st-table__muted">
+        Tandai atau ubah kehadiran membutuhkan izin yang sesuai.
+      </p>
+    </section>
 
-      <div v-if="canManualMark" class="st-card" data-testid="direct-update-panel">
-        <h3 class="st-card__title">Ubah kehadiran langsung</h3>
+    <UiDrawer
+      v-if="editingRosterEntry && canManualMark"
+      data-testid="attendance-edit-drawer"
+      :title="editingRosterEntry.record_status ? 'Ubah kehadiran' : 'Tandai kehadiran manual'"
+      :subtitle="`${editingRosterEntry.full_name} · ${editingRosterEntry.student_number}`"
+      @close="closeAttendanceEditor"
+    >
+      <form
+        id="attendance-edit-form"
+        class="attendance-edit-form"
+        @submit.prevent="submitEditedAttendance"
+      >
+        <p class="attendance-edit-form__summary">
+          Status saat ini:
+          <strong>{{ rosterStatusLabel(editingRosterEntry.record_status) }}</strong>
+        </p>
         <p v-if="isClosedSelected" class="st-alert" role="note">
-          Sesi sudah ditutup: perubahan di sini adalah koreksi pascasesi. Alasan wajib diisi dan
-          tercatat pada audit.
+          Sesi sudah ditutup. Perubahan adalah koreksi pascasesi dan alasan wajib diisi serta
+          dicatat pada audit.
         </p>
-        <p class="st-table__muted">
-          Pengganti koreksi berjenjang: guru/aslab berwenang langsung memperbarui catatan yang sudah
-          ada (termasuk hasil face recognition) tanpa persetujuan admin. Setiap perubahan dicatat
-          pada audit.
+        <p v-else-if="editingRosterEntry.record_status" class="st-table__muted">
+          Perubahan status memerlukan alasan dan akan dicatat pada audit.
         </p>
+        <p v-else class="st-table__muted">
+          Pilih status akhir untuk siswa roster yang belum memiliki catatan presensi.
+        </p>
+        <UiField label="Status kehadiran" required>
+          <UiSelect
+            v-model="draftFor(editingRosterEntry.student_id).status"
+            :disabled="draftFor(editingRosterEntry.student_id).saving"
+            aria-label="Status kehadiran"
+          >
+            <option value="present">Hadir</option>
+            <option value="late">Terlambat</option>
+            <option value="absent">Absen</option>
+            <option value="excused">Izin</option>
+          </UiSelect>
+        </UiField>
+        <UiField
+          :label="editingRosterEntry.record_status ? 'Alasan perubahan' : 'Alasan atau keterangan'"
+          :required="Boolean(editingRosterEntry.record_status) || isClosedSelected"
+          :error="draftFor(editingRosterEntry.student_id).error"
+        >
+          <UiInput
+            v-model="draftFor(editingRosterEntry.student_id).note"
+            type="text"
+            maxlength="500"
+            :placeholder="
+              editingRosterEntry.record_status
+                ? 'Tuliskan alasan perubahan'
+                : 'Opsional untuk sesi aktif'
+            "
+            :disabled="draftFor(editingRosterEntry.student_id).saving"
+            aria-label="Alasan atau keterangan"
+          />
+        </UiField>
         <p v-if="manualMarkMessage" class="st-alert st-alert--success" role="status">
           {{ manualMarkMessage }}
         </p>
-        <p v-if="markedRoster.length === 0" class="st-table__muted">
-          Belum ada catatan pada sesi ini. Gunakan “Tandai kehadiran manual” di atas.
-        </p>
-        <ul v-else class="st-list">
-          <li v-for="entry in markedRoster" :key="'upd-' + entry.student_id" class="st-list__item">
-            <span class="st-identity">
-              <UiAvatar :name="entry.full_name" />
-              <span
-                ><strong>{{ entry.full_name }}</strong
-                ><br /><span class="st-table__muted"
-                  >{{ entry.student_number }} · saat ini:
-                  {{ rosterStatusLabel(entry.record_status) }}</span
-                ></span
-              >
-            </span>
-            <UiSelect
-              v-model="draftFor(entry.student_id).status"
-              :disabled="draftFor(entry.student_id).saving"
-              :aria-label="'Status baru untuk ' + entry.full_name"
-            >
-              <option value="present">Hadir</option>
-              <option value="late">Terlambat</option>
-              <option value="absent">Absen</option>
-              <option value="excused">Izin</option>
-            </UiSelect>
-            <UiInput
-              v-model="draftFor(entry.student_id).note"
-              type="text"
-              maxlength="500"
-              placeholder="Alasan perubahan"
-              :disabled="draftFor(entry.student_id).saving"
-              :aria-label="'Catatan untuk ' + entry.full_name"
-            />
-            <UiButton
-              variant="secondary"
-              :disabled="draftFor(entry.student_id).saving"
-              :data-testid="'direct-update-' + entry.student_id"
-              @click="submitManualMark(entry)"
-              >{{ draftFor(entry.student_id).saving ? 'Menyimpan…' : 'Ubah langsung' }}</UiButton
-            >
-            <p
-              v-if="draftFor(entry.student_id).error"
-              class="st-alert st-alert--error"
-              role="alert"
-            >
-              {{ draftFor(entry.student_id).error }}
-            </p>
-          </li>
-        </ul>
-      </div>
-    </section>
+      </form>
+      <template #footer>
+        <UiButton variant="secondary" type="button" @click="closeAttendanceEditor">
+          Batal
+        </UiButton>
+        <UiButton
+          variant="primary"
+          type="button"
+          :disabled="draftFor(editingRosterEntry.student_id).saving"
+          data-testid="submit-attendance-edit"
+          @click="submitEditedAttendance"
+        >
+          {{
+            draftFor(editingRosterEntry.student_id).saving
+              ? 'Menyimpan…'
+              : editingRosterEntry.record_status
+                ? 'Simpan perubahan'
+                : 'Tandai kehadiran'
+          }}
+        </UiButton>
+      </template>
+    </UiDrawer>
 
     <!-- Modal tutup sesi (B03-05) -->
     <UiModal
@@ -1114,3 +1155,17 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
     </UiModal>
   </div>
 </template>
+
+<style scoped>
+.attendance-edit-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.attendance-edit-form__summary {
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--st-border);
+  color: var(--st-text-main);
+}
+</style>

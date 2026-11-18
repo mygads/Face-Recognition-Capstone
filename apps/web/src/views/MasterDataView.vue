@@ -84,6 +84,8 @@ const successMessage = ref<string | null>(null)
 const isFormOpen = ref(false)
 const editingId = ref<string | null>(null)
 const form = ref<Record<string, string | number | boolean>>({})
+const editingStudentClasses = ref<Student['classes']>([])
+const editingStudentPrimaryClassId = ref<string | null>(null)
 
 // import
 const isImportOpen = ref(false)
@@ -153,6 +155,17 @@ const tabPaths: Record<MasterTab, string> = {
   laboratories: '/app/master-data/laboratories',
 }
 const classOptions = ref<SchoolClass[]>([])
+const studentClassOptions = computed(() => {
+  const byId = new Map<string, { id: string; code: string; name: string; academic_year: string }>()
+  for (const schoolClass of classOptions.value) byId.set(schoolClass.id, schoolClass)
+  for (const studentClass of editingStudentClasses.value) {
+    if (!byId.has(studentClass.id)) byId.set(studentClass.id, studentClass)
+  }
+  return [...byId.values()].sort(
+    (left, right) =>
+      right.academic_year.localeCompare(left.academic_year) || left.code.localeCompare(right.code),
+  )
+})
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const activeFilterCount = computed(() => (classFilter.value ? 1 : 0) + (statusFilter.value ? 1 : 0))
 
@@ -253,6 +266,8 @@ function createDefaults(): Record<string, string | number | boolean> {
 
 function openCreate(): void {
   editingId.value = null
+  editingStudentClasses.value = []
+  editingStudentPrimaryClassId.value = null
   form.value = createDefaults()
   formError.value = null
   isFormOpen.value = true
@@ -260,13 +275,54 @@ function openCreate(): void {
 
 function openEditStudent(row: Student): void {
   editingId.value = row.id
+  editingStudentClasses.value = [...(row.classes ?? [])]
+  editingStudentPrimaryClassId.value = row.classes?.[0]?.id ?? null
   form.value = {
     student_number: row.student_number,
     full_name: row.full_name,
     is_active: row.is_active,
+    class_id: editingStudentPrimaryClassId.value ?? '',
   }
   formError.value = null
   isFormOpen.value = true
+}
+
+async function saveStudentClass(studentId: string, selectedClassId: string): Promise<void> {
+  const previousClassId = editingStudentPrimaryClassId.value
+  if (selectedClassId === (previousClassId ?? '')) return
+
+  const selectedAlreadyAssigned = editingStudentClasses.value.some(
+    (studentClass) => studentClass.id === selectedClassId,
+  )
+  if (selectedClassId && !selectedAlreadyAssigned) {
+    await enrollStudent(selectedClassId, studentId)
+    const selectedClass = classOptions.value.find(
+      (studentClass) => studentClass.id === selectedClassId,
+    )
+    if (selectedClass) {
+      editingStudentClasses.value = [
+        ...editingStudentClasses.value,
+        {
+          id: selectedClass.id,
+          code: selectedClass.code,
+          name: selectedClass.name,
+          academic_year: selectedClass.academic_year,
+        },
+      ].sort(
+        (left, right) =>
+          right.academic_year.localeCompare(left.academic_year) ||
+          left.code.localeCompare(right.code),
+      )
+    }
+  }
+
+  if (previousClassId) {
+    await removeStudentFromClass(previousClassId, studentId)
+    editingStudentClasses.value = editingStudentClasses.value.filter(
+      (studentClass) => studentClass.id !== previousClassId,
+    )
+  }
+  editingStudentPrimaryClassId.value = selectedClassId || null
 }
 
 function openEditRow(row: SchoolClass | Laboratory): void {
@@ -293,9 +349,14 @@ async function submitForm(): Promise<void> {
       } else {
         const created = await createStudent(payload)
         studentId = created.id
+        // Preserve the created record if assigning its selected class fails;
+        // retrying the open form must update this student, not create a duplicate.
+        editingId.value = created.id
+        editingStudentClasses.value = [...(created.classes ?? [])]
+        editingStudentPrimaryClassId.value = created.classes?.[0]?.id ?? null
       }
       const classId = String(form.value.class_id ?? '')
-      if (classId && studentId) await enrollStudent(classId, studentId)
+      if (studentId) await saveStudentClass(studentId, classId)
     } else if (tab.value === 'classes') {
       const payload = {
         code: String(form.value.code ?? '').trim(),
@@ -1130,13 +1191,18 @@ function labStatusTone(lab: Laboratory): 'present' | 'neutral' {
           <UiField label="Rombongan Belajar (Kelas)">
             <UiSelect
               :model-value="String(form.class_id ?? '')"
+              aria-label="Rombongan Belajar (Kelas)"
               @update:model-value="form.class_id = $event"
             >
               <option value="">- Tanpa kelas -</option>
-              <option v-for="cls in classOptions" :key="cls.id" :value="cls.id">
+              <option v-for="cls in studentClassOptions" :key="cls.id" :value="cls.id">
                 {{ cls.code }} - {{ cls.name }}
               </option>
             </UiSelect>
+            <p v-if="editingId" class="st-table__muted">
+              Kelas tahun ajaran terbaru dipilih otomatis. Perubahan kelas tidak menghapus relasi
+              tahun ajaran sebelumnya.
+            </p>
           </UiField>
           <UiField label="Status Akademik Siswa" required>
             <div class="st-radio-cards">
