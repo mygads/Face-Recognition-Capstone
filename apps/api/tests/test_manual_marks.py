@@ -17,6 +17,7 @@ from presensi_api.api.security.roles import (
     AuthenticatedUser,
     Permission,
     RoleCode,
+    principal_for_user,
 )
 from presensi_api.db.base import Base
 from presensi_api.db.models import (
@@ -29,11 +30,14 @@ from presensi_api.db.models import (
     Laboratory,
     PracticumSchedule,
     RecognitionEvent,
+    Role,
     SchoolClass,
     SessionStudent,
     Student,
     User,
+    UserRole,
 )
+from presensi_api.db.seed_roles import seed_roles
 from presensi_api.db.session import get_db_session
 from presensi_api.main import app
 
@@ -72,6 +76,7 @@ def manual_marks_database() -> Generator[
 
     local_now = datetime.now(ZoneInfo("Asia/Jakarta"))
     with factory.begin() as db:
+        seed_roles(db)
         teacher = User(
             id=TEACHER_ID,
             email="teacher@example.test",
@@ -98,6 +103,16 @@ def manual_marks_database() -> Generator[
             [teacher, other_teacher, school_class, laboratory, first, second, outsider]
         )
         db.flush()
+        teacher_role = db.scalar(
+            select(Role).where(Role.code == RoleCode.TEACHER.value)
+        )
+        assert teacher_role is not None
+        db.add_all(
+            [
+                UserRole(user_id=teacher.id, role_id=teacher_role.id),
+                UserRole(user_id=other_teacher.id, role_id=teacher_role.id),
+            ]
+        )
         schedule = PracticumSchedule(
             class_id=school_class.id,
             laboratory_id=laboratory.id,
@@ -453,15 +468,14 @@ def test_closed_session_new_mark_requires_reason(
     assert with_reason.json()["record"]["source"] == "manual"
 
 
-def test_closed_session_correction_grant_requires_session_view_grant(
+def test_teacher_closed_session_correction_uses_default_session_view_permission(
     manual_marks_database: tuple[sessionmaker[Session], dict[str, UUID]],
 ) -> None:
-    """Izin koreksi sesi tertutup dapat di-grant (butuh pantau sesi)."""
-    _, ids = manual_marks_database
-    _ = ids
-    from presensi_api.api.security.roles import LABORANT_GRANTABLE_PERMISSIONS
+    """Grant koreksi memakai default guru lalu membuka alur koreksi API."""
+    factory, ids = manual_marks_database
+    from presensi_api.api.security.roles import TEACHER_GRANTABLE_PERMISSIONS
 
-    assert Permission.ATTENDANCE_CORRECT_CLOSED in LABORANT_GRANTABLE_PERMISSIONS
+    assert Permission.ATTENDANCE_CORRECT_CLOSED in TEACHER_GRANTABLE_PERMISSIONS
     app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
         id=TEACHER_ID,
         email="admin-grant@example.test",
@@ -470,8 +484,6 @@ def test_closed_session_correction_grant_requires_session_view_grant(
     )
     try:
         grants_url = f"/api/v1/accounts/{TEACHER_ID}/permission-grants"
-        alone = httpx.Response(500)
-        # Tanpa prasyarat pantau sesi -> ditolak 422.
         import asyncio as _asyncio
 
         async def grant(permission: str) -> httpx.Response:
@@ -480,14 +492,61 @@ def test_closed_session_correction_grant_requires_session_view_grant(
             ) as client:
                 return await client.post(grants_url, json={"permission": permission})
 
-        alone = _asyncio.run(grant("attendance_correct_closed"))
-        assert alone.status_code == 422, alone.text
-        assert alone.json()["error"]["code"] == "grant_missing_prerequisite"
-        assert _asyncio.run(grant("session_view")).status_code == 201
+        async def list_grants() -> httpx.Response:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+            ) as client:
+                return await client.get(grants_url)
+
+        before_grant = _asyncio.run(list_grants())
+        assert before_grant.status_code == 200, before_grant.text
+        before_state = before_grant.json()
+        assert "session_view" in before_state["base_permissions"]
+        assert "attendance_read" in before_state["base_permissions"]
+        assert before_state["extra_permissions"] == []
+        assert before_state["grantable"] == ["attendance_correct_closed"]
+        denied = _asyncio.run(grant("device_operate"))
+        assert denied.status_code == 403, denied.text
+        assert denied.json()["error"]["code"] == "grant_forbidden"
+
         granted = _asyncio.run(grant("attendance_correct_closed"))
         assert granted.status_code == 201, granted.text
+
+        grant_state = _asyncio.run(list_grants())
+        assert grant_state.status_code == 200, grant_state.text
+        assert "session_view" in grant_state.json()["base_permissions"]
+        assert grant_state.json()["grantable"] == ["attendance_correct_closed"]
+        assert "attendance_correct_closed" in grant_state.json()["extra_permissions"]
     finally:
-        del app.dependency_overrides[get_current_user]
+        app.dependency_overrides.pop(get_current_user, None)
+
+    def persisted_teacher_principal() -> AuthenticatedUser:
+        with factory() as db:
+            teacher = db.get(User, TEACHER_ID)
+            assert teacher is not None
+            return principal_for_user(db, teacher)
+
+    lab_id = _lab_id(factory)
+    _seed_ai_record(factory, ids["session"], ids["first"], lab_id)
+    _close_session(factory, ids["session"])
+    app.dependency_overrides[get_current_user] = persisted_teacher_principal
+    try:
+        teacher = persisted_teacher_principal()
+        assert Permission.SESSION_VIEW in teacher.permissions
+        assert Permission.ATTENDANCE_CORRECT_CLOSED in teacher.permissions
+        corrected = post_mark(
+            ids["session"],
+            {
+                "student_id": str(ids["first"]),
+                "status": "late",
+                "note": "koreksi pascasesi dari grant tersimpan",
+            },
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+    assert corrected.status_code == 201, corrected.text
+    assert corrected.json()["record"]["status"] == "late"
+    assert corrected.json()["record"]["source"] == "manual"
 
 
 def test_closed_session_laborant_with_grant_and_lab_scope_succeeds(

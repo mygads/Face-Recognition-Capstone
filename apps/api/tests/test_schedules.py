@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Generator
+from datetime import date, datetime, timedelta
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -13,7 +15,7 @@ from sqlalchemy.pool import StaticPool
 from presensi_api.api.security.dependencies import get_current_user
 from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
 from presensi_api.db.base import Base
-from presensi_api.db.models import Role, User, UserRole
+from presensi_api.db.models import PracticumSchedule, Role, User, UserRole
 from presensi_api.db.seed_roles import seed_roles
 from presensi_api.db.session import get_db_session
 from presensi_api.main import app
@@ -141,6 +143,11 @@ def payload(
     if effective_through is not None:
         result["effective_through"] = effective_through
     return result
+
+
+def upcoming_weekday(day: int, start: date | None = None) -> date:
+    reference = start or datetime.now(ZoneInfo("Asia/Jakarta")).date()
+    return reference + timedelta(days=(day - reference.weekday()) % 7)
 
 
 def test_schedule_conflict_detection_and_filters(
@@ -277,6 +284,113 @@ def test_schedule_validates_references_time_and_teacher_scope(
         payload(class_a["id"], labs["a"]["id"], str(UUID(int=44))),
     )
     assert other_assignment.status_code == 403
+
+
+def test_duplicate_schedule_creates_numbered_one_meeting_per_week_and_splits_source(
+    api_database: sessionmaker[Session],
+) -> None:
+    class_a, _, labs = setup_master_data()
+    teacher_id = str(UUID(int=43))
+    today = datetime.now(ZoneInfo("Asia/Jakarta")).date()
+    first_duplicate_date = upcoming_weekday(1, today) + timedelta(days=7)
+    source = request(
+        "POST",
+        "/api/v1/schedules",
+        payload(
+            class_a["id"],
+            labs["a"]["id"],
+            teacher_id,
+            effective_from=(today - timedelta(days=28)).isoformat(),
+            effective_through=None,
+        ),
+    )
+    assert source.status_code == 201, source.text
+
+    duplicated = request(
+        "POST",
+        f"/api/v1/schedules/{source.json()['id']}/duplicates",
+        {
+            "start_date": first_duplicate_date.isoformat(),
+            "additional_weeks": 3,
+        },
+    )
+    assert duplicated.status_code == 201, duplicated.text
+    result = duplicated.json()
+    assert (
+        result["source"]["effective_through"]
+        == (first_duplicate_date - timedelta(days=1)).isoformat()
+    )
+    assert [item["subject"] for item in result["duplicates"]] == [
+        "Pertemuan 2 - Praktikum Sintetis",
+        "Pertemuan 3 - Praktikum Sintetis",
+        "Pertemuan 4 - Praktikum Sintetis",
+    ]
+    assert [item["effective_from"] for item in result["duplicates"]] == [
+        first_duplicate_date.isoformat(),
+        (first_duplicate_date + timedelta(days=7)).isoformat(),
+        (first_duplicate_date + timedelta(days=14)).isoformat(),
+    ]
+    assert all(
+        item["effective_from"] == item["effective_through"]
+        and item["weekday"] == result["source"]["weekday"]
+        and item["start_time"] == result["source"]["start_time"]
+        and item["end_time"] == result["source"]["end_time"]
+        for item in result["duplicates"]
+    )
+
+
+def test_duplicate_schedule_until_date_is_inclusive_and_conflicts_are_atomic(
+    api_database: sessionmaker[Session],
+) -> None:
+    class_a, _, labs = setup_master_data()
+    teacher_id = str(UUID(int=43))
+    today = datetime.now(ZoneInfo("Asia/Jakarta")).date()
+    source_start = today - timedelta(days=28)
+    source_end = today - timedelta(days=1)
+    first_duplicate_date = upcoming_weekday(1, today)
+    source = request(
+        "POST",
+        "/api/v1/schedules",
+        payload(
+            class_a["id"],
+            labs["a"]["id"],
+            teacher_id,
+            effective_from=source_start.isoformat(),
+            effective_through=source_end.isoformat(),
+        ),
+    )
+    assert source.status_code == 201, source.text
+    conflict_date = first_duplicate_date + timedelta(days=7)
+    conflicting = request(
+        "POST",
+        "/api/v1/schedules",
+        payload(
+            class_a["id"],
+            labs["a"]["id"],
+            teacher_id,
+            effective_from=conflict_date.isoformat(),
+            effective_through=conflict_date.isoformat(),
+        ),
+    )
+    assert conflicting.status_code == 201, conflicting.text
+
+    duplicated = request(
+        "POST",
+        f"/api/v1/schedules/{source.json()['id']}/duplicates",
+        {
+            "start_date": first_duplicate_date.isoformat(),
+            "through_date": (first_duplicate_date + timedelta(days=14)).isoformat(),
+        },
+    )
+    assert duplicated.status_code == 409, duplicated.text
+    assert duplicated.json()["error"]["code"] == "schedule_conflict"
+    assert conflict_date.isoformat() in duplicated.json()["error"]["message"]
+    with api_database() as session:
+        schedules = session.scalars(select(PracticumSchedule)).all()
+        assert len(schedules) == 2
+        stored_source = session.get(PracticumSchedule, UUID(source.json()["id"]))
+        assert stored_source is not None
+        assert stored_source.effective_through == source_end
 
 
 def test_schedule_update_rejects_conflict_and_can_deactivate(

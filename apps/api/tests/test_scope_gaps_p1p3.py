@@ -75,7 +75,8 @@ def gap_database() -> Generator[sessionmaker[Session], None, None]:
         from sqlalchemy import select as _select
 
         teacher_role = session.scalar(_select(Role).where(Role.code == "TEACHER"))
-        assert teacher_role is not None
+        laborant_role = session.scalar(_select(Role).where(Role.code == "LABORANT"))
+        assert teacher_role is not None and laborant_role is not None
         teacher = User(
             id=TEACHER_ID,
             email="teacher@example.test",
@@ -90,7 +91,12 @@ def gap_database() -> Generator[sessionmaker[Session], None, None]:
         )
         session.add_all([teacher, laboran])
         session.flush()
-        session.add(UserRole(user_id=teacher.id, role_id=teacher_role.id))
+        session.add_all(
+            [
+                UserRole(user_id=teacher.id, role_id=teacher_role.id),
+                UserRole(user_id=laboran.id, role_id=laborant_role.id),
+            ]
+        )
         lab_a = Laboratory(
             code="LAB-A", name="Lab A", display_pin_hash=hash_password("1234")
         )

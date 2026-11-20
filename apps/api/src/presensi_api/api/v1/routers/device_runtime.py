@@ -690,8 +690,12 @@ def apply_heartbeat_request(
         value = getattr(request, key)
         if value is not None:
             setattr(device, key, value)
-    if request.latency_summary is not None:
-        device.latency_summary = request.latency_summary.model_dump(exclude_unset=True)
+    if "latency_summary" in request.model_fields_set:
+        device.latency_summary = (
+            request.latency_summary.model_dump(exclude_unset=True)
+            if request.latency_summary is not None
+            else None
+        )
     if request.camera_metrics is not None:
         device.camera_metrics = request.camera_metrics.model_dump(
             mode="json", exclude_unset=True

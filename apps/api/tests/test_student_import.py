@@ -260,5 +260,5 @@ def test_import_template_returns_csv_with_header_and_examples(
         "content-disposition", ""
     )
     lines = response.text.strip().splitlines()
-    assert lines[0] == "student_number,full_name,class_code"
+    assert lines[0].lstrip("\ufeff") == "NIS/NISN;Nama Lengkap;Kode Kelas"
     assert len(lines) >= 3

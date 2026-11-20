@@ -83,6 +83,10 @@ LABORANT_GRANTABLE_PERMISSIONS: frozenset[Permission] = frozenset(
     }
 )
 
+TEACHER_GRANTABLE_PERMISSIONS: frozenset[Permission] = frozenset(
+    {Permission.ATTENDANCE_CORRECT_CLOSED}
+)
+
 # Prasyarat grant (pohon dependensi, 1 level):
 # - Kelola Jadwal butuh Lihat Jadwal.
 # - Operasikan Sesi, Tandai Manual, & Koreksi Sesi Tertutup butuh Pantau Sesi.

@@ -24,7 +24,7 @@ class LaboratoryResponse(ApiSchema):
 
 
 class LaboratoryDisplayPinRequest(ApiSchema):
-    pin: str = Field(min_length=4, max_length=32)
+    pin: str = Field(min_length=4, max_length=32, pattern=r"^[0-9]{4,32}$")
 
 
 class LaboratoryUpdateRequest(ApiSchema):

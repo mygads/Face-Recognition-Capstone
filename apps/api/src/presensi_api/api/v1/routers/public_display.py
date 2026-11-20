@@ -13,8 +13,10 @@ import json
 import time
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
+from datetime import time as datetime_time
 from typing import Annotated
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Cookie, Depends, Header, Query, Request
 from fastapi.responses import StreamingResponse
@@ -41,7 +43,9 @@ from presensi_api.db.models import (
     Laboratory,
     PracticumSchedule,
     RecognitionEvent,
+    SchoolClass,
     SessionStudent,
+    User,
 )
 from presensi_api.db.session import get_db_session, get_session_factory
 from presensi_api.session_lifecycle import as_utc
@@ -117,6 +121,7 @@ class KioskLiveUpdate(ApiSchema):
     laboratory_name: str
     session_id: UUID | None = None
     subject: str | None = None
+    class_name: str | None = None
     status: str | None = None
     opened_at: str | None = None
     present_count: int = 0
@@ -248,6 +253,69 @@ def _find_active_session(lab: Laboratory, session: Session) -> AttendanceSession
     return None
 
 
+def _find_current_schedule(
+    lab: Laboratory, session: Session, now: datetime
+) -> PracticumSchedule | None:
+    """Resolve the single schedule running now when its session is not open yet."""
+    candidates = session.scalars(
+        select(PracticumSchedule)
+        .join(SchoolClass, SchoolClass.id == PracticumSchedule.class_id)
+        .join(User, User.id == PracticumSchedule.teacher_user_id)
+        .where(
+            PracticumSchedule.laboratory_id == lab.id,
+            PracticumSchedule.is_active.is_(True),
+            SchoolClass.is_active.is_(True),
+            User.is_active.is_(True),
+        )
+    ).all()
+    current: list[PracticumSchedule] = []
+    for schedule in candidates:
+        try:
+            local_now = as_utc(now).astimezone(ZoneInfo(schedule.timezone_name))
+        except (ZoneInfoNotFoundError, ValueError, TypeError):
+            continue
+        if (
+            local_now.weekday() != schedule.weekday
+            or local_now.date() < schedule.effective_from
+            or (
+                schedule.effective_through is not None
+                and local_now.date() > schedule.effective_through
+            )
+        ):
+            continue
+        local_time = local_now.time().replace(tzinfo=None)
+        if schedule.start_time <= local_time < schedule.end_time:
+            current.append(schedule)
+    return current[0] if len(current) == 1 else None
+
+
+def _find_schedule_session_today(
+    schedule: PracticumSchedule, session: Session, now: datetime
+) -> AttendanceSession | None:
+    """Return the latest session opened on this schedule's local calendar day."""
+    try:
+        timezone = ZoneInfo(schedule.timezone_name)
+        local_day = as_utc(now).astimezone(timezone).date()
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
+        return None
+    start_at = datetime.combine(
+        local_day, datetime_time.min, tzinfo=timezone
+    ).astimezone(UTC)
+    end_at = datetime.combine(
+        local_day + timedelta(days=1), datetime_time.min, tzinfo=timezone
+    ).astimezone(UTC)
+    return session.scalar(
+        select(AttendanceSession)
+        .where(
+            AttendanceSession.practicum_schedule_id == schedule.id,
+            AttendanceSession.opened_at >= start_at,
+            AttendanceSession.opened_at < end_at,
+        )
+        .order_by(AttendanceSession.opened_at.desc())
+        .limit(1)
+    )
+
+
 def _build_live_update(
     lab: Laboratory, session: Session, device_id: UUID | None = None
 ) -> KioskLiveUpdate:
@@ -260,14 +328,30 @@ def _build_live_update(
     - Sorotan lab (device_id None): hasil terbaru lab apa pun, beserta
       ``source`` agar UI dapat membedakan hasil scan vs pencatatan manual.
     """
+    now = datetime.now(UTC)
     active = _find_active_session(lab, session)
     if active is None:
+        schedule = _find_current_schedule(lab, session, now)
+        if schedule is not None:
+            school_class = session.get(SchoolClass, schedule.class_id)
+            latest = _find_schedule_session_today(schedule, session, now)
+            return KioskLiveUpdate(
+                laboratory_id=lab.id,
+                laboratory_name=lab.name,
+                session_id=latest.id if latest else None,
+                subject=schedule.subject,
+                class_name=school_class.name if school_class else None,
+                status=latest.status if latest else "scheduled",
+                opened_at=(as_utc(latest.opened_at).isoformat() if latest else None),
+                server_time=now.isoformat(),
+            )
         return KioskLiveUpdate(
             laboratory_id=lab.id,
             laboratory_name=lab.name,
-            server_time=datetime.now(UTC).isoformat(),
+            server_time=now.isoformat(),
         )
     schedule = session.get(PracticumSchedule, active.practicum_schedule_id)
+    school_class = session.get(SchoolClass, schedule.class_id) if schedule else None
     total = (
         session.scalar(
             select(func.count())
@@ -371,6 +455,7 @@ def _build_live_update(
         laboratory_name=lab.name,
         session_id=active.id,
         subject=schedule.subject if schedule else None,
+        class_name=school_class.name if school_class else None,
         status=active.status,
         opened_at=as_utc(active.opened_at).isoformat(),
         present_count=present,
@@ -379,7 +464,7 @@ def _build_live_update(
         total_roster=total,
         spotlight=spotlight,
         grace_period_minutes=active.grace_period_minutes,
-        server_time=datetime.now(UTC).isoformat(),
+        server_time=now.isoformat(),
     )
 
 
@@ -471,10 +556,25 @@ SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 def _build_snapshot(
     lab: Laboratory, session: Session, *, light: bool = False
 ) -> PublicDisplayResponse:
+    now = datetime.now(UTC)
     active = _find_active_session(lab, session)
     if active is None:
+        schedule = _find_current_schedule(lab, session, now)
+        if schedule is not None:
+            school_class = session.get(SchoolClass, schedule.class_id)
+            latest = _find_schedule_session_today(schedule, session, now)
+            return PublicDisplayResponse(
+                laboratory_id=lab.id,
+                laboratory_name=lab.name,
+                session_id=latest.id if latest else None,
+                subject=schedule.subject,
+                class_name=school_class.name if school_class else None,
+                status=latest.status if latest else "scheduled",
+                opened_at=(as_utc(latest.opened_at).isoformat() if latest else None),
+            )
         return PublicDisplayResponse(laboratory_id=lab.id, laboratory_name=lab.name)
     schedule = session.get(PracticumSchedule, active.practicum_schedule_id)
+    school_class = session.get(SchoolClass, schedule.class_id) if schedule else None
     roster = session.execute(
         select(
             SessionStudent.student_number_snapshot,
@@ -512,7 +612,7 @@ def _build_snapshot(
         laboratory_name=lab.name,
         session_id=active.id,
         subject=schedule.subject if schedule else None,
-        class_name=None,
+        class_name=school_class.name if school_class else None,
         status=active.status,
         opened_at=as_utc(active.opened_at).isoformat(),
         present_count=present,

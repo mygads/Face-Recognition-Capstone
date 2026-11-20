@@ -46,6 +46,7 @@ class AccountResponse(ApiSchema):
     id: UUID
     email: str
     full_name: str
+    roles: list[str]
     is_active: bool
     created_at: AwareDatetime
 
@@ -54,6 +55,7 @@ class StaffAccountCreateRequest(ApiSchema):
     full_name: str = Field(min_length=2, max_length=200)
     email: str = Field(min_length=6, max_length=320)
     role: Literal["TEACHER", "LABORANT"]
+    password: str = Field(min_length=8, max_length=200)
 
     @field_validator("email")
     @classmethod
@@ -72,6 +74,15 @@ class StaffAccountCreateRequest(ApiSchema):
             raise ValueError("Masukkan alamat email yang valid.")
         return normalized
 
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        if len(value.strip()) < 8:
+            raise ValueError("Kata sandi minimal 8 karakter.")
+        if any(character.isspace() for character in value):
+            raise ValueError("Kata sandi tidak boleh mengandung spasi.")
+        return value
+
 
 class StaffAccountCreatedResponse(ApiSchema):
     id: UUID
@@ -80,7 +91,6 @@ class StaffAccountCreatedResponse(ApiSchema):
     role: Literal["TEACHER", "LABORANT"]
     is_active: bool
     must_change_password: bool
-    temporary_password: str
 
 
 class AccountDetailResponse(ApiSchema):
@@ -130,6 +140,12 @@ class StaffPasswordSetResponse(ApiSchema):
 
 class PermissionGrantRequest(ApiSchema):
     permission: str = Field(min_length=2, max_length=64)
+
+
+class PermissionGrantListResponse(ApiSchema):
+    base_permissions: list[str]
+    extra_permissions: list[str]
+    grantable: list[str]
 
 
 class LaborantAssignmentRequest(ApiSchema):

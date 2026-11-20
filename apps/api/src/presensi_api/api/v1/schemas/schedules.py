@@ -71,6 +71,20 @@ class ScheduleUpdateRequest(ApiSchema):
         return self
 
 
+class ScheduleDuplicateRequest(ApiSchema):
+    start_date: date
+    additional_weeks: int | None = Field(default=None, ge=1, le=52)
+    through_date: date | None = None
+
+    @model_validator(mode="after")
+    def validate_duplicate_range(self) -> "ScheduleDuplicateRequest":
+        if (self.additional_weeks is None) == (self.through_date is None):
+            raise ValueError("Choose either additional_weeks or through_date.")
+        if self.through_date is not None and self.through_date < self.start_date:
+            raise ValueError("through_date must not precede start_date.")
+        return self
+
+
 class ScheduleTeacherResponse(ApiSchema):
     id: UUID
     full_name: str
@@ -95,3 +109,8 @@ class ScheduleResponse(ApiSchema):
     teacher_name: str
     created_at: AwareDatetime
     updated_at: AwareDatetime
+
+
+class ScheduleDuplicateResponse(ApiSchema):
+    source: ScheduleResponse
+    duplicates: list[ScheduleResponse]

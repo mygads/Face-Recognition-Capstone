@@ -763,6 +763,33 @@ def test_device_heartbeat_persists_edge_queue_backlog(
         assert device.camera_status == "online"
 
 
+def test_device_heartbeat_updates_and_clears_latency_summary(
+    runtime_database: tuple[sessionmaker[Session], dict[str, Any]],
+) -> None:
+    factory, _time_data = runtime_database
+    response = _request(
+        "POST",
+        f"/api/v1/devices/{DEVICE_ID}/device-heartbeat",
+        json_body={"latency_summary": {"p50_ms": 18.2, "p95_ms": 42.7}},
+    )
+    assert response.status_code == 200, response.text
+    with factory() as session:
+        device = session.get(Device, DEVICE_ID)
+        assert device is not None
+        assert device.latency_summary == {"p50_ms": 18.2, "p95_ms": 42.7}
+
+    response = _request(
+        "POST",
+        f"/api/v1/devices/{DEVICE_ID}/device-heartbeat",
+        json_body={"latency_summary": None},
+    )
+    assert response.status_code == 200, response.text
+    with factory() as session:
+        device = session.get(Device, DEVICE_ID)
+        assert device is not None
+        assert device.latency_summary is None
+
+
 def test_device_health_warns_on_dead_letter_backlog(
     runtime_database: tuple[sessionmaker[Session], dict[str, Any]],
 ) -> None:

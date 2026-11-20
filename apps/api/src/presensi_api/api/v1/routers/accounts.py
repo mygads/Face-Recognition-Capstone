@@ -1,5 +1,6 @@
 import secrets
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -11,6 +12,8 @@ from presensi_api.api.security.dependencies import get_current_user, require_per
 from presensi_api.api.security.passwords import hash_password
 from presensi_api.api.security.roles import (
     LABORANT_GRANTABLE_PERMISSIONS,
+    ROLE_PERMISSIONS,
+    TEACHER_GRANTABLE_PERMISSIONS,
     AuthenticatedUser,
     Permission,
     RoleCode,
@@ -23,6 +26,7 @@ from presensi_api.api.v1.schemas.auth import (
     AccountResponse,
     ClassLaboratoryRequest,
     LaborantAssignmentRequest,
+    PermissionGrantListResponse,
     PermissionGrantRequest,
     StaffAccountCreatedResponse,
     StaffAccountCreateRequest,
@@ -52,6 +56,21 @@ from presensi_api.session_lifecycle import as_utc
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
 
+def _permission_sets_for_account(
+    session: Session, user_id: UUID
+) -> tuple[frozenset[Permission], frozenset[Permission]]:
+    roles = get_user_roles(session, user_id)
+    base_permissions = frozenset(
+        permission for role in roles for permission in ROLE_PERMISSIONS[role]
+    )
+    grantable: set[Permission] = set()
+    if RoleCode.TEACHER in roles:
+        grantable.update(TEACHER_GRANTABLE_PERMISSIONS)
+    if RoleCode.LABORANT in roles:
+        grantable.update(LABORANT_GRANTABLE_PERMISSIONS)
+    return base_permissions, frozenset(grantable)
+
+
 @router.get(
     "",
     response_model=PageResponse[AccountResponse],
@@ -72,12 +91,23 @@ def list_accounts(
         .limit(limit)
         .offset(offset)
     ).all()
+    roles_by_user: dict[str, list[str]] = {}
+    if users:
+        role_rows = session.execute(
+            select(UserRole.user_id, Role.code)
+            .join(Role, Role.id == UserRole.role_id)
+            .where(UserRole.user_id.in_([user.id for user in users]))
+            .order_by(UserRole.user_id, Role.code)
+        ).all()
+        for user_id, role_code in role_rows:
+            roles_by_user.setdefault(str(user_id), []).append(role_code)
     return PageResponse(
         items=[
             AccountResponse(
                 id=user.id,
                 email=user.email,
                 full_name=user.full_name,
+                roles=roles_by_user.get(str(user.id), []),
                 is_active=user.is_active,
                 created_at=as_utc(user.created_at),
             )
@@ -94,8 +124,7 @@ def list_accounts(
     responses=OPENAPI_ERROR_RESPONSES,
     summary="Create a teacher or laborant account",
     description=(
-        "Creates a staff account with a one-time temporary password. The user "
-        "must set a private password before accessing the application."
+        "Creates a staff account with the password provided by the administrator."
     ),
 )
 def create_staff_account(
@@ -119,12 +148,11 @@ def create_staff_account(
             "Role belum tersedia. Jalankan seed role terlebih dahulu.",
         )
 
-    temporary_password = secrets.token_urlsafe(18)
     user = User(
         email=request.email,
         full_name=request.full_name,
-        password_hash=hash_password(temporary_password),
-        must_change_password=True,
+        password_hash=hash_password(request.password),
+        must_change_password=False,
     )
     try:
         session.add(user)
@@ -145,7 +173,7 @@ def create_staff_account(
                 after_state={
                     "role": request.role,
                     "is_active": True,
-                    "must_change_password": True,
+                    "must_change_password": False,
                 },
             )
         )
@@ -163,7 +191,6 @@ def create_staff_account(
         role=request.role,
         is_active=user.is_active,
         must_change_password=user.must_change_password,
-        temporary_password=temporary_password,
     )
 
 
@@ -693,8 +720,9 @@ def remove_laborant_assignment(
 
 @router.get(
     "/{account_id}/permission-grants",
+    response_model=PermissionGrantListResponse,
     responses=OPENAPI_ERROR_RESPONSES,
-    summary="List optional permission grants for a laborant",
+    summary="List base and optional permissions for staff",
 )
 def list_permission_grants(
     account_id: str,
@@ -702,22 +730,28 @@ def list_permission_grants(
     principal: AuthenticatedUser = Depends(
         require_permissions(Permission.MANAGE_ACCOUNTS)
     ),
-) -> dict[str, object]:
+) -> PermissionGrantListResponse:
     from uuid import UUID as _UUID
 
     try:
         uid = _UUID(str(account_id))
     except ValueError:
         raise ApiProblem(404, "account_not_found", "Akun tidak ditemukan.")
+    if session.get(User, uid) is None:
+        raise ApiProblem(404, "account_not_found", "Akun tidak ditemukan.")
+    base_permissions, grantable_permissions = _permission_sets_for_account(session, uid)
     extras = sorted(p.value for p in get_user_extra_permissions(session, uid))
-    grantable = sorted(p.value for p in LABORANT_GRANTABLE_PERMISSIONS)
-    return {"extra_permissions": extras, "grantable": grantable}
+    return PermissionGrantListResponse(
+        base_permissions=sorted(permission.value for permission in base_permissions),
+        extra_permissions=extras,
+        grantable=sorted(permission.value for permission in grantable_permissions),
+    )
 
 
 @router.post(
     "/{account_id}/permission-grants",
     responses=OPENAPI_ERROR_RESPONSES,
-    summary="Grant an optional permission to a laborant",
+    summary="Grant an optional permission to staff",
     status_code=status.HTTP_201_CREATED,
 )
 def grant_optional_permission(
@@ -734,13 +768,6 @@ def grant_optional_permission(
         permission = Permission(str(request.permission).strip())
     except ValueError:
         raise ApiProblem(422, "invalid_permission", "Permission tidak dikenal.")
-    if (
-        permission not in LABORANT_GRANTABLE_PERMISSIONS
-        and RoleCode.ADMIN not in principal.roles
-    ):
-        raise ApiProblem(
-            403, "grant_forbidden", "Permission tidak bisa diberikan ke laboran."
-        )
     try:
         uid = _UUID(str(account_id))
     except ValueError:
@@ -748,6 +775,13 @@ def grant_optional_permission(
     user = session.get(User, uid)
     if user is None:
         raise ApiProblem(404, "account_not_found", "Akun tidak ditemukan.")
+    base_permissions, grantable_permissions = _permission_sets_for_account(session, uid)
+    if permission not in grantable_permissions:
+        raise ApiProblem(
+            403,
+            "grant_forbidden",
+            "Permission tidak dapat diberikan untuk role akun ini.",
+        )
     current = {
         Permission(row)
         for row in session.scalars(
@@ -758,7 +792,7 @@ def grant_optional_permission(
         if row in Permission._value2member_map_
     }
     current.add(permission)
-    missing = missing_prerequisites(frozenset(current))
+    missing = missing_prerequisites(frozenset(base_permissions | current))
     if missing:
         raise ApiProblem(
             422,
@@ -807,9 +841,15 @@ def revoke_optional_permission(
         uid = _UUID(str(account_id))
     except ValueError:
         raise ApiProblem(404, "account_not_found", "Akun tidak ditemukan.")
+    user = session.get(User, uid)
+    if user is None:
+        raise ApiProblem(404, "account_not_found", "Akun tidak ditemukan.")
     row = session.get(UserPermissionGrant, (uid, str(permission)))
     if row is None:
         raise ApiProblem(404, "grant_not_found", "Hak akses tambahan tidak ditemukan.")
+    base_permissions, _grantable_permissions = _permission_sets_for_account(
+        session, uid
+    )
     remaining = {
         Permission(r)
         for r in session.scalars(
@@ -819,7 +859,7 @@ def revoke_optional_permission(
         ).all()
         if r in Permission._value2member_map_ and r != str(permission)
     }
-    missing = missing_prerequisites(frozenset(remaining))
+    missing = missing_prerequisites(frozenset(base_permissions | remaining))
     if missing:
         raise ApiProblem(
             422,

@@ -1,4 +1,5 @@
-from datetime import UTC, date, datetime, time
+import re
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated, Any
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -14,6 +15,8 @@ from presensi_api.api.security.scope import laborant_lab_ids
 from presensi_api.api.v1.schemas.common import PageResponse, Pagination
 from presensi_api.api.v1.schemas.schedules import (
     ScheduleCreateRequest,
+    ScheduleDuplicateRequest,
+    ScheduleDuplicateResponse,
     ScheduleResponse,
     ScheduleTeacherResponse,
     ScheduleUpdateRequest,
@@ -30,6 +33,8 @@ from presensi_api.db.search import like_contains
 from presensi_api.db.session import get_db_session
 
 router = APIRouter(prefix="/schedules", tags=["schedules"])
+_MEETING_SUBJECT = re.compile(r"^\s*Pertemuan\s+(\d+)\s*-\s*(.+?)\s*$", re.IGNORECASE)
+MAX_DUPLICATE_WEEKS = 52
 
 
 def _timestamp(value: datetime) -> datetime:
@@ -61,6 +66,51 @@ def _response(session: Session, schedule: PracticumSchedule) -> ScheduleResponse
         created_at=_timestamp(schedule.created_at),
         updated_at=_timestamp(schedule.updated_at),
     )
+
+
+def _meeting_subject(subject: str) -> tuple[int, str]:
+    match = _MEETING_SUBJECT.fullmatch(subject)
+    if match is None:
+        return 1, subject.strip()
+    return int(match.group(1)), match.group(2).strip()
+
+
+def _next_weekday_on_or_after(start: date, weekday: int) -> date:
+    return start + timedelta(days=(weekday - start.weekday()) % 7)
+
+
+def _first_allowed_duplicate_date(schedule: PracticumSchedule, today: date) -> date:
+    anchor = _next_weekday_on_or_after(
+        max(today, schedule.effective_from), schedule.weekday
+    )
+    source_has_anchor_occurrence = (
+        schedule.effective_through is None or schedule.effective_through >= anchor
+    )
+    return anchor + timedelta(days=7) if source_has_anchor_occurrence else anchor
+
+
+def _next_meeting_number(
+    session: Session, schedule: PracticumSchedule, base_subject: str
+) -> int:
+    related = session.scalars(
+        select(PracticumSchedule).where(
+            PracticumSchedule.class_id == schedule.class_id,
+            PracticumSchedule.laboratory_id == schedule.laboratory_id,
+            PracticumSchedule.teacher_user_id == schedule.teacher_user_id,
+            PracticumSchedule.weekday == schedule.weekday,
+            PracticumSchedule.start_time == schedule.start_time,
+            PracticumSchedule.end_time == schedule.end_time,
+            PracticumSchedule.timezone_name == schedule.timezone_name,
+            PracticumSchedule.effective_from >= schedule.effective_from,
+        )
+    ).all()
+    next_number = 2
+    for candidate in related:
+        candidate_match = _MEETING_SUBJECT.fullmatch(candidate.subject)
+        if candidate_match is None or candidate_match.group(2).strip() != base_subject:
+            continue
+        next_number = max(next_number, int(candidate_match.group(1)) + 1)
+    return next_number
 
 
 def _teacher_role_id(session: Session) -> UUID | None:
@@ -360,6 +410,153 @@ def create_schedule(
     session.commit()
     session.refresh(schedule)
     return _response(session, schedule)
+
+
+@router.post(
+    "/{schedule_id}/duplicates",
+    response_model=ScheduleDuplicateResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Create numbered weekly schedule meetings",
+)
+def duplicate_schedule_weekly(
+    schedule_id: UUID,
+    request: ScheduleDuplicateRequest,
+    principal: Annotated[
+        AuthenticatedUser, Depends(require_permissions(Permission.SCHEDULE_MANAGE))
+    ],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> ScheduleDuplicateResponse:
+    schedule = session.get(PracticumSchedule, schedule_id)
+    if schedule is None:
+        raise ApiProblem(404, "schedule_not_found", "Jadwal tidak ditemukan.")
+    from presensi_api.api.security.scope import ensure_schedule_operate as _eso
+
+    try:
+        _eso(session, principal, schedule)
+    except Exception:
+        raise ApiProblem(404, "schedule_not_found", "Jadwal tidak ditemukan.")
+    if not schedule.is_active:
+        raise ApiProblem(
+            422,
+            "inactive_schedule_cannot_duplicate",
+            "Aktifkan jadwal terlebih dahulu sebelum membuat pertemuan berikutnya.",
+        )
+    _validate_timezone(schedule.timezone_name)
+    if request.start_date.weekday() != schedule.weekday:
+        raise ApiProblem(
+            422,
+            "duplicate_weekday_mismatch",
+            "Pilih tanggal dengan hari yang sama seperti jadwal ini.",
+        )
+
+    today = datetime.now(ZoneInfo(schedule.timezone_name)).date()
+    earliest = _first_allowed_duplicate_date(schedule, today)
+    if request.start_date < earliest:
+        raise ApiProblem(
+            422,
+            "duplicate_start_too_soon",
+            "Pertemuan berikutnya paling cepat dapat dimulai pada "
+            f"{earliest.isoformat()}.",
+        )
+
+    if request.additional_weeks is not None:
+        duplicate_count = request.additional_weeks
+    else:
+        assert request.through_date is not None
+        duplicate_count = (request.through_date - request.start_date).days // 7 + 1
+    if duplicate_count > MAX_DUPLICATE_WEEKS:
+        raise ApiProblem(
+            422,
+            "duplicate_range_too_long",
+            f"Maksimal {MAX_DUPLICATE_WEEKS} pertemuan tambahan dalam satu rangkaian.",
+        )
+
+    current_number, base_subject = _meeting_subject(schedule.subject)
+    next_number = max(
+        current_number + 1,
+        _next_meeting_number(session, schedule, base_subject),
+    )
+    duplicate_dates = [
+        request.start_date + timedelta(days=7 * index)
+        for index in range(duplicate_count)
+    ]
+    duplicate_subjects = [
+        f"Pertemuan {next_number + index} - {base_subject}"
+        for index in range(duplicate_count)
+    ]
+    if any(len(subject) > 120 for subject in duplicate_subjects):
+        raise ApiProblem(
+            422,
+            "duplicate_subject_too_long",
+            "Nama jadwal terlalu panjang untuk ditambahkan nomor pertemuan. "
+            "Persingkat nama jadwal sumber.",
+        )
+
+    _validate_references(
+        session,
+        class_id=schedule.class_id,
+        laboratory_id=schedule.laboratory_id,
+        teacher_user_id=schedule.teacher_user_id,
+        principal=principal,
+    )
+    for index, meeting_date in enumerate(duplicate_dates):
+        try:
+            _check_conflict(
+                session,
+                schedule_id=schedule.id,
+                class_id=schedule.class_id,
+                laboratory_id=schedule.laboratory_id,
+                teacher_user_id=schedule.teacher_user_id,
+                weekday=schedule.weekday,
+                start_time=schedule.start_time,
+                end_time=schedule.end_time,
+                effective_from=meeting_date,
+                effective_through=meeting_date,
+                is_active=True,
+            )
+        except ApiProblem as exc:
+            if exc.code != "schedule_conflict":
+                raise
+            raise ApiProblem(
+                409,
+                "schedule_conflict",
+                f"{duplicate_subjects[index]} pada {meeting_date.isoformat()} "
+                f"bertabrakan. {exc.message}",
+            ) from exc
+
+    if (
+        schedule.effective_through is None
+        or schedule.effective_through >= request.start_date
+    ):
+        schedule.effective_through = request.start_date - timedelta(days=1)
+    duplicates = [
+        PracticumSchedule(
+            class_id=schedule.class_id,
+            laboratory_id=schedule.laboratory_id,
+            teacher_user_id=schedule.teacher_user_id,
+            subject=subject,
+            weekday=schedule.weekday,
+            start_time=schedule.start_time,
+            end_time=schedule.end_time,
+            timezone_name=schedule.timezone_name,
+            effective_from=meeting_date,
+            effective_through=meeting_date,
+            is_active=True,
+        )
+        for subject, meeting_date in zip(
+            duplicate_subjects, duplicate_dates, strict=True
+        )
+    ]
+    session.add_all(duplicates)
+    session.commit()
+    session.refresh(schedule)
+    for duplicate in duplicates:
+        session.refresh(duplicate)
+    return ScheduleDuplicateResponse(
+        source=_response(session, schedule),
+        duplicates=[_response(session, duplicate) for duplicate in duplicates],
+    )
 
 
 @router.patch(

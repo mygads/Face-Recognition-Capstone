@@ -122,6 +122,15 @@ async def _read_upload(upload: UploadFile) -> tuple[list[str], list[ImportSource
         if extension == "csv":
             decoded = content.decode("utf-8-sig")
             table = list(csv.reader(StringIO(decoded)))
+            # Excel commonly exports CSV with semicolon separators in locales
+            # where comma is the decimal separator. Keep normal comma CSVs as
+            # the default, then retry semicolon/tab when the header is one cell.
+            if table and len(table[0]) < 2:
+                for delimiter in (";", "\t"):
+                    candidate = list(csv.reader(StringIO(decoded), delimiter=delimiter))
+                    if candidate and len(candidate[0]) > len(table[0]):
+                        table = candidate
+                        break
         else:
             with ZipFile(BytesIO(content)) as archive:
                 expanded_size = sum(item.file_size for item in archive.infolist())
@@ -364,9 +373,9 @@ def download_student_import_template(
     ),
 ) -> PlainTextResponse:
     content = (
-        "student_number,full_name,class_code\n"
-        "2401,Contoh Siswa Satu,XI-IPA-1\n"
-        "2402,Contoh Siswa Dua,XI-IPA-1\n"
+        "\ufeffNIS/NISN;Nama Lengkap;Kode Kelas\r\n"
+        "2401;Contoh Siswa Satu;XI-IPA-1\r\n"
+        "2402;Contoh Siswa Dua;XI-IPA-1\r\n"
     )
     return PlainTextResponse(
         content,

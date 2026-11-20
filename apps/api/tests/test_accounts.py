@@ -6,14 +6,14 @@ from uuid import UUID
 
 import httpx
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from presensi_api.api.security.dependencies import get_current_user
 from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
 from presensi_api.db.base import Base
-from presensi_api.db.models import User
+from presensi_api.db.models import Role, User, UserRole
 from presensi_api.db.session import get_db_session
 from presensi_api.main import app
 
@@ -100,6 +100,38 @@ def request(
 def test_list_accounts_returns_email_order_and_pagination(
     api_database: sessionmaker[Session],
 ) -> None:
+    with api_database.begin() as session:
+        roles = [
+            Role(code=code, name=name)
+            for code, name in (
+                ("ADMIN", "Admin"),
+                ("TEACHER", "Guru"),
+                ("LABORANT", "Laboran"),
+            )
+        ]
+        session.add_all(roles)
+        session.flush()
+        roles_by_code = {role.code: role for role in roles}
+        users_by_email = {
+            user.email: user for user in session.scalars(select(User)).all()
+        }
+        session.add_all(
+            [
+                UserRole(
+                    user_id=users_by_email["admin@example.test"].id,
+                    role_id=roles_by_code["ADMIN"].id,
+                ),
+                UserRole(
+                    user_id=users_by_email["teacher@example.test"].id,
+                    role_id=roles_by_code["TEACHER"].id,
+                ),
+                UserRole(
+                    user_id=users_by_email["laborant@example.test"].id,
+                    role_id=roles_by_code["LABORANT"].id,
+                ),
+            ]
+        )
+
     response = request("GET", "/api/v1/accounts", query="?limit=2&offset=0")
     assert response.status_code == 200
     payload = response.json()
@@ -119,10 +151,14 @@ def test_list_accounts_returns_email_order_and_pagination(
             "id",
             "email",
             "full_name",
+            "roles",
             "is_active",
             "created_at",
         }
         assert "password_hash" not in str(item)
+    assert payload["items"][0]["roles"] == ["ADMIN"]
+    assert payload["items"][1]["roles"] == ["LABORANT"]
+    assert second.json()["items"][0]["roles"] == ["TEACHER"]
 
 
 def test_list_accounts_forbids_teacher_principal(
