@@ -182,6 +182,31 @@ describe('master data view (Stitch B02)', () => {
     wrapper.unmount()
   })
 
+  it('menonaktifkan perubahan siswa saat belum ada kelas serta memberi tautan untuk membuat kelas', async () => {
+    api.listClasses.mockResolvedValue({
+      items: [],
+      pagination: { total: 0, limit: 100, offset: 0 },
+    })
+    const { wrapper, router } = await mountAt('/app/master-data/students', 'ADMIN')
+
+    expect(wrapper.get('[data-testid="no-active-classes"]').text()).toContain(
+      'Tambahkan kelas terlebih dahulu',
+    )
+    expect(wrapper.get('[data-testid="add-student-button"]').attributes('disabled')).toBeDefined()
+    expect(
+      wrapper.get('[data-testid="import-students-button"]').attributes('disabled'),
+    ).toBeDefined()
+    expect(
+      wrapper.get('[data-testid="edit-student-student-1"]').attributes('disabled'),
+    ).toBeDefined()
+    expect(wrapper.get('[data-testid="no-active-classes"]').text()).toContain('mengubah')
+
+    await wrapper.get('[data-testid="create-class-link"]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/app/master-data/classes')
+    wrapper.unmount()
+  })
+
   it('admin menambah siswa lewat drawer formulir master', async () => {
     const { wrapper } = await mountAt('/app/master-data/students', 'ADMIN')
     await wrapper
@@ -284,9 +309,9 @@ describe('master data view (Stitch B02)', () => {
     await flushPromises()
 
     expect(api.previewStudentImport).toHaveBeenCalledWith(file, {
-      student_number_column: 'NIS',
-      full_name_column: 'Nama',
-      class_code_column: 'Kelas',
+      student_number_column: 'NIS/NISN',
+      full_name_column: 'Nama Lengkap',
+      class_code_column: 'Kode Kelas',
     })
     expect(wrapper.text()).toContain('Baris Bermasalah')
     expect(wrapper.text()).toContain('Nama siswa wajib diisi.')

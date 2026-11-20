@@ -11,6 +11,7 @@ import UiInput from '../components/ui/UiInput.vue'
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
+const schoolLogoUrl = '/logo-sekolah.png'
 const email = ref('')
 const password = ref('')
 
@@ -40,7 +41,7 @@ async function submitLogin(): Promise<void> {
     <div class="st-login__brand">
       <img
         class="st-login__logo"
-        src="/logo-sekolah.png"
+        :src="schoolLogoUrl"
         alt="Logo SMA Cimahi"
         width="112"
         height="112"

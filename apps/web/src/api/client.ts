@@ -32,6 +32,8 @@ export type StudentImportCommit = components['schemas']['StudentImportCommitResp
 export type Schedule = components['schemas']['ScheduleResponse']
 export type ScheduleCreate = components['schemas']['ScheduleCreateRequest']
 export type ScheduleUpdate = components['schemas']['ScheduleUpdateRequest']
+export type ScheduleDuplicateRequest = components['schemas']['ScheduleDuplicateRequest']
+export type ScheduleDuplicateResult = components['schemas']['ScheduleDuplicateResponse']
 export type ScheduleTeacher = components['schemas']['ScheduleTeacherResponse']
 export type AttendanceSession = components['schemas']['AttendanceSessionResponse']
 export type SessionOpeningPolicy = components['schemas']['SessionOpeningPolicy']
@@ -494,6 +496,17 @@ export async function createSchedule(body: ScheduleCreate): Promise<Schedule> {
   return unwrap(result)
 }
 
+export async function duplicateSchedule(
+  scheduleId: string,
+  body: ScheduleDuplicateRequest,
+): Promise<ScheduleDuplicateResult> {
+  const result = await apiClient.POST('/api/v1/schedules/{schedule_id}/duplicates', {
+    params: { path: { schedule_id: scheduleId } },
+    body,
+  })
+  return unwrap(result)
+}
+
 export async function updateSchedule(scheduleId: string, body: ScheduleUpdate): Promise<Schedule> {
   const result = await apiClient.PATCH('/api/v1/schedules/{schedule_id}', {
     params: { path: { schedule_id: scheduleId } },
@@ -665,13 +678,18 @@ export async function removeLaborantAssignment(
 }
 
 export async function listPermissionGrants(accountId: string): Promise<{
+  base_permissions: string[]
   extra_permissions: string[]
   grantable: string[]
 }> {
   const result = await apiClient.GET('/api/v1/accounts/{account_id}/permission-grants', {
     params: { path: { account_id: accountId } },
   })
-  return unwrap(result) as unknown as { extra_permissions: string[]; grantable: string[] }
+  return unwrap(result) as unknown as {
+    base_permissions: string[]
+    extra_permissions: string[]
+    grantable: string[]
+  }
 }
 
 export async function grantOptionalPermission(
@@ -771,6 +789,7 @@ export interface KioskLiveUpdate {
   laboratory_name: string
   session_id: string | null
   subject: string | null
+  class_name: string | null
   status: string | null
   opened_at: string | null
   present_count: number

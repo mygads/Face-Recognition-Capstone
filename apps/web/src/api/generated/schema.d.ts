@@ -265,7 +265,7 @@ export interface paths {
         put?: never;
         /**
          * Create a teacher or laborant account
-         * @description Creates a staff account with a one-time temporary password. The user must set a private password before accessing the application.
+         * @description Creates a staff account with the password provided by the administrator.
          */
         post: operations["create_staff_account_api_v1_accounts_post"];
         delete?: never;
@@ -406,10 +406,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List optional permission grants for a laborant */
+        /** List base and optional permissions for staff */
         get: operations["list_permission_grants_api_v1_accounts__account_id__permission_grants_get"];
         put?: never;
-        /** Grant an optional permission to a laborant */
+        /** Grant an optional permission to staff */
         post: operations["grant_optional_permission_api_v1_accounts__account_id__permission_grants_post"];
         delete?: never;
         options?: never;
@@ -1035,6 +1035,23 @@ export interface paths {
         patch: operations["update_schedule_api_v1_schedules__schedule_id__patch"];
         trace?: never;
     };
+    "/api/v1/schedules/{schedule_id}/duplicates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create numbered weekly schedule meetings */
+        post: operations["duplicate_schedule_weekly_api_v1_schedules__schedule_id__duplicates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/openable-schedules": {
         parameters: {
             query?: never;
@@ -1466,7 +1483,7 @@ export interface paths {
         put?: never;
         /**
          * Record or directly update a manual attendance mark
-         * @description Stores a final attendance record for a roster member, or directly updates the existing record (pengganti alur koreksi: tanpa persetujuan admin). Never accepts image or embedding fields.
+         * @description Stores a final attendance record for a roster member, or directly updates the existing record (pengganti alur koreksi: tanpa persetujuan admin). Closed sessions accept a separate post-session correction permission (alasan wajib, tercatat audit). Never accepts image or embedding fields.
          */
         post: operations["create_manual_mark_api_v1_attendance_sessions__session_id__manual_marks_post"];
         delete?: never;
@@ -1748,6 +1765,8 @@ export interface components {
             email: string;
             /** Full Name */
             full_name: string;
+            /** Roles */
+            roles: string[];
             /** Is Active */
             is_active: boolean;
             /**
@@ -2921,7 +2940,7 @@ export interface components {
             pin: string;
             /**
              * Light
-             * @default false
+             * @default true
              */
             light: boolean;
         };
@@ -2997,7 +3016,7 @@ export interface components {
             pin: string;
             /**
              * Light
-             * @default false
+             * @default true
              */
             light: boolean;
         };
@@ -3204,6 +3223,15 @@ export interface components {
             password_changed: boolean;
             /** Sign In Again */
             sign_in_again: boolean;
+        };
+        /** PermissionGrantListResponse */
+        PermissionGrantListResponse: {
+            /** Base Permissions */
+            base_permissions: string[];
+            /** Extra Permissions */
+            extra_permissions: string[];
+            /** Grantable */
+            grantable: string[];
         };
         /** PermissionGrantRequest */
         PermissionGrantRequest: {
@@ -3462,6 +3490,24 @@ export interface components {
             effective_from: string;
             /** Effective Through */
             effective_through?: string | null;
+        };
+        /** ScheduleDuplicateRequest */
+        ScheduleDuplicateRequest: {
+            /**
+             * Start Date
+             * Format: date
+             */
+            start_date: string;
+            /** Additional Weeks */
+            additional_weeks?: number | null;
+            /** Through Date */
+            through_date?: string | null;
+        };
+        /** ScheduleDuplicateResponse */
+        ScheduleDuplicateResponse: {
+            source: components["schemas"]["ScheduleResponse"];
+            /** Duplicates */
+            duplicates: components["schemas"]["ScheduleResponse"][];
         };
         /** ScheduleResponse */
         ScheduleResponse: {
@@ -3777,6 +3823,8 @@ export interface components {
              * @enum {string}
              */
             role: "TEACHER" | "LABORANT";
+            /** Password */
+            password: string;
         };
         /** StaffAccountCreatedResponse */
         StaffAccountCreatedResponse: {
@@ -3798,8 +3846,6 @@ export interface components {
             is_active: boolean;
             /** Must Change Password */
             must_change_password: boolean;
-            /** Temporary Password */
-            temporary_password: string;
         };
         /** StaffAccountUpdateRequest */
         StaffAccountUpdateRequest: {
@@ -4122,6 +4168,11 @@ export interface components {
              * @default null
              */
             subject: string | null;
+            /**
+             * Class Name
+             * @default null
+             */
+            class_name: string | null;
             /**
              * Status
              * @default null
@@ -8004,9 +8055,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["PermissionGrantListResponse"];
                 };
             };
             /** @description The request could not be processed. */
@@ -14664,6 +14713,149 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScheduleResponse"];
+                };
+            };
+            /** @description The request could not be processed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Authentication is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description You are not allowed to perform this action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The requested resource was not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This method is not allowed for the resource. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The uploaded file exceeds the allowed size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The file extension or media type is not supported. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Request validation failed. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many requests. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description An unexpected server error occurred. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This API operation is not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The service is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    duplicate_schedule_weekly_api_v1_schedules__schedule_id__duplicates_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleDuplicateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleDuplicateResponse"];
                 };
             };
             /** @description The request could not be processed. */

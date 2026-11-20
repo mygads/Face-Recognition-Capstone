@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
   listLaboratories: vi.fn(),
   resetKioskPin: vi.fn(),
   revokeKiosk: vi.fn(),
+  setLaboratoryDisplayPin: vi.fn(),
   updateKiosk: vi.fn(),
 }))
 
@@ -56,6 +57,7 @@ describe('kiosks view ttl', () => {
     api.listKiosks.mockResolvedValue({ items: [kiosk], pagination: { total: 1 } })
     api.listDevices.mockResolvedValue({ items: [], pagination: { total: 0 } })
     api.listLaboratories.mockResolvedValue({ items: [], pagination: { total: 0 } })
+    api.setLaboratoryDisplayPin.mockResolvedValue(undefined)
   })
 
   it('menampilkan TTL Default untuk kiosk tanpa TTL dan mengirim 8 jam saat diubah', async () => {
@@ -81,5 +83,55 @@ describe('kiosks view ttl', () => {
     expect(api.createKiosk).toHaveBeenCalledWith(
       expect.objectContaining({ display_name: 'Kiosk Baru', token_ttl_hours: 2 }),
     )
+  })
+
+  it('membuka layar kiosk di tab baru', async () => {
+    const wrapper = mount(KiosksView, { global: { plugins: [adminPinia()] } })
+    await flushPromises()
+
+    const link = wrapper.get('[data-testid="open-kiosk-new-tab"]')
+    expect(link.attributes('href')).toBe('/presensi')
+    expect(link.attributes('target')).toBe('_blank')
+    expect(link.attributes('rel')).toContain('noopener')
+    expect(link.text()).toContain('Buka kiosk di tab baru')
+    wrapper.unmount()
+  })
+
+  it('mengelola PIN publik lab dari halaman kiosk dan hanya menerima angka', async () => {
+    api.listLaboratories.mockResolvedValue({
+      items: [
+        {
+          id: 'lab-1',
+          code: 'LAB-1',
+          name: 'Lab Kimia 1',
+          location: null,
+          is_active: true,
+          created_at: '2026-11-06T00:00:00Z',
+          updated_at: '2026-11-06T00:00:00Z',
+          has_display_pin: false,
+        },
+      ],
+      pagination: { total: 1 },
+    })
+    const wrapper = mount(KiosksView, { global: { plugins: [adminPinia()] } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="laboratory-display-pin-table"]').text()).toContain(
+      'Belum diatur',
+    )
+    await wrapper.get('button[aria-label="Atur PIN untuk Lab Kimia 1"]').trigger('click')
+    expect(wrapper.find('[data-testid="laboratory-display-pin-dialog"]').exists()).toBe(true)
+    const input = wrapper.get('[data-testid="laboratory-display-pin-input"]')
+    await input.setValue('12a34')
+    expect((input.element as HTMLInputElement).value).toBe('1234')
+    await wrapper.get('[data-testid="save-laboratory-display-pin"]').trigger('click')
+    await flushPromises()
+
+    expect(api.setLaboratoryDisplayPin).toHaveBeenCalledWith('lab-1', '1234')
+    expect(wrapper.find('[data-testid="laboratory-display-pin-table"]').text()).toContain(
+      'Sudah diatur',
+    )
+    expect(wrapper.find('[data-testid="laboratory-display-pin-dialog"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 })

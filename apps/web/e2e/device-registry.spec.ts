@@ -138,10 +138,11 @@ test('AI_EDGE admin confirms device removal and can inspect the inactive device'
   })
 
   await loginAsAdmin(page)
-  await expect(page.getByText('tes-perangkat1')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Daftarkan perangkat' })).toHaveCount(0)
+  const deviceRow = page.getByRole('row').filter({ hasText: 'tes-perangkat1' })
+  await expect(deviceRow).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Siapkan kamera' })).toHaveCount(0)
 
-  await page.getByRole('button', { name: 'Hapus', exact: true }).click()
+  await deviceRow.getByRole('button', { name: 'Hapus', exact: true }).click()
   const confirmation = page.getByRole('alertdialog')
   await expect(confirmation).toContainText('Data presensi dan audit lama tetap tersimpan')
   await expect(confirmation.getByRole('button', { name: 'Ya, hapus perangkat' })).toBeVisible()
@@ -149,12 +150,13 @@ test('AI_EDGE admin confirms device removal and can inspect the inactive device'
 
   await confirmation.getByRole('button', { name: 'Ya, hapus perangkat' }).click()
   await expect(page.getByText('Belum ada perangkat yang cocok.')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Daftarkan perangkat' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Siapkan kamera' })).toBeVisible()
   expect(deleteRequests).toBe(1)
 
   await page.getByLabel('Tampilkan perangkat nonaktif').check()
-  await expect(page.getByText('tes-perangkat1')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Kredensial' })).toBeDisabled()
+  const inactiveDeviceRow = page.getByRole('row').filter({ hasText: 'tes-perangkat1' })
+  await expect(inactiveDeviceRow).toBeVisible()
+  await expect(inactiveDeviceRow.getByRole('button', { name: 'Lanjutkan setup' })).toBeDisabled()
 })
 
 test('AI_EDGE admin can pause and reactivate the camera without removing the device', async ({
@@ -184,10 +186,10 @@ test('AI_EDGE admin can pause and reactivate the camera without removing the dev
     config_applied_revision: 0,
     config_apply_status: 'not_configured',
     config_error_code: null,
-    health_status: 'offline',
+    health_status: 'online',
     heartbeat_timeout_seconds: 60,
     is_active: true,
-    last_seen_at: null,
+    last_seen_at: '2026-11-19T08:00:00Z',
     created_at: '2026-10-01T00:00:00Z',
   }
 
@@ -235,16 +237,12 @@ test('AI_EDGE admin can pause and reactivate the camera without removing the dev
   const row = page.getByRole('row').filter({ hasText: 'tes-perangkat1' })
   await expect(row.getByRole('button', { name: 'Jeda kamera' })).toBeVisible()
   await row.getByRole('button', { name: 'Jeda kamera' }).click()
-  const pauseDialog = page.getByRole('dialog')
-  await expect(pauseDialog).toContainText('akan berhenti mengambil frame')
-  await pauseDialog.getByRole('button', { name: 'Jeda kamera' }).click()
   await expect(row.getByRole('button', { name: 'Aktifkan kamera' })).toBeVisible()
   await expect(row).toContainText('Menunggu agent dijeda')
+  await expect(row).toContainText('Menunggu agent menghentikan kamera')
   expect(cameraEnabled).toBe(false)
 
   await row.getByRole('button', { name: 'Aktifkan kamera' }).click()
-  const activateDialog = page.getByRole('dialog')
-  await activateDialog.getByRole('button', { name: 'Aktifkan kamera' }).click()
   await expect(row.getByRole('button', { name: 'Jeda kamera' })).toBeVisible()
   expect(cameraCommands).toEqual([false, true])
 })

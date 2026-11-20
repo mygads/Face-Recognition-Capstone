@@ -93,9 +93,9 @@ const isImportLoading = ref(false)
 const isImportCommitting = ref(false)
 const importFile = ref<File | null>(null)
 const importMapping = ref({
-  student_number_column: 'NIS',
-  full_name_column: 'Nama',
-  class_code_column: 'Kelas',
+  student_number_column: 'NIS/NISN',
+  full_name_column: 'Nama Lengkap',
+  class_code_column: 'Kode Kelas',
 })
 const importPreview = ref<StudentImportPreview | null>(null)
 const importError = ref<string | null>(null)
@@ -155,9 +155,19 @@ const tabPaths: Record<MasterTab, string> = {
   laboratories: '/app/master-data/laboratories',
 }
 const classOptions = ref<SchoolClass[]>([])
+const classOptionsLoadState = ref<'loading' | 'loaded' | 'error'>('loading')
+const activeClassOptions = computed(() =>
+  classOptions.value.filter((schoolClass) => schoolClass.is_active),
+)
+const canManageStudentRecords = computed(
+  () =>
+    canManage.value &&
+    classOptionsLoadState.value === 'loaded' &&
+    activeClassOptions.value.length > 0,
+)
 const studentClassOptions = computed(() => {
   const byId = new Map<string, { id: string; code: string; name: string; academic_year: string }>()
-  for (const schoolClass of classOptions.value) byId.set(schoolClass.id, schoolClass)
+  for (const schoolClass of activeClassOptions.value) byId.set(schoolClass.id, schoolClass)
   for (const studentClass of editingStudentClasses.value) {
     if (!byId.has(studentClass.id)) byId.set(studentClass.id, studentClass)
   }
@@ -212,11 +222,14 @@ async function loadRows(): Promise<void> {
 }
 
 async function loadClassOptions(): Promise<void> {
+  classOptionsLoadState.value = 'loading'
   try {
     const result = await listClasses({ limit: 100, offset: 0 })
     classOptions.value = result.items
+    classOptionsLoadState.value = 'loaded'
   } catch {
     classOptions.value = []
+    classOptionsLoadState.value = 'error'
   }
 }
 
@@ -265,6 +278,7 @@ function createDefaults(): Record<string, string | number | boolean> {
 }
 
 function openCreate(): void {
+  if (tab.value === 'students' && !canManageStudentRecords.value) return
   editingId.value = null
   editingStudentClasses.value = []
   editingStudentPrimaryClassId.value = null
@@ -274,6 +288,7 @@ function openCreate(): void {
 }
 
 function openEditStudent(row: Student): void {
+  if (!canManageStudentRecords.value) return
   editingId.value = row.id
   editingStudentClasses.value = [...(row.classes ?? [])]
   editingStudentPrimaryClassId.value = row.classes?.[0]?.id ?? null
@@ -336,6 +351,11 @@ async function submitForm(): Promise<void> {
   formError.value = null
   try {
     if (tab.value === 'students') {
+      if (!canManageStudentRecords.value) {
+        formError.value =
+          'Buat kelas aktif terlebih dahulu sebelum menambah atau mengubah data siswa.'
+        return
+      }
       const payload = {
         student_number: String(form.value.student_number ?? '').trim(),
         full_name: String(form.value.full_name ?? '').trim(),
@@ -394,6 +414,7 @@ async function submitForm(): Promise<void> {
 }
 
 function openImport(): void {
+  if (!canManageStudentRecords.value) return
   isImportOpen.value = true
   importFile.value = null
   importPreview.value = null
@@ -429,6 +450,10 @@ async function downloadTemplate(): Promise<void> {
 }
 
 async function previewImport(): Promise<void> {
+  if (!canManageStudentRecords.value) {
+    importError.value = 'Buat kelas aktif terlebih dahulu sebelum mengimpor data siswa.'
+    return
+  }
   if (!importFile.value) {
     importError.value = 'Pilih file CSV atau XLSX terlebih dahulu.'
     return
@@ -446,6 +471,10 @@ async function previewImport(): Promise<void> {
 }
 
 async function commitImport(): Promise<void> {
+  if (!canManageStudentRecords.value) {
+    importError.value = 'Buat kelas aktif terlebih dahulu sebelum mengimpor data siswa.'
+    return
+  }
   if (!importFile.value || !importPreview.value?.can_commit) return
   isImportCommitting.value = true
   importError.value = null
@@ -673,10 +702,53 @@ function labStatusTone(lab: Laboratory): 'present' | 'neutral' {
         description="Kelola data induk siswa, penetapan kelas, dan status keaktifan akademik"
       >
         <template #actions>
-          <UiButton v-if="canManage" variant="secondary" @click="openImport">Impor Siswa</UiButton>
-          <UiButton v-if="canManage" variant="primary" @click="openCreate">+ Tambah Siswa</UiButton>
+          <UiButton
+            v-if="canManage"
+            variant="secondary"
+            :disabled="!canManageStudentRecords"
+            :title="!canManageStudentRecords ? 'Buat kelas aktif terlebih dahulu.' : undefined"
+            data-testid="import-students-button"
+            @click="openImport"
+          >
+            Impor Siswa
+          </UiButton>
+          <UiButton
+            v-if="canManage"
+            variant="primary"
+            :disabled="!canManageStudentRecords"
+            :title="!canManageStudentRecords ? 'Buat kelas aktif terlebih dahulu.' : undefined"
+            data-testid="add-student-button"
+            @click="openCreate"
+          >
+            + Tambah Siswa
+          </UiButton>
         </template>
       </UiPageHeader>
+
+      <p
+        v-if="canManage && classOptionsLoadState === 'loaded' && !activeClassOptions.length"
+        class="st-alert st-alert--warning"
+        role="status"
+        data-testid="no-active-classes"
+      >
+        Belum ada kelas aktif. Tambahkan kelas terlebih dahulu sebelum menambah, mengubah, atau
+        mengimpor data siswa.
+        <RouterLink
+          class="st-btnlink"
+          to="/app/master-data/classes"
+          data-testid="create-class-link"
+        >
+          Buka Data Master → Kelas
+        </RouterLink>
+      </p>
+      <p
+        v-else-if="canManage && classOptionsLoadState === 'error'"
+        class="st-alert st-alert--error"
+        role="alert"
+      >
+        Daftar kelas belum dapat dimuat, sehingga tambah, edit, dan impor siswa dinonaktifkan.
+        <button type="button" class="st-link" @click="loadClassOptions">Coba lagi</button>
+      </p>
 
       <form class="st-toolbar" @submit.prevent="submitSearch">
         <UiSearchInput
@@ -743,6 +815,11 @@ function labStatusTone(lab: Laboratory): 'present' | 'neutral' {
                     v-if="canManage"
                     type="button"
                     class="st-link"
+                    :disabled="!canManageStudentRecords"
+                    :title="
+                      !canManageStudentRecords ? 'Buat kelas aktif terlebih dahulu.' : undefined
+                    "
+                    :data-testid="`edit-student-${row.id}`"
                     @click="openEditStudent(row)"
                   >
                     Edit
@@ -1338,7 +1415,14 @@ function labStatusTone(lab: Laboratory): 'present' | 'neutral' {
           {{ displayShortDate(studentDetail.updated_at) }}
         </p>
         <p v-if="canManage">
-          <UiButton variant="secondary" @click="editStudentFromDetail">Ubah Data Siswa</UiButton>
+          <UiButton
+            variant="secondary"
+            :disabled="!canManageStudentRecords"
+            :title="!canManageStudentRecords ? 'Buat kelas aktif terlebih dahulu.' : undefined"
+            @click="editStudentFromDetail"
+          >
+            Ubah Data Siswa
+          </UiButton>
         </p>
       </div>
       <p v-else class="st-table__muted">Memuat detail siswa…</p>
@@ -1348,7 +1432,8 @@ function labStatusTone(lab: Laboratory): 'present' | 'neutral' {
     <UiModal v-if="isImportOpen" title="Impor Data Siswa" wide @close="isImportOpen = false">
       <p class="st-table__muted">
         Unggah dan validasi berkas CSV atau XLSX untuk penambahan data siswa secara massal. Unduh
-        template bila belum punya format kolom yang benar.
+        template bila belum punya format kolom yang benar. Template CSV memakai pemisah titik koma
+        agar setiap data terbuka pada kolomnya di Excel.
       </p>
       <div class="master-data__form-actions" style="justify-content: flex-start">
         <UiButton
@@ -1362,12 +1447,7 @@ function labStatusTone(lab: Laboratory): 'present' | 'neutral' {
       </div>
       <p v-if="importError" class="st-alert st-alert--error" role="alert">{{ importError }}</p>
       <UiField label="Berkas CSV / XLSX" required>
-        <input
-          class="st-file"
-          type="file"
-          accept=".csv,.xlsx,.xls"
-          @change="handleImportFileChange"
-        />
+        <input class="st-file" type="file" accept=".csv,.xlsx" @change="handleImportFileChange" />
       </UiField>
       <div class="st-grid2">
         <UiCard

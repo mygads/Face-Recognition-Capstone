@@ -38,6 +38,7 @@ interface MenuGroup {
 
 const auth = useAuthStore()
 const route = useRoute()
+const schoolLogoUrl = '/logo-sekolah.png'
 
 const expandedGroups = ref<Record<string, boolean>>({
   'data-master': true,
@@ -332,7 +333,7 @@ function toggleGroup(key: string): void {
       <span class="app-sidebar__brand-lockup">
         <img
           class="app-sidebar__brand-logo"
-          src="/logo-sekolah.png"
+          :src="schoolLogoUrl"
           alt="Logo SMA Cimahi"
           width="60"
           height="60"

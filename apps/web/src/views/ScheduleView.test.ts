@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
   listLaboratories: vi.fn(),
   listScheduleTeachers: vi.fn(),
   createSchedule: vi.fn(),
+  duplicateSchedule: vi.fn(),
   updateSchedule: vi.fn(),
 }))
 
@@ -41,6 +42,12 @@ const schedule = {
   effective_from: '2026-07-01',
   effective_through: null,
   is_active: true,
+}
+
+function addDays(date: string, days: number): string {
+  const result = new Date(`${date}T00:00:00.000Z`)
+  result.setUTCDate(result.getUTCDate() + days)
+  return result.toISOString().slice(0, 10)
 }
 
 function router() {
@@ -89,6 +96,14 @@ beforeEach(() => {
     { id: 'teacher-1', full_name: 'Dewi Lestari', opening_mode: 'automatic' },
   ])
   api.createSchedule.mockResolvedValue(schedule)
+  api.duplicateSchedule.mockResolvedValue({
+    source: schedule,
+    duplicates: [
+      { ...schedule, id: 'sch-2', subject: 'Pertemuan 2 - Praktikum Web' },
+      { ...schedule, id: 'sch-3', subject: 'Pertemuan 3 - Praktikum Web' },
+      { ...schedule, id: 'sch-4', subject: 'Pertemuan 4 - Praktikum Web' },
+    ],
+  })
 })
 
 describe('schedule view (Stitch B02-09/10)', () => {
@@ -138,6 +153,59 @@ describe('schedule view (Stitch B02-09/10)', () => {
     expect((wrapper.vm as unknown as { form: { laboratory_id: string } }).form.laboratory_id).toBe(
       'lab-2',
     )
+    wrapper.unmount()
+  })
+
+  it('membuat beberapa salinan mingguan dan menampilkan hasilnya', async () => {
+    const r = router()
+    r.push('/app/schedules')
+    await r.isReady()
+    const wrapper = mount(ScheduleView, { global: { plugins: [piniaTeacher(), r] } })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="duplicate-schedule-sch-1"]').trigger('click')
+    const firstDateInput = wrapper.get('[data-testid="duplicate-start-date"]')
+    const firstDate = firstDateInput.attributes('min')!
+    await firstDateInput.setValue(firstDate)
+    await wrapper.get('[data-testid="duplicate-weeks"]').setValue('3')
+    expect(wrapper.text()).toContain('3 pertemuan akan dibuat')
+    await wrapper.get('[data-testid="submit-schedule-duplicate"]').trigger('click')
+    await flushPromises()
+
+    expect(api.duplicateSchedule).toHaveBeenCalledWith('sch-1', {
+      start_date: firstDate,
+      additional_weeks: 3,
+    })
+    expect(api.duplicateSchedule).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain(
+      '3 jadwal berhasil dibuat: Pertemuan 2 - Praktikum Web sampai Pertemuan 4 - Praktikum Web.',
+    )
+    expect(api.listSchedules).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('membuat salinan sampai tanggal akhir dan menghitung pertemuan yang masuk rentang', async () => {
+    const r = router()
+    r.push('/app/schedules')
+    await r.isReady()
+    const wrapper = mount(ScheduleView, { global: { plugins: [piniaTeacher(), r] } })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="duplicate-schedule-sch-1"]').trigger('click')
+    const firstDateInput = wrapper.get('[data-testid="duplicate-start-date"]')
+    const firstDate = firstDateInput.attributes('min')!
+    await firstDateInput.setValue(firstDate)
+    await wrapper.get('input[type="radio"][value="through"]').setValue('through')
+    const throughDate = addDays(firstDate, 14)
+    await wrapper.get('[data-testid="duplicate-through-date"]').setValue(throughDate)
+    expect(wrapper.text()).toContain('3 pertemuan akan dibuat')
+    await wrapper.get('[data-testid="submit-schedule-duplicate"]').trigger('click')
+    await flushPromises()
+
+    expect(api.duplicateSchedule).toHaveBeenCalledWith('sch-1', {
+      start_date: firstDate,
+      through_date: throughDate,
+    })
     wrapper.unmount()
   })
 })

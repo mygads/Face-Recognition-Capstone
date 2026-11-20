@@ -8,6 +8,7 @@ import {
   listLaboratories,
   resetKioskPin,
   revokeKiosk,
+  setLaboratoryDisplayPin,
   updateKiosk,
   type Device,
   type Kiosk,
@@ -18,6 +19,7 @@ import UiBadge from '../components/ui/UiBadge.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiCard from '../components/ui/UiCard.vue'
 import UiInput from '../components/ui/UiInput.vue'
+import UiModal from '../components/ui/UiModal.vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiSelect from '../components/ui/UiSelect.vue'
 
@@ -26,6 +28,14 @@ const isAdmin = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
 const kiosks = ref<Kiosk[]>([])
 const devices = ref<Device[]>([])
 const labs = ref<Laboratory[]>([])
+const displayPinDrafts = ref<Record<string, string>>({})
+const displayPinMessage = ref<string | null>(null)
+const displayPinError = ref<string | null>(null)
+const editingDisplayPinLabId = ref<string | null>(null)
+const editingDisplayPinLab = computed(
+  () => labs.value.find((lab) => lab.id === editingDisplayPinLabId.value) ?? null,
+)
+const isSavingDisplayPin = ref(false)
 const isLoading = ref(false)
 const error = ref<string | null>(null)
 const message = ref<string | null>(null)
@@ -129,6 +139,51 @@ async function revoke(k: Kiosk): Promise<void> {
   }
 }
 
+function editDisplayPin(labId: string): void {
+  editingDisplayPinLabId.value = labId
+  displayPinDrafts.value[labId] = ''
+  displayPinError.value = null
+  displayPinMessage.value = null
+}
+
+function setDisplayPinDraft(labId: string, value: string): void {
+  displayPinDrafts.value[labId] = value.replace(/[^0-9]/g, '').slice(0, 32)
+  displayPinError.value = null
+}
+
+function cancelDisplayPinEdit(): void {
+  const labId = editingDisplayPinLabId.value
+  if (labId) displayPinDrafts.value[labId] = ''
+  editingDisplayPinLabId.value = null
+  displayPinError.value = null
+}
+
+async function saveDisplayPin(labId: string): Promise<void> {
+  if (isSavingDisplayPin.value) return
+  const pin = displayPinDrafts.value[labId] ?? ''
+  if (!/^[0-9]{4,32}$/.test(pin)) {
+    displayPinError.value = 'PIN harus berisi 4–32 angka.'
+    return
+  }
+  isSavingDisplayPin.value = true
+  displayPinError.value = null
+  displayPinMessage.value = null
+  try {
+    await setLaboratoryDisplayPin(labId, pin)
+    labs.value = labs.value.map((lab) =>
+      lab.id === labId ? { ...lab, has_display_pin: true } : lab,
+    )
+    const lab = labs.value.find((item) => item.id === labId)
+    displayPinMessage.value = `PIN publik untuk ${lab?.code ?? labId} diperbarui.`
+    displayPinDrafts.value[labId] = ''
+    editingDisplayPinLabId.value = null
+  } catch (err) {
+    displayPinError.value = err instanceof Error ? err.message : 'Gagal menyimpan PIN.'
+  } finally {
+    isSavingDisplayPin.value = false
+  }
+}
+
 onMounted(() => void load())
 </script>
 
@@ -140,6 +195,16 @@ onMounted(() => void load())
       description="Admin memilih perangkat, memberi nama layar, membuat/reset PIN, dan mencabut akses. PIN baru hanya tampil sekali."
     >
       <template #actions>
+        <a
+          class="st-btn st-btn--secondary"
+          href="/presensi"
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid="open-kiosk-new-tab"
+        >
+          <span class="st-material-icon" aria-hidden="true">open_in_new</span>
+          Buka kiosk di tab baru
+        </a>
         <UiButton variant="secondary" type="button" @click="load">Muat ulang</UiButton>
       </template>
     </UiPageHeader>
@@ -152,7 +217,7 @@ onMounted(() => void load())
     <UiCard
       v-if="isAdmin"
       title="Daftarkan layar"
-      subtitle="Pilih perangkat, beri nama layar, lalu buat PIN."
+      subtitle="Pilih perangkat, beri nama layar, lalu buat PIN khusus untuk layar tersebut."
     >
       <form style="display: grid; gap: 10px" @submit.prevent="submit">
         <div class="st-grid2">
@@ -203,6 +268,56 @@ onMounted(() => void load())
           >
         </div>
       </form>
+    </UiCard>
+    <UiCard
+      v-if="isAdmin"
+      title="PIN publik per laboratorium"
+      subtitle="PIN untuk membuka /display dalam mode lab tanpa memilih layar kiosk terdaftar."
+    >
+      <p class="st-table__muted">
+        Jika layar memakai kiosk terdaftar, gunakan PIN khusus kiosk pada tabel di bawah.
+      </p>
+      <p v-if="displayPinMessage" class="st-alert st-alert--success" role="status">
+        {{ displayPinMessage }}
+      </p>
+      <div class="st-tablewrap">
+        <table class="st-table" data-testid="laboratory-display-pin-table">
+          <thead>
+            <tr>
+              <th scope="col">Laboratorium</th>
+              <th scope="col">PIN publik</th>
+              <th scope="col">Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="lab in labs" :key="lab.id">
+              <td>
+                <strong>{{ lab.code }}</strong>
+                <small>{{ lab.name }}</small>
+              </td>
+              <td>
+                <UiBadge :tone="lab.has_display_pin ? 'present' : 'neutral'">
+                  {{ lab.has_display_pin ? 'Sudah diatur' : 'Belum diatur' }}
+                </UiBadge>
+              </td>
+              <td>
+                <UiButton
+                  variant="secondary"
+                  type="button"
+                  :aria-label="`${lab.has_display_pin ? 'Ubah' : 'Atur'} PIN untuk ${lab.name}`"
+                  @click="editDisplayPin(lab.id)"
+                >
+                  <span class="st-material-icon" aria-hidden="true">edit</span>
+                  {{ lab.has_display_pin ? 'Ubah PIN' : 'Atur PIN' }}
+                </UiButton>
+              </td>
+            </tr>
+            <tr v-if="!labs.length">
+              <td colspan="3" class="master-data__empty">Belum ada laboratorium.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </UiCard>
     <UiCard v-if="kiosks.length" title="Layar terdaftar" :subtitle="`${kiosks.length} layar`">
       <div class="st-tablewrap">
@@ -262,5 +377,65 @@ onMounted(() => void load())
         </table>
       </div>
     </UiCard>
+
+    <UiModal
+      v-if="editingDisplayPinLab"
+      :title="`${editingDisplayPinLab.has_display_pin ? 'Ubah' : 'Atur'} PIN publik · ${editingDisplayPinLab.code}`"
+      data-testid="laboratory-display-pin-dialog"
+      @close="cancelDisplayPinEdit"
+    >
+      <p class="st-table__muted">PIN lama tidak ditampilkan. Masukkan 4–32 angka.</p>
+      <form
+        id="laboratory-display-pin-form"
+        class="kiosks-view__pin-form"
+        @submit.prevent="saveDisplayPin(editingDisplayPinLab.id)"
+      >
+        <label for="laboratory-display-pin-input">PIN baru</label>
+        <UiInput
+          id="laboratory-display-pin-input"
+          :model-value="displayPinDrafts[editingDisplayPinLab.id] ?? ''"
+          type="password"
+          inputmode="numeric"
+          pattern="[0-9]{4,32}"
+          minlength="4"
+          maxlength="32"
+          autocomplete="off"
+          :invalid="Boolean(displayPinError)"
+          required
+          data-testid="laboratory-display-pin-input"
+          @update:model-value="setDisplayPinDraft(editingDisplayPinLab.id, $event)"
+        />
+        <p v-if="displayPinError" class="st-alert st-alert--error" role="alert">
+          {{ displayPinError }}
+        </p>
+      </form>
+      <template #footer>
+        <UiButton
+          variant="secondary"
+          type="button"
+          :disabled="isSavingDisplayPin"
+          @click="cancelDisplayPinEdit"
+        >
+          Batal
+        </UiButton>
+        <UiButton
+          variant="primary"
+          type="button"
+          :disabled="isSavingDisplayPin"
+          form="laboratory-display-pin-form"
+          data-testid="save-laboratory-display-pin"
+          @click="saveDisplayPin(editingDisplayPinLab.id)"
+        >
+          {{ isSavingDisplayPin ? 'Menyimpan…' : 'Simpan PIN' }}
+        </UiButton>
+      </template>
+    </UiModal>
   </div>
 </template>
+
+<style scoped>
+.kiosks-view__pin-form {
+  display: grid;
+  gap: 8px;
+}
+</style>

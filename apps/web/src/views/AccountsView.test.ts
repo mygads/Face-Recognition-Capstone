@@ -39,7 +39,27 @@ function account(id: string, roles: string[]) {
   }
 }
 
-async function openDrawer(detailRoles: string[]) {
+const emptyGrantList: {
+  base_permissions: string[]
+  extra_permissions: string[]
+  grantable: string[]
+} = { base_permissions: [], extra_permissions: [], grantable: [] }
+
+async function openDrawer(
+  detailRoles: string[],
+  openManagement = true,
+  grantList = emptyGrantList,
+  classOptions: { id: string; code: string; name: string; academic_year: string }[] = [],
+  teacherAssignments: {
+    class_id: string
+    code: string | null
+    name: string | null
+    starts_on: string | null
+    ends_on: string | null
+    is_substitute: boolean
+  }[] = [],
+  permissionLoadFails = false,
+) {
   api.listAccounts.mockResolvedValue({
     items: [account('akun-1', detailRoles)],
     pagination: { total: 1, limit: 100, offset: 0 },
@@ -48,21 +68,34 @@ async function openDrawer(detailRoles: string[]) {
     items: [],
     pagination: { total: 0, limit: 100, offset: 0 },
   })
-  api.listClasses.mockResolvedValue({ items: [], pagination: { total: 0, limit: 100, offset: 0 } })
+  api.listClasses.mockResolvedValue({
+    items: classOptions,
+    pagination: { total: classOptions.length, limit: 100, offset: 0 },
+  })
   api.getStaffAccount.mockResolvedValue(account('akun-1', detailRoles))
   api.listLaborantAssignments.mockResolvedValue({ items: [] })
-  api.listPermissionGrants.mockResolvedValue({ extra_permissions: [], grantable: [] })
-  api.listTeacherAssignments.mockResolvedValue({ items: [] })
+  if (permissionLoadFails) {
+    api.listPermissionGrants.mockRejectedValue(new Error('permission service unavailable'))
+  } else {
+    api.listPermissionGrants.mockResolvedValue(grantList)
+  }
+  api.listTeacherAssignments.mockResolvedValue({ items: teacherAssignments })
   const wrapper = mount(AccountsView)
   await flushPromises()
-  await wrapper.find('[data-testid="manage-akun-1"]').trigger('click')
-  await flushPromises()
+  if (openManagement) {
+    await wrapper.find('[data-testid="manage-akun-1"]').trigger('click')
+    await flushPromises()
+  }
   return wrapper
 }
 
 describe('drawer kelola staf per role', () => {
   it('guru: hanya seksi guru + mode sesi, tanpa seksi laboran', async () => {
-    const wrapper = await openDrawer(['TEACHER'])
+    const wrapper = await openDrawer(['TEACHER'], true, {
+      base_permissions: ['session_view', 'reports_read'],
+      extra_permissions: [],
+      grantable: ['attendance_correct_closed'],
+    })
     try {
       const drawer = wrapper.find('[data-testid="account-manage"]')
       expect(drawer.exists()).toBe(true)
@@ -71,7 +104,12 @@ describe('drawer kelola staf per role', () => {
       expect(wrapper.text()).toContain('Mode pembukaan sesi (guru)')
       expect(wrapper.text()).not.toContain('Penugasan laboran')
       expect(wrapper.text()).not.toContain('Hak akses opsional')
-      expect(wrapper.text()).toContain('Hak akses tambahan guru')
+      expect(wrapper.text()).toContain('Akses bawaan guru')
+      expect(wrapper.text()).toContain('Pantau Sesi')
+      expect(wrapper.text()).toContain('Lihat Laporan')
+      expect(wrapper.text()).toContain('Koreksi Sesi Tertutup')
+      expect(wrapper.text()).toContain('Hak akses tambahan aktif: -')
+      expect(wrapper.text()).not.toContain('Lihat Jadwal')
       expect(api.listPermissionGrants).toHaveBeenCalled()
       expect(wrapper.text()).not.toContain('Tautkan')
     } finally {
@@ -81,11 +119,18 @@ describe('drawer kelola staf per role', () => {
   })
 
   it('laboran: hanya seksi laboran + izin, tanpa seksi guru', async () => {
-    const wrapper = await openDrawer(['LABORANT'])
+    const wrapper = await openDrawer(['LABORANT'], true, {
+      base_permissions: ['roster_read', 'laboratory_read', 'device_operate', 'enrollment_manage'],
+      extra_permissions: [],
+      grantable: ['schedule_read', 'schedule_manage'],
+    })
     try {
       expect(wrapper.text()).toContain('Kelola laboran')
       expect(wrapper.text()).toContain('Penugasan laboran')
-      expect(wrapper.text()).toContain('Hak akses opsional')
+      expect(wrapper.text()).toContain('Akses bawaan laboran')
+      expect(wrapper.text()).toContain('Baca Roster')
+      expect(wrapper.text()).toContain('Operasikan Perangkat')
+      expect(wrapper.text()).toContain('Hak akses tambahan')
       expect(wrapper.text()).not.toContain('Penugasan guru')
       expect(wrapper.text()).not.toContain('Mode pembukaan sesi')
       expect(wrapper.text()).not.toContain('Tautkan')
@@ -95,14 +140,100 @@ describe('drawer kelola staf per role', () => {
     }
   })
 
-  it('admin: tanpa seksi guru/laboran dan tanpa ubah role', async () => {
-    const wrapper = await openDrawer(['ADMIN'])
+  it('tidak menampilkan izin kosong jika daftar izin gagal dimuat', async () => {
+    const wrapper = await openDrawer(['TEACHER'], true, emptyGrantList, [], [], true)
     try {
-      expect(wrapper.text()).toContain('Kelola admin')
-      expect(wrapper.text()).not.toContain('Penugasan guru')
-      expect(wrapper.text()).not.toContain('Penugasan laboran')
-      expect(wrapper.text()).not.toContain('Mode pembukaan sesi')
-      expect(wrapper.find('[data-testid="edit-role"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="permission-grants-load-error"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="base-permissions"]').exists()).toBe(false)
+      expect(wrapper.text()).not.toContain('Tidak ada akses bawaan.')
+      expect(wrapper.text()).not.toContain('Koreksi Sesi Tertutup')
+    } finally {
+      wrapper.unmount()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('menyembunyikan kelas yang sudah ditugaskan dari pilihan kelas guru', async () => {
+    const wrapper = await openDrawer(
+      ['TEACHER'],
+      true,
+      emptyGrantList,
+      [
+        { id: 'kelas-1', code: 'TES1', name: 'MIPA TES', academic_year: '2026-2027' },
+        { id: 'kelas-2', code: 'TES2', name: 'MIPA TES 2', academic_year: '2026-2027' },
+      ],
+      [
+        {
+          class_id: 'kelas-1',
+          code: 'TES1',
+          name: 'MIPA TES',
+          starts_on: null,
+          ends_on: null,
+          is_substitute: false,
+        },
+      ],
+    )
+    try {
+      const options = wrapper
+        .findAll('select[aria-label="Pilih kelas untuk guru"] option')
+        .map((option) => option.attributes('value'))
+      expect(options).not.toContain('kelas-1')
+      expect(options).toContain('kelas-2')
+    } finally {
+      wrapper.unmount()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('memilih semua izin tambahan dengan prasyarat sebelum izin turunannya', async () => {
+    const grantable = [
+      'attendance_correct_closed',
+      'attendance_manual',
+      'attendance_read',
+      'session_operate',
+      'session_view',
+    ]
+    const active = new Set<string>()
+    api.grantOptionalPermission.mockImplementation(async (_accountId, permission) => {
+      active.add(String(permission))
+    })
+    api.listPermissionGrants.mockImplementation(async () => ({
+      base_permissions: [],
+      extra_permissions: [...active],
+      grantable,
+    }))
+    const wrapper = await openDrawer(['LABORANT'], true, {
+      base_permissions: [],
+      extra_permissions: [],
+      grantable,
+    })
+    try {
+      api.grantOptionalPermission.mockClear()
+      const selectAll = wrapper
+        .findAll('label')
+        .find((label) => label.text().includes('Pilih semua Sesi dan Kehadiran'))
+      expect(selectAll).toBeDefined()
+      await selectAll!.get('input[type="checkbox"]').setValue(true)
+      await flushPromises()
+      expect(api.grantOptionalPermission.mock.calls.map(([, permission]) => permission)).toEqual([
+        'session_view',
+        'attendance_correct_closed',
+        'attendance_manual',
+        'attendance_read',
+        'session_operate',
+      ])
+    } finally {
+      wrapper.unmount()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('admin: menampilkan role tetapi menyembunyikan tombol Kelola', async () => {
+    const wrapper = await openDrawer(['ADMIN'], false)
+    try {
+      expect(wrapper.text()).toContain('Admin')
+      expect(wrapper.find('[data-testid="account-list"] table').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="manage-akun-1"]').exists()).toBe(false)
     } finally {
       wrapper.unmount()
       vi.unstubAllGlobals()

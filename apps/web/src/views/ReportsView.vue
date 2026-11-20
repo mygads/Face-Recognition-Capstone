@@ -202,9 +202,6 @@ function pct(part: number, whole: number): string {
   if (!whole) return '0%'
   return `${((part / whole) * 100).toFixed(1)}%`
 }
-function printSlip(): void {
-  window.print()
-}
 function statusLabel(status: AttendanceReportRow['status']): string {
   return {
     present: 'Hadir',
@@ -275,9 +272,6 @@ onMounted(async () => {
       description="Rekapitulasi presensi praktikum laboratorium terintegrasi."
     >
       <template #actions>
-        <UiButton variant="secondary" type="button" @click="printSlip"
-          ><span class="st-material-icon" aria-hidden="true">print</span>Cetak Slip</UiButton
-        >
         <UiButton
           variant="primary"
           type="button"

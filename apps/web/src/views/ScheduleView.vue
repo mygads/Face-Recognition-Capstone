@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { todayLocalISO } from '../utils/dateFormat'
 import {
   createSchedule,
+  duplicateSchedule,
   listClasses,
   listLaboratories,
   listScheduleTeachers,
@@ -10,6 +11,7 @@ import {
   updateSchedule,
   type Laboratory,
   type Schedule,
+  type ScheduleDuplicateRequest,
   type ScheduleTeacher,
   type SchoolClass,
 } from '../api/client'
@@ -20,6 +22,7 @@ import UiDrawer from '../components/ui/UiDrawer.vue'
 import UiEmptyState from '../components/ui/UiEmptyState.vue'
 import UiField from '../components/ui/UiField.vue'
 import UiInput from '../components/ui/UiInput.vue'
+import UiModal from '../components/ui/UiModal.vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiPagination from '../components/ui/UiPagination.vue'
 import UiSearchInput from '../components/ui/UiSearchInput.vue'
@@ -62,6 +65,15 @@ const isFormOpen = ref(false)
 const editingId = ref<string | null>(null)
 const selected = ref<Schedule | null>(null)
 const form = ref<ScheduleForm>(emptyForm())
+const duplicateTarget = ref<Schedule | null>(null)
+const isDuplicateOpen = ref(false)
+const isDuplicating = ref(false)
+const duplicateMode = ref<'weeks' | 'through'>('weeks')
+const duplicateWeeks = ref(4)
+const duplicateStartDate = ref('')
+const duplicateThroughDate = ref('')
+const duplicateError = ref<string | null>(null)
+const successMessage = ref<string | null>(null)
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 
@@ -94,6 +106,116 @@ function weekdayName(day: number): string {
 function displayTime(value: string): string {
   return value.slice(0, 5)
 }
+
+function dateValue(value: string): Date {
+  return new Date(`${value}T00:00:00.000Z`)
+}
+
+function isoDate(value: Date): string {
+  return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, '0')}-${String(value.getUTCDate()).padStart(2, '0')}`
+}
+
+function addDays(value: string, days: number): string {
+  const result = dateValue(value)
+  result.setUTCDate(result.getUTCDate() + days)
+  return isoDate(result)
+}
+
+function todayInTimezone(timezone: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value
+  return `${part('year')}-${part('month')}-${part('day')}`
+}
+
+function nextWeekdayOnOrAfter(startDate: string, weekday: number): string {
+  const start = dateValue(startDate)
+  const mondayFirstWeekday = (start.getUTCDay() + 6) % 7
+  const daysUntil = (weekday - mondayFirstWeekday + 7) % 7
+  return addDays(startDate, daysUntil)
+}
+
+function firstDuplicateDate(schedule: Schedule): string {
+  const today = todayInTimezone(schedule.timezone_name)
+  const anchor = nextWeekdayOnOrAfter(
+    schedule.effective_from > today ? schedule.effective_from : today,
+    schedule.weekday,
+  )
+  const sourceStillHasAnchor =
+    schedule.effective_through === null || schedule.effective_through >= anchor
+  return sourceStillHasAnchor ? addDays(anchor, 7) : anchor
+}
+
+function formatDate(value: string): string {
+  return dateValue(value).toLocaleDateString('id-ID', {
+    timeZone: 'UTC',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
+const duplicatePreviewDates = computed(() => {
+  if (!duplicateTarget.value || !duplicateStartDate.value) return []
+  let count = duplicateWeeks.value
+  if (duplicateMode.value === 'through') {
+    if (!duplicateThroughDate.value || duplicateThroughDate.value < duplicateStartDate.value) {
+      return []
+    }
+    count =
+      Math.floor(
+        (dateValue(duplicateThroughDate.value).getTime() -
+          dateValue(duplicateStartDate.value).getTime()) /
+          (7 * 24 * 60 * 60 * 1000),
+      ) + 1
+  }
+  if (!Number.isInteger(count) || count < 1 || count > 52) return []
+  return Array.from({ length: count }, (_, index) => addDays(duplicateStartDate.value, index * 7))
+})
+
+const duplicateDateError = computed(() => {
+  if (!duplicateTarget.value || !duplicateStartDate.value)
+    return 'Pilih tanggal pertemuan berikutnya.'
+  const selectedDate = dateValue(duplicateStartDate.value)
+  const weekday = (selectedDate.getUTCDay() + 6) % 7
+  if (weekday !== duplicateTarget.value.weekday) {
+    return `Tanggal harus jatuh pada hari ${weekdayName(duplicateTarget.value.weekday)}.`
+  }
+  if (duplicateStartDate.value < firstDuplicateDate(duplicateTarget.value)) {
+    return `Tanggal paling awal untuk salinan adalah ${formatDate(firstDuplicateDate(duplicateTarget.value))}.`
+  }
+  if (
+    duplicateMode.value === 'weeks' &&
+    (!Number.isInteger(duplicateWeeks.value) ||
+      duplicateWeeks.value < 1 ||
+      duplicateWeeks.value > 52)
+  ) {
+    return 'Masukkan jumlah 1 sampai 52 minggu.'
+  }
+  if (duplicateMode.value === 'through') {
+    if (!duplicateThroughDate.value) return 'Pilih tanggal akhir.'
+    if (duplicateThroughDate.value < duplicateStartDate.value) {
+      return 'Tanggal akhir harus sama dengan atau setelah tanggal salinan pertama.'
+    }
+    if (duplicatePreviewDates.value.length === 0) {
+      return 'Rentang maksimal adalah 52 pertemuan mingguan.'
+    }
+  }
+  return null
+})
+
+const duplicateSourceWillEnd = computed(() => {
+  if (!duplicateTarget.value || !duplicateStartDate.value) return false
+  return (
+    duplicateTarget.value.effective_through === null ||
+    duplicateTarget.value.effective_through >= duplicateStartDate.value
+  )
+})
 
 async function loadRows(): Promise<void> {
   isLoading.value = true
@@ -168,6 +290,49 @@ function openEdit(schedule: Schedule): void {
   }
   formError.value = null
   isFormOpen.value = true
+}
+
+function openDuplicate(schedule: Schedule): void {
+  duplicateTarget.value = schedule
+  duplicateMode.value = 'weeks'
+  duplicateWeeks.value = 4
+  duplicateStartDate.value = firstDuplicateDate(schedule)
+  duplicateThroughDate.value = ''
+  duplicateError.value = null
+  selected.value = null
+  isDuplicateOpen.value = true
+}
+
+function closeDuplicate(): void {
+  if (isDuplicating.value) return
+  isDuplicateOpen.value = false
+  duplicateTarget.value = null
+}
+
+async function submitDuplicate(): Promise<void> {
+  if (!duplicateTarget.value || duplicateDateError.value || isDuplicating.value) return
+  duplicateError.value = null
+  successMessage.value = null
+  isDuplicating.value = true
+  const body: ScheduleDuplicateRequest = {
+    start_date: duplicateStartDate.value,
+    ...(duplicateMode.value === 'weeks'
+      ? { additional_weeks: duplicateWeeks.value }
+      : { through_date: duplicateThroughDate.value }),
+  }
+  try {
+    const result = await duplicateSchedule(duplicateTarget.value.id, body)
+    const firstSubject = result.duplicates[0]?.subject
+    const lastSubject = result.duplicates[result.duplicates.length - 1]?.subject
+    successMessage.value = `${result.duplicates.length} jadwal berhasil dibuat: ${firstSubject} sampai ${lastSubject}.`
+    isDuplicateOpen.value = false
+    duplicateTarget.value = null
+    await loadRows()
+  } catch (error) {
+    duplicateError.value = formatError(error)
+  } finally {
+    isDuplicating.value = false
+  }
 }
 
 async function submitForm(): Promise<void> {
@@ -266,6 +431,9 @@ function goToPage(nextPage: number): void {
     </UiPageHeader>
 
     <p v-if="errorMessage" class="st-alert st-alert--error" role="alert">{{ errorMessage }}</p>
+    <p v-if="successMessage" class="st-alert st-alert--success" role="status">
+      {{ successMessage }}
+    </p>
 
     <div class="st-toolbar">
       <div class="st-scope" role="group" aria-label="Rentang jadwal">
@@ -346,6 +514,15 @@ function goToPage(nextPage: number): void {
             >
               Ubah
             </button>
+            <button
+              v-if="canManageSchedule && schedule.is_active"
+              type="button"
+              class="st-link"
+              :data-testid="`duplicate-schedule-${schedule.id}`"
+              @click="openDuplicate(schedule)"
+            >
+              Duplikasi mingguan
+            </button>
           </div>
         </div>
       </article>
@@ -399,11 +576,128 @@ function goToPage(nextPage: number): void {
       </dl>
       <template #footer>
         <UiButton variant="secondary" @click="selected = null">Tutup</UiButton>
+        <UiButton
+          v-if="canManageSchedule && selected.is_active"
+          variant="secondary"
+          @click="openDuplicate(selected)"
+        >
+          Duplikasi mingguan
+        </UiButton>
         <UiButton v-if="canManageSchedule" variant="primary" @click="selected && openEdit(selected)"
           >Ubah Jadwal</UiButton
         >
       </template>
     </UiDrawer>
+
+    <UiModal
+      v-if="isDuplicateOpen && duplicateTarget"
+      title="Duplikasi jadwal mingguan"
+      @close="closeDuplicate"
+    >
+      <p class="st-table__muted">
+        Buat pertemuan baru pada hari, jam, kelas, laboratorium, dan guru yang sama. Nama pertemuan
+        dibuat berurutan, misalnya “Pertemuan 2 - {{ duplicateTarget.subject }}”.
+      </p>
+      <p class="st-alert st-alert--warning" role="note">
+        {{
+          duplicateSourceWillEnd
+            ? `Jadwal sumber akan berakhir pada ${formatDate(addDays(duplicateStartDate, -1))}. Pertemuan baru dibuat sebagai jadwal satu kali supaya tidak ada sesi ganda; setelah salinan terakhir, jadwal ini tidak berulang lagi.`
+            : 'Jadwal sumber sudah berakhir sebelum tanggal salinan pertama. Jadwal sumber tetap seperti sekarang; salinan baru dibuat sebagai jadwal satu kali.'
+        }}
+      </p>
+      <p v-if="duplicateError" class="st-alert st-alert--error" role="alert">
+        {{ duplicateError }}
+      </p>
+      <form id="duplicate-schedule-form" class="st-form" @submit.prevent="submitDuplicate">
+        <UiField
+          label="Tanggal salinan pertama"
+          :hint="`Jadwal sumber: ${weekdayName(duplicateTarget.weekday)}, ${displayTime(duplicateTarget.start_time)}–${displayTime(duplicateTarget.end_time)} · tanggal harus pada hari yang sama.`"
+          :error="duplicateDateError"
+        >
+          <UiInput
+            v-model="duplicateStartDate"
+            type="date"
+            required
+            :min="firstDuplicateDate(duplicateTarget)"
+            data-testid="duplicate-start-date"
+          />
+        </UiField>
+        <fieldset class="st-duplicate-mode">
+          <legend>Jumlah pertemuan</legend>
+          <label
+            class="st-radio-card"
+            :class="{ 'st-radio-card--active': duplicateMode === 'weeks' }"
+          >
+            <input v-model="duplicateMode" type="radio" value="weeks" />
+            <span><strong>Jumlah minggu</strong><small>Atur banyak salinan</small></span>
+          </label>
+          <label
+            class="st-radio-card"
+            :class="{ 'st-radio-card--active': duplicateMode === 'through' }"
+          >
+            <input v-model="duplicateMode" type="radio" value="through" />
+            <span
+              ><strong>Sampai tanggal</strong
+              ><small>Termasuk pertemuan pada hari jadwal</small></span
+            >
+          </label>
+        </fieldset>
+        <UiField
+          v-if="duplicateMode === 'weeks'"
+          label="Minggu tambahan"
+          hint="1 sampai 52 pertemuan"
+        >
+          <UiInput
+            v-model.number="duplicateWeeks"
+            type="number"
+            min="1"
+            max="52"
+            required
+            data-testid="duplicate-weeks"
+          />
+        </UiField>
+        <UiField
+          v-else
+          label="Tanggal akhir"
+          hint="Pertemuan dibuat setiap 7 hari sampai tanggal ini."
+        >
+          <UiInput
+            v-model="duplicateThroughDate"
+            type="date"
+            required
+            :min="duplicateStartDate"
+            data-testid="duplicate-through-date"
+          />
+        </UiField>
+      </form>
+      <div v-if="duplicatePreviewDates.length" class="st-duplicate-preview" aria-live="polite">
+        <strong>{{ duplicatePreviewDates.length }} pertemuan akan dibuat</strong>
+        <ul>
+          <li v-for="date in duplicatePreviewDates.slice(0, 4)" :key="date">
+            {{ weekdayName(duplicateTarget.weekday) }}, {{ formatDate(date) }}
+          </li>
+          <li v-if="duplicatePreviewDates.length > 4">
+            dan {{ duplicatePreviewDates.length - 4 }} pertemuan berikutnya
+          </li>
+        </ul>
+        <small>Nomor pertemuan berlanjut otomatis dari jadwal dan pertemuan yang sudah ada.</small>
+      </div>
+      <template #footer>
+        <UiButton variant="secondary" :disabled="isDuplicating" @click="closeDuplicate">
+          Batal
+        </UiButton>
+        <UiButton
+          variant="primary"
+          type="submit"
+          :disabled="isDuplicating || Boolean(duplicateDateError)"
+          form="duplicate-schedule-form"
+          data-testid="submit-schedule-duplicate"
+          @click="submitDuplicate"
+        >
+          {{ isDuplicating ? 'Membuat…' : `Buat ${duplicatePreviewDates.length} pertemuan` }}
+        </UiButton>
+      </template>
+    </UiModal>
 
     <!-- Form tambah/ubah (B02-10) -->
     <UiDrawer

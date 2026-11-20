@@ -164,6 +164,8 @@ describe('dashboard laboran ala Stitch B01-06/B01-07', () => {
     })
     await flushPromises()
     expect(wrapper.text()).toContain('Belum ada penugasan laboratorium')
+    expect(api.listAttendanceSessions).not.toHaveBeenCalled()
+    expect(api.listAtRiskStudents).not.toHaveBeenCalled()
   })
 
   it('menampilkan perangkat dan menu delegasi sesuai izin', async () => {

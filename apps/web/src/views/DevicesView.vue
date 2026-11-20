@@ -2,7 +2,15 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { shouldPausePolling } from '../utils/visibility'
 import { useAuthStore } from '../stores/auth'
-import { UiButton, UiInput, UiPageHeader, UiSelect, UiStat } from '../components/ui'
+import {
+  UiButton,
+  UiCard,
+  UiInput,
+  UiModal,
+  UiPageHeader,
+  UiSelect,
+  UiStat,
+} from '../components/ui'
 import {
   buildDeviceSetupCommand,
   type DeviceConnectionMode,
@@ -13,21 +21,23 @@ import {
   createDevice,
   deleteDevice,
   getAiReadiness,
+  getDeviceRuntimeConfiguration,
   listDevices,
   listLaboratories,
   provisionDeviceCredential,
   rotateDeviceCredential,
   setDeviceCameraEnabled,
-  setLaboratoryDisplayPin,
   updateDevice,
   type Device,
   type DeviceCredential,
+  type DeviceRuntimeConfiguration,
   type Laboratory,
   type AiReadiness,
 } from '../api/client'
 import { triggerDownload } from '../utils/download'
 import { formatDateTimeLocal } from '../utils/dateFormat'
 import { createRefreshEpoch } from '../utils/refresh'
+import { isFactoryDefaultReference } from '../utils/recognitionConfig'
 
 type DeviceForm = {
   name: string
@@ -48,12 +58,11 @@ const FALLBACK_MODEL_VERSION = 'opencv-zoo-sface-2021dec'
 
 const auth = useAuthStore()
 const canManage = computed(() => auth.account?.roles.includes('ADMIN') ?? false)
-const canPreviewCamera = computed(
-  () => auth.account?.roles.some((role) => role === 'ADMIN' || role === 'LABORANT') ?? false,
-)
 const devices = ref<Device[]>([])
 const laboratories = ref<Laboratory[]>([])
 const aiReadiness = ref<AiReadiness | null>(null)
+const edgeSetupDevice = ref<Device | null>(null)
+const edgeSetupRuntime = ref<DeviceRuntimeConfiguration | null>(null)
 const isProfileLoading = ref(true)
 const hasResolvedInitialProfile = ref(false)
 const edgeDeviceCount = ref(0)
@@ -74,22 +83,8 @@ const isSaving = ref(false)
 const editingDeviceId = ref<string | null>(null)
 const form = ref<DeviceForm>(emptyForm())
 const credentialDevice = ref<Device | null>(null)
-const displayPinDrafts = ref<Record<string, string>>({})
-const displayPinMessage = ref<string | null>(null)
-async function saveDisplayPin(labId: string): Promise<void> {
-  const pin = (displayPinDrafts.value[labId] ?? '').trim()
-  if (pin.length < 4) {
-    displayPinMessage.value = 'PIN minimal 4 karakter.'
-    return
-  }
-  try {
-    await setLaboratoryDisplayPin(labId, pin)
-    displayPinMessage.value = 'PIN layar diperbarui untuk lab ' + labId
-    displayPinDrafts.value[labId] = ''
-  } catch (err) {
-    displayPinMessage.value = err instanceof Error ? err.message : 'Gagal menyimpan PIN.'
-  }
-}
+const isEdgeSetupWizard = ref(false)
+const isEdgeSetupMinimized = ref(false)
 const issuedCredential = ref<DeviceCredential | null>(null)
 const credentialError = ref<string | null>(null)
 const credentialCopyMessage = ref<string | null>(null)
@@ -100,7 +95,9 @@ const modelVersion = ref('opencv-zoo-sface-2021dec')
 const installPlatform = ref<DeviceSetupPlatform>('windows')
 const connectionMode = ref<DeviceConnectionMode>('same-host')
 const setupDefaults = ref<DeviceSetupDefaults>(loadSetupDefaults())
+const setupDefaultsDraft = ref<DeviceSetupDefaults>({ ...setupDefaults.value })
 const setupDefaultsMessage = ref<string | null>(null)
+const isSetupDefaultsOpen = ref(false)
 const installCommandMessage = ref<string | null>(null)
 const bundleMessage = ref<string | null>(null)
 const isCredentialLoading = ref(false)
@@ -108,20 +105,114 @@ const isRotationOpen = ref(false)
 const devicePendingDeletion = ref<Device | null>(null)
 const isDeletingDevice = ref(false)
 const deleteError = ref<string | null>(null)
-const cameraControlTarget = ref<Device | null>(null)
 const isCameraControlSaving = ref(false)
 let refreshTimer: ReturnType<typeof setInterval> | undefined
+let wizardRefreshTimer: ReturnType<typeof setInterval> | undefined
 
 const activeProfile = computed(() => aiReadiness.value?.deployment_profile ?? null)
 const enrollmentModelVersion = computed(
   () => aiReadiness.value?.enrollment_model_version?.trim() || '',
 )
+const setupDefaultsConnectionLabel = computed(() => {
+  if (activeProfile.value === 'AI_EDGE') {
+    return isLoopbackOrigin(setupDefaults.value.coreApiUrl)
+      ? 'Komputer ini · localhost'
+      : 'LAN/VPN sekolah · HTTPS'
+  }
+  return setupDefaults.value.connectionMode === 'same-host'
+    ? 'Komputer yang sama · localhost'
+    : 'LAN/VPN sekolah · HTTPS'
+})
 const canRegisterDevice = computed(() => {
   if (!canManage.value || isProfileLoading.value || !activeProfile.value) return false
   return (
     activeProfile.value === 'AI_CENTRAL' ||
     (edgeDeviceCount.value === 0 && enrollmentModelVersion.value.length > 0)
   )
+})
+const edgeCameraReady = computed(() => {
+  const device = edgeSetupDevice.value
+  return Boolean(
+    device?.is_active &&
+    device.camera_enabled &&
+    device.camera_status === 'online' &&
+    device.last_seen_at,
+  )
+})
+const edgePreviewRoute = computed(() => ({
+  path: '/app/camera-preview',
+  query: {
+    lab: edgeSetupDevice.value?.laboratory_id,
+    device: edgeSetupDevice.value?.device_id,
+  },
+}))
+const edgeAiSetupStatus = computed(() => {
+  const device = edgeSetupDevice.value
+  if (!device) {
+    return {
+      tone: 'neutral',
+      label: 'Menunggu perangkat',
+      detail: 'Daftarkan satu PC kamera untuk memulai.',
+    }
+  }
+  if (!aiReadiness.value?.enrollment_models_ready) {
+    return {
+      tone: 'warning',
+      label: 'Model enrollment belum siap',
+      detail: 'Model perlu tersedia di Core API untuk mengambil template wajah.',
+    }
+  }
+  if (!device.model_version) {
+    return {
+      tone: 'neutral',
+      label: 'Menunggu agent melaporkan model',
+      detail: 'Setelah agent hidup, versi model akan diperiksa otomatis.',
+    }
+  }
+  if (device.model_version !== enrollmentModelVersion.value) {
+    return {
+      tone: 'danger',
+      label: 'Versi model tidak cocok',
+      detail: 'Versi model agent harus sama dengan versi template enrollment.',
+    }
+  }
+  if (edgeSetupRuntime.value?.apply_status === 'error') {
+    return {
+      tone: 'danger',
+      label: 'Konfigurasi AI gagal diterapkan',
+      detail: 'Buka AI & Kamera untuk melihat alasan dan memperbaiki konfigurasi.',
+    }
+  }
+  if (edgeSetupRuntime.value?.apply_status !== 'applied') {
+    return {
+      tone: 'warning',
+      label: 'Menunggu konfigurasi AI diterapkan',
+      detail: 'Agent akan mengambil pengaturan saat tersambung.',
+    }
+  }
+  const settings = edgeSetupRuntime.value.settings as Record<string, unknown>
+  if (
+    typeof settings.min_top1_similarity !== 'number' ||
+    typeof settings.min_top1_top2_margin !== 'number'
+  ) {
+    return {
+      tone: 'warning',
+      label: 'Ambang pengenalan belum diatur',
+      detail: 'Atur ambang sebelum mencoba pengenalan wajah.',
+    }
+  }
+  if (isFactoryDefaultReference(settings.calibration_reference as string | null | undefined)) {
+    return {
+      tone: 'warning',
+      label: 'Siap untuk smoke test terawasi',
+      detail: 'Ambang default sementara wajib dikalibrasi sebelum operasional.',
+    }
+  }
+  return {
+    tone: 'success',
+    label: 'AI siap menerima sesi',
+    detail: 'Presensi baru dicatat jika template siswa tersedia dan sesi aktif.',
+  }
 })
 const deviceConnectionMode = computed<DeviceConnectionMode>(() => {
   if (credentialDevice.value?.deployment_profile === 'AI_EDGE') {
@@ -168,26 +259,37 @@ function loadSetupDefaults(): DeviceSetupDefaults {
   }
 }
 
-function saveSetupDefaults(): void {
+function openSetupDefaultsEditor(): void {
+  setupDefaultsDraft.value = { ...setupDefaults.value }
+  setupDefaultsMessage.value = null
+  isSetupDefaultsOpen.value = true
+}
+
+function closeSetupDefaultsEditor(): void {
+  isSetupDefaultsOpen.value = false
+  setupDefaultsMessage.value = null
+}
+
+function saveSetupDefaults(): boolean {
   setupDefaultsMessage.value = null
   try {
-    const coreOrigin = normalizeServerOrigin(setupDefaults.value.coreApiUrl, 'URL Core API')
+    const coreOrigin = normalizeServerOrigin(setupDefaultsDraft.value.coreApiUrl, 'URL Core API')
     const mode =
       activeProfile.value === 'AI_EDGE'
         ? isLoopbackOrigin(coreOrigin)
           ? 'same-host'
           : 'private-network'
-        : setupDefaults.value.connectionMode
+        : setupDefaultsDraft.value.connectionMode
     validateConnectionOrigin(mode, coreOrigin, 'URL Core API')
     const centralOrigin =
-      activeProfile.value === 'AI_CENTRAL' && setupDefaults.value.centralAiUrl.trim()
-        ? normalizeServerOrigin(setupDefaults.value.centralAiUrl, 'URL AI Central')
+      activeProfile.value === 'AI_CENTRAL' && setupDefaultsDraft.value.centralAiUrl.trim()
+        ? normalizeServerOrigin(setupDefaultsDraft.value.centralAiUrl, 'URL AI Central')
         : ''
     if (centralOrigin) {
       validateConnectionOrigin(mode, centralOrigin, 'URL AI Central')
     }
     const next: DeviceSetupDefaults = {
-      ...setupDefaults.value,
+      ...setupDefaultsDraft.value,
       coreApiUrl: coreOrigin,
       centralAiUrl: centralOrigin,
       connectionMode: mode,
@@ -195,12 +297,19 @@ function saveSetupDefaults(): void {
     }
     window.localStorage.setItem(DEVICE_SETUP_DEFAULTS_KEY, JSON.stringify(next))
     setupDefaults.value = next
+    setupDefaultsDraft.value = { ...next }
     setupDefaultsMessage.value =
       'Default disimpan di browser ini. URL akan terisi untuk setup device berikutnya; token tidak disimpan.'
+    return true
   } catch (error) {
     setupDefaultsMessage.value =
       error instanceof Error ? error.message : 'Default setup tidak dapat disimpan.'
+    return false
   }
+}
+
+function saveSetupDefaultsAndClose(): void {
+  if (saveSetupDefaults()) isSetupDefaultsOpen.value = false
 }
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
@@ -270,8 +379,31 @@ function defaultCentralAiUrl(): string {
   return ''
 }
 
+function defaultAiEdgePlatform(): Extract<DeviceSetupPlatform, 'windows' | 'ubuntu'> {
+  const platform = window.navigator.platform.toLowerCase()
+  const userAgent = window.navigator.userAgent.toLowerCase()
+  return platform.startsWith('win') || userAgent.includes('windows') ? 'windows' : 'ubuntu'
+}
+
 function healthLabel(status: Device['health_status']): string {
   return { online: 'Online', offline: 'Offline', warning: 'Warning' }[status]
+}
+
+function warningStatusMessage(device: Device): string {
+  if (!device.camera_enabled) return 'Kamera dijeda admin.'
+  if (device.camera_status === 'disabled') {
+    return 'Agent belum menerapkan perintah untuk mengaktifkan kamera.'
+  }
+  if (device.camera_status === 'error') return 'Agent melaporkan gangguan kamera.'
+  if (device.camera_status === 'offline') return 'Kamera belum aktif pada agent.'
+  if (device.camera_status === 'unknown') return 'Agent belum melaporkan status kamera.'
+  if ((device.dead_letter_events ?? 0) > 0) {
+    return `${device.dead_letter_events} event gagal dikirim dan perlu diperiksa.`
+  }
+  if ((device.pending_events ?? 0) > 0) {
+    return `${device.pending_events} event masih menunggu dikirim.`
+  }
+  return 'Periksa antrean perangkat atau konfigurasi kamera.'
 }
 
 function profileLabel(profile: Device['deployment_profile']): string {
@@ -326,27 +458,31 @@ function cameraQualityLabel(device: Device): string {
 }
 
 function cameraQualitySourceLabel(device: Device): string | null {
-  const source = device.camera_metrics?.quality_source
-  if (source === 'face_check') return 'Uji wajah di preview AI_EDGE'
-  if (source === 'frame_filter') return 'Uji cahaya/ketajaman ringan gateway'
+  if (device.camera_metrics?.quality_source === 'frame_filter') {
+    return 'Pemeriksaan cahaya/ketajaman ringan gateway'
+  }
   return null
 }
 
-function requestCameraToggle(device: Device): void {
-  cameraControlTarget.value = device
+function cameraLatencyLabel(device: Device): string {
+  const summary = device.latency_summary
+  if (!summary || (summary.p50_ms == null && summary.p95_ms == null)) {
+    return 'Belum ada sampel'
+  }
+  const p50 = typeof summary.p50_ms === 'number' ? summary.p50_ms.toFixed(1) : '-'
+  const p95 = typeof summary.p95_ms === 'number' ? summary.p95_ms.toFixed(1) : '-'
+  return `${p50} / ${p95} ms`
 }
 
-async function confirmCameraToggle(): Promise<void> {
-  const target = cameraControlTarget.value
-  if (!target) return
+async function toggleDeviceCamera(device: Device): Promise<void> {
+  if (isCameraControlSaving.value) return
   isCameraControlSaving.value = true
   errorMessage.value = null
   try {
-    const updated = await setDeviceCameraEnabled(target.device_id, !target.camera_enabled)
+    const updated = await setDeviceCameraEnabled(device.device_id, !device.camera_enabled)
     devices.value = devices.value.map((item) =>
       item.device_id === updated.device_id ? updated : item,
     )
-    cameraControlTarget.value = null
   } catch (error) {
     errorMessage.value = formatError(error)
   } finally {
@@ -383,9 +519,23 @@ async function loadDevices(): Promise<void> {
         deployment_profile: 'AI_EDGE',
         is_active: true,
       })
+      if (!loadDevicesEpoch.isCurrent(epoch)) return
       edgeDeviceCount.value = edgeDevices.pagination.total
+      edgeSetupDevice.value = edgeDevices.items[0] ?? null
+      edgeSetupRuntime.value = null
+      if (edgeSetupDevice.value) {
+        try {
+          edgeSetupRuntime.value = await getDeviceRuntimeConfiguration(
+            edgeSetupDevice.value.device_id,
+          )
+        } catch {
+          edgeSetupRuntime.value = null
+        }
+      }
     } else {
       edgeDeviceCount.value = 0
+      edgeSetupDevice.value = null
+      edgeSetupRuntime.value = null
     }
   } catch (error) {
     if (loadDevicesEpoch.isCurrent(epoch)) errorMessage.value = formatError(error)
@@ -447,6 +597,12 @@ function openCreate(): void {
   void loadLaboratories()
 }
 
+function closeDeviceForm(): void {
+  if (isSaving.value) return
+  isFormOpen.value = false
+  formError.value = null
+}
+
 function openEdit(device: Device): void {
   editingDeviceId.value = device.device_id
   form.value = {
@@ -461,12 +617,22 @@ function openEdit(device: Device): void {
 }
 
 async function submitForm(): Promise<void> {
+  if (isSaving.value) return
   formError.value = null
   if (!activeProfile.value) {
     formError.value = 'Profil server belum dapat dipastikan. Muat ulang halaman lalu coba lagi.'
     return
   }
+  if (!form.value.name.trim()) {
+    formError.value = 'Nama perangkat wajib diisi.'
+    return
+  }
+  if (!form.value.laboratory_id) {
+    formError.value = 'Pilih laboratorium untuk perangkat ini.'
+    return
+  }
   isSaving.value = true
+  let newlyCreatedDevice: Device | null = null
   try {
     if (editingDeviceId.value) {
       await updateDevice(editingDeviceId.value, {
@@ -475,7 +641,7 @@ async function submitForm(): Promise<void> {
         is_active: form.value.is_active,
       })
     } else {
-      await createDevice({
+      newlyCreatedDevice = await createDevice({
         name: form.value.name.trim(),
         laboratory_id: form.value.laboratory_id,
         deployment_profile: activeProfile.value === 'AI_CENTRAL' ? 'STB_GATEWAY' : 'AI_EDGE',
@@ -484,6 +650,13 @@ async function submitForm(): Promise<void> {
     }
     isFormOpen.value = false
     await loadDevices()
+    if (newlyCreatedDevice) {
+      if (newlyCreatedDevice.deployment_profile === 'AI_EDGE') {
+        await startEdgeSetup(newlyCreatedDevice, true)
+      } else {
+        openCredential(newlyCreatedDevice)
+      }
+    }
   } catch (error) {
     formError.value = formatError(error)
   } finally {
@@ -493,6 +666,8 @@ async function submitForm(): Promise<void> {
 
 function openCredential(device: Device): void {
   credentialDevice.value = device
+  isEdgeSetupWizard.value = false
+  isEdgeSetupMinimized.value = false
   issuedCredential.value = null
   credentialError.value = null
   credentialCopyMessage.value = null
@@ -506,7 +681,8 @@ function openCredential(device: Device): void {
       ? savedCentral || (browserIsLocal ? defaultCentralAiUrl() : '')
       : ''
   modelVersion.value = enrollmentModelVersion.value
-  installPlatform.value = device.deployment_profile === 'STB_GATEWAY' ? 'armbian' : 'windows'
+  installPlatform.value =
+    device.deployment_profile === 'STB_GATEWAY' ? 'armbian' : defaultAiEdgePlatform()
   connectionMode.value =
     device.deployment_profile === 'AI_EDGE'
       ? isLoopbackOrigin(coreApiUrl.value)
@@ -518,10 +694,28 @@ function openCredential(device: Device): void {
   isRotationOpen.value = false
 }
 
+async function startEdgeSetup(device: Device, provisionForNewDevice = false): Promise<void> {
+  if (credentialDevice.value?.device_id === device.device_id && isEdgeSetupWizard.value) {
+    isEdgeSetupMinimized.value = false
+    return
+  }
+  openCredential(device)
+  isEdgeSetupWizard.value = true
+  if (provisionForNewDevice) await issueCredential('provision')
+}
+
+function minimizeEdgeSetup(): void {
+  if (bundleMessage.value?.startsWith('Paket setup diunduh')) {
+    isEdgeSetupMinimized.value = true
+  }
+}
+
 function closeCredential(): void {
   if (isCredentialLoading.value) return
   issuedCredential.value = null
   credentialDevice.value = null
+  isEdgeSetupWizard.value = false
+  isEdgeSetupMinimized.value = false
   credentialError.value = null
   credentialCopyMessage.value = null
   installCommandMessage.value = null
@@ -654,19 +848,22 @@ function selectConnectionMode(mode: DeviceConnectionMode): void {
   }
 }
 
-function onDefaultConnectionModeChange(event: Event): void {
-  const mode = (event.currentTarget as HTMLSelectElement).value
+function onDefaultConnectionModeChange(mode: string): void {
   if (mode !== 'same-host' && mode !== 'private-network') return
-  setupDefaults.value.connectionMode = mode
+  setupDefaultsDraft.value.connectionMode = mode
   if (mode === 'same-host') {
-    setupDefaults.value.coreApiUrl = 'http://127.0.0.1:8000'
+    setupDefaultsDraft.value.coreApiUrl = 'http://127.0.0.1:8000'
     if (activeProfile.value === 'AI_CENTRAL') {
-      setupDefaults.value.centralAiUrl = 'http://127.0.0.1:8001'
+      setupDefaultsDraft.value.centralAiUrl = 'http://127.0.0.1:8001'
     }
     return
   }
-  if (isLoopbackOrigin(setupDefaults.value.coreApiUrl)) setupDefaults.value.coreApiUrl = ''
-  if (isLoopbackOrigin(setupDefaults.value.centralAiUrl)) setupDefaults.value.centralAiUrl = ''
+  if (isLoopbackOrigin(setupDefaultsDraft.value.coreApiUrl)) {
+    setupDefaultsDraft.value.coreApiUrl = ''
+  }
+  if (isLoopbackOrigin(setupDefaultsDraft.value.centralAiUrl)) {
+    setupDefaultsDraft.value.centralAiUrl = ''
+  }
 }
 
 function onConnectionModeChange(event: Event): void {
@@ -771,10 +968,15 @@ function downloadSetupBundle(): void {
     })
     triggerDownload(file, `presensi-device-${device.device_id}-setup.json`)
     bundleMessage.value =
-      'Paket setup diunduh. Paket ini memuat secret; pindahkan secara aman ke host kamera dan hapus setelah agent berhasil dipasang.'
+      'Paket setup diunduh. File ini berisi token rahasia; hapus setelah agent Online.'
   } catch (error) {
     bundleMessage.value = error instanceof Error ? error.message : 'Paket setup tidak dapat dibuat.'
   }
+}
+
+async function downloadSetupAndCopyCommand(): Promise<void> {
+  downloadSetupBundle()
+  if (bundleMessage.value?.startsWith('Paket setup diunduh')) await copyInstallCommand()
 }
 
 function onRotationToggle(event: Event): void {
@@ -787,6 +989,14 @@ function goToPage(nextPage: number): void {
 }
 
 watch([page, statusFilter, includeInactive], () => void loadDevices())
+watch(isEdgeSetupWizard, (isOpen) => {
+  if (wizardRefreshTimer) clearInterval(wizardRefreshTimer)
+  if (isOpen) {
+    wizardRefreshTimer = setInterval(() => {
+      if (!shouldPausePolling()) void loadDevices()
+    }, 4_000)
+  }
+})
 watch([coreApiUrl, centralAiUrl, connectionMode], () => {
   bundleMessage.value = null
   installCommandMessage.value = null
@@ -806,6 +1016,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   if (refreshTimer) clearInterval(refreshTimer)
+  if (wizardRefreshTimer) clearInterval(wizardRefreshTimer)
   issuedCredential.value = null
 })
 </script>
@@ -815,7 +1026,7 @@ onBeforeUnmount(() => {
     <UiPageHeader
       eyebrow="Edge fleet monitoring"
       title="Manajemen Perangkat & Kamera"
-      description="Monitoring status edge agent biometrik, kamera IP, dan sinkronisasi hardware presensi."
+      description="Daftarkan perangkat, siapkan agent, lalu pantau heartbeat dan kamera."
     >
       <template #actions>
         <RouterLink
@@ -826,12 +1037,128 @@ onBeforeUnmount(() => {
           Preview kamera
         </RouterLink>
         <UiButton v-if="canRegisterDevice" variant="primary" type="button" @click="openCreate">
-          Daftarkan perangkat
+          {{ activeProfile === 'AI_EDGE' ? 'Siapkan kamera' : 'Daftarkan perangkat' }}
         </UiButton>
       </template>
     </UiPageHeader>
 
     <p v-if="errorMessage" class="master-data__alert" role="alert">{{ errorMessage }}</p>
+    <UiCard
+      v-if="canManage && activeProfile === 'AI_EDGE'"
+      title="Siapkan PC kamera AI_EDGE"
+      subtitle="Satu alur: daftarkan perangkat, pasang agent, lalu cek kamera dan kesiapan AI."
+      data-testid="edge-setup-progress"
+    >
+      <p v-if="isProfileLoading" class="st-table__muted" role="status">
+        Memeriksa kesiapan model dan perangkat…
+      </p>
+      <template v-else>
+        <p v-if="edgeSetupDevice" class="devices-view__setup-device">
+          <strong>{{ edgeSetupDevice.name }}</strong> · {{ edgeSetupDevice.laboratory_name }}
+        </p>
+        <div class="devices-view__setup-steps" aria-label="Tahapan setup AI_EDGE">
+          <div
+            class="devices-view__setup-step"
+            :class="
+              edgeSetupDevice
+                ? 'devices-view__setup-step--done'
+                : 'devices-view__setup-step--pending'
+            "
+          >
+            <span aria-hidden="true">1</span>
+            <div>
+              <strong>Perangkat</strong><small>{{ edgeSetupDevice ? 'Terdaftar' : 'Belum' }}</small>
+            </div>
+          </div>
+          <div
+            class="devices-view__setup-step"
+            :class="
+              edgeCameraReady
+                ? 'devices-view__setup-step--done'
+                : 'devices-view__setup-step--pending'
+            "
+          >
+            <span aria-hidden="true">2</span>
+            <div>
+              <strong>Agent &amp; kamera</strong>
+              <small>{{
+                edgeCameraReady
+                  ? 'Online'
+                  : edgeSetupDevice?.camera_enabled === false
+                    ? 'Dijeda'
+                    : 'Menunggu koneksi'
+              }}</small>
+            </div>
+          </div>
+          <div
+            class="devices-view__setup-step"
+            :class="`devices-view__setup-step--${edgeAiSetupStatus.tone}`"
+          >
+            <span aria-hidden="true">3</span>
+            <div>
+              <strong>Kesiapan AI</strong><small>{{ edgeAiSetupStatus.label }}</small>
+            </div>
+          </div>
+        </div>
+        <p class="devices-view__setup-detail">
+          {{ edgeAiSetupStatus.detail }}
+          <template v-if="edgeSetupDevice && edgeAiSetupStatus.tone === 'success'">
+            Template wajah siswa dan sesi aktif tetap diperlukan agar presensi dapat dicatat.
+          </template>
+        </p>
+        <div class="devices-view__setup-actions">
+          <UiButton
+            v-if="!edgeSetupDevice && canRegisterDevice"
+            variant="primary"
+            type="button"
+            data-testid="start-edge-setup"
+            @click="openCreate"
+          >
+            Mulai setup kamera
+          </UiButton>
+          <UiButton
+            v-else-if="edgeSetupDevice && !edgeSetupDevice.last_seen_at"
+            variant="primary"
+            type="button"
+            data-testid="continue-edge-setup"
+            @click="startEdgeSetup(edgeSetupDevice)"
+          >
+            Lanjutkan pemasangan
+          </UiButton>
+          <UiButton
+            v-else-if="edgeSetupDevice && !edgeSetupDevice.camera_enabled"
+            variant="secondary"
+            type="button"
+            :disabled="isCameraControlSaving"
+            @click="toggleDeviceCamera(edgeSetupDevice)"
+          >
+            Aktifkan kamera
+          </UiButton>
+          <RouterLink
+            v-if="edgeCameraReady"
+            class="button button--secondary"
+            :to="edgePreviewRoute"
+            data-testid="edge-setup-preview"
+          >
+            Buka preview kamera
+          </RouterLink>
+          <RouterLink
+            v-if="edgeSetupDevice && edgeAiSetupStatus.tone !== 'success'"
+            class="button button--secondary"
+            to="/app/ai-setup"
+          >
+            Atur AI
+          </RouterLink>
+          <RouterLink
+            v-if="edgeSetupDevice && edgeAiSetupStatus.tone === 'success'"
+            class="button button--secondary"
+            to="/app/enrollment"
+          >
+            Daftarkan wajah siswa
+          </RouterLink>
+        </div>
+      </template>
+    </UiCard>
     <p
       v-if="canManage && activeProfile === 'AI_EDGE' && edgeDeviceCount > 0"
       class="devices-view__profile-note"
@@ -861,49 +1188,114 @@ onBeforeUnmount(() => {
       />
     </div>
 
-    <section v-if="canManage" class="master-data__panel devices-view__form-panel">
-      <div class="master-data__panel-heading">
-        <div>
-          <h2>Default koneksi untuk installer kamera</h2>
-          <p>
-            Isi sekali untuk mempercepat paket device berikutnya. Nilai ini disimpan hanya di
-            browser admin ini, bukan di server; tidak ada token di sini. Ubah default per device
-            bila lab memakai jaringan berbeda.
-          </p>
-        </div>
-      </div>
-      <div v-if="isProfileLoading" class="master-data__form">
-        <p role="status">Memuat profil instalasi…</p>
-      </div>
-      <div v-else class="master-data__form">
+    <details
+      v-if="canManage"
+      class="devices-view__advanced-defaults"
+      :open="activeProfile === 'AI_CENTRAL'"
+    >
+      <summary>
+        {{
+          activeProfile === 'AI_EDGE'
+            ? 'Pengaturan koneksi lanjutan'
+            : 'Default koneksi untuk installer kamera'
+        }}
+      </summary>
+      <UiCard
+        title="Default koneksi untuk installer kamera"
+        subtitle="Digunakan untuk paket perangkat berikutnya dan disimpan hanya di browser admin ini."
+        data-testid="device-setup-defaults-card"
+      >
+        <template #header>
+          <UiButton
+            variant="secondary"
+            type="button"
+            :disabled="isProfileLoading"
+            data-testid="edit-device-setup-defaults"
+            @click="openSetupDefaultsEditor"
+          >
+            <span class="st-material-icon" aria-hidden="true">edit</span>
+            Edit
+          </UiButton>
+        </template>
+        <p v-if="isProfileLoading" role="status">Memuat default koneksi…</p>
+        <dl v-else class="devices-view__defaults-summary">
+          <div>
+            <dt>URL Core API</dt>
+            <dd>
+              <code>{{ setupDefaults.coreApiUrl || 'Belum diatur' }}</code>
+            </dd>
+          </div>
+          <div>
+            <dt>Koneksi</dt>
+            <dd>{{ setupDefaultsConnectionLabel }}</dd>
+          </div>
+          <div v-if="activeProfile === 'AI_CENTRAL'">
+            <dt>URL AI Central</dt>
+            <dd>
+              <code>{{ setupDefaults.centralAiUrl || 'Belum diatur' }}</code>
+            </dd>
+          </div>
+          <div v-if="activeProfile === 'AI_EDGE'">
+            <dt>Model enrollment · terkunci</dt>
+            <dd>{{ enrollmentModelVersion || 'Belum dilaporkan server' }}</dd>
+          </div>
+        </dl>
+        <p v-if="setupDefaultsMessage" class="master-data__success" role="status">
+          {{ setupDefaultsMessage }}
+        </p>
+      </UiCard>
+    </details>
+
+    <UiModal
+      v-if="isSetupDefaultsOpen"
+      title="Edit default koneksi installer"
+      data-testid="device-setup-defaults-dialog"
+      @close="closeSetupDefaultsEditor"
+    >
+      <form
+        id="device-setup-defaults-form"
+        class="master-data__form devices-view__setup-defaults-form"
+        @submit.prevent="saveSetupDefaultsAndClose"
+      >
+        <p class="devices-view__profile-note">
+          Nilai ini disimpan hanya di browser admin ini, bukan di server. Token perangkat tidak
+          disimpan di sini; kredensial dibuat terpisah untuk tiap perangkat.
+        </p>
         <label v-if="activeProfile === 'AI_CENTRAL'">
           Jaringan dari host kamera ke server
-          <select
-            :value="setupDefaults.connectionMode"
+          <UiSelect
+            :model-value="setupDefaultsDraft.connectionMode"
             aria-label="Default jaringan device"
-            @change="onDefaultConnectionModeChange"
+            @update:model-value="onDefaultConnectionModeChange"
           >
-            <option value="same-host">Komputer yang sama - localhost</option>
-            <option value="private-network">LAN/VPN sekolah - HTTPS</option>
-          </select>
+            <option value="same-host">Komputer yang sama · localhost</option>
+            <option value="private-network">LAN/VPN sekolah · HTTPS</option>
+          </UiSelect>
         </label>
         <p v-else-if="activeProfile === 'AI_EDGE'" class="devices-view__profile-note">
-          AI_EDGE memakai alamat Core API di bawah. Koneksi otomatis diperlakukan sebagai localhost
+          AI_EDGE memakai alamat Core API berikut. Koneksi otomatis diperlakukan sebagai localhost
           untuk komputer yang sama atau HTTPS untuk host lain.
         </p>
         <label>
           Default URL Core API
           <UiInput
-            v-model="setupDefaults.coreApiUrl"
+            id="device-default-core-api-url"
+            v-model="setupDefaultsDraft.coreApiUrl"
             type="url"
             autocomplete="url"
             placeholder="http://127.0.0.1:8000 atau https://presensi.sekolah.id"
           />
         </label>
+        <p v-if="activeProfile === 'AI_EDGE'" class="devices-view__profile-note">
+          URL ini hanya dipakai untuk perintah dan paket installer kamera baru. Pada laptop ini
+          gunakan <code>http://127.0.0.1:8000</code>; untuk PC kamera lain, gunakan alamat Core API
+          yang bisa dijangkau lewat LAN/VPN sekolah dengan HTTPS. Perangkat yang sudah terdaftar
+          tidak berubah saat default ini diedit.
+        </p>
         <label v-if="activeProfile === 'AI_CENTRAL'">
           Default URL AI Central (STB_GATEWAY)
           <UiInput
-            v-model="setupDefaults.centralAiUrl"
+            v-model="setupDefaultsDraft.centralAiUrl"
             type="url"
             autocomplete="url"
             placeholder="https://ai.sekolah.id"
@@ -913,9 +1305,8 @@ onBeforeUnmount(() => {
           Versi model enrollment (terkunci)
           <UiInput
             id="device-default-model-version"
-            :value="enrollmentModelVersion"
-            readonly
-            aria-readonly="true"
+            :model-value="enrollmentModelVersion"
+            disabled
           />
         </label>
         <p v-if="activeProfile === 'AI_EDGE'" class="devices-view__profile-note">
@@ -930,16 +1321,25 @@ onBeforeUnmount(() => {
           Versi model belum dilaporkan oleh Core API. Atur versi model saat provisioning server
           sebelum mendaftarkan kamera AI_EDGE.
         </p>
-        <p v-if="setupDefaultsMessage" class="master-data__alert" role="status">
+        <p v-if="setupDefaultsMessage" class="master-data__alert" role="alert">
           {{ setupDefaultsMessage }}
         </p>
-        <div class="master-data__form-actions">
-          <UiButton variant="primary" type="button" @click="saveSetupDefaults">
-            Simpan default di browser ini
-          </UiButton>
-        </div>
-      </div>
-    </section>
+      </form>
+      <template #footer>
+        <UiButton variant="secondary" type="button" @click="closeSetupDefaultsEditor">
+          Batal
+        </UiButton>
+        <UiButton
+          variant="primary"
+          type="button"
+          form="device-setup-defaults-form"
+          data-testid="save-device-setup-defaults"
+          @click="saveSetupDefaultsAndClose"
+        >
+          Simpan untuk paket berikutnya
+        </UiButton>
+      </template>
+    </UiModal>
 
     <div class="devices-view__toolbar">
       <form class="master-data__search" role="search" @submit.prevent="submitSearch">
@@ -966,61 +1366,36 @@ onBeforeUnmount(() => {
       </label>
     </div>
     <p class="devices-view__camera-help">
-      Resolusi dan FPS aktual berasal dari kamera pada host. Uji wajah di Preview kamera; kualitas
-      frame dan sampling dapat diatur di AI &amp; kamera. Resolusi/FPS diubah lewat wizard kamera di
-      host perangkat.
+      Resolusi dan FPS aktual berasal dari kamera pada host. Kualitas frame dan sampling diatur di
+      AI &amp; kamera; resolusi/FPS diubah lewat wizard kamera pada host perangkat.
     </p>
-    <section v-if="canManage" class="master-data__panel" data-testid="display-pin-panel">
-      <div class="master-data__panel-heading">
-        <div>
-          <p class="master-data__eyebrow">Layar publik</p>
-          <h2>PIN layar per lab (tanpa login)</h2>
-        </div>
-      </div>
-      <p class="accounts-view__hint">
-        PIN dipakai siswa di halaman <code>/display</code> fullscreen: pilih lab + PIN untuk melihat
-        status sudah-masuk / belum. Atur PIN per lab di sini.
-      </p>
-      <p v-if="displayPinMessage" class="master-data__success" role="status">
-        {{ displayPinMessage }}
-      </p>
-      <ul class="accounts-view__list">
-        <li v-for="lab in laboratories" :key="lab.id" class="accounts-view__row">
-          <form class="accounts-view__pin-form" @submit.prevent="saveDisplayPin(lab.id)">
-            <div>
-              <strong>{{ lab.code }}</strong>
-              <small
-                >{{ lab.name }} · PIN: {{ lab.has_display_pin ? 'sudah diatur' : 'belum' }}</small
-              >
-            </div>
-            <UiInput
-              v-model="displayPinDrafts[lab.id]"
-              type="password"
-              minlength="4"
-              maxlength="32"
-              placeholder="PIN baru"
-              autocomplete="new-password"
-              :aria-label="'PIN untuk ' + lab.name"
-            />
-            <UiButton variant="secondary" type="submit"> Simpan PIN </UiButton>
-          </form>
-        </li>
-      </ul>
-    </section>
-
-    <section v-if="isFormOpen" class="master-data__panel devices-view__form-panel">
-      <div class="master-data__panel-heading">
-        <h2>{{ editingDeviceId ? 'Ubah perangkat' : 'Daftarkan perangkat' }}</h2>
-        <UiButton variant="text" type="button" @click="isFormOpen = false">Tutup</UiButton>
-      </div>
-      <form class="master-data__form" @submit.prevent="submitForm">
+    <UiModal
+      v-if="isFormOpen"
+      :title="
+        editingDeviceId
+          ? 'Ubah perangkat'
+          : activeProfile === 'AI_EDGE'
+            ? 'Siapkan PC kamera'
+            : 'Daftarkan perangkat'
+      "
+      wide
+      @close="closeDeviceForm"
+    >
+      <p v-if="formError" class="master-data__alert" role="alert">{{ formError }}</p>
+      <form id="device-registration-form" class="master-data__form" @submit.prevent="submitForm">
         <label>
           Nama perangkat
-          <UiInput v-model="form.name" required maxlength="120" autocomplete="off" />
+          <UiInput
+            v-model="form.name"
+            required
+            maxlength="120"
+            autocomplete="off"
+            data-testid="register-device-name"
+          />
         </label>
         <label>
           Laboratorium
-          <UiSelect v-model="form.laboratory_id" required>
+          <UiSelect v-model="form.laboratory_id" required data-testid="register-device-lab">
             <option value="" disabled>Pilih laboratorium</option>
             <option v-for="lab in laboratories" :key="lab.id" :value="lab.id">
               {{ lab.code }} · {{ lab.name }}
@@ -1030,20 +1405,45 @@ onBeforeUnmount(() => {
         <p class="devices-view__profile-note">
           Profil instalasi: {{ profileLabel(form.deployment_profile) }}
         </p>
+        <p
+          v-if="!editingDeviceId && activeProfile === 'AI_EDGE'"
+          class="devices-view__profile-note"
+        >
+          Setelah disimpan, wizard akan membuat paket setup agent. Jalankan satu perintah di PC
+          kamera untuk memilih webcam dan mengaktifkannya.
+        </p>
+        <p v-else-if="!editingDeviceId" class="devices-view__profile-note">
+          Pendaftaran menambahkan perangkat ke registry. Status Online muncul setelah agent
+          diinstal, memakai kredensial perangkat, lalu mengirim heartbeat ke Core API.
+        </p>
         <label v-if="editingDeviceId" class="master-data__checkbox">
           <input v-model="form.is_active" type="checkbox" /> Perangkat aktif
         </label>
-        <p v-if="formError" class="master-data__alert master-data__alert--form" role="alert">
-          {{ formError }}
-        </p>
-        <div class="master-data__form-actions">
-          <UiButton variant="secondary" type="button" @click="isFormOpen = false"> Batal </UiButton>
-          <UiButton variant="primary" type="submit" :disabled="isSaving">
-            {{ isSaving ? 'Menyimpan…' : editingDeviceId ? 'Simpan perubahan' : 'Daftarkan' }}
-          </UiButton>
-        </div>
       </form>
-    </section>
+      <template #footer>
+        <UiButton variant="secondary" type="button" :disabled="isSaving" @click="closeDeviceForm">
+          Batal
+        </UiButton>
+        <UiButton
+          variant="primary"
+          type="button"
+          :disabled="isSaving"
+          form="device-registration-form"
+          data-testid="submit-device-registration"
+          @click="submitForm"
+        >
+          {{
+            isSaving
+              ? 'Menyimpan…'
+              : editingDeviceId
+                ? 'Simpan perubahan'
+                : activeProfile === 'AI_EDGE'
+                  ? 'Daftar & lanjutkan'
+                  : 'Daftarkan'
+          }}
+        </UiButton>
+      </template>
+    </UiModal>
 
     <div class="st-tablewrap">
       <table class="devices-view__table st-table">
@@ -1055,7 +1455,7 @@ onBeforeUnmount(() => {
             <th scope="col">Versi app / model</th>
             <th scope="col">Kamera &amp; kualitas</th>
             <th scope="col">Heartbeat</th>
-            <th scope="col">Latency p50 / p95</th>
+            <th scope="col">Baca kamera p50 / p95</th>
             <th scope="col">Status</th>
             <th v-if="canManage" scope="col">Aksi</th>
           </tr>
@@ -1085,20 +1485,20 @@ onBeforeUnmount(() => {
             </td>
             <td data-label="Kamera & kualitas">
               <strong>{{ cameraLabel(device) }}</strong>
-              <small>{{ cameraModeLabel(device) }}</small>
+              <small v-if="!device.last_seen_at">
+                Menunggu agent terpasang dan kamera tersambung.
+              </small>
+              <small v-else-if="device.camera_enabled">{{ cameraModeLabel(device) }}</small>
+              <small v-else-if="device.camera_status === 'disabled'">
+                Kamera sudah ditutup oleh agent
+              </small>
+              <small v-else>Menunggu agent menghentikan kamera</small>
               <small>Kualitas: {{ cameraQualityLabel(device) }}</small>
               <small v-if="cameraQualitySourceLabel(device)">
                 {{ cameraQualitySourceLabel(device) }}
               </small>
               <RouterLink
-                v-if="canPreviewCamera && device.deployment_profile === 'AI_EDGE'"
-                class="devices-view__camera-link"
-                to="/app/camera-preview"
-              >
-                Uji kamera
-              </RouterLink>
-              <RouterLink
-                v-else-if="canManage"
+                v-if="canManage && device.deployment_profile === 'STB_GATEWAY'"
                 class="devices-view__camera-link"
                 to="/app/ai-setup"
               >
@@ -1109,9 +1509,11 @@ onBeforeUnmount(() => {
               {{ formatLastSeen(device.last_seen_at) }}
               <small>Timeout {{ device.heartbeat_timeout_seconds }} detik</small>
             </td>
-            <td data-label="Latency p50 / p95">
-              {{ device.latency_summary?.p50_ms ?? '-' }} /
-              {{ device.latency_summary?.p95_ms ?? '-' }} ms
+            <td
+              data-label="Baca kamera p50 / p95"
+              title="Waktu agent membaca frame kamera; p50/p95 dihitung dari 20–512 frame terakhir. Ini bukan latency pengenalan AI."
+            >
+              {{ cameraLatencyLabel(device) }}
             </td>
             <td data-label="Status">
               <span
@@ -1121,18 +1523,36 @@ onBeforeUnmount(() => {
               >
                 {{ healthLabel(device.health_status) }}
               </span>
+              <small v-if="!device.is_active">Nonaktif di registry.</small>
+              <small v-else-if="!device.last_seen_at">
+                Terdaftar aktif; agent belum mengirim heartbeat. Klik “Siapkan agent” untuk memasang
+                agent kamera.
+              </small>
+              <small v-else-if="device.health_status === 'offline'">
+                Heartbeat melewati batas waktu.
+              </small>
+              <small v-else-if="device.health_status === 'warning'">
+                {{ warningStatusMessage(device) }}
+              </small>
             </td>
             <td v-if="canManage" data-label="Aksi">
               <div class="devices-view__actions">
                 <UiButton variant="text" type="button" @click="openEdit(device)"> Ubah </UiButton>
                 <UiButton
+                  v-if="device.last_seen_at"
                   variant="secondary"
                   type="button"
-                  :disabled="!device.is_active"
+                  :disabled="!device.is_active || isCameraControlSaving"
                   :aria-label="device.camera_enabled ? 'Jeda kamera' : 'Aktifkan kamera'"
-                  @click="requestCameraToggle(device)"
+                  @click="toggleDeviceCamera(device)"
                 >
-                  {{ device.camera_enabled ? 'Jeda kamera' : 'Aktifkan kamera' }}
+                  {{
+                    isCameraControlSaving
+                      ? 'Menerapkan…'
+                      : device.camera_enabled
+                        ? 'Jeda kamera'
+                        : 'Aktifkan kamera'
+                  }}
                 </UiButton>
                 <UiButton
                   variant="secondary"
@@ -1140,12 +1560,24 @@ onBeforeUnmount(() => {
                   :disabled="!device.is_active"
                   :title="
                     device.is_active
-                      ? 'Buat atau rotasi token agent'
+                      ? device.last_seen_at
+                        ? 'Token untuk autentikasi AI_EDGE atau STB_GATEWAY ke Core API'
+                        : 'Lanjutkan wizard setup agent di PC kamera'
                       : 'Aktifkan perangkat lebih dulu'
                   "
-                  @click="openCredential(device)"
+                  @click="
+                    device.deployment_profile === 'AI_EDGE' && !device.last_seen_at
+                      ? startEdgeSetup(device)
+                      : openCredential(device)
+                  "
                 >
-                  Kredensial
+                  {{
+                    device.last_seen_at
+                      ? 'Kredensial'
+                      : device.deployment_profile === 'AI_EDGE'
+                        ? 'Lanjutkan setup'
+                        : 'Siapkan agent'
+                  }}
                 </UiButton>
                 <UiButton
                   variant="danger"
@@ -1160,61 +1592,6 @@ onBeforeUnmount(() => {
           </tr>
         </tbody>
       </table>
-    </div>
-
-    <div
-      v-if="cameraControlTarget"
-      class="devices-view__modal-backdrop"
-      role="presentation"
-      @click.self="cameraControlTarget = null"
-    >
-      <section
-        class="devices-view__confirm-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="camera-control-title"
-      >
-        <p class="master-data__eyebrow">Kontrol kamera</p>
-        <h2 id="camera-control-title">
-          {{ cameraControlTarget.camera_enabled ? 'Jeda kamera?' : 'Aktifkan kamera?' }}
-        </h2>
-        <p>
-          <strong>{{ cameraControlTarget.name }}</strong>
-          <template v-if="cameraControlTarget.camera_enabled">
-            akan berhenti mengambil frame dan mengirim presensi. Preview kamera, stream kiosk, dan
-            pendaftaran via lab ikut mati; presensi manual tetap bisa dicatat. Perangkat tetap
-            terdaftar dan dapat diaktifkan kembali dari halaman ini.
-          </template>
-          <template v-else>
-            akan mulai mengambil frame kembali saat agent menerima pengaturan ini.
-          </template>
-        </p>
-        <div class="master-data__form-actions">
-          <UiButton
-            variant="secondary"
-            type="button"
-            :disabled="isCameraControlSaving"
-            @click="cameraControlTarget = null"
-          >
-            Batal
-          </UiButton>
-          <UiButton
-            variant="primary"
-            :class="cameraControlTarget.camera_enabled ? 'button--danger' : 'button--primary'"
-            type="button"
-            :disabled="isCameraControlSaving"
-            @click="confirmCameraToggle"
-          >
-            {{
-              isCameraControlSaving
-                ? 'Menerapkan…'
-                : cameraControlTarget.camera_enabled
-                  ? 'Jeda kamera'
-                  : 'Aktifkan kamera'
-            }}
-          </UiButton>
-        </div>
-      </section>
     </div>
 
     <footer class="master-data__pagination">
@@ -1235,7 +1612,7 @@ onBeforeUnmount(() => {
     </footer>
 
     <div
-      v-if="credentialDevice"
+      v-if="credentialDevice && !isEdgeSetupMinimized"
       class="devices-view__modal-backdrop"
       role="presentation"
       @click.self="handleCredentialBackdropClick"
@@ -1267,7 +1644,220 @@ onBeforeUnmount(() => {
           </UiButton>
         </header>
 
-        <template v-if="issuedCredential">
+        <template v-if="isEdgeSetupWizard && credentialDevice.deployment_profile === 'AI_EDGE'">
+          <ol class="devices-view__setup-steps devices-view__setup-steps--modal">
+            <li class="devices-view__setup-step devices-view__setup-step--done">
+              <span aria-hidden="true">1</span>
+              <div><strong>Perangkat</strong><small>Terdaftar</small></div>
+            </li>
+            <li
+              class="devices-view__setup-step"
+              :class="
+                edgeCameraReady
+                  ? 'devices-view__setup-step--done'
+                  : 'devices-view__setup-step--pending'
+              "
+            >
+              <span aria-hidden="true">2</span>
+              <div>
+                <strong>Agent &amp; kamera</strong>
+                <small>{{ edgeCameraReady ? 'Online' : 'Menunggu setup di PC kamera' }}</small>
+              </div>
+            </li>
+            <li
+              class="devices-view__setup-step"
+              :class="`devices-view__setup-step--${edgeAiSetupStatus.tone}`"
+            >
+              <span aria-hidden="true">3</span>
+              <div>
+                <strong>Kesiapan AI</strong><small>{{ edgeAiSetupStatus.label }}</small>
+              </div>
+            </li>
+          </ol>
+
+          <p v-if="isCredentialLoading" class="devices-view__credential-status" role="status">
+            Membuat akses aman untuk agent…
+          </p>
+          <p v-if="credentialError" class="master-data__alert" role="alert">
+            {{ credentialError }}
+          </p>
+
+          <template v-if="!issuedCredential">
+            <p class="devices-view__credential-instructions">
+              Perangkat sudah terdaftar. Buat akses agent satu kali; token langsung dipakai di paket
+              setup dan tidak perlu disalin manual.
+            </p>
+            <UiButton
+              variant="primary"
+              type="button"
+              :disabled="isCredentialLoading"
+              data-testid="edge-wizard-provision"
+              @click="issueCredential('provision')"
+            >
+              {{ isCredentialLoading ? 'Menyiapkan…' : 'Buat akses agent & lanjutkan' }}
+            </UiButton>
+            <details
+              :open="isRotationOpen"
+              class="devices-view__rotation"
+              @toggle="onRotationToggle"
+            >
+              <summary>Token pernah dibuat atau hilang?</summary>
+              <form class="devices-view__rotation-form" @submit.prevent="issueCredential('rotate')">
+                <label for="edge-wizard-rotation-reason">Alasan membuat token pengganti</label>
+                <UiInput
+                  id="edge-wizard-rotation-reason"
+                  v-model="rotationReason"
+                  required
+                  maxlength="200"
+                  placeholder="Contoh: token setup sebelumnya hilang"
+                />
+                <UiButton
+                  variant="secondary"
+                  type="submit"
+                  :disabled="isCredentialLoading || !rotationReason.trim()"
+                >
+                  {{ isCredentialLoading ? 'Memproses…' : 'Rotasi token & lanjutkan' }}
+                </UiButton>
+              </form>
+            </details>
+          </template>
+
+          <template v-else>
+            <section class="devices-view__setup-panel" aria-label="Pasang agent kamera">
+              <div>
+                <h3>Jalankan setup di PC kamera</h3>
+                <p>
+                  Pilih sistem operasi PC yang terhubung ke webcam. Installer akan memilih kamera,
+                  menguji frame, lalu menjalankan agent.
+                </p>
+              </div>
+              <label for="device-install-platform">Sistem operasi PC kamera</label>
+              <UiSelect id="device-install-platform" v-model="installPlatform">
+                <option value="ubuntu">Ubuntu Linux</option>
+                <option value="windows">Windows</option>
+              </UiSelect>
+              <details class="devices-view__setup-advanced">
+                <summary>PC kamera berbeda dari server aplikasi?</summary>
+                <p>
+                  Untuk satu PC gunakan localhost. Jika kamera berada di komputer lain, masukkan
+                  alamat Core API HTTPS yang bisa dijangkau dari PC kamera.
+                </p>
+                <label for="device-core-api-url">Alamat Core API</label>
+                <UiInput
+                  id="device-core-api-url"
+                  v-model="coreApiUrl"
+                  type="url"
+                  required
+                  autocomplete="url"
+                  placeholder="http://127.0.0.1:8000"
+                />
+              </details>
+              <p
+                v-if="setupCommandState.error"
+                class="devices-view__credential-warning"
+                role="alert"
+              >
+                {{ setupCommandState.error }}
+              </p>
+              <UiButton
+                variant="primary"
+                type="button"
+                :disabled="!setupCommandState.command"
+                data-testid="edge-wizard-download-setup"
+                @click="downloadSetupAndCopyCommand"
+              >
+                Unduh paket &amp; salin perintah
+              </UiButton>
+              <p v-if="bundleMessage" class="devices-view__credential-status" role="status">
+                {{ bundleMessage }}
+              </p>
+              <p v-if="installCommandMessage" class="devices-view__credential-status" role="status">
+                {{ installCommandMessage }}
+              </p>
+              <div v-if="setupCommandState.command" class="devices-view__credential-commands">
+                <p>Di PC kamera, buka Terminal lalu tempel perintah berikut:</p>
+                <pre
+                  data-testid="device-install-command"
+                ><code>{{ setupCommandState.command }}</code></pre>
+                <UiButton
+                  v-if="bundleMessage?.startsWith('Paket setup diunduh')"
+                  variant="secondary"
+                  type="button"
+                  @click="copyInstallCommand"
+                >
+                  Salin perintah lagi
+                </UiButton>
+              </div>
+              <p class="devices-view__credential-warning" role="note">
+                Paket setup berisi token rahasia. Jika diunduh di komputer berbeda, pindahkan file
+                ke folder Downloads PC kamera. Hapus file setelah agent tersambung.
+              </p>
+              <p v-if="installPlatform === 'ubuntu'" class="devices-view__credential-instructions">
+                Di Ubuntu, installer juga memasang agent sebagai systemd user service dan
+                mengaktifkan autostart setelah reboot jika izin sudo tersedia.
+              </p>
+            </section>
+
+            <section
+              class="devices-view__setup-result"
+              :class="
+                edgeCameraReady
+                  ? 'devices-view__setup-result--ready'
+                  : 'devices-view__setup-result--pending'
+              "
+              role="status"
+            >
+              <strong>{{
+                edgeCameraReady ? 'Agent dan kamera Online' : 'Menunggu agent tersambung'
+              }}</strong>
+              <p>
+                {{
+                  edgeCameraReady
+                    ? `${edgeSetupDevice?.camera_metrics?.frame_width ?? '—'} × ${edgeSetupDevice?.camera_metrics?.frame_height ?? '—'} · ${edgeSetupDevice?.camera_metrics?.capture_fps?.toFixed(1) ?? '—'} FPS`
+                    : 'Setelah perintah selesai, dashboard mengecek heartbeat dan kamera otomatis setiap beberapa detik.'
+                }}
+              </p>
+              <RouterLink
+                v-if="edgeCameraReady"
+                class="button button--secondary"
+                :to="edgePreviewRoute"
+                data-testid="edge-wizard-preview"
+              >
+                Uji preview kamera
+              </RouterLink>
+            </section>
+
+            <section
+              class="devices-view__setup-result"
+              :class="`devices-view__setup-result--${edgeAiSetupStatus.tone}`"
+              role="status"
+            >
+              <strong>{{ edgeAiSetupStatus.label }}</strong>
+              <p>{{ edgeAiSetupStatus.detail }}</p>
+              <RouterLink
+                v-if="edgeAiSetupStatus.tone !== 'success'"
+                to="/app/ai-setup"
+                class="button button--secondary"
+              >
+                Buka AI &amp; Kamera
+              </RouterLink>
+              <RouterLink v-else to="/app/enrollment" class="button button--secondary">
+                Daftarkan wajah siswa
+              </RouterLink>
+            </section>
+
+            <div
+              v-if="bundleMessage?.startsWith('Paket setup diunduh')"
+              class="master-data__form-actions"
+            >
+              <UiButton variant="secondary" type="button" @click="minimizeEdgeSetup">
+                Lanjutkan di dashboard
+              </UiButton>
+            </div>
+          </template>
+        </template>
+
+        <template v-else-if="issuedCredential">
           <p class="devices-view__credential-warning" role="alert">
             Token ini hanya ditampilkan sekarang. Salin atau unduh sebelum menutup panel. Sistem
             hanya menyimpan verifier token dan tidak dapat menampilkan token lama kembali.
@@ -1387,7 +1977,7 @@ onBeforeUnmount(() => {
               <label for="device-model-version">Versi model (terkunci)</label>
               <UiInput
                 id="device-model-version"
-                :value="enrollmentModelVersion"
+                :model-value="enrollmentModelVersion"
                 readonly
                 aria-readonly="true"
               />
@@ -1460,6 +2050,16 @@ onBeforeUnmount(() => {
         </template>
 
         <template v-else>
+          <p class="devices-view__credential-instructions">
+            Kredensial ini adalah identitas agent
+            {{
+              credentialDevice.deployment_profile === 'AI_EDGE'
+                ? 'AI_EDGE di PC kamera'
+                : 'STB_GATEWAY'
+            }}
+            untuk mengakses Core API. Agent memakainya untuk mengirim heartbeat dan status
+            perangkat; kredensial ini bukan akun login staf.
+          </p>
           <p class="devices-view__credential-instructions">
             Buat token untuk pemasangan pertama agent. Token tidak bisa dibuka ulang setelah panel
             ditutup. Jika token lama hilang, gunakan rotasi untuk menerbitkan token pengganti.

@@ -340,10 +340,6 @@ function statusLabel(status: boolean | null): string {
   return status ? 'Siap' : 'Belum siap'
 }
 
-function profileLabel(profile: AiReadiness['deployment_profile']): string {
-  return profile === 'AI_CENTRAL' ? 'AI Central · server' : 'AI Edge · PC kamera'
-}
-
 function serviceLabel(status: AiReadiness['central_ai_status']): string {
   switch (status) {
     case 'disabled':
@@ -408,31 +404,8 @@ onBeforeUnmount(() => {
     </p>
 
     <template v-if="readiness">
-      <section class="ai-setup-view__profile master-data__panel">
-        <div>
-          <p class="master-data__eyebrow">Profile server</p>
-          <h2>{{ profileLabel(readiness.deployment_profile) }}</h2>
-          <p>
-            Model YuNet/SFace tetap dipasang dan diverifikasi pada host inference. Pengaturan di
-            halaman ini tidak mengganti file model atau kamera fisik.
-          </p>
-        </div>
-        <RouterLink class="st-btnlink" to="/app/devices">Lihat perangkat</RouterLink>
-      </section>
-
-      <div class="ai-setup-view__grid">
+      <div v-if="readiness.deployment_profile === 'AI_CENTRAL'" class="ai-setup-view__grid">
         <article class="ai-setup-view__card">
-          <p class="master-data__eyebrow">Model enrollment</p>
-          <h2>{{ readiness.enrollment_models_ready ? 'Tersedia' : 'Belum tersedia' }}</h2>
-          <p>Model lokal Core API memproses capture sementara; gambar tidak disimpan.</p>
-          <span
-            class="ai-setup-view__badge"
-            :class="readiness.enrollment_models_ready ? 'is-ready' : 'is-pending'"
-          >
-            {{ statusLabel(readiness.enrollment_models_ready) }}
-          </span>
-        </article>
-        <article v-if="readiness.deployment_profile === 'AI_CENTRAL'" class="ai-setup-view__card">
           <p class="master-data__eyebrow">AI Central</p>
           <h2>{{ serviceLabel(readiness.central_ai_status) }}</h2>
           <dl class="ai-setup-view__checks">
