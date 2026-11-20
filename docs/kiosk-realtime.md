@@ -102,7 +102,7 @@ inference tetap di edge-agent native (Python/ONNX). Tiga perubahan:
 - Nyalakan `PRESENSI_EDGE_PERFORMANCE_LOGS=1`, ukur `camera_read_fps`,
   `detect_ms`, `embed_ms`, `pipeline_total_ms` (p50/p95) sebelum klaim FPS.
 - Checklist tuning (default kode sudah operasi, bukan diagnostik):
-  capture 640x480 @ 15fps, `detection_max_width: 640`, FOURCC MJPG best-effort
+  capture 640x480 @ 30fps untuk AI_EDGE, `detection_max_width: 640`, FOURCC MJPG best-effort
   di `OpenCVCamera.open()` (fallback diam bila driver menolak; mode negosiasi
   tercatat di `reported_mode().fourcc`).
 - Koreksi penting: YuNet/SFace berjalan via OpenCV DNN, BUKAN ONNX Runtime,

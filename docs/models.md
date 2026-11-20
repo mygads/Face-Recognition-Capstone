@@ -1,5 +1,32 @@
 # Model assets
 
+## Browser face mesh for camera preview
+
+The camera preview and kiosk use MediaPipe Face Landmarker from the pinned
+`@mediapipe/tasks-vision` 1.2.3 package to draw a live 478-point face mesh. The
+same `CameraFrame` and mesh overlay render in both screens. Processing runs in a
+browser Web Worker and samples the agent's existing camera stream; the browser
+does not open a second camera. The worker prefers GPU and falls back to CPU.
+
+This model only supplies visualization landmarks. It does not identify a
+student, create an attendance decision, replace YuNet/SFace, or persist camera
+frames. The AI_EDGE agent remains the owner of the camera and the existing
+recognition-core/API rules remain unchanged.
+
+The model task file is fetched from the official MediaPipe model URL on the
+first `npm run dev` or `npm run build`, then checked by exact size and SHA-256.
+It stays in the ignored `apps/web/public/models/` directory and is not committed.
+The WebAssembly runtime is bundled from the pinned npm package.
+
+| Asset | Source | Size | SHA-256 | License |
+| --- | --- | ---: | --- | --- |
+| `face_landmarker.task` | [MediaPipe Face Landmarker model](https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task) | 3,758,596 bytes | `64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff` | Apache-2.0 per [official model card](https://storage.googleapis.com/mediapipe-assets/Model%20Card%20MediaPipe%20Face%20Mesh%20V2.pdf) |
+
+The worker emits its measured mesh FPS in the UI. No target-hardware performance
+claim is made until it is measured on the actual lab PC and camera. MediaPipe
+describes the task output and browser setup in its [official Face Landmarker
+documentation](https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker/web_js).
+
 ## Practical recommendation
 
 For the current codebase, YuNet 2023mar plus SFace 2021dec are the pair already

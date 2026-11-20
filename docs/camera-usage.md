@@ -196,13 +196,22 @@ Jangan mengandalkan angka FPS yang dilaporkan driver saja. Baca `camera_read_fps
 di ringkasan agent untuk FPS capture yang benar-benar tercapai; `actual_fps` pada
 log pembukaan kamera adalah nilai yang dilaporkan driver. Preview menggunakan
 latest-frame consumer supaya inference yang lebih lambat tidak menahan capture.
-Dashboard menampilkan sampai sekitar 15 FPS.
+Dashboard dan kiosk memakai stream kamera yang sama dengan target sampai 30 FPS;
+angka aktual tetap dibatasi capture webcam dan kecepatan encoding JPEG.
 
 Pada sesi pengukuran laptop development ini, kamera UVC index 0 menghasilkan
 sekitar 8,5 FPS pada 1280×720 dan 24,9 FPS pada 640×480 ketika hanya mengukur
 capture. Dengan agent aktif pada 640×480, hasilnya sekitar 29,6 FPS capture dan
-17,8 FPS frame encode preview; browser tetap menampilkan maksimal sekitar 15 FPS.
-Angka ini spesifik pada laptop/kamera tersebut dan bukan jaminan hardware lain.
+17,8 FPS frame encode preview. Kecepatan encode menjadi batas aktual preview
+pada pengukuran tersebut, sehingga menaikkan target browser saja tidak menjamin
+30 FPS. Angka ini spesifik pada laptop/kamera tersebut dan bukan jaminan hardware lain.
+
+Pada UAT 19 November 2026 di PC ini, driver melaporkan 30 FPS tetapi pembacaan
+aktual sekitar 9,5 FPS (p50/p95 waktu baca 95/112 ms). Uji capture terpisah,
+dengan MJPEG maupun format bawaan, juga sekitar 9 FPS; encoding preview hanya
+sekitar 1,9 ms p50. Pada kondisi uji ini batasnya ada di frame yang dikirim
+kamera/driver, bukan loop preview. Pencahayaan atau mode webcam dapat mengubah
+hasil; jangan memaksa exposure lebih cepat tanpa memastikan wajah tetap cukup terang.
 
 Untuk development, coba 640×480 terlebih dahulu bila preview tersendat. Pastikan
 oval wajah tetap hijau dan wajah pada jarak terjauh masih memenuhi ukuran minimum
@@ -272,11 +281,14 @@ Untuk production, lihat runbook [AI_EDGE](deployment.md#3-runbook-ai_edge-server
 atau [AI_CENTRAL + STB](deployment.md#4-runbook-ai_central--stb_gateway) untuk provisioning
 credential, service systemd, dan upgrade.
 
-Untuk produksi, systemd menjalankan agent headless setelah boot. Pada AI_EDGE,
-preview lokal tetap hanya bind ke loopback dan membutuhkan otorisasi operator;
-preview tidak tersedia melalui jaringan. Jalankan utility calibration secara
-manual pada sesi desktop lokal sebelum menyalakan service; hentikan service
-terlebih dahulu bila ia sedang memegang webcam. Pada STB gateway, gunakan
+Pada Ubuntu AI_EDGE untuk uji satu PC, installer dapat memasang agent sebagai
+systemd user service dan mengaktifkannya kembali setelah reboot. Service ini
+berjalan di akun desktop agar setup webcam tetap sederhana. Untuk produksi,
+gunakan service systemd dedicated-account yang hardened pada deployment
+runbook. Preview lokal tetap hanya bind ke loopback dan membutuhkan otorisasi
+operator; preview tidak tersedia melalui jaringan. Jalankan utility calibration
+secara manual pada sesi desktop lokal sebelum menyalakan service; hentikan
+service terlebih dahulu bila ia sedang memegang webcam. Pada STB gateway, gunakan
 capture hemat CPU dari contoh `STB_GATEWAY`; STB tidak memuat SFace/YuNet untuk
 inference. Preview diagnostik tetap alat lokal, bukan stream jaringan.
 

@@ -53,13 +53,11 @@ diakses perangkat lain dan jangan menyebarkan password admin lewat chat grup.
 ## Membuat akun guru dan laboran
 
 1. Masuk sebagai ADMIN, lalu buka menu **Akun Staf**.
-2. Isi nama lengkap dan email login, pilih role **Guru** atau **Laboran**, lalu
-   klik **Buat akun**.
-3. Salin password sementara yang ditampilkan setelah akun dibuat. Password itu
-   hanya ditampilkan sekali; berikan kepada pemilik akun secara pribadi.
-4. Minta staf login dengan email dan password sementara tersebut. Sistem akan
-   meminta mereka mengganti password sebelum membuka fitur lain.
-5. Buka **Kelola** pada akun itu dan isi penugasan yang sesuai:
+2. Klik **Tambah Staff**. Isi nama lengkap, email login, pilih role **Guru** atau
+   **Laboran**, lalu masukkan kata sandi minimal 8 karakter tanpa spasi.
+3. Klik **Buat akun**. Berikan email dan kata sandi yang ditetapkan kepada
+   pemilik akun secara pribadi. Akun dapat langsung digunakan untuk login.
+4. Buka **Kelola** pada akun itu dan isi penugasan yang sesuai:
    - **Guru:** tetapkan kelas yang diajar. Jadwal, sesi, dan data kelas dibatasi
      oleh penugasan tersebut.
    - **Laboran:** tetapkan laboratorium yang menjadi tanggung jawabnya. Hak

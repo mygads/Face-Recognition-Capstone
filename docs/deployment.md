@@ -328,9 +328,9 @@ kamera 1080p.
   tidak berubah. Wajib konfirmasi ulang via laporan kalibrasi lokal sebelum
   produksi (recall wajah jauh bisa turun). Set 0 hanya untuk diagnostik
   resolusi penuh.
-- **Resolusi/FPS kamera**: validasi mewanti di atas 1280x720/15fps. Untuk
-  lorong walk-through, 720p@10fps + `sample_every_n_frames: 6` cukup; PC
-  kuat boleh 720p@15fps + stride 4–5. STB_GATEWAY cukup 640x360@10fps
+- **Resolusi/FPS kamera**: AI_EDGE default 640x480@30fps; batas ukuran AI_EDGE
+  adalah 1280x720. FPS aktual bergantung pada mode webcam dan encoding.
+  STB_GATEWAY tetap dibatasi 1280x720@15fps; contoh bawaannya 640x360@10fps
   (contoh bawaan) karena deteksi terpusat.
 - **Burst STB**: `burst_frame_count` 3–5, `minimum_burst_interval_seconds` ≥5,
   `periodic_burst_seconds` 30 sebagai jaring pengaman; `jpeg_quality` 70

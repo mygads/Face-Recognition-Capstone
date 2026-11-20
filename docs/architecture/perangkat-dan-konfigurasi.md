@@ -21,8 +21,11 @@ AI_EDGE vs forwarding STB_GATEWAY; tidak memutuskan threshold.
 Heartbeat `POST /api/v1/devices/{device_id}/device-heartbeat` (kredensial
 device) me-refresh `last_seen_at` jam API; body opsional: profile (harus cocok
 registry), app/model version, status kamera (`unknown/online/offline/error`),
-agregat `p50_ms/p95_ms` — tanpa image/embedding/frame. Heartbeat memperbarui
-kredensial expiring bila agent memakai `token_file` terlindungi; verifier lama
+agregat `p50_ms/p95_ms` waktu baca kamera dari 20–512 frame terakhir —
+tanpa image/embedding/frame. Ringkasan belum tersedia sebelum 20 frame berhasil
+dibaca dan dikosongkan oleh heartbeat saat kamera dijeda.
+Heartbeat memperbarui kredensial expiring bila agent memakai `token_file`
+terlindungi; verifier lama
 overlap 24 jam untuk replace file aman-crash. Discovery sesi aktif + fetch
 gallery roster/model cocok memakai kredensial yang sama.
 Gallery aktif memakai refresh kondisional (`known_generated_at` → `304` tanpa
