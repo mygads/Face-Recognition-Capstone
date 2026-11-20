@@ -12,13 +12,13 @@ api:
   token_file: /var/lib/presensi-edge-agent/device.token
 
 camera:
-  # Operasi realtime: 640x480 @ 15fps. 1080p hanya untuk diagnostik karena
+  # Operasi realtime AI_EDGE: 640x480 @ 30fps. 1080p hanya untuk diagnostik karena
   # YuNet cost skala dengan piksel (~6x piksel vs 480p) dan USB YUYV bisa
   # membunuh FPS sebelum inference mulai.
   index: 0
   width: 640
   height: 480
-  fps: 15
+  fps: 30
   backend: v4l2
   scan_max_index: 8
   reconnect_seconds: 2
@@ -42,7 +42,7 @@ recognition:
   min_top1_top2_margin: null
   # Consensus must stay reachable inside one track lifetime:
   # ceil(track_ttl_seconds * camera fps / sample_every_n_frames)
-  # must cover minimum_agreeing_frames (here 3s*15fps/6 = ~7 >= 3).
+  # must cover minimum_agreeing_frames (here 3s*30fps/6 = 15 >= 3).
   # Startup refuses to run otherwise instead of stalling silently.
   minimum_agreeing_frames: 3
   sample_every_n_frames: 6

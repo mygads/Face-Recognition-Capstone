@@ -133,6 +133,8 @@ class LocalCameraPreview:
             ):
                 payload["diagnostic_candidate"] = None
                 self._status["diagnostic_candidate"] = None
+            device_id = self.config.device_id
+            payload["device_id"] = str(device_id) if device_id is not None else None
             payload["calibration"] = self._calibration_status_locked()
             return payload
 
@@ -692,18 +694,13 @@ class LocalCameraPreview:
                 if not preview.kiosk_token_ok(supplied):
                     self.send_error(401)
                     return
-                with preview._lock:
-                    jpeg = preview._jpeg_frame
-                if jpeg is None:
-                    # Belum ada frame: tetap tandai konsumen agar service
-                    # mulai mengisi buffer; kios coba lagi (retry di FE).
-                    preview.note_kiosk_stream_hit()
-                    preview.note_kiosk_hint_hit()
-                    self.send_error(503)
-                    return
+                # Buka stream sebelum frame pertama tiba. Membalas 503 di sini
+                # memicu retry dan polling berulang, lalu membuat preview
+                # tersendat tepat saat kamera baru mulai aktif.
                 preview.note_kiosk_stream_hit()
                 preview.note_kiosk_hint_hit()
                 self.send_response(200)
+                self._kiosk_cors_headers(self.headers.get("Origin"))
                 self.send_header(
                     "Content-Type",
                     "multipart/x-mixed-replace; boundary=presensi-frame",
@@ -715,18 +712,18 @@ class LocalCameraPreview:
                 boundary = b"--presensi-frame\r\n"
                 min_interval = 1.0 / max(1, min(30, preview.config.camera.fps))
                 last_sent_at = 0.0
-                stream_started = time.monotonic()
+                last_consumer_note_at = time.monotonic()
                 try:
                     while True:
-                        if (
-                            time.monotonic() - stream_started
-                            > _PREVIEW_SESSION_TTL_SECONDS
-                        ):
-                            return
                         with preview._lock:
                             jpeg = preview._jpeg_frame
                             frame_at = preview._last_frame_at
                         if jpeg is None or frame_at <= last_sent_at:
+                            now = time.monotonic()
+                            if now - last_consumer_note_at >= 1.0:
+                                preview.note_kiosk_stream_hit()
+                                preview.note_kiosk_hint_hit()
+                                last_consumer_note_at = now
                             time.sleep(min_interval)
                             continue
                         part = (
@@ -756,12 +753,14 @@ class LocalCameraPreview:
                 if not self._authorized_token(supplied):
                     self.send_error(401)
                     return
-                with preview._lock:
-                    jpeg = preview._jpeg_frame
-                if jpeg is None:
-                    self.send_error(503)
-                    return
+                origin = self.headers.get("Origin")
+                if origin is not None:
+                    origin = self._origin()
+                    if origin is None:
+                        return
                 self.send_response(200)
+                if origin is not None:
+                    self._cors(origin)
                 self.send_header(
                     "Content-Type",
                     "multipart/x-mixed-replace; boundary=presensi-frame",
@@ -773,14 +772,8 @@ class LocalCameraPreview:
                 boundary = b"--presensi-frame\r\n"
                 min_interval = 1.0 / max(1, min(30, preview.config.camera.fps))
                 last_sent_at = 0.0
-                stream_started = time.monotonic()
                 try:
                     while True:
-                        if (
-                            time.monotonic() - stream_started
-                            > _PREVIEW_SESSION_TTL_SECONDS
-                        ):
-                            return
                         with preview._lock:
                             jpeg = preview._jpeg_frame
                             frame_at = preview._last_frame_at
@@ -1102,6 +1095,24 @@ class LocalCameraPreview:
                 ):
                     continue
                 safe_face: dict[str, object] = box
+                raw_landmarks = face.get("landmarks")
+                if isinstance(raw_landmarks, list):
+                    safe_landmarks: list[list[float]] = []
+                    for point in raw_landmarks[:5]:
+                        if not isinstance(point, list) or len(point) < 2:
+                            continue
+                        x, y = point[0], point[1]
+                        if (
+                            isinstance(x, (int, float))
+                            and math.isfinite(x)
+                            and 0 <= x <= 1
+                            and isinstance(y, (int, float))
+                            and math.isfinite(y)
+                            and 0 <= y <= 1
+                        ):
+                            safe_landmarks.append([float(x), float(y)])
+                    if len(safe_landmarks) == 5:
+                        safe_face["landmarks"] = safe_landmarks
                 detection_confidence = face.get("detection_confidence")
                 if (
                     isinstance(detection_confidence, (int, float))

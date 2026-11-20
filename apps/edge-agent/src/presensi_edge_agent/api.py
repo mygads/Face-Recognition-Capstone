@@ -55,6 +55,9 @@ class CoreApiClient:
         self._last_heartbeat_expiry: datetime | None = None
         self._camera_status_provider: Callable[[], str] | None = None
         self._camera_metrics_provider: Callable[[], dict[str, object]] | None = None
+        self._latency_summary_provider: (
+            Callable[[], dict[str, float] | None] | None
+        ) = None
         self._queue_status_provider: Callable[[], dict[str, object]] | None = None
         self._gallery_version_provider: Callable[[], str | None] | None = None
         self._client = client or httpx.Client(
@@ -119,6 +122,8 @@ class CoreApiClient:
             payload["camera_status"] = self._camera_status_provider()
         if self._camera_metrics_provider is not None:
             payload["camera_metrics"] = self._camera_metrics_provider()
+        if self._latency_summary_provider is not None:
+            payload["latency_summary"] = self._latency_summary_provider()
         if self._queue_status_provider is not None:
             payload["queue_status"] = self._queue_status_provider()
         response = self._request(
@@ -161,6 +166,11 @@ class CoreApiClient:
         self, provider: Callable[[], dict[str, object]]
     ) -> None:
         self._camera_metrics_provider = provider
+
+    def set_latency_summary_provider(
+        self, provider: Callable[[], dict[str, float] | None]
+    ) -> None:
+        self._latency_summary_provider = provider
 
     def set_queue_status_provider(
         self, provider: Callable[[], dict[str, object]]

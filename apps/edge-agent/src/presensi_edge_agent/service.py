@@ -26,8 +26,12 @@ from presensi_edge_agent.camera_diagnostics import (
     CameraFrameInspector,
     build_camera_frame_inspector,
 )
-from presensi_edge_agent.camera_metrics import CameraRuntimeMetrics
-from presensi_edge_agent.config import EdgeConfig, resolve_api_token
+from presensi_edge_agent.camera_metrics import CameraRuntimeMetrics, read_camera_frame
+from presensi_edge_agent.config import (
+    EdgeConfig,
+    managed_configuration_poll_interval,
+    resolve_api_token,
+)
 from presensi_edge_agent.events import event_payload
 from presensi_edge_agent.local_preview import LocalCameraPreview
 from presensi_edge_agent.logging import log_event
@@ -103,6 +107,7 @@ class EdgeService:
                 )
             )
             api.set_camera_metrics_provider(self.camera_metrics.snapshot)
+            api.set_latency_summary_provider(self._latency_summary_snapshot)
             api.set_queue_status_provider(self._queue_status_snapshot)
             api.set_gallery_version_provider(self._gallery_version_hint)
         self.outbox = outbox
@@ -114,6 +119,7 @@ class EdgeService:
         self.stop_event = threading.Event()
         self._worker: threading.Thread | None = None
         self._capture_thread: threading.Thread | None = None
+        self._preview_thread: threading.Thread | None = None
         self._frame_condition = threading.Condition()
         self._latest_frame: object | None = None
         self._frame_sequence = 0
@@ -146,6 +152,11 @@ class EdgeService:
             "pending_events": pending,
             "dead_letter_events": dead_letter,
         }
+
+    def _latency_summary_snapshot(self) -> dict[str, float] | None:
+        if not self._camera_enabled or not self._camera_open:
+            return None
+        return self.camera_metrics.latency_summary()
 
     def _gallery_version_hint(self) -> str | None:
         current = self.cache.current()
@@ -224,6 +235,13 @@ class EdgeService:
                     exception_type=type(exc).__name__,
                 )
         try:
+            if self.preview is not None:
+                self._preview_thread = threading.Thread(
+                    target=self._preview_loop,
+                    name="edge-camera-preview-encode",
+                    daemon=True,
+                )
+                self._preview_thread.start()
             self._capture_thread = threading.Thread(
                 target=self._capture_loop,
                 name="edge-camera-capture",
@@ -259,6 +277,10 @@ class EdgeService:
                 self._frame_condition.notify_all()
             if self._capture_thread is not None:
                 self._capture_thread.join(
+                    timeout=max(2.0, self.config.api.timeout_seconds)
+                )
+            if self._preview_thread is not None:
+                self._preview_thread.join(
                     timeout=max(2.0, self.config.api.timeout_seconds)
                 )
             if self._worker is not None:
@@ -314,33 +336,17 @@ class EdgeService:
                             actual_height=actual_mode.get("height"),
                             actual_fps=actual_mode.get("fps"),
                         )
-                    read_started = time.perf_counter_ns()
-                    ok, frame = self.camera.read()
+                    ok, frame, read_duration_ms = read_camera_frame(
+                        self.camera, self.camera_metrics
+                    )
                     if self.performance is not None:
-                        self.performance.observe(
-                            "camera_read_ms",
-                            (time.perf_counter_ns() - read_started) / 1_000_000,
-                        )
+                        self.performance.observe("camera_read_ms", read_duration_ms)
                     if not ok or frame is None:
                         raise CameraUnavailableError("Camera frame read failed.")
                     if self.performance is not None:
                         self.performance.increment("camera_frames")
                     self.camera_metrics.record_frame(frame)
                     self._publish_camera_metrics()
-                    if self.preview is not None and (
-                        self.preview.has_active_viewer()
-                        or self.preview.has_kiosk_stream_consumer()
-                    ):
-                        preview_started = time.perf_counter_ns()
-                        if (
-                            self.preview.update_frame(frame)
-                            and self.performance is not None
-                        ):
-                            self.performance.increment("preview_frames")
-                            self.performance.observe(
-                                "preview_encode_ms",
-                                (time.perf_counter_ns() - preview_started) / 1_000_000,
-                            )
                     self._publish_camera_frame(frame)
                     if self.performance is not None:
                         self.performance.maybe_log()
@@ -367,6 +373,30 @@ class EdgeService:
             self.camera.close()
             self._camera_open = False
             self._publish_camera_frame(None)
+
+    def _preview_loop(self) -> None:
+        """Encode the latest camera frame outside the latency-sensitive capture loop."""
+        preview = self.preview
+        if preview is None:
+            return
+        last_sequence = 0
+        while not self.stop_event.is_set():
+            captured = self._next_camera_frame(last_sequence)
+            if captured is None:
+                continue
+            last_sequence, frame = captured
+            if frame is None or not self._camera_enabled:
+                preview.clear_frame()
+                continue
+            if not (preview.has_active_viewer() or preview.has_kiosk_stream_consumer()):
+                continue
+            preview_started = time.perf_counter_ns()
+            if preview.update_frame(frame) and self.performance is not None:
+                self.performance.increment("preview_frames")
+                self.performance.observe(
+                    "preview_encode_ms",
+                    (time.perf_counter_ns() - preview_started) / 1_000_000,
+                )
 
     def _publish_camera_frame(self, frame: object | None) -> None:
         with self._frame_condition:
@@ -878,8 +908,11 @@ class EdgeService:
                     next_cache_refresh = now + retry_delay
                 if now >= next_configuration_refresh:
                     self._sync_managed_configuration()
-                    next_configuration_refresh = now + max(
-                        15.0, self.config.api.heartbeat_interval_seconds
+                    next_configuration_refresh = (
+                        now
+                        + managed_configuration_poll_interval(
+                            self.config.api.heartbeat_interval_seconds
+                        )
                     )
                 self._flush_outbox()
             except Exception as exc:

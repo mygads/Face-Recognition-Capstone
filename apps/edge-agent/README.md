@@ -58,9 +58,13 @@ the camera index is used instead. Re-run the wizard with:
 .venv-edge-agent/bin/presensi-edge-agent --config apps/edge-agent/config/stb-gateway.yaml configure-camera
 ```
 
-This is commissioning setup, not a persistent service. If the Core API,
-camera, and local models are available, it offers to run the agent in the
-current terminal so the first heartbeat can be seen; Ctrl+C stops that run.
+On Ubuntu with systemd, the AI_EDGE installer creates and starts a user service
+after camera setup. It enables lingering when sudo is available so the agent can
+return after reboot; otherwise it starts when that desktop account logs in. If
+systemd is unavailable, setup falls back to running in the current terminal.
+This user service is for a single-PC test/kiosk setup and runs as the desktop
+account. Production should use the hardened dedicated-account service in the
+deployment runbook.
 The `waiting_for_calibration` status is safe for camera/heartbeat/config sync,
 but identity recognition and attendance submission remain paused. `AI_EDGE` requires local
 YuNet/SFace files and a calibrated policy from the admin dashboard. The AI_EDGE
@@ -68,8 +72,7 @@ installer automatically downloads and checksum-verifies the pinned YuNet/SFace
 files. It never fills guessed thresholds. The agent can start in waiting mode
 without calibrated thresholds, but will not recognize or submit attendance
 until it receives a valid policy. `STB_GATEWAY` does not install local face-
-recognition models. For
-reboot survival, use the hardened systemd steps in the deployment runbook.
+recognition models.
 
 When running as `AI_EDGE`, the agent serves one authenticated local preview at
 `http://127.0.0.1:8765` for the dashboard on the same computer. Go to

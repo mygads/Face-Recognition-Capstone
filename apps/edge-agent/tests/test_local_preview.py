@@ -113,6 +113,13 @@ def test_preview_requires_operator_session_and_serves_no_store_status(
                         "y": 0.25,
                         "width": 0.15,
                         "height": 0.3,
+                        "landmarks": [
+                            [0.43, 0.38],
+                            [0.58, 0.38],
+                            [0.505, 0.52],
+                            [0.45, 0.64],
+                            [0.56, 0.64],
+                        ],
                         "acceptable": True,
                         "quality_score": 0.9,
                         "embedding": [1.0, 2.0],
@@ -132,6 +139,13 @@ def test_preview_requires_operator_session_and_serves_no_store_status(
         assert status["recognition_state"] == "waiting_for_calibration"
         assert status["display_name"] is None
         assert status["camera_observation"]["state"] == "ready"
+        assert status["camera_observation"]["faces"][0]["landmarks"] == [
+            [0.43, 0.38],
+            [0.58, 0.38],
+            [0.505, 0.52],
+            [0.45, 0.64],
+            [0.56, 0.64],
+        ]
         candidate = status["diagnostic_candidate"]
         assert isinstance(candidate, dict)
         assert candidate["display_name"] == "Candidate Adult"
@@ -301,13 +315,63 @@ def _read_stream_until(
     return out
 
 
-def _open_stream(port: int, path: str) -> socket.socket:
+def _open_stream(
+    port: int, path: str, headers: dict[str, str] | None = None
+) -> socket.socket:
     sock = socket.create_connection(("127.0.0.1", port), timeout=10)
+    extra_headers = "".join(
+        f"{name}: {value}\r\n" for name, value in (headers or {}).items()
+    )
     sock.sendall(
         f"GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
-        "Connection: close\r\n\r\n".encode()
+        f"{extra_headers}Connection: close\r\n\r\n".encode()
     )
     return sock
+
+
+def test_preview_stream_waits_for_first_frame_and_allows_web_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Frame:
+        shape = (240, 320, 3)
+
+        def copy(self) -> "Frame":
+            return self
+
+    class Encoded:
+        def tobytes(self) -> bytes:
+            return b"\xff\xd8synthetic-jpeg\xff\xd9"
+
+    fake_cv2: Any = SimpleNamespace(
+        INTER_AREA=1,
+        IMWRITE_JPEG_QUALITY=2,
+        resize=lambda _frame, _size, **_kwargs: Frame(),
+        imencode=lambda *_args, **_kwargs: (True, Encoded()),
+    )
+    monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
+    preview, port, token = _start_preview(monkeypatch, ["LABORANT"])
+    try:
+        sock = _open_stream(
+            port,
+            f"/v1/stream?token={token}",
+            headers={"Origin": ORIGIN},
+        )
+        try:
+            buf = bytearray()
+            headers = _read_stream_until(sock, b"\r\n\r\n", 1, buf)
+            assert b"200 OK" in headers
+            assert b"Access-Control-Allow-Origin: " + ORIGIN.encode() in headers
+            assert b"--presensi-frame" not in headers
+
+            assert preview.update_frame(Frame()) is True
+            first_boundary = _read_stream_until(
+                sock, b"--presensi-frame", 1, buf, deadline_s=2
+            )
+            assert first_boundary.endswith(b"--presensi-frame")
+        finally:
+            sock.close()
+    finally:
+        preview.stop()
 
 
 def test_preview_stream_serves_multipart_frames_with_query_token(
@@ -562,6 +626,13 @@ def test_kiosk_hint_serves_generic_state_without_token_or_identity(
                         "y": 0.25,
                         "width": 0.15,
                         "height": 0.3,
+                        "landmarks": [
+                            [0.43, 0.38],
+                            [0.58, 0.38],
+                            [0.505, 0.52],
+                            [0.45, 0.64],
+                            [0.56, 0.64],
+                        ],
                         "acceptable": True,
                         "quality_score": 0.9,
                         "embedding": [9.0, 9.0],
@@ -593,7 +664,13 @@ def test_kiosk_hint_serves_generic_state_without_token_or_identity(
         assert isinstance(hint.get("faces"), list) and len(hint["faces"]) == 1
         face = hint["faces"][0]
         assert face["acceptable"] is True
-        assert face.get("landmarks") == [] or isinstance(face.get("landmarks"), list)
+        assert face.get("landmarks") == [
+            [0.43, 0.38],
+            [0.58, 0.38],
+            [0.505, 0.52],
+            [0.45, 0.64],
+            [0.56, 0.64],
+        ]
         assert "embedding" not in serialized.lower()
         assert "student_name" not in serialized
         assert "diagnostic_candidate" not in hint
@@ -613,6 +690,21 @@ def test_kiosk_hint_reports_local_device_id_for_pairing_check() -> None:
         preview_provisioned = LocalCameraPreview(provisioned)
         try:
             assert preview_provisioned.kiosk_hint()["device_id"] == str(UUID(int=4242))
+        finally:
+            preview_provisioned.stop()
+    finally:
+        preview.stop()
+
+
+def test_operator_status_reports_local_device_id_for_preview_pairing() -> None:
+    config = load_config(EXAMPLE_CONFIG)
+    preview = LocalCameraPreview(config)
+    try:
+        assert preview.status()["device_id"] is None
+        provisioned = replace(config, device_id=UUID(int=4242))
+        preview_provisioned = LocalCameraPreview(provisioned)
+        try:
+            assert preview_provisioned.status()["device_id"] == str(UUID(int=4242))
         finally:
             preview_provisioned.stop()
     finally:
@@ -848,18 +940,28 @@ def test_kiosk_stream_serves_mjpeg_without_token_loopback_only(
 
     preview, port, _token = _start_preview(monkeypatch, ["ADMIN"])
     try:
-        preview.update_frame(np.zeros((240, 320, 3), dtype=np.uint8))
-        request = urllib.request.Request(
-            f"http://127.0.0.1:{port}/v1/kiosk-stream", method="GET"
+        sock = _open_stream(
+            port,
+            "/v1/kiosk-stream",
+            headers={"Origin": ORIGIN},
         )
-        with urllib.request.urlopen(request, timeout=2) as response:
-            assert response.status == 200
-            assert "multipart/x-mixed-replace" in response.headers.get(
-                "Content-Type", ""
+        try:
+            buf = bytearray()
+            headers = _read_stream_until(sock, b"\r\n\r\n", 1, buf)
+            assert b"200 OK" in headers
+            assert b"Access-Control-Allow-Origin: " + ORIGIN.encode() in headers
+            assert b"multipart/x-mixed-replace" in headers
+            assert b"--presensi-frame" not in headers
+            assert preview.has_kiosk_stream_consumer() is True
+            preview.update_frame(np.zeros((240, 320, 3), dtype=np.uint8))
+            first_frame = _read_stream_until(
+                sock, b"--presensi-frame", 1, buf, deadline_s=2
             )
-            chunk = response.read(600)
-            assert b"--presensi-frame" in chunk
-            assert b"Content-Type: image/jpeg" in chunk
+            assert first_frame.endswith(b"--presensi-frame")
+            part_headers = _read_stream_until(sock, b"\r\n\r\n", 1, buf, deadline_s=2)
+            assert b"Content-Type: image/jpeg" in part_headers
+        finally:
+            sock.close()
         bad = urllib.request.Request(
             f"http://127.0.0.1:{port}/v1/kiosk-stream",
             headers={"Host": "kiosk.sekolah.example"},

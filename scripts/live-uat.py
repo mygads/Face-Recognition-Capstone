@@ -16,9 +16,11 @@ Env (defaults work with the documented live-UAT stack):
 
 import os
 import socket
+import ssl
 import sys
 import uuid
 from datetime import datetime
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -35,7 +37,10 @@ passed: list[str] = []
 
 
 def check(name: str, cond: bool, extra: object = "") -> None:
-    print(("PASS " if cond else "FAIL ") + name, extra)
+    # Response snippets may contain access tokens or one-time passwords.
+    # Keep diagnostics useful without ever writing response bodies to stdout.
+    suffix = f" ({extra})" if isinstance(extra, (int, float)) else ""
+    print(("PASS " if cond else "FAIL ") + name + suffix)
     if not cond:
         sys.exit(1)
     passed.append(name)
@@ -263,12 +268,20 @@ check("hadir tercatat 1", summ.get("present") == 1, str(summ))
 # 9. GZip live (minimum_size=1024: snapshot kecil 724B wajar tak dikompres;
 #    buktikan pada daftar sesi >1KB via raw socket agar httpx tak decode diam-diam)
 raw_path = "/api/v1/sessions?limit=100&offset=0"
+api_url = urlsplit(API)
+if api_url.scheme not in {"http", "https"} or api_url.hostname is None:
+    raise RuntimeError("API_BASE must be an absolute HTTP(S) URL")
+request_path = f"{api_url.path.rstrip('/')}{raw_path}"
+host_header = api_url.netloc
 raw_req = (
-    f"GET {raw_path} HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+    f"GET {request_path} HTTP/1.1\r\nHost: {host_header}\r\n"
     f"Authorization: Bearer {ADMIN}\r\n"
     "Accept-Encoding: gzip\r\nConnection: close\r\n\r\n"
 )
-s = socket.create_connection(("127.0.0.1", 8017), timeout=10)
+port = api_url.port or (443 if api_url.scheme == "https" else 80)
+s = socket.create_connection((api_url.hostname, port), timeout=10)
+if api_url.scheme == "https":
+    s = ssl.create_default_context().wrap_socket(s, server_hostname=api_url.hostname)
 s.sendall(raw_req.encode())
 wire = b""
 while True:

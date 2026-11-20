@@ -262,5 +262,5 @@ with open(sys.argv[1], "w", encoding="utf-8") as stream:
 unset TOKEN
 
 echo "Profile dari registry: $PROFILE"
-echo 'Menginstal dependency, menulis token/config terlindungi, memeriksa kamera, lalu menawarkan menjalankan agent.'
+echo 'Menginstal dependency, menyimpan credential terlindungi, menguji kamera, lalu menyalakan agent jika host mendukung.'
 bash "$SOURCE_DIR/scripts/install-camera-device.sh" "$SETUP_BUNDLE" </dev/tty

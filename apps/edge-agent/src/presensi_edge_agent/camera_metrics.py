@@ -7,7 +7,7 @@ import threading
 import time
 from collections import deque
 from datetime import UTC, datetime
-from typing import Literal, cast
+from typing import Literal, Protocol, cast
 
 CameraQualityState = Literal[
     "not_checked",
@@ -18,6 +18,11 @@ CameraQualityState = Literal[
     "unavailable",
 ]
 CameraQualitySource = Literal["face_check", "frame_filter"]
+MIN_LATENCY_SAMPLES = 20
+
+
+class CameraReader(Protocol):
+    def read(self) -> tuple[bool, object | None]: ...
 
 
 class CameraRuntimeMetrics:
@@ -29,6 +34,7 @@ class CameraRuntimeMetrics:
         self.requested_fps = requested_fps
         self._lock = threading.Lock()
         self._frame_times: deque[float] = deque()
+        self._read_latencies_ms: deque[float] = deque(maxlen=512)
         self._frame_width: int | None = None
         self._frame_height: int | None = None
         self._driver_fps: float | None = None
@@ -64,6 +70,22 @@ class CameraRuntimeMetrics:
                 self._frame_width = width
             if height is not None and 1 <= height <= 8192:
                 self._frame_height = height
+
+    def record_read_latency(self, duration_ms: float) -> None:
+        if not math.isfinite(duration_ms) or duration_ms < 0 or duration_ms > 600_000:
+            return
+        with self._lock:
+            self._read_latencies_ms.append(duration_ms)
+
+    def latency_summary(self) -> dict[str, float] | None:
+        with self._lock:
+            if len(self._read_latencies_ms) < MIN_LATENCY_SAMPLES:
+                return None
+            values = sorted(self._read_latencies_ms)
+        return {
+            "p50_ms": round(_percentile(values, 0.50), 1),
+            "p95_ms": round(_percentile(values, 0.95), 1),
+        }
 
     def set_quality_state(
         self,
@@ -119,4 +141,26 @@ class CameraRuntimeMetrics:
             }
 
 
-__all__ = ["CameraRuntimeMetrics", "CameraQualitySource", "CameraQualityState"]
+__all__ = [
+    "CameraRuntimeMetrics",
+    "CameraQualitySource",
+    "CameraQualityState",
+    "read_camera_frame",
+]
+
+
+def read_camera_frame(
+    camera: CameraReader, metrics: CameraRuntimeMetrics
+) -> tuple[bool, object | None, float]:
+    """Read one frame and record the successful camera-read latency in ms."""
+    started = time.perf_counter_ns()
+    ok, frame = camera.read()
+    duration_ms = (time.perf_counter_ns() - started) / 1_000_000
+    if ok and frame is not None:
+        metrics.record_read_latency(duration_ms)
+    return bool(ok), frame, duration_ms
+
+
+def _percentile(values: list[float], fraction: float) -> float:
+    index = max(0, math.ceil(fraction * len(values)) - 1)
+    return values[index]

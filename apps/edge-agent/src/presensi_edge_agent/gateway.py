@@ -10,9 +10,14 @@ from uuid import UUID, uuid4
 
 from presensi_edge_agent.api import ApiCallError, CoreApiClient
 from presensi_edge_agent.camera import CameraUnavailableError
-from presensi_edge_agent.camera_metrics import CameraRuntimeMetrics
+from presensi_edge_agent.camera_metrics import CameraRuntimeMetrics, read_camera_frame
 from presensi_edge_agent.central_ai import BurstFrame, CentralDecision
-from presensi_edge_agent.config import EdgeConfig, resolve_ai_token, resolve_api_token
+from presensi_edge_agent.config import (
+    EdgeConfig,
+    managed_configuration_poll_interval,
+    resolve_ai_token,
+    resolve_api_token,
+)
 from presensi_edge_agent.logging import log_event
 from presensi_edge_agent.managed_config import (
     apply_managed_configuration,
@@ -145,6 +150,7 @@ class StbGatewayService:
                 )
             )
             api.set_camera_metrics_provider(self.camera_metrics.snapshot)
+            api.set_latency_summary_provider(self._latency_summary_snapshot)
             api.set_queue_status_provider(self._queue_status_snapshot)
         self.ai = ai
         self.outbox = outbox
@@ -162,6 +168,11 @@ class StbGatewayService:
             "pending_events": pending,
             "dead_letter_events": dead_letter,
         }
+
+    def _latency_summary_snapshot(self) -> dict[str, float] | None:
+        if not self._camera_enabled or not self._camera_open:
+            return None
+        return self.camera_metrics.latency_summary()
 
     def status(self) -> dict[str, object]:
         pending, dead_letter = self.outbox.counts()
@@ -226,7 +237,9 @@ class StbGatewayService:
                                 mode = None
                             if isinstance(mode, dict):
                                 self.camera_metrics.set_driver_mode(mode)
-                        ok, health_frame = self.camera.read()
+                        ok, health_frame, _read_duration_ms = read_camera_frame(
+                            self.camera, self.camera_metrics
+                        )
                         if not ok or health_frame is None:
                             raise CameraUnavailableError("Camera health sample failed.")
                         self.camera_metrics.record_frame(health_frame)
@@ -268,7 +281,9 @@ class StbGatewayService:
                             requested_height=self.config.camera.height,
                             requested_fps=self.config.camera.fps,
                         )
-                    ok, frame = self.camera.read()
+                    ok, frame, _read_duration_ms = read_camera_frame(
+                        self.camera, self.camera_metrics
+                    )
                     if not ok or frame is None:
                         raise CameraUnavailableError("Camera frame read failed.")
                     self.camera_metrics.record_frame(frame)
@@ -418,7 +433,9 @@ class StbGatewayService:
                 self.stop_event.wait(self.config.gateway.burst_frame_interval_seconds)
                 if self.stop_event.is_set():
                     break
-                ok, next_frame = self.camera.read()
+                ok, next_frame, _read_duration_ms = read_camera_frame(
+                    self.camera, self.camera_metrics
+                )
                 if not ok or next_frame is None:
                     break
                 frame = next_frame
@@ -608,8 +625,11 @@ class StbGatewayService:
                     next_heartbeat = now + self.config.api.heartbeat_interval_seconds
                 if now >= next_configuration_refresh:
                     self._sync_managed_configuration()
-                    next_configuration_refresh = now + max(
-                        15.0, self.config.api.heartbeat_interval_seconds
+                    next_configuration_refresh = (
+                        now
+                        + managed_configuration_poll_interval(
+                            self.config.api.heartbeat_interval_seconds
+                        )
                     )
                 for queued_event in self.outbox.due(limit=50):
                     try:

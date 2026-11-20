@@ -96,6 +96,73 @@ if [[ "$PROFILE" == "AI_EDGE" ]]; then
 fi
 
 AGENT="$VENV_PATH/bin/presensi-edge-agent"
+
+install_ai_edge_user_service() {
+  [[ "$PROFILE" == AI_EDGE && -d /run/systemd/system ]] || return 1
+  command -v systemctl >/dev/null 2>&1 || return 1
+
+  local unit_dir unit_path service_name unit_working_dir unit_agent unit_config
+  unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+  unit_path="$unit_dir/presensi-edge-agent-ai-edge.service"
+  service_name="presensi-edge-agent-ai-edge.service"
+  mkdir -p "$unit_dir" || return 1
+
+  systemd_quote() {
+    local escaped="$1"
+    escaped="${escaped//\\/\\\\}"
+    escaped="${escaped//\"/\\\"}"
+    escaped="${escaped//%/%%}"
+    printf '"%s"' "$escaped"
+  }
+
+  unit_working_dir="$(systemd_quote "$ROOT")"
+  unit_agent="$(systemd_quote "$AGENT")"
+  unit_config="$(systemd_quote "$CONFIG_PATH")"
+  cat > "$unit_path" <<EOF
+[Unit]
+Description=Presensi AI_EDGE camera agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$unit_working_dir
+ExecStart=$unit_agent --config $unit_config run
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+UMask=0077
+
+[Install]
+WantedBy=default.target
+EOF
+  [[ -s "$unit_path" ]] || return 1
+  chmod 600 "$unit_path" || return 1
+
+  if command -v sudo >/dev/null 2>&1 && command -v loginctl >/dev/null 2>&1; then
+    if sudo loginctl enable-linger "$(id -un)"; then
+      echo 'systemd user service akan aktif otomatis setelah reboot.'
+    else
+      echo 'Linger tidak aktif; service berjalan setelah akun desktop ini login.' >&2
+    fi
+  else
+    echo 'Linger belum tersedia; service berjalan setelah akun desktop ini login.'
+  fi
+
+  if ! systemctl --user daemon-reload; then
+    echo 'User systemd manager belum tersedia; service belum diaktifkan.' >&2
+    return 1
+  fi
+  if ! systemctl --user enable --now "$service_name"; then
+    echo 'Service systemd tidak dapat diaktifkan.' >&2
+    return 1
+  fi
+  echo "Agent aktif sebagai service systemd: $service_name"
+  echo "Periksa dengan: systemctl --user status $service_name"
+  echo "Log: journalctl --user -u $service_name -f"
+  return 0
+}
+
 echo
 read -r -p 'Run interactive camera setup now (camera, resolution, FPS)? [Y/n] ' CONFIGURE_CAMERA
 case "$CONFIGURE_CAMERA" in
@@ -132,6 +199,10 @@ if [[ "$PROFILE" == AI_EDGE ]]; then
   echo 'AI_EDGE requires local YuNet/SFace files and calibrated Top-1/margin thresholds before attendance can run.'
 fi
 if [[ "$RUNTIME_STATUS" -eq 0 ]]; then
+  if [[ "$PROFILE" == AI_EDGE && "$CAMERA_STATUS" -eq 0 ]] && install_ai_edge_user_service; then
+    echo 'Setup selesai. Kembali ke dashboard; status agent dan kamera diperiksa otomatis.'
+    exit 0
+  fi
   read -r -p 'Start the agent now in this terminal? [Y/n] ' START_NOW
   case "$START_NOW" in
     n|N|no|NO) echo "When ready: $AGENT --config $CONFIG_PATH run" ;;

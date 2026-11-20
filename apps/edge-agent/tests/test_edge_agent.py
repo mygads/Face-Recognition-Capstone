@@ -34,6 +34,7 @@ from presensi_edge_agent.config import (
     RecognitionSettings,
     RuntimeSettings,
     load_config,
+    managed_configuration_poll_interval,
 )
 from presensi_edge_agent.events import _api_score, event_payload
 from presensi_edge_agent.logging import JsonLogFormatter
@@ -58,6 +59,14 @@ DEVICE_ID = UUID("33000000-0000-4000-8000-000000000001")
 SESSION_ID = UUID("33000000-0000-4000-8000-000000000002")
 STUDENT_ID = UUID("33000000-0000-4000-8000-000000000003")
 MODEL_NAME = "opencv-zoo-sface"
+
+
+def test_managed_configuration_poll_interval_keeps_camera_controls_responsive() -> None:
+    assert managed_configuration_poll_interval(15.0) == 5.0
+    assert managed_configuration_poll_interval(3.0) == 3.0
+    assert managed_configuration_poll_interval(0.5) == 1.0
+
+
 MODEL_VERSION = "test-version"
 
 
@@ -117,11 +126,24 @@ def test_yaml_config_accepts_environment_overrides_without_a_secret_in_yaml() ->
     assert config.camera.index == 2
     assert config.camera.width == 640
     assert config.camera.height == 480
-    assert config.camera.fps == 15
+    assert config.camera.fps == 30
     assert config.recognition.sample_every_n_frames == 7
     assert config.api.cache_max_offline_seconds == 90
     assert config.recognition.min_top1_similarity is None
     assert "test-token-is-in-environment-only" not in repr(config)
+
+
+def test_ai_edge_camera_fps_defaults_to_30_when_omitted(tmp_path: Path) -> None:
+    config_text = EXAMPLE_CONFIG.read_text(encoding="utf-8")
+    assert "  fps: 30\n" in config_text
+    config_path = tmp_path / "edge-agent.yaml"
+    config_path.write_text(config_text.replace("  fps: 30\n", "", 1), encoding="utf-8")
+
+    config = load_config(
+        config_path, environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)}
+    )
+
+    assert config.camera.fps == 30
 
 
 def test_runtime_config_requires_calibrated_thresholds_and_model_files(
@@ -2035,6 +2057,9 @@ def test_edge_service_wires_outbox_queue_provider(tmp_path: Path) -> None:
             "pending_events": 1,
             "dead_letter_events": 0,
         }
+        service._camera_open = True
+        for _ in range(20):
+            service.camera_metrics.record_read_latency(18.4)
         service._send_heartbeat()
     finally:
         service.outbox.close()
@@ -2046,6 +2071,7 @@ def test_edge_service_wires_outbox_queue_provider(tmp_path: Path) -> None:
         "pending_events": 1,
         "dead_letter_events": 0,
     }
+    assert captured[0]["latency_summary"] == {"p50_ms": 18.4, "p95_ms": 18.4}
 
 
 def test_preview_gallery_reuses_valid_cache_without_refetch(tmp_path: Path) -> None:
@@ -2177,7 +2203,7 @@ def test_managed_edge_config_rejects_unreachable_sampling() -> None:
         apply_managed_configuration(config, revision=2, settings=settings)
 
 
-def test_managed_reconfiguration_clears_stale_decision_signature(
+def test_managed_reconfiguration_clears_stale_signature_and_applies_camera_pause(
     tmp_path: Path,
 ) -> None:
     """After a managed threshold push, the first decision of the recalibrated
@@ -2211,7 +2237,7 @@ def test_managed_reconfiguration_clears_stale_decision_signature(
         def fetch_runtime_configuration(self) -> dict[str, object]:
             return {
                 "revision": 1,
-                "camera_enabled": True,
+                "camera_enabled": False,
                 "settings": {
                     "min_face_pixels": 80,
                     "min_laplacian_variance": 45.0,
@@ -2260,6 +2286,7 @@ def test_managed_reconfiguration_clears_stale_decision_signature(
     service._last_decision = ("rejected", None, "top1_below_threshold")
     service._sync_managed_configuration()
     assert service._last_decision is None
+    assert service._camera_enabled is False
     assert service.config.runtime_config_revision == 1
     assert len(applied) == 1
     assert reported == [(1, "applied")]
@@ -2405,6 +2432,7 @@ def test_kiosk_stream_consumer_fills_jpeg_without_operator_viewer(
         def open(self) -> None: ...
 
         def read(self) -> tuple[bool, object | None]:
+            time.sleep(0.005)
             return True, np.zeros((480, 640, 3), dtype=np.uint8)
 
         def close(self) -> None: ...
@@ -2433,7 +2461,9 @@ def test_kiosk_stream_consumer_fills_jpeg_without_operator_viewer(
 
     def run_loop(seconds: float) -> None:
         service.stop_event.clear()
+        preview_worker = threading.Thread(target=service._preview_loop, daemon=True)
         worker = threading.Thread(target=service._capture_loop, daemon=True)
+        preview_worker.start()
         worker.start()
         try:
             deadline = time.monotonic() + seconds
@@ -2442,6 +2472,7 @@ def test_kiosk_stream_consumer_fills_jpeg_without_operator_viewer(
         finally:
             service.stop_event.set()
             worker.join(timeout=10)
+            preview_worker.join(timeout=10)
 
     try:
         run_loop(0.6)
@@ -2449,17 +2480,91 @@ def test_kiosk_stream_consumer_fills_jpeg_without_operator_viewer(
 
         service.stop_event.clear()
         service.preview.note_kiosk_stream_hit()
+        preview_worker = threading.Thread(target=service._preview_loop, daemon=True)
         worker = threading.Thread(target=service._capture_loop, daemon=True)
+        preview_worker.start()
         worker.start()
         try:
             deadline = time.monotonic() + 2.0
             while service.preview._jpeg_frame is None and time.monotonic() < deadline:
                 service.preview.note_kiosk_stream_hit()
                 time.sleep(0.05)
+            assert service.preview._jpeg_frame is not None
         finally:
             service.stop_event.set()
             worker.join(timeout=10)
-        assert service.preview._jpeg_frame is not None
+            preview_worker.join(timeout=10)
         assert service.preview.has_kiosk_stream_consumer()
     finally:
+        outbox.close()
+
+
+def test_slow_preview_encode_does_not_block_camera_capture(tmp_path: Path) -> None:
+    """JPEG encoding runs away from the camera's frame acquisition thread."""
+    import threading
+
+    import numpy as np
+
+    config = load_config(
+        EXAMPLE_CONFIG, environ={"PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID)}
+    )
+    reads = 0
+    reads_lock = threading.Lock()
+
+    class FakeCamera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            nonlocal reads
+            time.sleep(0.01)
+            with reads_lock:
+                reads += 1
+            return True, np.zeros((64, 64, 3), dtype=np.uint8)
+
+        def close(self) -> None: ...
+
+    class FakeApi:
+        def close(self) -> None: ...
+
+    class NeverRecognizer:
+        def process(self, *_args: object, **_kwargs: object) -> object:
+            raise AssertionError("capture loop tidak memakai recognizer.")
+
+        def reset(self) -> None: ...
+
+    outbox = EventOutbox(tmp_path / "slow-preview-outbox.sqlite3", max_pending=10)
+    service = EdgeService(
+        config,
+        FakeCamera(),
+        FakeApi(),  # type: ignore[arg-type]
+        outbox,
+        NeverRecognizer(),  # type: ignore[arg-type]
+        lambda: {},
+    )
+    assert service.preview is not None
+    service.preview.note_kiosk_stream_hit()
+    encode_started = threading.Event()
+    release_encode = threading.Event()
+
+    def slow_encode(_frame: object) -> bool:
+        encode_started.set()
+        release_encode.wait(timeout=2)
+        return True
+
+    service.preview.update_frame = slow_encode  # type: ignore[method-assign]
+    preview_worker = threading.Thread(target=service._preview_loop, daemon=True)
+    capture_worker = threading.Thread(target=service._capture_loop, daemon=True)
+    preview_worker.start()
+    capture_worker.start()
+    try:
+        assert encode_started.wait(timeout=2)
+        time.sleep(0.2)
+        with reads_lock:
+            captured_during_encode = reads
+        assert captured_during_encode >= 5
+    finally:
+        release_encode.set()
+        service.stop_event.set()
+        capture_worker.join(timeout=5)
+        preview_worker.join(timeout=5)
         outbox.close()

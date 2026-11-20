@@ -12,6 +12,17 @@ from uuid import UUID
 
 import yaml
 
+MANAGED_CONFIGURATION_POLL_MIN_SECONDS = 1.0
+MANAGED_CONFIGURATION_POLL_MAX_SECONDS = 5.0
+
+
+def managed_configuration_poll_interval(heartbeat_interval_seconds: float) -> float:
+    """Keep camera controls responsive without polling faster than once per second."""
+    return min(
+        MANAGED_CONFIGURATION_POLL_MAX_SECONDS,
+        max(MANAGED_CONFIGURATION_POLL_MIN_SECONDS, heartbeat_interval_seconds),
+    )
+
 
 class EdgeConfigError(ValueError):
     """Raised when the edge agent configuration is incomplete or invalid."""
@@ -569,7 +580,7 @@ def load_config(
         index=camera_index,
         width=_integer(camera_raw, "width", 640),
         height=_integer(camera_raw, "height", 480),
-        fps=_integer(camera_raw, "fps", 15),
+        fps=_integer(camera_raw, "fps", 30 if mode == "AI_EDGE" else 15),
         backend=str(camera_raw.get("backend", "auto")).lower(),
         scan_max_index=_integer(camera_raw, "scan_max_index", 8, minimum=0),
         reconnect_seconds=_positive_number(

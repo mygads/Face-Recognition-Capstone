@@ -11,8 +11,8 @@ COPY ${SERVICE_PATH}/pyproject.toml ./pyproject.toml
 COPY ${SERVICE_PATH}/src ./src
 COPY libs/recognition-core /recognition-core
 RUN if [ "$INSTALL_RECOGNITION_CORE" = "true" ]; then \
-      python -m pip install --no-cache-dir -e "/recognition-core[opencv]"; \
+      python -m pip install --no-cache-dir --timeout 120 --retries 10 -e "/recognition-core[opencv]"; \
     fi \
-    && python -m pip install --no-cache-dir -e ".[${SERVICE_EXTRAS}]"
+    && python -m pip install --no-cache-dir --timeout 120 --retries 10 -e ".[${SERVICE_EXTRAS}]"
 
 EXPOSE 8000
