@@ -510,6 +510,9 @@ async def _live_event_generator(
                 if lab is None or not lab.is_active:
                     yield 'event: error\ndata: {"code":"laboratory_not_found"}\n\n'
                     return
+                if kind == "lab" and not lab.display_pin_hash:
+                    yield 'event: error\ndata: {"code":"display_token_invalid"}\n\n'
+                    return
                 if kind == "kiosk":
                     device = db.get(Device, subject_id)
                     if device is None or not device.is_active:
@@ -669,6 +672,7 @@ def get_public_display(
     claims = decode_display_token(resolved, settings)
     if claims is None or claims.kind != "lab":
         raise ApiProblem(401, "display_token_invalid", "Sesi layar tidak valid.")
+    _require_lab_stream_target("lab", claims.subject_id, claims.laboratory_id, session)
     lab = session.get(Laboratory, claims.laboratory_id)
     if lab is None or not lab.is_active:
         raise ApiProblem(404, "laboratory_not_found", "Laboratorium tidak ditemukan.")
@@ -793,6 +797,8 @@ def _require_lab_stream_target(
     lab = session.get(Laboratory, claims_lab)
     if lab is None or not lab.is_active:
         raise ApiProblem(404, "laboratory_not_found", "Laboratorium tidak ditemukan.")
+    if kind == "lab" and not lab.display_pin_hash:
+        raise ApiProblem(401, "display_token_invalid", "Sesi layar tidak valid.")
     if kind == "kiosk":
         device = session.get(Device, claims_subject)
         if device is None or not device.is_active:

@@ -725,6 +725,13 @@ export async function setLaboratoryDisplayPin(
   return unwrap(result)
 }
 
+export async function revokeLaboratoryDisplayPin(laboratoryId: string): Promise<Laboratory> {
+  const result = await apiClient.DELETE('/api/v1/laboratories/{laboratory_id}/display-pin', {
+    params: { path: { laboratory_id: laboratoryId } },
+  })
+  return unwrap(result)
+}
+
 export async function listEwsFollowUps(studentId: string): Promise<EwsFollowUp[]> {
   const result = await apiClient.GET('/api/v1/reports/attendance/at-risk/{student_id}/follow-ups', {
     params: { path: { student_id: studentId } },

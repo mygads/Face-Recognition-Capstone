@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -14,6 +15,8 @@ const api = vi.hoisted(() => ({
   openAttendanceSession: vi.fn(),
   closeAttendanceSession: vi.fn(),
   getAttendanceSessionStatus: vi.fn(),
+  getSessionDashboardSnapshot: vi.fn(),
+  sessionDashboardWebSocketUrl: vi.fn(),
   getSessionRoster: vi.fn(),
   markManualAttendance: vi.fn(),
 }))
@@ -62,6 +65,22 @@ const overrideSession = {
   scheduled_end_at: '2026-10-05T04:00:00Z',
 }
 
+const dashboardSnapshot = {
+  session_id: 'session-1',
+  session_status: 'manual_override' as const,
+  generated_at: '2026-10-05T02:10:00Z',
+  summary: {
+    total_roster: 2,
+    present: 0,
+    late: 0,
+    excused: 0,
+    absent: 0,
+    not_present: 2,
+  },
+  devices: [],
+  recent_activity: [],
+}
+
 function laboranPinia() {
   const pinia = createPinia()
   useAuthStore(pinia).$patch({
@@ -104,6 +123,10 @@ describe('sessions view', () => {
       items: [overrideSession],
       pagination: { total: 1, limit: 50, offset: 0 },
     })
+    api.getSessionDashboardSnapshot.mockResolvedValue(dashboardSnapshot)
+    api.sessionDashboardWebSocketUrl.mockImplementation(
+      (sessionId: string) => `ws://localhost/api/${sessionId}`,
+    )
     api.getOpeningPreference.mockResolvedValue({
       opening_mode: 'manual',
       updated_at: null,
@@ -114,7 +137,7 @@ describe('sessions view', () => {
     const wrapper = mount(SessionsView, { global: { plugins: [teacherPinia()] } })
     await flushPromises()
     expect(wrapper.find('[data-testid="open-grace-input"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('Toleransi sesi mengikuti Kebijakan Presensi')
+    expect(wrapper.text()).toContain('Toleransi mengikuti Kebijakan Presensi')
     api.openAttendanceSession.mockResolvedValueOnce({
       ...overrideSession,
       status: 'active',
@@ -430,6 +453,102 @@ describe('session roster overview', () => {
     await wrapper.get('[data-testid="roster-filter-present"]').trigger('click')
     expect(wrapper.findAll('[data-testid="roster-row"]')).toHaveLength(1)
     expect(wrapper.text()).toContain('Siswa Satu')
+  })
+})
+
+describe('session detail live updates', () => {
+  class FakeWebSocket {
+    static instances: FakeWebSocket[] = []
+    readonly send = vi.fn()
+    onopen: ((event: Event) => void) | null = null
+    onmessage: ((event: MessageEvent) => void) | null = null
+    onclose: ((event: CloseEvent) => void) | null = null
+    onerror: ((event: Event) => void) | null = null
+
+    constructor(readonly url: string) {
+      FakeWebSocket.instances.push(this)
+    }
+
+    open(): void {
+      this.onopen?.(new Event('open'))
+    }
+
+    message(payload: unknown): void {
+      this.onmessage?.({ data: JSON.stringify(payload) } as MessageEvent)
+    }
+
+    close(): void {
+      this.onclose?.(new CloseEvent('close'))
+    }
+  }
+
+  it('mengirim token sesi dan memperbarui roster saat WebSocket menerima snapshot baru', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    FakeWebSocket.instances = []
+    api.getAttendanceSessionStatus.mockResolvedValue(overrideSession)
+    const unmarkedRoster = [
+      {
+        student_id: 'student-1',
+        student_number: 'S-001',
+        full_name: 'Siswa Satu',
+        record_status: null,
+      },
+    ]
+    const presentRoster = [
+      {
+        ...unmarkedRoster[0],
+        record_status: 'present' as const,
+      },
+    ]
+    api.getSessionRoster
+      .mockResolvedValueOnce(unmarkedRoster)
+      .mockResolvedValueOnce(unmarkedRoster)
+      .mockResolvedValueOnce(presentRoster)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/app/sessions/:sessionId', component: SessionsView }],
+    })
+    await router.push('/app/sessions/session-1')
+    await router.isReady()
+    const wrapper = mount(SessionsView, {
+      global: { plugins: [teacherPinia(), router] },
+    })
+    try {
+      await flushPromises()
+      const socket = FakeWebSocket.instances[0]
+      expect(socket.url).toBe('ws://localhost/api/session-1')
+      socket.open()
+      expect(socket.send).toHaveBeenCalledWith(
+        JSON.stringify({ type: 'authenticate', access_token: 'unit-test-token' }),
+      )
+      await flushPromises()
+      socket.message({
+        type: 'snapshot',
+        data: {
+          ...dashboardSnapshot,
+          summary: { ...dashboardSnapshot.summary, present: 1, not_present: 1 },
+          recent_activity: [
+            {
+              id: 'event-1',
+              occurred_at: '2026-10-05T02:11:00Z',
+              kind: 'recognition',
+              student_name: 'Siswa Satu',
+              recognition_outcome: 'matched',
+              attendance_status: 'present',
+              decision_reason: null,
+            },
+          ],
+        },
+      })
+      await flushPromises()
+      expect(wrapper.get('[data-testid="session-live-status"]').text()).toContain(
+        'Pembaruan langsung aktif',
+      )
+      expect(wrapper.get('[data-testid="roster-row"]').text()).toContain('Hadir')
+    } finally {
+      wrapper.unmount()
+      vi.unstubAllGlobals()
+    }
   })
 })
 

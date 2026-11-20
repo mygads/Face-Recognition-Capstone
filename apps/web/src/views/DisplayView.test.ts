@@ -150,15 +150,12 @@ describe('DisplayView ala Stitch', () => {
     await w.find('form').trigger('submit.prevent')
     await flushPromises()
 
-    expect(w.get('[data-testid="display-session-state"]').text()).toContain(
-      'Tidak ada sesi berlangsung',
-    )
-    expect(w.get('[data-testid="display-session-opened"]').text()).toContain(
-      'Tidak ada jadwal aktif',
-    )
+    expect(w.get('[data-testid="display-session-state"]').text()).toContain('Belum ada sesi aktif')
     expect(w.get('[data-testid="display-recognition-status"]').text()).toContain(
-      'Belum ada sesi presensi aktif',
+      'Kamera menunggu guru atau laboran membuka sesi',
     )
+    expect(w.findAll('[data-testid="display-session-state"]')).toHaveLength(1)
+    expect(w.find('[data-testid="display-session-opened"]').exists()).toBe(false)
   })
 
   it('menampilkan deteksi wajah lokal pada kiosk walau sesi belum aktif', async () => {
@@ -193,8 +190,9 @@ describe('DisplayView ala Stitch', () => {
 
     expect(wrapper.get('[data-testid="display-board"]').text()).toContain('1 wajah')
     expect(wrapper.get('[data-testid="display-recognition-status"]').text()).toContain(
-      'identitas belum diperiksa karena sesi belum dibuka',
+      'Wajah terlihat, tetapi belum dicocokkan',
     )
+    expect(wrapper.get('[data-testid="display-recognition-title"]').text()).toBe('Wajah terdeteksi')
     wrapper.unmount()
   })
 
@@ -249,7 +247,9 @@ describe('DisplayView ala Stitch', () => {
     await w.find('form').trigger('submit.prevent')
     await flushPromises()
 
-    expect(w.get('[data-testid="display-session-state"]').text()).toContain('Sesi belum dibuka')
+    expect(w.get('[data-testid="display-session-state"]').text()).toContain(
+      'Jadwal menunggu dibuka',
+    )
     expect(w.get('[data-testid="display-session-details"]').text()).toContain(
       'Praktikum Larutan · Kelas XI MIPA 2 · Lab Kimia 1',
     )
@@ -269,6 +269,15 @@ describe('DisplayView fullscreen', () => {
     await flushPromises()
     return wrapper
   }
+
+  it('menampilkan tombol fullscreen sejak layar aktivasi', async () => {
+    const wrapper = mount(DisplayView)
+    await flushPromises()
+    const button = wrapper.get('[data-testid="display-activation-fullscreen"]')
+    expect(button.attributes('aria-label')).toBe('Masuk layar penuh')
+    expect(button.get('.st-material-icon').text()).toBe('fullscreen')
+    wrapper.unmount()
+  })
 
   it('meminta fullscreen dari klik aktivasi sebelum menunggu respons PIN', async () => {
     api.openPublicDisplaySession.mockResolvedValueOnce({ display_token: 'tok-gesture', snapshot })
@@ -312,21 +321,26 @@ describe('DisplayView fullscreen', () => {
       value: requestFullscreen,
     })
     try {
-      const enterButton = wrapper
-        .findAll('button')
-        .find((button) => button.text().trim() === 'Fullscreen')
+      const enterButton = wrapper.get('[data-testid="display-fullscreen-toggle"]')
       await enterButton?.trigger('click')
       await flushPromises()
       expect(requestFullscreen).toHaveBeenCalledOnce()
-      expect(wrapper.text()).toContain('Keluar fullscreen')
+      expect(wrapper.text()).toContain('Keluar layar penuh')
+      expect(
+        wrapper.get('[data-testid="display-fullscreen-toggle"] .st-material-icon').text(),
+      ).toBe('fullscreen_exit')
 
-      const exitButton = wrapper
-        .findAll('button')
-        .find((button) => button.text().trim() === 'Keluar fullscreen')
+      const exitButton = wrapper.get('[data-testid="display-fullscreen-toggle"]')
       await exitButton?.trigger('click')
       await flushPromises()
       expect(exitFullscreen).toHaveBeenCalledOnce()
-      expect(wrapper.text()).toContain('Fullscreen')
+      expect(wrapper.text()).toContain('Masuk layar penuh')
+      expect(
+        wrapper.get('[data-testid="display-fullscreen-toggle"] .st-material-icon').text(),
+      ).toBe('fullscreen')
+      const changeScreenButton = wrapper.get('[data-testid="display-change-screen"]')
+      expect(changeScreenButton.attributes('aria-label')).toBe('Ganti layar')
+      expect(changeScreenButton.get('.st-material-icon').text()).toBe('close')
     } finally {
       wrapper.unmount()
       if (originalFullscreenElement) {
@@ -356,11 +370,11 @@ describe('DisplayView fullscreen', () => {
       }),
     })
     try {
-      const button = wrapper.findAll('button').find((item) => item.text().trim() === 'Fullscreen')
+      const button = wrapper.get('[data-testid="display-fullscreen-toggle"]')
       await button?.trigger('click')
       await flushPromises()
       expect(wrapper.get('[data-testid="fullscreen-error"]').text()).toContain(
-        'Buka kiosk di tab Chrome biasa',
+        'jalankan Chrome dalam mode kiosk',
       )
     } finally {
       wrapper.unmount()
@@ -516,6 +530,12 @@ describe('DisplayView rotasi token', () => {
     g['EventSource'] = FakeES2
     FakeES2.instances = []
     vi.useFakeTimers()
+    // The kiosk also polls the agent hint and updates its clock every second.
+    // Keep this test focused on token rotation instead of advancing 1,800
+    // unrelated interval callbacks when moving the clock forward 30 minutes.
+    const setIntervalSpy = vi
+      .spyOn(globalThis, 'setInterval')
+      .mockReturnValue(0 as unknown as ReturnType<typeof setInterval>)
     try {
       api.openPublicDisplaySession.mockResolvedValueOnce({
         display_token: 'tok-lama',
@@ -540,6 +560,7 @@ describe('DisplayView rotasi token', () => {
       expect(FakeES2.instances).toHaveLength(2)
       expect(FakeES2.instances[1].url).toContain('tok-baru')
     } finally {
+      setIntervalSpy.mockRestore()
       vi.useRealTimers()
       g['EventSource'] = realES
     }
@@ -622,6 +643,29 @@ describe('DisplayView sinyal agent lokal', () => {
       expect(w.get('[data-testid="display-recognition-policy"]').text()).toContain(
         'Nama siswa hanya ditampilkan setelah presensi dikonfirmasi',
       )
+    } finally {
+      w.unmount()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('tidak menampilkan progres verifikasi saat AI menunggu kalibrasi', async () => {
+    const w = await mountLiveBoard({
+      session_active: true,
+      camera_open: true,
+      recognition_state: 'waiting_for_calibration',
+      face_present: true,
+      face_count: 1,
+      attendance_result: null,
+    })
+    try {
+      expect(w.get('[data-testid="display-recognition-title"]').text()).toBe(
+        'Pengenalan belum siap',
+      )
+      expect(w.get('[data-testid="display-recognition-status"]').text()).toContain(
+        'Hubungi petugas untuk menyelesaikan kalibrasi',
+      )
+      expect(w.find('[data-testid="display-verifying"]').exists()).toBe(false)
     } finally {
       w.unmount()
       vi.unstubAllGlobals()

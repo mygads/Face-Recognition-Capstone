@@ -2152,6 +2152,32 @@ a:focus-visible {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.ai-setup-view__preset-note {
+  margin: 0;
+  padding: 0.8rem 0.95rem;
+  border-left: 3px solid var(--primary);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: color-mix(in srgb, var(--primary) 7%, var(--bg-surface));
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.ai-setup-view__preset-note strong {
+  color: var(--text);
+}
+
+.master-data__form > label.ai-setup-view__field {
+  gap: 0.45rem;
+}
+
+.ai-setup-view__field-hint {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
 .ai-setup-view__form-wide {
   grid-column: 1 / -1;
 }
@@ -2972,6 +2998,10 @@ a:focus-visible {
   margin-top: var(--space-4);
 }
 
+.enrollment-view__source-toggle {
+  grid-column: 1 / -1;
+}
+
 .enrollment-view__camera-frame {
   position: relative;
   display: grid;
@@ -2987,8 +3017,23 @@ a:focus-visible {
 .enrollment-view__camera {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
   transform: scaleX(-1);
+}
+
+.enrollment-view__capture-pose {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--bg-surface-secondary, #f6f8fa);
+}
+
+.enrollment-view__capture-pose span {
+  color: var(--text-muted);
+  font-size: 0.85rem;
 }
 
 .enrollment-view__camera-placeholder {
@@ -3061,6 +3106,77 @@ a:focus-visible {
   border-radius: inherit;
   background: var(--primary);
   transition: width 220ms ease;
+}
+
+.enrollment-view__progress span.enrollment-view__progress--indeterminate {
+  width: 34%;
+  animation: enrollment-progress-sweep 1.25s ease-in-out infinite alternate;
+}
+
+.enrollment-view__processing {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-4);
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius);
+  background: var(--bg-surface-secondary, #f6f8fa);
+}
+
+.enrollment-view__processing > div {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.enrollment-view__processing strong {
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.enrollment-view__processing p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.enrollment-view__processing-spinner {
+  flex: 0 0 1.25rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-top: 1px;
+  border: 2px solid var(--border-color-light);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: enrollment-spinner 0.8s linear infinite;
+}
+
+@keyframes enrollment-progress-sweep {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(190%);
+  }
+}
+
+@keyframes enrollment-spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .enrollment-view__progress span.enrollment-view__progress--indeterminate,
+  .enrollment-view__processing-spinner {
+    animation: none;
+  }
+
+  .enrollment-view__progress span.enrollment-view__progress--indeterminate {
+    width: 100%;
+  }
 }
 
 .enrollment-view__confirm {

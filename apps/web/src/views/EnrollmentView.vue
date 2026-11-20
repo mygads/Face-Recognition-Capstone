@@ -75,10 +75,20 @@ const enrolledCount = computed(
 const pendingCount = computed(
   () => students.value.filter((s) => s.template_status !== 'enrolled').length,
 )
+const capturePoseSteps = [
+  { label: 'Lihat lurus ke kamera', guidance: 'Wajah menghadap kamera dengan posisi santai.' },
+  {
+    label: 'Putar sedikit ke kiri',
+    guidance: 'Gerakkan kepala sedikit saja, jangan sampai keluar frame.',
+  },
+  {
+    label: 'Putar sedikit ke kanan',
+    guidance: 'Gerakkan kepala sedikit saja, jangan sampai keluar frame.',
+  },
+  { label: 'Kembali menghadap lurus', guidance: 'Lihat kamera seperti pada foto pertama.' },
+] as const
 const videoElement = ref<HTMLVideoElement | null>(null)
 const labImageElement = ref<HTMLImageElement | null>(null)
-const deviceFrameDimensions = ref({ width: 0, height: 0 })
-const labFrameDimensions = ref({ width: 0, height: 0 })
 const isLocalAIEdgeHost = ['localhost', '127.0.0.1'].includes(window.location.hostname)
 const cameraSource = ref<'device' | 'lab'>(isLocalAIEdgeHost ? 'lab' : 'device')
 const labStreamKey = ref(0)
@@ -115,13 +125,7 @@ const stream = ref<MediaStream | null>(null)
 const selectedStudent = computed(
   () => students.value.find((student) => student.id === selectedStudentId.value) ?? null,
 )
-const enrollmentCameraFrameStyle = computed(() => {
-  const size =
-    cameraSource.value === 'device' ? deviceFrameDimensions.value : labFrameDimensions.value
-  return {
-    aspectRatio: size.width > 0 && size.height > 0 ? `${size.width} / ${size.height}` : '4 / 3',
-  }
-})
+const capturePoseStep = computed(() => capturePoseSteps[captureIndex.value - 1] ?? null)
 const deviceFaceMesh = useFaceLandmarks(
   videoElement,
   computed(() => cameraSource.value === 'device' && stream.value !== null),
@@ -142,7 +146,7 @@ let previewGeneration = 0
 let statusTimer: number | undefined
 let streamRetryTimer: number | undefined
 let streamRetryAttempts = 0
-const MAX_STREAM_RETRIES = 3
+const MAX_STREAM_RETRY_DELAY_MS = 8000
 
 const cameraObservationLabel = computed(() => {
   if (cameraSource.value === 'lab' && localPreviewRecognitionState.value === 'camera_disabled') {
@@ -231,11 +235,11 @@ const canStartAgentCapture = computed(
 const eligibleStudents = computed(() =>
   students.value.filter((student) => student.template_status !== 'enrolled'),
 )
-const progressPercent = computed(() => {
+const progressPercent = computed<number | null>(() => {
   if (capturePhase.value === 'countdown') return 5
   if (capturePhase.value === 'capturing') return Math.round((captureIndex.value / 4) * 70) + 10
-  if (capturePhase.value === 'processing') return 90
   if (capturePhase.value === 'confirming') return 100
+  if (capturePhase.value === 'processing') return null
   return 0
 })
 
@@ -260,23 +264,12 @@ function stopCamera(): void {
   if (videoElement.value) videoElement.value.srcObject = null
 }
 
-function updateDeviceFrameDimensions(): void {
-  const video = videoElement.value
-  if (!video || video.videoWidth < 1 || video.videoHeight < 1) return
-  deviceFrameDimensions.value = { width: video.videoWidth, height: video.videoHeight }
-}
-
-function handleLabStreamLoad(event: Event): void {
+function handleLabStreamLoad(): void {
   if (streamRetryTimer) window.clearTimeout(streamRetryTimer)
   streamRetryTimer = undefined
   streamRetryAttempts = 0
   labStreamFailed.value = false
   localPreviewError.value = null
-  const image = event.currentTarget
-  if (!(image instanceof HTMLImageElement) || image.naturalWidth < 1 || image.naturalHeight < 1) {
-    return
-  }
-  labFrameDimensions.value = { width: image.naturalWidth, height: image.naturalHeight }
 }
 
 async function startDevicePreview(): Promise<void> {
@@ -294,7 +287,12 @@ async function startDevicePreview(): Promise<void> {
   try {
     const cameraStream = await navigator.mediaDevices.getUserMedia({
       audio: false,
-      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+      video: {
+        facingMode: 'user',
+        width: { ideal: 640 },
+        height: { ideal: 480 },
+        aspectRatio: { ideal: 4 / 3 },
+      },
     })
     if (currentFlow !== flowVersion) {
       cameraStream.getTracks().forEach((track) => track.stop())
@@ -473,9 +471,10 @@ async function startLocalPreview(): Promise<void> {
 }
 
 function scheduleLabStreamRetry(): void {
-  if (streamRetryTimer || streamRetryAttempts >= MAX_STREAM_RETRIES) return
+  if (streamRetryTimer) return
   streamRetryAttempts += 1
-  const delay = Math.min(500 * 2 ** (streamRetryAttempts - 1), 4000)
+  const exponent = Math.min(streamRetryAttempts - 1, 4)
+  const delay = Math.min(500 * 2 ** exponent, MAX_STREAM_RETRY_DELAY_MS)
   streamRetryTimer = window.setTimeout(() => {
     streamRetryTimer = undefined
     void retryLabStream(true)
@@ -509,7 +508,6 @@ async function retryLabStream(automatic = false): Promise<void> {
     localPreviewToken.value = nextToken
     labStreamKey.value += 1
     labStreamFailed.value = false
-    streamRetryAttempts = 0
     void closeLocalPreviewSession(previousToken)
   } catch (error) {
     if (generation === previewGeneration && cameraSource.value === 'lab') {
@@ -665,9 +663,12 @@ async function startEnrollment(): Promise<void> {
     const captures: Blob[] = []
     for (let index = 0; index < 4; index += 1) {
       captureIndex.value = index + 1
+      // Show each prompt before its frame is captured so the student can
+      // follow the small pose change without guessing when the shutter fires.
+      await delay(index === 0 ? 600 : 1000)
+      if (currentFlow !== flowVersion) return
       captures.push(await captureVideoFrame())
       if (currentFlow !== flowVersion) return
-      if (index < 3) await delay(1000)
     }
 
     capturePhase.value = 'processing'
@@ -731,18 +732,43 @@ async function revokeSelectedTemplates(): Promise<void> {
   if (templates.length === 0 || !student || isRevoking.value) return
   isRevoking.value = true
   pageError.value = null
+  let alreadyRevokedBatches = 0
   try {
+    const templateByBatch = new Map<string, FaceTemplate>()
     for (const template of templates) {
-      await revokeFaceTemplate(template.id)
+      if (!templateByBatch.has(template.enrollment_batch_id)) {
+        templateByBatch.set(template.enrollment_batch_id, template)
+      }
     }
-    const updatedRoster = await listClassEnrollmentStatus(selectedClassId.value)
+    for (const template of templateByBatch.values()) {
+      try {
+        await revokeFaceTemplate(template.id)
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.code !== 'face_template_already_revoked') {
+          throw error
+        }
+        alreadyRevokedBatches += 1
+      }
+    }
+
+    const [updatedRoster, refreshedTemplates] = await Promise.all([
+      listClassEnrollmentStatus(selectedClassId.value),
+      listFaceTemplates(student.id),
+    ])
     students.value = updatedRoster
     const updatedStudent = updatedRoster.find((item) => item.id === student.id)
     selectedStudentId.value = updatedStudent?.id ?? ''
-    activeTemplates.value = []
-    pageMessage.value =
-      `${student.full_name}: ${templates.length} template dicabut. ` +
-      'Siswa dapat didaftarkan ulang.'
+    activeTemplates.value = refreshedTemplates
+    if (refreshedTemplates.length === 0) {
+      pageMessage.value =
+        alreadyRevokedBatches === templateByBatch.size
+          ? `${student.full_name}: acuan wajah sudah dicabut sebelumnya. Status diperbarui.`
+          : `${student.full_name}: semua acuan wajah aktif sudah dicabut. Siswa dapat didaftarkan ulang.`
+    } else {
+      pageMessage.value =
+        `${student.full_name}: status disegarkan. ` +
+        `${refreshedTemplates.length} acuan wajah aktif masih tersisa.`
+    }
   } catch (error) {
     pageError.value = formatError(error)
   } finally {
@@ -945,11 +971,7 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
     >
       <template #header>
         <UiButton
-          v-if="
-            capturePhase === 'countdown' ||
-            capturePhase === 'capturing' ||
-            capturePhase === 'processing'
-          "
+          v-if="capturePhase === 'countdown' || capturePhase === 'capturing'"
           variant="secondary"
           type="button"
           @click="cancelCapture"
@@ -980,11 +1002,7 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             Kamera lab via AI_EDGE · deteksi aktif
           </label>
         </div>
-        <p v-if="cameraSource === 'lab'" class="st-table__muted">
-          Satu kamera satu pemilik: stream lab berasal dari agent yang sama dengan pengenalan,
-          browser tidak membuka kamera kedua.
-        </p>
-        <div class="enrollment-view__camera-frame" :style="enrollmentCameraFrameStyle">
+        <div class="enrollment-view__camera-frame">
           <video
             v-if="cameraSource === 'device'"
             ref="videoElement"
@@ -994,14 +1012,13 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             playsinline
             aria-label="Preview kamera siswa"
             data-testid="enrollment-camera"
-            @loadedmetadata="updateDeviceFrameDimensions"
           />
           <FaceOverlay
             v-if="cameraSource === 'device' && deviceFaceMesh.faces.value.length"
             :faces="deviceFaceMesh.faces.value"
             :image-width="deviceFaceMesh.frameSize.value.width"
             :image-height="deviceFaceMesh.frameSize.value.height"
-            fit="contain"
+            fit="cover"
             mirrored
             class="enrollment-view__face-overlay"
             data-testid="enrollment-device-mesh"
@@ -1011,6 +1028,7 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             :key="labStreamKey"
             ref="labImageElement"
             :src="labStreamSrc"
+            crossorigin="anonymous"
             class="enrollment-view__camera enrollment-view__camera--mirror"
             alt="Stream kamera lab dari agent"
             data-testid="enrollment-lab-stream"
@@ -1022,7 +1040,7 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             :faces="labFaceMesh.faces.value"
             :image-width="labFaceMesh.frameSize.value.width"
             :image-height="labFaceMesh.frameSize.value.height"
-            fit="contain"
+            fit="cover"
             mirrored
             class="enrollment-view__face-overlay"
             data-testid="enrollment-lab-mesh"
@@ -1045,6 +1063,9 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             <span v-else-if="cameraSource === 'device'">Membuka preview kamera…</span>
             <span v-else-if="localPreviewError">{{ localPreviewError }}</span>
             <span v-else-if="isOpeningLocalPreview">Menghubungkan ke kamera AI_EDGE…</span>
+            <span v-else-if="streamRetryTimer" data-testid="enrollment-lab-retry-status">
+              Koneksi stream terputus; sistem mencoba ulang otomatis.
+            </span>
             <span v-else>Stream kamera lab belum tersedia.</span>
             <UiButton
               v-if="cameraSource === 'lab'"
@@ -1106,7 +1127,8 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
 
         <div class="enrollment-view__capture-info">
           <p v-if="capturePhase === 'ready'" class="enrollment-view__instruction">
-            Arahkan kamera ke siswa. Wajah dan nama di layar harus sesuai sebelum melanjutkan.
+            Pastikan wajah dan nama siswa sesuai, terlihat jelas, dan cukup terang sebelum
+            melanjutkan.
           </p>
           <p
             v-else-if="capturePhase === 'countdown'"
@@ -1120,19 +1142,40 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             class="enrollment-view__instruction"
             aria-live="polite"
           >
-            Pengambilan {{ captureIndex }} dari 4. Minta siswa tetap menghadap kamera.
+            Pengambilan {{ captureIndex }} dari 4.
           </p>
           <p
-            v-else-if="capturePhase === 'processing'"
-            class="enrollment-view__instruction"
+            v-if="capturePhase === 'capturing' && capturePoseStep"
+            class="enrollment-view__capture-pose"
             aria-live="polite"
+            data-testid="enrollment-capture-pose"
           >
-            Sedang memeriksa hasil capture. Tunggu sebentar.
+            <strong>{{ capturePoseStep.label }}</strong>
+            <span>{{ capturePoseStep.guidance }}</span>
           </p>
+          <div
+            v-else-if="capturePhase === 'processing'"
+            class="enrollment-view__processing"
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+            data-testid="enrollment-processing-status"
+          >
+            <span class="enrollment-view__processing-spinner" aria-hidden="true" />
+            <div>
+              <strong>Mengirim dan memeriksa 4 frame</strong>
+              <p>
+                Core API sedang memeriksa wajah dan kualitas gambar, lalu menyiapkan acuan. Tunggu
+                sebentar; hasil akan muncul di sini setelah proses selesai.
+              </p>
+            </div>
+          </div>
           <template v-else-if="capturePhase === 'confirming' && captureResult">
             <p class="enrollment-view__instruction" role="status">
-              {{ captureResult.accepted_frames }} dari 4 capture siap. Pastikan siswa pada preview
-              cocok dengan identitas berikut.
+              {{ captureResult.accepted_frames }} dari 4 frame diterima,
+              {{ captureResult.rejected_frames }} tidak digunakan.
+              {{ captureResult.template_count }}
+              acuan wajah tersimpan. Pastikan siswa pada preview cocok dengan identitas berikut.
             </p>
             <label v-if="confirmationRequired" class="enrollment-view__confirm">
               <input v-model="identityConfirmed" type="checkbox" />
@@ -1165,17 +1208,25 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             v-if="
               capturePhase === 'countdown' ||
               capturePhase === 'capturing' ||
-              capturePhase === 'processing' ||
-              capturePhase === 'confirming'
+              capturePhase === 'processing'
             "
             class="enrollment-view__progress"
             role="progressbar"
             aria-label="Kemajuan pendaftaran"
-            :aria-valuenow="progressPercent"
+            :aria-valuenow="progressPercent ?? undefined"
+            :aria-valuetext="
+              progressPercent === null
+                ? 'Mengirim dan memeriksa empat frame di Core API'
+                : `${progressPercent}%`
+            "
+            :aria-busy="capturePhase === 'processing'"
             aria-valuemin="0"
             aria-valuemax="100"
           >
-            <span :style="{ width: `${progressPercent}%` }" />
+            <span
+              :class="{ 'enrollment-view__progress--indeterminate': progressPercent === null }"
+              :style="progressPercent === null ? undefined : { width: `${progressPercent}%` }"
+            />
           </div>
           <p v-if="capturePhase === 'capturing'" class="st-table__muted">
             {{ captureIndex }} / 4 capture

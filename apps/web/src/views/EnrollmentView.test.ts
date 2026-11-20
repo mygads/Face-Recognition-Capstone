@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import FaceOverlay from '../components/FaceOverlay.vue'
 import EnrollmentView from './EnrollmentView.vue'
@@ -88,6 +89,13 @@ function mountView() {
           }),
         } as Response
       }
+      if (url.endsWith('/v1/frame.jpg')) {
+        return {
+          ok: true,
+          status: 200,
+          blob: async () => new Blob(['synthetic-frame'], { type: 'image/jpeg' }),
+        } as Response
+      }
       return { ok: false, status: 404 } as Response
     }),
   )
@@ -119,7 +127,12 @@ describe('enrollment revoke dialog', () => {
       pagination: { total: 1, limit: 100, offset: 0 },
     })
     api.listClassEnrollmentStatus.mockResolvedValue([enrolledStudent, pendingStudent])
-    api.listFaceTemplates.mockResolvedValue([{ id: 'template-1' }])
+    api.listFaceTemplates.mockResolvedValue(
+      ['template-1', 'template-2', 'template-3', 'template-4'].map((id) => ({
+        id,
+        enrollment_batch_id: 'batch-1',
+      })),
+    )
     api.revokeFaceTemplate.mockResolvedValue({ id: 'template-1' })
   })
 
@@ -153,11 +166,50 @@ describe('enrollment revoke dialog', () => {
       wrapper.find('[data-testid="confirm-revoke-template"]').attributes('disabled'),
     ).toBeUndefined()
 
+    api.listFaceTemplates.mockResolvedValueOnce([])
+    api.listClassEnrollmentStatus.mockResolvedValueOnce([
+      { ...enrolledStudent, template_status: 'needs_reenrollment' },
+      pendingStudent,
+    ])
     await wrapper.find('[data-testid="confirm-revoke-template"]').trigger('click')
     await flushPromises()
 
+    expect(api.revokeFaceTemplate).toHaveBeenCalledTimes(1)
     expect(api.revokeFaceTemplate).toHaveBeenCalledWith('template-1')
     expect(wrapper.find('[data-testid="revoke-identity"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('semua acuan wajah aktif sudah dicabut')
+  })
+
+  it('menyegarkan status dan menutup dialog jika acuan sudah dicabut di server', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper
+      .find('[data-testid="enrollment-student-student-enrolled"] .st-rowbtn')
+      .trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="revoke-enrollment-template"]').trigger('click')
+    await wrapper
+      .find('[data-testid="revoke-reason-input"]')
+      .setValue('Acuan lama perlu disegarkan')
+
+    api.revokeFaceTemplate.mockRejectedValueOnce(
+      new ApiError(409, 'face_template_already_revoked', 'Template sudah dicabut.'),
+    )
+    api.listClassEnrollmentStatus.mockResolvedValueOnce([
+      { ...enrolledStudent, template_status: 'needs_reenrollment' },
+      pendingStudent,
+    ])
+    api.listFaceTemplates.mockResolvedValueOnce([])
+    await wrapper.find('[data-testid="confirm-revoke-template"]').trigger('click')
+    await flushPromises()
+
+    expect(api.revokeFaceTemplate).toHaveBeenCalledTimes(1)
+    expect(api.listFaceTemplates).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-testid="revoke-identity"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="confirm-revoke-template"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('acuan wajah sudah dicabut sebelumnya. Status diperbarui.')
+    expect(wrapper.text()).toContain('Perlu daftar ulang')
   })
 })
 
@@ -226,6 +278,7 @@ describe('enrollment camera source', () => {
         'enrollment-view__camera--mirror',
       )
       const image = wrapper.get('[data-testid="enrollment-lab-stream"]').element as HTMLImageElement
+      expect(image.crossOrigin).toBe('anonymous')
       Object.defineProperties(image, {
         complete: { configurable: true, value: false },
         naturalWidth: { configurable: true, value: 640 },
@@ -242,11 +295,9 @@ describe('enrollment camera source', () => {
         'Mesh aktif · 478 titik',
       )
       expect(wrapper.find('.enrollment-view__face-overlay').exists()).toBe(true)
-      expect(wrapper.findComponent(FaceOverlay).props('fit')).toBe('contain')
+      expect(wrapper.findComponent(FaceOverlay).props('fit')).toBe('cover')
       expect(wrapper.findComponent(FaceOverlay).props('mirrored')).toBe(true)
-      expect(
-        (wrapper.get('.enrollment-view__camera-frame').element as HTMLElement).style.aspectRatio,
-      ).toBe('640 / 480')
+      expect(wrapper.get('.enrollment-view__camera-frame').attributes('style')).toBeUndefined()
       expect(wrapper.findAll('.face-overlay__skeleton')).toHaveLength(0)
       expect(wrapper.findAll('.face-overlay__point')).toHaveLength(0)
       expect(wrapper.findAll('.enrollment-view__face-overlay rect')).toHaveLength(0)
@@ -262,7 +313,7 @@ describe('enrollment camera source', () => {
     }
   })
 
-  it('opsi kamera lab menampilkan stream agent dan satu pemilik', async () => {
+  it('opsi kamera lab menampilkan stream agent tanpa teks bantuan yang mengubah layout', async () => {
     api.listClasses.mockResolvedValue({
       items: [
         {
@@ -286,7 +337,10 @@ describe('enrollment camera source', () => {
     await flushPromises()
     await wrapper.find('[data-testid="enrollment-source-lab"]').setValue('lab')
     expect(wrapper.find('[data-testid="enrollment-lab-stream"]').exists()).toBe(true)
-    expect(wrapper.text()).toContain('Satu kamera satu pemilik')
+    expect(wrapper.text()).not.toContain('Satu kamera satu pemilik')
+    expect(wrapper.get('.enrollment-view__source-toggle').classes()).toContain(
+      'enrollment-view__source-toggle',
+    )
     wrapper.unmount()
   })
 
@@ -323,6 +377,44 @@ describe('enrollment camera source', () => {
       expect(reconnectedStream.attributes('src')).toContain('synthetic-preview-token-2')
     } finally {
       wrapper.unmount()
+    }
+  })
+
+  it('terus menyambungkan ulang stream AI_EDGE setelah lebih dari tiga kegagalan', async () => {
+    api.listClasses.mockResolvedValue({
+      items: [
+        {
+          id: 'class-1',
+          code: 'XII-RPL-1',
+          name: 'Kelas XII RPL 1',
+          academic_year: '2026-2027',
+          grade: 12,
+          homeroom_teacher_id: null,
+          is_active: true,
+        },
+      ],
+      pagination: { total: 1, limit: 100, offset: 0 },
+    })
+    api.listClassEnrollmentStatus.mockResolvedValue([pendingStudent])
+    const wrapper = mountView()
+    try {
+      await flushPromises()
+      vi.useFakeTimers()
+
+      const retryDelays = [500, 1000, 2000, 4000]
+      for (const retryDelay of retryDelays) {
+        await wrapper.get('[data-testid="enrollment-lab-stream"]').trigger('error')
+        expect(wrapper.find('[data-testid="enrollment-lab-retry-status"]').exists()).toBe(true)
+        await vi.advanceTimersByTimeAsync(retryDelay)
+        await flushPromises()
+      }
+
+      expect(wrapper.get('[data-testid="enrollment-lab-stream"]').attributes('src')).toContain(
+        'synthetic-preview-token-5',
+      )
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
     }
   })
 
@@ -415,6 +507,15 @@ describe('enrollment camera source', () => {
       await flushPromises()
 
       expect(getUserMedia).toHaveBeenCalledOnce()
+      expect(getUserMedia).toHaveBeenCalledWith(
+        expect.objectContaining({
+          video: expect.objectContaining({
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            aspectRatio: { ideal: 4 / 3 },
+          }),
+        }),
+      )
       expect((video.srcObject as MediaStream).getTracks()).toHaveLength(1)
       expect(wrapper.get('[data-testid="enrollment-device-guidance"]').text()).toContain(
         'Wajah terdeteksi',
@@ -492,6 +593,50 @@ describe('enrollment camera source', () => {
       } else {
         Reflect.deleteProperty(window, 'isSecureContext')
       }
+    }
+  })
+})
+
+describe('enrollment capture progress', () => {
+  it('shows an honest indeterminate state while Core API processes the four-frame batch', async () => {
+    api.listClasses.mockResolvedValue({
+      items: [
+        {
+          id: 'class-1',
+          code: 'XII-RPL-1',
+          name: 'Kelas XII RPL 1',
+          academic_year: '2026-2027',
+          grade: 12,
+          homeroom_teacher_id: null,
+          is_active: true,
+        },
+      ],
+      pagination: { total: 1, limit: 100, offset: 0 },
+    })
+    api.listClassEnrollmentStatus.mockResolvedValue([pendingStudent])
+    api.submitEnrollmentCaptures.mockImplementation(() => new Promise(() => undefined))
+    vi.useFakeTimers()
+    const wrapper = mountView()
+
+    try {
+      await flushPromises()
+      await wrapper.get('[data-testid="start-enrollment-capture"]').trigger('click')
+      await vi.advanceTimersByTimeAsync(7000)
+      await flushPromises()
+
+      expect(api.submitEnrollmentCaptures).toHaveBeenCalledOnce()
+      expect(wrapper.get('[data-testid="enrollment-processing-status"]').text()).toContain(
+        'Mengirim dan memeriksa 4 frame',
+      )
+      const progress = wrapper.get('[role="progressbar"]')
+      expect(progress.attributes('aria-busy')).toBe('true')
+      expect(progress.attributes('aria-valuenow')).toBeUndefined()
+      expect(progress.find('span').classes()).toContain('enrollment-view__progress--indeterminate')
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+      vi.restoreAllMocks()
+      vi.unstubAllGlobals()
     }
   })
 })

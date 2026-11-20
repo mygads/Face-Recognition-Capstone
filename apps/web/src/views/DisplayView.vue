@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import CameraFrame from '../components/CameraFrame.vue'
 import { useFaceLandmarks } from '../composables/useFaceLandmarks'
-import { UiBadge, UiButton, UiEmptyState, UiInput } from '../components/ui'
+import { UiBadge, UiButton, UiInput } from '../components/ui'
 import { shortDisplayName } from '../utils/displayName'
 import {
   agentHintUrl as buildAgentHintUrl,
@@ -730,11 +730,18 @@ function syncFullscreenState(): void {
 }
 
 const fullscreenFailureMessage =
-  'Chrome menolak fullscreen. Buka kiosk di tab Chrome biasa, lalu tekan tombol Layar penuh.'
+  'Browser menolak layar penuh. Coba tombol “Masuk layar penuh” sekali lagi. Untuk kiosk otomatis tanpa tab, jalankan Chrome dalam mode kiosk.'
 
 function requestKioskFullscreen(): void {
   const root = displayRoot.value
-  if (!root?.requestFullscreen || document.fullscreenElement) return
+  if (document.fullscreenElement) {
+    syncFullscreenState()
+    return
+  }
+  if (!root?.requestFullscreen) {
+    fullscreenError.value = fullscreenFailureMessage
+    return
+  }
   try {
     void root
       .requestFullscreen({ navigationUI: 'hide' })
@@ -809,46 +816,73 @@ const terminalId = computed(() => {
   const code = (lab?.code ?? 'LAB').toUpperCase().replace(/[^A-Z0-9]+/g, '-')
   return `KIOSK-${code || 'LAB'}-01`
 })
-const waitingCount = computed(() => live.value?.waiting_count ?? 0)
-
-const boardTitle = computed(() => display.value?.laboratory_name ?? 'Layar presensi')
 const sessionStateLabel = computed(() => {
   if (!display.value) return 'Menunggu aktivasi petugas'
-  if (live.value?.status === 'scheduled') return 'Sesi belum dibuka'
+  if (live.value?.status === 'scheduled') return 'Jadwal menunggu dibuka'
   if (live.value?.status === 'closed') return 'Sesi sudah ditutup'
   if (live.value?.status === 'cancelled') return 'Sesi dibatalkan'
-  if (!live.value?.session_id) return 'Tidak ada sesi berlangsung'
+  if (!live.value?.session_id) return 'Belum ada sesi aktif'
   return live.value.status === 'manual_override'
     ? 'Sesi aktif · dibuka manual'
     : 'Sesi aktif · sudah dibuka'
 })
 const sessionDetailsLabel = computed(() => {
   if (!display.value) return ''
-  const subject = live.value?.subject ?? 'Tidak ada praktikum berlangsung'
-  const className = live.value?.class_name ?? 'Tidak ada kelas aktif'
-  return `${subject} · ${className} · ${display.value.laboratory_name}`
+  const details = [live.value?.subject, live.value?.class_name].filter((value): value is string =>
+    Boolean(value),
+  )
+  return details.length
+    ? `${details.join(' · ')} · ${display.value.laboratory_name}`
+    : display.value.laboratory_name
 })
 const sessionOpenedLabel = computed(() => {
   if (!display.value) return ''
   if (live.value?.status === 'scheduled') {
     return 'Belum dibuka oleh guru atau laboran.'
   }
-  if (!live.value?.session_id || !live.value.opened_at) return 'Tidak ada jadwal aktif sekarang.'
+  if (!live.value?.session_id || !live.value.opened_at) return ''
   return `Dibuka ${formatRecordedTime(live.value.opened_at)} WIB`
+})
+const sessionStatsLabel = computed(() => {
+  if (!live.value?.session_id) return ''
+  return [
+    `Hadir ${live.value.present_count}`,
+    `Terlambat ${live.value.late_count}`,
+    `Menunggu ${live.value.waiting_count} dari ${live.value.total_roster}`,
+  ].join(' · ')
 })
 
 const spotlight = computed(() => live.value?.spotlight ?? null)
+const kioskResultTitle = computed(() => {
+  if (live.value?.status === 'scheduled') {
+    return kioskFaceCount.value > 0 ? 'Wajah terdeteksi' : 'Menunggu petugas membuka sesi'
+  }
+  if (!live.value?.session_id) {
+    return kioskFaceCount.value > 0 ? 'Wajah terdeteksi' : 'Kamera siap menunggu sesi'
+  }
+  if (agentHint.value?.recognition_state === 'waiting_for_calibration') {
+    return 'Pengenalan belum siap'
+  }
+  if (
+    agentHint.value?.recognition_state === 'checking' ||
+    agentHint.value?.recognition_state === 'collecting' ||
+    agentHint.value?.attendance_result === 'pending'
+  ) {
+    return 'Memeriksa kehadiran'
+  }
+  return kioskFaceCount.value > 0 ? 'Wajah terdeteksi' : 'Menunggu siswa'
+})
 
 const kioskRecognitionMessage = computed(() => {
   if (live.value?.status === 'scheduled') {
     return kioskFaceCount.value > 0
-      ? 'Wajah terdeteksi. AI menunggu sesi dibuka agar bisa mencocokkan wajah dengan roster jadwal ini.'
-      : 'Jadwal sudah ada, tetapi guru atau laboran belum membuka sesi. Pengenalan wajah belum dimulai.'
+      ? 'Pencocokan identitas dimulai setelah guru atau laboran membuka jadwal ini.'
+      : 'Jadwal tersedia. Guru atau laboran perlu membuka sesi sebelum presensi dimulai.'
   }
   if (!live.value?.session_id) {
     return kioskFaceCount.value > 0
-      ? 'Wajah terdeteksi, tetapi identitas belum diperiksa karena sesi belum dibuka. Minta guru atau laboran membuka sesi agar AI memakai roster yang benar.'
-      : 'Belum ada sesi presensi aktif. Minta guru atau laboran membuka sesi agar roster dan template siswa dimuat.'
+      ? 'Wajah terlihat, tetapi belum dicocokkan. AI hanya mencari siswa pada roster sesi yang dibuka.'
+      : 'Kamera menunggu guru atau laboran membuka sesi agar roster siswa dapat dimuat.'
   }
   if (agentDeviceMismatch.value) {
     return 'Perangkat kamera berbeda dari kiosk ini. Identitas tidak akan diperiksa sampai perangkatnya cocok.'
@@ -860,7 +894,7 @@ const kioskRecognitionMessage = computed(() => {
     return 'Kamera agent sedang dijeda atau tidak tersedia. Aktifkan kamera pada perangkat lab.'
   }
   if (agentHint.value?.recognition_state === 'waiting_for_calibration') {
-    return 'AI belum dikalibrasi, sehingga identitas belum dapat diverifikasi.'
+    return 'Pengenalan wajah belum siap. Hubungi petugas untuk menyelesaikan kalibrasi.'
   }
   if (
     agentHint.value?.recognition_state === 'checking' ||
@@ -901,15 +935,21 @@ const spotlightFresh = computed(() => {
   return Date.now() - ts < 4000
 })
 
-// Umpan balik rasa KAI: generik, tanpa nama, hanya saat wajah terdeteksi
-// atau kirim menunggu konfirmasi dan belum ada sorotan hasil terbaru.
+// Tampilkan progres hanya ketika pipeline benar-benar sedang memeriksa frame
+// atau menunggu konfirmasi API. Deteksi wajah saja tidak berarti verifikasi
+// sedang berlangsung (mis. saat menunggu kalibrasi).
 const showVerifying = computed(() => {
   if (!live.value?.session_id || streamState.value === 'off') return false
   if (spotlightFresh.value) return false
   if (!hintFresh.value) return false
   const hint = agentHint.value
   if (!hint || !hint.session_active) return false
-  return hint.face_present || hint.attendance_result === 'pending'
+  if (hint.recognition_state === 'waiting_for_calibration') return false
+  return (
+    hint.recognition_state === 'checking' ||
+    hint.recognition_state === 'collecting' ||
+    hint.attendance_result === 'pending'
+  )
 })
 
 function formatRecordedTime(value: string | null | undefined): string {
@@ -973,22 +1013,6 @@ onBeforeUnmount(() => {
           <small>Layar Kiosk Siswa · SMA Taruna Nusantara Kampus Cimahi</small>
         </span>
       </div>
-      <p class="kiosk__session-pill" data-testid="display-session-pill">
-        <span
-          class="kiosk__dot"
-          :class="{ 'kiosk__dot--live': !!live?.session_id, 'kiosk__dot--idle': !live?.session_id }"
-          aria-hidden="true"
-        />
-        <span class="kiosk__session-copy">
-          <strong data-testid="display-session-state">{{ sessionStateLabel }}</strong>
-          <small v-if="display" data-testid="display-session-details">{{
-            sessionDetailsLabel
-          }}</small>
-          <small v-if="display" data-testid="display-session-opened">{{
-            sessionOpenedLabel
-          }}</small>
-        </span>
-      </p>
       <div class="kiosk__clock">
         <strong>{{ clockWib }} <small>WIB</small></strong>
         <small>{{ dateLine }}</small>
@@ -1082,6 +1106,20 @@ onBeforeUnmount(() => {
           </p>
           <UiButton variant="primary" type="submit" :disabled="isLoadingDisplay" class="kiosk__cta">
             {{ isLoadingDisplay ? 'Memuat…' : 'Mulai Layar Presensi' }}
+          </UiButton>
+          <UiButton
+            variant="secondary"
+            type="button"
+            class="kiosk__fullscreen-setup"
+            :aria-pressed="isFullscreen"
+            :aria-label="isFullscreen ? 'Keluar layar penuh' : 'Masuk layar penuh'"
+            data-testid="display-activation-fullscreen"
+            @click="void toggleFullscreen()"
+          >
+            <span class="st-material-icon" aria-hidden="true">
+              {{ isFullscreen ? 'fullscreen_exit' : 'fullscreen' }}
+            </span>
+            {{ isFullscreen ? 'Keluar layar penuh' : 'Masuk layar penuh' }}
           </UiButton>
         </form>
         <footer class="kiosk__terminal">
@@ -1186,11 +1224,6 @@ onBeforeUnmount(() => {
               >Bingkai hijau siap diverifikasi.</span
             >
           </p>
-          <p class="kiosk__camera-meta">
-            {{ boardTitle }} · Hadir {{ live?.present_count ?? 0 }} · Terlambat
-            {{ live?.late_count ?? 0 }} / {{ live?.total_roster ?? 0 }} · Menunggu
-            {{ waitingCount }}
-          </p>
           <p
             v-if="agentStreamState === 'failed' && !showBrowserCamera"
             class="kiosk__muted"
@@ -1206,10 +1239,30 @@ onBeforeUnmount(() => {
             Mode polling 5 detik (stream realtime tidak tersedia).
           </p>
           <div class="kiosk__board-actions">
-            <UiButton variant="secondary" type="button" @click="void toggleFullscreen()">
-              {{ isFullscreen ? 'Keluar fullscreen' : 'Fullscreen' }}
+            <UiButton
+              variant="secondary"
+              type="button"
+              :aria-pressed="isFullscreen"
+              :aria-label="isFullscreen ? 'Keluar layar penuh' : 'Masuk layar penuh'"
+              data-testid="display-fullscreen-toggle"
+              @click="void toggleFullscreen()"
+            >
+              <span class="st-material-icon" aria-hidden="true">
+                {{ isFullscreen ? 'fullscreen_exit' : 'fullscreen' }}
+              </span>
+              {{ isFullscreen ? 'Keluar layar penuh' : 'Masuk layar penuh' }}
             </UiButton>
-            <UiButton variant="text" type="button" @click="resetSession">Ganti layar</UiButton>
+            <UiButton
+              class="kiosk__icon-button"
+              variant="text"
+              type="button"
+              aria-label="Ganti layar"
+              title="Ganti layar"
+              data-testid="display-change-screen"
+              @click="resetSession"
+            >
+              <span class="st-material-icon" aria-hidden="true">close</span>
+            </UiButton>
           </div>
           <p
             v-if="fullscreenError"
@@ -1225,6 +1278,22 @@ onBeforeUnmount(() => {
             <p class="kiosk__eyebrow">
               {{ spotlightFresh ? 'Hasil Dikonfirmasi' : 'Hasil terakhir' }} ·
               {{ formatRecordedTime(spotlight.recorded_at) }} WIB
+            </p>
+            <p class="kiosk__session-context" data-testid="display-session-details">
+              {{ sessionDetailsLabel }}
+            </p>
+            <p v-if="sessionOpenedLabel" class="kiosk__muted" data-testid="display-session-opened">
+              {{ sessionOpenedLabel }}
+            </p>
+            <p class="kiosk__session-state" data-testid="display-session-state">
+              {{ sessionStateLabel }}
+            </p>
+            <p
+              v-if="sessionStatsLabel"
+              class="kiosk__session-stats"
+              data-testid="display-session-stats"
+            >
+              {{ sessionStatsLabel }}
             </p>
             <p class="kiosk__date">{{ dateLine }}</p>
             <p class="kiosk__avatar" aria-hidden="true">
@@ -1264,17 +1333,31 @@ onBeforeUnmount(() => {
             </p>
           </div>
           <div v-else class="kiosk__result-card kiosk__result-card--waiting">
-            <p class="kiosk__eyebrow">Menunggu hasil pindaian</p>
-            <h2 v-if="display.subject">{{ display.subject }}</h2>
-            <UiEmptyState v-else title="Presensi belum dibuka. Tunggu petugas membuka sesi." />
-            <p v-if="display.subject" class="kiosk__muted">
-              {{ display.status }} · Hadir {{ live?.present_count ?? 0 }} · Terlambat
-              {{ live?.late_count ?? 0 }} / {{ live?.total_roster ?? 0 }}
+            <p class="kiosk__eyebrow" data-testid="display-session-state">
+              {{ sessionStateLabel }}
+            </p>
+            <h2 data-testid="display-recognition-title">{{ kioskResultTitle }}</h2>
+            <p class="kiosk__session-context" data-testid="display-session-details">
+              {{ sessionDetailsLabel }}
+            </p>
+            <p
+              v-if="sessionStatsLabel"
+              class="kiosk__session-stats"
+              data-testid="display-session-stats"
+            >
+              {{ sessionStatsLabel }}
+            </p>
+            <p v-if="sessionOpenedLabel" class="kiosk__muted" data-testid="display-session-opened">
+              {{ sessionOpenedLabel }}
             </p>
             <p class="kiosk__muted" data-testid="display-recognition-status">
               {{ kioskRecognitionMessage }}
             </p>
-            <p class="kiosk__muted" data-testid="display-recognition-policy">
+            <p
+              v-if="live?.session_id"
+              class="kiosk__muted"
+              data-testid="display-recognition-policy"
+            >
               Nama siswa hanya ditampilkan setelah presensi dikonfirmasi oleh Core API.
             </p>
             <p
@@ -1347,34 +1430,6 @@ onBeforeUnmount(() => {
 .kiosk__brand-text small {
   color: #a9bccd;
   font-size: 0.72rem;
-}
-.kiosk__session-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0;
-  padding: 8px 16px;
-  border-radius: 12px;
-  background: #0b2036;
-  border: 1px solid #1e3a52;
-  font-size: 0.82rem;
-  font-weight: 600;
-  max-width: 100%;
-}
-.kiosk__session-copy {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-.kiosk__session-copy strong {
-  color: #f1f5f9;
-  font-size: 0.82rem;
-}
-.kiosk__session-copy small {
-  color: #a9bccd;
-  font-size: 0.7rem;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
 }
 .kiosk__dot {
   width: 10px;
@@ -1563,6 +1618,10 @@ onBeforeUnmount(() => {
   min-height: 48px;
   font-size: 0.95rem;
 }
+.kiosk__fullscreen-setup {
+  width: 100%;
+  min-height: 44px;
+}
 .kiosk__terminal {
   display: flex;
   flex-wrap: wrap;
@@ -1659,6 +1718,22 @@ onBeforeUnmount(() => {
   justify-content: flex-start;
   margin-top: auto;
 }
+.kiosk__board-actions .kiosk__icon-button {
+  width: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 1px solid #35516b;
+  border-radius: 10px;
+  color: #c6d4d3;
+}
+.kiosk__board-actions .kiosk__icon-button:hover {
+  border-color: #8bd4c6;
+  background: rgb(139 212 198 / 10%);
+}
+.kiosk__board-actions .st-material-icon {
+  font-size: 1.25rem;
+}
 .kiosk__result {
   display: grid;
   gap: 12px;
@@ -1680,6 +1755,31 @@ onBeforeUnmount(() => {
 }
 .kiosk__result-card .kiosk__eyebrow {
   color: var(--st-gold);
+}
+.kiosk__session-context {
+  margin: 0;
+  color: #c6d4d3;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.kiosk__session-state {
+  margin: 0;
+  color: #a9bccd;
+  font-size: 0.76rem;
+}
+.kiosk__session-stats {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 4px 0;
+  padding: 10px 12px;
+  border: 1px solid #1e3a52;
+  border-radius: 8px;
+  background: #0b2036;
+  color: #f1f5f9;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  font-weight: 600;
 }
 .kiosk__date {
   margin: 0;

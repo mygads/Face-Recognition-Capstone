@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import UiAvatar from '../components/ui/UiAvatar.vue'
 import UiBadge from '../components/ui/UiBadge.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -19,6 +19,7 @@ import {
   ApiError,
   closeAttendanceSession,
   getAttendanceSessionStatus,
+  getSessionDashboardSnapshot,
   getSessionOpeningPolicy,
   getSessionRoster,
   listAttendanceSessions,
@@ -28,7 +29,9 @@ import {
   type AttendanceSession,
   type ManualMarkRequest,
   type OpenableSchedule,
+  type SessionDashboardSnapshot,
   type SessionRosterEntry,
+  sessionDashboardWebSocketUrl,
 } from '../api/client'
 
 const weekdays = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu']
@@ -164,6 +167,10 @@ function sessionStatusClass(status: AttendanceSession['status']): string {
   return 'status-badge--inactive'
 }
 
+function displaySessionSubject(subject: string): string {
+  return subject.replace(/^(Pertemuan)\s*(\d+)\b/i, '$1 $2')
+}
+
 function draftFor(studentId: string): {
   status: string
   note: string
@@ -276,21 +283,46 @@ const closeAbsent = computed(() => {
   return 0
 })
 
-const liveRoster = ref<Record<string, { present: number; late: number; total: number }>>({})
+const liveRoster = ref<
+  Record<
+    string,
+    { present: number; late: number; recorded: number; notPresent: number; total: number }
+  >
+>({})
+const detailLiveState = ref<'idle' | 'connecting' | 'live' | 'polling' | 'reconnecting'>('idle')
+const detailLiveLabel = computed(() => {
+  if (detailLiveState.value === 'live') return 'Pembaruan langsung aktif'
+  if (detailLiveState.value === 'polling') return 'Pembaruan otomatis setiap 5 detik'
+  if (detailLiveState.value === 'connecting') return 'Menghubungkan pembaruan…'
+  if (detailLiveState.value === 'reconnecting') return 'Menyambungkan ulang…'
+  return 'Pembaruan langsung tidak aktif'
+})
+let detailPollingTimer: ReturnType<typeof setInterval> | null = null
+let detailReconnectTimer: ReturnType<typeof setTimeout> | null = null
+let detailSocket: WebSocket | null = null
+let detailStreamGeneration = 0
+let detailReconnectDelayMs = 1000
+let detailPollInFlight = false
+let detailSnapshotFingerprint = ''
 
 async function refreshLiveRoster(items: AttendanceSession[]): Promise<void> {
-  const next: Record<string, { present: number; late: number; total: number }> = {}
+  const next = { ...liveRoster.value }
+  const activeIds = new Set(items.map((item) => item.id))
+  for (const sessionId of Object.keys(next)) {
+    if (!activeIds.has(sessionId)) delete next[sessionId]
+  }
   await Promise.all(
     items.map(async (item) => {
       try {
-        const entries = await getSessionRoster(item.id)
-        let present = 0
-        let late = 0
-        for (const e of entries) {
-          if (e.record_status === 'present') present += 1
-          else if (e.record_status === 'late') late += 1
+        const snapshot = await getSessionDashboardSnapshot(item.id)
+        const summary = snapshot.summary
+        next[item.id] = {
+          present: summary.present,
+          late: summary.late,
+          recorded: summary.present + summary.late + summary.excused + summary.absent,
+          notPresent: summary.not_present,
+          total: summary.total_roster,
         }
-        next[item.id] = { present, late, total: entries.length || item.student_count }
       } catch {
         /* panel live roster disembunyikan bila gagal dimuat */
       }
@@ -326,13 +358,194 @@ async function reload(): Promise<void> {
   }
 }
 
+function dashboardFingerprint(snapshot: SessionDashboardSnapshot): string {
+  return JSON.stringify({
+    status: snapshot.session_status,
+    summary: snapshot.summary,
+    activity: snapshot.recent_activity.map((activity) => [
+      activity.id,
+      activity.occurred_at,
+      activity.attendance_status,
+      activity.recognition_outcome,
+      activity.decision_reason,
+    ]),
+  })
+}
+
+function applyDashboardSnapshot(snapshot: SessionDashboardSnapshot, sessionId: string): void {
+  if (snapshot.session_id !== sessionId || selected.value?.id !== sessionId) return
+  selected.value = {
+    ...selected.value,
+    status: snapshot.session_status,
+    student_count: snapshot.summary.total_roster,
+  }
+  const fingerprint = dashboardFingerprint(snapshot)
+  if (fingerprint !== detailSnapshotFingerprint) {
+    detailSnapshotFingerprint = fingerprint
+    void loadRoster(sessionId, true)
+  }
+}
+
+function parseDashboardMessage(
+  rawData: unknown,
+  sessionId: string,
+): SessionDashboardSnapshot | null {
+  if (typeof rawData !== 'string') return null
+  try {
+    const message: unknown = JSON.parse(rawData)
+    if (!message || typeof message !== 'object') return null
+    const envelope = message as { type?: unknown; data?: unknown }
+    if (envelope.type !== 'snapshot' || !envelope.data || typeof envelope.data !== 'object') {
+      return null
+    }
+    const snapshot = envelope.data as SessionDashboardSnapshot
+    if (
+      snapshot.session_id !== sessionId ||
+      !snapshot.summary ||
+      !Array.isArray(snapshot.recent_activity)
+    ) {
+      return null
+    }
+    return snapshot
+  } catch {
+    return null
+  }
+}
+
+function startDetailPolling(sessionId: string, generation: number): void {
+  if (detailPollingTimer) return
+  const poll = async () => {
+    if (generation !== detailStreamGeneration || detailPollInFlight) return
+    detailPollInFlight = true
+    try {
+      const snapshot = await getSessionDashboardSnapshot(sessionId)
+      applyDashboardSnapshot(snapshot, sessionId)
+      if (generation === detailStreamGeneration && detailLiveState.value !== 'live') {
+        detailLiveState.value = 'polling'
+      }
+    } catch {
+      if (generation === detailStreamGeneration && !detailSocket) {
+        detailLiveState.value = 'reconnecting'
+      }
+    } finally {
+      detailPollInFlight = false
+    }
+  }
+  void poll()
+  detailPollingTimer = setInterval(() => void poll(), 5000)
+}
+
+function scheduleDetailReconnect(sessionId: string, generation: number): void {
+  if (detailReconnectTimer || generation !== detailStreamGeneration) return
+  const delay = detailReconnectDelayMs
+  detailReconnectDelayMs = Math.min(detailReconnectDelayMs * 2, 15_000)
+  detailReconnectTimer = setTimeout(() => {
+    detailReconnectTimer = null
+    connectDetailSocket(sessionId, generation)
+  }, delay)
+}
+
+function connectDetailSocket(sessionId: string, generation: number): void {
+  if (generation !== detailStreamGeneration || typeof WebSocket === 'undefined') return
+  if (!auth.getValidAccessToken()) {
+    detailLiveState.value = 'polling'
+    startDetailPolling(sessionId, generation)
+    scheduleDetailReconnect(sessionId, generation)
+    return
+  }
+
+  detailLiveState.value = 'connecting'
+  let socket: WebSocket
+  try {
+    socket = new WebSocket(sessionDashboardWebSocketUrl(sessionId))
+  } catch {
+    detailLiveState.value = 'polling'
+    startDetailPolling(sessionId, generation)
+    scheduleDetailReconnect(sessionId, generation)
+    return
+  }
+  detailSocket = socket
+  socket.onopen = () => {
+    if (generation !== detailStreamGeneration) {
+      socket.close()
+      return
+    }
+    const token = auth.getValidAccessToken()
+    if (!token) {
+      socket.close()
+      return
+    }
+    socket.send(JSON.stringify({ type: 'authenticate', access_token: token }))
+  }
+  socket.onmessage = (event: MessageEvent) => {
+    if (generation !== detailStreamGeneration) return
+    const snapshot = parseDashboardMessage(event.data, sessionId)
+    if (!snapshot) return
+    applyDashboardSnapshot(snapshot, sessionId)
+    detailLiveState.value = 'live'
+    detailReconnectDelayMs = 1000
+    if (detailPollingTimer) clearInterval(detailPollingTimer)
+    detailPollingTimer = null
+  }
+  socket.onclose = () => {
+    if (generation !== detailStreamGeneration) return
+    if (detailSocket === socket) detailSocket = null
+    detailLiveState.value = 'polling'
+    startDetailPolling(sessionId, generation)
+    scheduleDetailReconnect(sessionId, generation)
+  }
+  socket.onerror = () => {
+    if (generation === detailStreamGeneration) detailLiveState.value = 'reconnecting'
+    socket.close()
+  }
+}
+
+function stopDetailLiveUpdates(): void {
+  detailStreamGeneration += 1
+  if (detailPollingTimer) clearInterval(detailPollingTimer)
+  if (detailReconnectTimer) clearTimeout(detailReconnectTimer)
+  detailPollingTimer = null
+  detailReconnectTimer = null
+  detailPollInFlight = false
+  detailSnapshotFingerprint = ''
+  const socket = detailSocket
+  detailSocket = null
+  if (socket) {
+    socket.onopen = null
+    socket.onmessage = null
+    socket.onclose = null
+    socket.onerror = null
+    socket.close()
+  }
+  detailLiveState.value = 'idle'
+}
+
+function startDetailLiveUpdates(sessionId: string): void {
+  stopDetailLiveUpdates()
+  const generation = detailStreamGeneration
+  detailReconnectDelayMs = 1000
+  if (typeof WebSocket === 'undefined') {
+    detailLiveState.value = 'polling'
+    startDetailPolling(sessionId, generation)
+    return
+  }
+  detailLiveState.value = 'connecting'
+  startDetailPolling(sessionId, generation)
+  connectDetailSocket(sessionId, generation)
+}
+
 onMounted(async () => {
   await reload()
+})
+
+onBeforeUnmount(() => {
+  stopDetailLiveUpdates()
 })
 
 watch(
   () => route?.params.sessionId,
   (rawSessionId) => {
+    stopDetailLiveUpdates()
     editingRosterStudentId.value = null
     if (typeof rawSessionId === 'string') {
       void loadSessionDetail(rawSessionId)
@@ -435,6 +648,9 @@ async function loadSessionDetail(sessionId: string): Promise<void> {
   try {
     selected.value = await getAttendanceSessionStatus(sessionId)
     await loadRoster(sessionId)
+    if (isSessionDetailRoute.value && route?.params.sessionId === sessionId) {
+      startDetailLiveUpdates(sessionId)
+    }
   } catch (error) {
     pageError.value = formatError(error)
   } finally {
@@ -446,6 +662,7 @@ async function returnToSessionList(): Promise<void> {
   if (router) {
     await router.push({ name: 'sessions' })
   } else {
+    stopDetailLiveUpdates()
     selected.value = null
     roster.value = []
   }
@@ -469,13 +686,15 @@ async function submitEditedAttendance(): Promise<void> {
   if (editingRosterEntry.value) await submitManualMark(editingRosterEntry.value)
 }
 
-async function loadRoster(sessionId: string): Promise<void> {
+async function loadRoster(sessionId: string, preserveView = false): Promise<void> {
   isRosterLoading.value = true
   rosterError.value = null
   try {
     roster.value = await getSessionRoster(sessionId)
-    rosterSearch.value = ''
-    rosterStatusFilter.value = 'all'
+    if (!preserveView) {
+      rosterSearch.value = ''
+      rosterStatusFilter.value = 'all'
+    }
   } catch (error) {
     roster.value = []
     rosterError.value = formatError(error)
@@ -529,11 +748,11 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
 </script>
 
 <template>
-  <div class="st-page">
+  <div class="st-page sessions-view">
     <UiPageHeader
       v-if="!isSessionDetailRoute"
       title="Sesi Presensi"
-      description="Pantau sesi berjalan, buka jadwal yang memenuhi syarat, dan lihat riwayat presensi."
+      description="Buka sesi, pantau kehadiran, dan tinjau sesi yang sudah selesai."
     >
       <template #actions>
         <UiButton variant="secondary" @click="reload">Muat ulang</UiButton>
@@ -571,16 +790,20 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
     </div>
 
     <!-- Siap dibuka hari ini -->
-    <section v-if="!isSessionDetailRoute" aria-labelledby="openable-title">
+    <section
+      v-if="!isSessionDetailRoute"
+      class="sessions-view__section"
+      aria-labelledby="openable-title"
+    >
       <div class="st-sectionrow">
-        <h2 id="openable-title" class="st-section">Siap Dibuka Hari Ini</h2>
+        <h2 id="openable-title" class="st-section">Jadwal siap dibuka</h2>
         <p class="st-table__muted">
-          Toleransi sesi mengikuti Kebijakan Presensi<span v-if="isAdmin">
-            · <RouterLink to="/app/attendance-policy">Atur kebijakan</RouterLink></span
+          Toleransi mengikuti Kebijakan Presensi<span v-if="isAdmin">
+            · <RouterLink to="/app/attendance-policy">Atur</RouterLink></span
           >
         </p>
       </div>
-      <div v-if="schedules.length" class="st-grid2">
+      <div v-if="schedules.length" class="sessions-view__openable-list">
         <article v-for="schedule in schedules" :key="schedule.id" class="st-card st-schedule">
           <div class="st-schedule__time">
             <strong>{{ displayTime(schedule.start_time) }}</strong>
@@ -592,7 +815,7 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
               <UiBadge tone="info">{{ weekdayName(schedule.weekday) }}</UiBadge>
               <UiBadge tone="neutral">Menunggu Pembukaan</UiBadge>
             </div>
-            <h3 class="st-card__title">{{ schedule.subject }}</h3>
+            <h3 class="st-card__title">{{ displaySessionSubject(schedule.subject) }}</h3>
             <p class="st-table__muted">
               {{ schedule.class_name }} · {{ schedule.laboratory_name }} ·
               {{ schedule.teacher_name }}
@@ -616,22 +839,29 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
         </article>
       </div>
       <p v-else class="st-table__muted" data-testid="no-openable-schedules">
-        Tidak ada jadwal aktif yang dapat dibuka hari ini.
+        Belum ada jadwal yang siap dibuka hari ini.
       </p>
     </section>
 
     <!-- Sedang berlangsung -->
-    <section v-if="!isSessionDetailRoute" aria-labelledby="active-title">
+    <section
+      v-if="!isSessionDetailRoute"
+      class="sessions-view__section"
+      aria-labelledby="active-title"
+    >
       <div class="st-sectionrow">
-        <h2 id="active-title" class="st-section">Sedang Berlangsung</h2>
-        <p class="st-table__muted">Real-time sinkronisasi kamera laboratorium</p>
+        <h2 id="active-title" class="st-section">Sesi berlangsung</h2>
+        <p class="sessions-view__refresh-note" data-testid="sessions-auto-refresh">
+          <span class="st-material-icon" aria-hidden="true">visibility</span>
+          Buka detail sesi untuk pemantauan langsung
+        </p>
       </div>
-      <div v-if="activeSessions.length" class="st-grid2">
+      <div v-if="activeSessions.length" class="sessions-view__active-list">
         <article v-for="item in activeSessions" :key="item.id" class="st-card st-session-live">
           <div class="st-session-live__main">
             <div class="st-schedule__tags">
               <UiBadge tone="present">Sesi Aktif</UiBadge>
-              <UiBadge tone="neutral">{{ sessionOpenTime(item) }} WIB · berjalan</UiBadge>
+              <UiBadge tone="neutral">Mulai {{ sessionOpenTime(item) }} WIB</UiBadge>
               <span
                 v-if="item.status === 'manual_override'"
                 class="status-badge status-badge--warning"
@@ -639,29 +869,43 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
                 >{{ sessionStatusLabel(item.status) }}</span
               >
             </div>
-            <h3 class="st-card__title">{{ item.subject }}</h3>
-            <p class="st-table__muted">
-              Guru Pengampu: {{ item.teacher_name }} · Dibuka
-              {{ displayDateTime(item.opened_at, item.timezone_name) }} ·
-              {{ item.opened_automatically ? 'Otomatis' : 'Manual' }}
-            </p>
+            <h3 class="st-card__title">{{ displaySessionSubject(item.subject) }}</h3>
+            <div class="st-session-live__meta">
+              <p>
+                <small>Guru pengampu</small>
+                <strong>{{ item.teacher_name }}</strong>
+              </p>
+              <p>
+                <small>Dibuka</small>
+                <strong>{{ displayDateTime(item.opened_at, item.timezone_name) }}</strong>
+              </p>
+              <p>
+                <small>Mode</small>
+                <strong>{{ item.opened_automatically ? 'Otomatis' : 'Manual' }}</strong>
+              </p>
+            </div>
             <div class="st-session-live__tiles">
               <div class="st-session-live__tile">
                 <span class="st-material-icon" aria-hidden="true">groups</span>
-                <span
-                  ><small>Kelas</small
-                  ><strong>{{ item.class_name }} ({{ item.student_count }} Siswa)</strong></span
-                >
+                <span>
+                  <small>Kelas</small>
+                  <strong>{{ item.class_name }}</strong>
+                  <small>{{ item.student_count }} siswa dalam roster</small>
+                </span>
               </div>
               <div class="st-session-live__tile">
                 <span class="st-material-icon" aria-hidden="true">science</span>
-                <span
-                  ><small>Ruang</small><strong>{{ item.laboratory_name }}</strong></span
-                >
+                <span>
+                  <small>Laboratorium</small>
+                  <strong>{{ item.laboratory_name }}</strong>
+                </span>
               </div>
               <div class="st-session-live__tile">
                 <span class="st-material-icon" aria-hidden="true">videocam</span>
-                <span><small>Pemindai AI</small><strong>Kamera: Pintu Masuk 01</strong></span>
+                <span>
+                  <small>Pemindai</small>
+                  <strong>Kamera laboratorium</strong>
+                </span>
               </div>
             </div>
           </div>
@@ -671,11 +915,8 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
             aria-label="Roster langsung"
           >
             <p class="st-session-live__roster-head">
-              Live roster kehadiran
-              <strong
-                >{{ liveRoster[item.id].present + liveRoster[item.id].late }} /
-                {{ liveRoster[item.id].total }} Terdata</strong
-              >
+              <span><strong>Presensi tercatat</strong><small>Ringkasan kehadiran sesi</small></span>
+              <strong>{{ liveRoster[item.id].recorded }} / {{ liveRoster[item.id].total }}</strong>
             </p>
             <div
               class="st-session-live__bar"
@@ -683,9 +924,7 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
               :style="{
                 '--done-pct':
                   Math.round(
-                    ((liveRoster[item.id].present + liveRoster[item.id].late) /
-                      Math.max(1, liveRoster[item.id].total)) *
-                      100,
+                    (liveRoster[item.id].recorded / Math.max(1, liveRoster[item.id].total)) * 100,
                   ) + '%',
               }"
             />
@@ -699,10 +938,8 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
                 ><small>Terlambat</small></span
               >
               <span
-                ><strong>{{
-                  liveRoster[item.id].total - liveRoster[item.id].present - liveRoster[item.id].late
-                }}</strong
-                ><small>Belum Masuk</small></span
+                ><strong>{{ liveRoster[item.id].notPresent }}</strong
+                ><small>Belum tercatat</small></span
               >
             </div>
             <UiButton
@@ -710,8 +947,8 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
               :data-testid="'show-status-' + item.id"
               class="st-session-live__cta"
               @click="showStatus(item)"
-              ><span class="st-material-icon" aria-hidden="true">visibility</span>Pantau Sesi &amp;
-              Roster</UiButton
+              ><span class="st-material-icon" aria-hidden="true">visibility</span>Lihat detail
+              sesi</UiButton
             >
             <UiButton
               v-if="canOperateSessions"
@@ -740,11 +977,15 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
           </div>
         </article>
       </div>
-      <p v-else class="st-table__muted">Tidak ada sesi yang sedang berjalan.</p>
+      <p v-else class="st-table__muted">Tidak ada sesi yang sedang berlangsung.</p>
     </section>
 
     <!-- Riwayat -->
-    <section v-if="!isSessionDetailRoute" aria-labelledby="history-title">
+    <section
+      v-if="!isSessionDetailRoute"
+      class="sessions-view__section"
+      aria-labelledby="history-title"
+    >
       <div class="st-sectionrow">
         <h2 id="history-title" class="st-section">Riwayat Sesi Terakhir</h2>
         <RouterLink class="st-link" to="/app/reports">Lihat Semua Laporan →</RouterLink>
@@ -772,7 +1013,7 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
               <tr v-for="item in historySessions" v-else :key="item.id">
                 <td>{{ displayDateTime(item.opened_at, item.timezone_name) }}</td>
                 <td>
-                  <strong>{{ item.subject }}</strong
+                  <strong>{{ displaySessionSubject(item.subject) }}</strong
                   ><br />
                   <span class="st-table__muted">{{ item.class_name }}</span>
                 </td>
@@ -806,7 +1047,7 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
     </section>
 
     <!-- Detail sesi -->
-    <section v-if="selected" aria-labelledby="session-detail-title">
+    <section v-if="selected" class="sessions-view__detail" aria-labelledby="session-detail-title">
       <UiButton variant="text" size="sm" @click="returnToSessionList"
         >← Kembali ke daftar sesi</UiButton
       >
@@ -832,17 +1073,30 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
         </span>
       </div>
       <UiPageHeader
-        :title="`Detail Sesi: ${selected.subject}`"
+        :title="`Detail Sesi: ${displaySessionSubject(selected.subject)}`"
         :description="`${selected.laboratory_name} · ${selected.class_name} · Pengampu ${selected.teacher_name}`"
       >
         <template #actions>
-          <UiButton variant="secondary" type="button" @click="loadSessionDetail(selected.id)">
-            Muat ulang
-          </UiButton>
+          <div class="sessions-view__detail-actions">
+            <span
+              class="sessions-view__live-status"
+              :data-state="detailLiveState"
+              role="status"
+              aria-live="polite"
+              data-testid="session-live-status"
+            >
+              <span class="sessions-view__live-dot" aria-hidden="true" />
+              {{ detailLiveLabel }}
+            </span>
+            <UiButton variant="secondary" type="button" @click="loadSessionDetail(selected.id)">
+              <span class="st-material-icon" aria-hidden="true">refresh</span>
+              Muat ulang
+            </UiButton>
+          </div>
         </template>
       </UiPageHeader>
-      <div class="st-grid3">
-        <UiCard title="Total Siswa" :subtitle="`${selected.student_count} Kadet`">
+      <div class="st-grid3 sessions-view__summary-grid">
+        <UiCard title="Jumlah siswa" subtitle="Siswa di roster sesi">
           <p class="st-kpi">{{ selected.student_count }}</p>
         </UiCard>
         <UiCard
@@ -854,14 +1108,14 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
             }}<small> / {{ roster.length }}</small>
           </p>
         </UiCard>
-        <UiCard title="Belum Tercatat" subtitle="Akan menjadi absen saat tutup">
+        <UiCard title="Belum tercatat" subtitle="Akan ditetapkan saat sesi ditutup">
           <p class="st-kpi">{{ rosterStatusCounts.unmarked }}</p>
         </UiCard>
       </div>
 
-      <div class="st-card">
+      <div class="st-card sessions-view__roster-card">
         <h3 class="st-card__title">Roster sesi</h3>
-        <form class="st-toolbar" @submit.prevent>
+        <form class="st-toolbar sessions-view__roster-toolbar" @submit.prevent>
           <UiSearchInput
             v-model="rosterSearch"
             placeholder="Nama atau NIS…"
@@ -1157,6 +1411,232 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
 </template>
 
 <style scoped>
+.sessions-view {
+  gap: 24px;
+}
+
+.sessions-view__section,
+.sessions-view__detail {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.sessions-view__section .st-sectionrow {
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.sessions-view__section .st-sectionrow .st-section,
+.sessions-view__section .st-sectionrow p {
+  margin: 0;
+}
+
+.sessions-view__section .st-sectionrow .st-section {
+  font-size: 1rem;
+}
+
+.sessions-view__refresh-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--st-text-muted);
+  font-size: 0.8125rem;
+}
+
+.sessions-view__refresh-note .st-material-icon {
+  font-size: 1.125rem;
+  color: var(--st-primary-container);
+}
+
+.sessions-view__active-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.sessions-view__openable-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr));
+  gap: 16px;
+}
+
+.sessions-view .st-schedule__tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sessions-view .st-schedule__main > p {
+  margin: 0;
+}
+
+.sessions-view .st-session-live {
+  grid-template-columns: minmax(0, 1.5fr) minmax(300px, 0.8fr);
+  align-items: stretch;
+  gap: 24px;
+  padding: 24px;
+}
+
+.sessions-view .st-session-live__main {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.sessions-view .st-session-live__main .st-card__title {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.sessions-view .st-session-live__meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.sessions-view .st-session-live__meta p {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+}
+
+.sessions-view .st-session-live__meta small,
+.sessions-view .st-session-live__tile small,
+.sessions-view .st-session-live__roster-head small {
+  color: var(--st-text-muted);
+  font-size: 0.75rem;
+}
+
+.sessions-view .st-session-live__meta strong {
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+}
+
+.sessions-view .st-session-live__tiles {
+  gap: 12px;
+  margin-top: 0;
+}
+
+.sessions-view .st-session-live__tile {
+  min-height: 92px;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+}
+
+.sessions-view .st-session-live__tile > span:last-child {
+  align-content: start;
+  gap: 4px;
+}
+
+.sessions-view .st-session-live__tile strong {
+  overflow-wrap: anywhere;
+  font-size: 0.9375rem;
+}
+
+.sessions-view .st-session-live__roster {
+  justify-content: center;
+  gap: 16px;
+  padding: 20px;
+}
+
+.sessions-view .st-session-live__roster-head {
+  gap: 12px;
+  font-size: 0.8125rem;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.sessions-view .st-session-live__roster-head > span {
+  display: grid;
+  gap: 4px;
+}
+
+.sessions-view .st-session-live__roster-head > span strong {
+  white-space: normal;
+}
+
+.sessions-view .st-session-live__roster-head > strong {
+  font-size: 1.125rem;
+}
+
+.sessions-view .st-session-live__counts {
+  gap: 12px;
+}
+
+.sessions-view .st-session-live__counts > span {
+  min-height: 76px;
+  align-content: center;
+  gap: 4px;
+  padding: 12px 8px;
+}
+
+.sessions-view .st-session-live__counts small {
+  text-align: center;
+}
+
+.sessions-view__detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.sessions-view__live-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  color: var(--st-text-muted);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.sessions-view__live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--st-warning);
+}
+
+.sessions-view__live-status[data-state='live'] .sessions-view__live-dot {
+  background: var(--st-success);
+}
+
+.sessions-view__live-status[data-state='polling'] .sessions-view__live-dot {
+  background: var(--st-info);
+}
+
+.sessions-view__summary-grid {
+  gap: 16px;
+}
+
+.sessions-view__roster-card {
+  display: grid;
+  gap: 16px;
+  padding: 24px;
+}
+
+.sessions-view__roster-card .st-card__title {
+  margin: 0;
+}
+
+.sessions-view__roster-toolbar {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+}
+
+.sessions-view__roster-toolbar .st-scope {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .attendance-edit-form {
   display: grid;
   gap: 1rem;
@@ -1167,5 +1647,27 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
   padding: 0.75rem;
   border: 1px solid var(--st-border);
   color: var(--st-text-main);
+}
+
+@media (max-width: 900px) {
+  .sessions-view .st-session-live {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+    padding: 20px;
+  }
+}
+
+@media (max-width: 640px) {
+  .sessions-view .st-session-live__meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sessions-view__detail-actions {
+    justify-content: flex-start;
+  }
+
+  .sessions-view__roster-card {
+    padding: 16px;
+  }
 }
 </style>

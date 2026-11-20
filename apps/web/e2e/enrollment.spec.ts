@@ -189,6 +189,22 @@ test('enrollment reconnects AI_EDGE stream after an expired preview token', asyn
   const stream = page.getByTestId('enrollment-lab-stream')
   await expect(stream).toBeVisible()
   await expect(stream).toHaveAttribute('src', /synthetic-agent-token-2/, { timeout: 8000 })
+  await expect(stream).toHaveAttribute('crossorigin', 'anonymous')
+  await expect
+    .poll(() => stream.evaluate((image) => (image as HTMLImageElement).naturalWidth))
+    .toBeGreaterThan(0)
+  const corsFrame = await page.evaluate(async () => {
+    const response = await fetch('http://127.0.0.1:8765/v1/frame.jpg', {
+      headers: { 'X-Presensi-Preview-Token': 'synthetic-agent-token-2' },
+    })
+    return {
+      ok: response.ok,
+      type: response.type,
+      frameBytes: (await response.blob()).size,
+    }
+  })
+  expect(corsFrame).toEqual({ ok: true, type: 'cors', frameBytes: expect.any(Number) })
+  expect(corsFrame.frameBytes).toBeGreaterThan(0)
 })
 
 test('laborant captures a student, confirms identity, and advances to the next student', async ({
@@ -272,13 +288,39 @@ test('laborant captures a student, confirms identity, and advances to the next s
   ).toBeVisible()
 
   await expect(page.getByTestId('enrollment-lab-stream')).toBeVisible()
+  const toggle = page.locator('.enrollment-view__source-toggle')
+  const labCamera = page.locator('.enrollment-view__camera-frame')
+  const readCameraBox = () =>
+    labCamera.evaluate((element) => {
+      const box = element.getBoundingClientRect()
+      return {
+        x: box.x + window.scrollX,
+        y: box.y + window.scrollY,
+        width: box.width,
+        height: box.height,
+      }
+    })
+  const labBox = await readCameraBox()
+  await expect(toggle).toHaveCSS('grid-column-end', '-1')
+  await page.getByTestId('enrollment-source-device').check()
+  const deviceBox = await readCameraBox()
+  expect(deviceBox.x).toBeCloseTo(labBox.x, 0)
+  expect(deviceBox.y).toBeCloseTo(labBox.y, 0)
+  expect(deviceBox.width).toBeCloseTo(labBox.width, 0)
+  expect(deviceBox.height).toBeCloseTo(labBox.height, 0)
+  await page.getByTestId('enrollment-source-lab').check()
   await expect(page.getByTestId('enrollment-face-guidance')).toContainText('Wajah siap ditangkap')
   // Fixture agent only has five diagnostic points and a 1px image; it is not
   // a dense local mesh and should not render a misleading face skeleton.
   await expect(page.locator('.face-overlay__skeleton')).toHaveCount(0)
   await page.getByTestId('start-enrollment-capture').click()
   await expect(page.getByText(/capture dimulai dalam 3 detik/i)).toBeVisible()
-  await expect(page.getByText('Pengambilan 1 dari 4.')).toBeVisible({ timeout: 5000 })
+  await expect(page.getByTestId('enrollment-capture-pose')).toContainText('Lihat lurus ke kamera')
+  await expect(page.getByTestId('enrollment-capture-pose')).toContainText('Putar sedikit ke kiri')
+  await expect(page.getByTestId('enrollment-capture-pose')).toContainText('Putar sedikit ke kanan')
+  await expect(page.getByTestId('enrollment-capture-pose')).toContainText(
+    'Kembali menghadap lurus',
+  )
   await expect(page.getByText(/4 dari 4 capture siap/i)).toBeVisible({ timeout: 10_000 })
   await expect(
     page.getByText(/Ada kemungkinan wajah mirip dengan Synthetic Student Three/),

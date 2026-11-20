@@ -123,7 +123,7 @@ function applyFactoryDefaults(): void {
   edgeForm.value = { ...edgeForm.value, ...safe }
   syncThresholdTexts()
   successMessage.value =
-    'Default aman sementara terisi. Simpan untuk mengaktifkan, lalu WAJIB kalibrasi lokal sebelum produksi.'
+    'Preset uji lokal terisi. Tinjau nilainya, lalu terapkan ke perangkat untuk pengujian terawasi.'
 }
 
 function copyEnrollmentQualityToEdge(): void {
@@ -556,9 +556,8 @@ onBeforeUnmount(() => {
         </div>
         <p class="ai-setup-view__note">
           <template v-if="readiness.deployment_profile === 'AI_EDGE'">
-            Pilih PC AI_EDGE untuk mengatur threshold pengenalan dan sampling. Kualitas capture
-            bersama diatur satu kali pada tab Kualitas capture. Kamera, resolusi, dan FPS diatur di
-            host kamera.
+            Pilih PC kamera untuk mengatur pengenalan. Preset uji lokal mengisi angka awal; kamera,
+            resolusi, dan FPS tetap diatur di PC kamera.
           </template>
           <template v-else>
             Pilih STB gateway untuk mengatur burst dan filter capture. Kamera, resolusi, dan FPS
@@ -577,95 +576,170 @@ onBeforeUnmount(() => {
 
         <template v-if="selectedDevice?.deployment_profile === 'AI_EDGE'">
           <h3>AI_EDGE · kebijakan pengenalan</h3>
+          <p class="ai-setup-view__preset-note" data-testid="edge-preset-note">
+            <strong>Mulai cepat:</strong> gunakan preset uji lokal di bawah, lalu sesuaikan setelah
+            melihat hasil kamera. Preset bukan hasil kalibrasi; jangan jadikan nilai produksi tanpa
+            laporan lokal.
+          </p>
           <form class="master-data__form ai-setup-view__form" @submit.prevent="saveDevice">
-            <label
-              >Top-1 similarity<UiInput
+            <label class="ai-setup-view__field">
+              Top-1 similarity
+              <UiInput
+                id="edge-top1-threshold"
                 v-model="edgeTop1Text"
+                aria-describedby="edge-top1-hint"
                 type="number"
                 min="-1"
                 max="1"
                 step="any"
                 :required="edgeMarginText !== ''"
-            /></label>
-            <label
-              >Margin Top-1 − Top-2<UiInput
+              />
+              <small id="edge-top1-hint" class="ai-setup-view__field-hint">
+                Skor kandidat terbaik (-1 s.d. 1). Makin tinggi, makin ketat. Nilai awal uji: 0,65.
+              </small>
+            </label>
+            <label class="ai-setup-view__field">
+              Margin Top-1 − Top-2
+              <UiInput
+                id="edge-margin-threshold"
                 v-model="edgeMarginText"
+                aria-describedby="edge-margin-hint"
                 type="number"
                 min="0"
                 max="2"
                 step="any"
                 :required="edgeTop1Text !== ''"
-            /></label>
-            <label
-              >YuNet score threshold<UiInput
+              />
+              <small id="edge-margin-hint" class="ai-setup-view__field-hint">
+                Jarak skor kandidat pertama dan kedua. Makin tinggi, makin banyak kasus ambigu
+                diminta ulang. Nilai awal uji: 0,20.
+              </small>
+            </label>
+            <label class="ai-setup-view__field">
+              YuNet score threshold
+              <UiInput
+                id="edge-yunet-score"
                 v-model.number="edgeForm.yunet_score_threshold"
+                aria-describedby="edge-yunet-score-hint"
                 type="number"
                 min="0"
                 max="1"
                 step="any"
                 required
-            /></label>
-            <label
-              >YuNet NMS threshold<UiInput
+              />
+              <small id="edge-yunet-score-hint" class="ai-setup-view__field-hint">
+                Ambang deteksi wajah, bukan identitas. Nilai awal: 0,90; bila wajah sering luput,
+                periksa fokus dan cahaya sebelum menurunkannya.
+              </small>
+            </label>
+            <label class="ai-setup-view__field">
+              YuNet NMS threshold
+              <UiInput
+                id="edge-yunet-nms"
                 v-model.number="edgeForm.yunet_nms_threshold"
+                aria-describedby="edge-yunet-nms-hint"
                 type="number"
                 min="0"
                 max="1"
                 step="any"
                 required
-            /></label>
-            <label
-              >Frame yang harus sepakat<UiInput
+              />
+              <small id="edge-yunet-nms-hint" class="ai-setup-view__field-hint">
+                Mengatur penekanan kotak deteksi yang bertumpuk. Biarkan 0,30 sebagai nilai awal.
+              </small>
+            </label>
+            <label class="ai-setup-view__field">
+              Frame yang harus sepakat
+              <UiInput
+                id="edge-agreeing-frames"
                 v-model.number="edgeForm.minimum_agreeing_frames"
+                aria-describedby="edge-agreeing-frames-hint"
                 type="number"
                 min="1"
                 max="10"
                 required
-            /></label>
-            <label
-              >Sampling setiap N frame<UiInput
+              />
+              <small id="edge-agreeing-frames-hint" class="ai-setup-view__field-hint">
+                Jumlah hasil identitas yang konsisten sebelum kandidat diterima. Nilai awal: 3.
+              </small>
+            </label>
+            <label class="ai-setup-view__field">
+              Sampling setiap N frame
+              <UiInput
+                id="edge-sample-every"
                 v-model.number="edgeForm.sample_every_n_frames"
+                aria-describedby="edge-sample-every-hint"
                 type="number"
                 min="1"
                 max="60"
                 required
-            /></label>
-            <label
-              >Frame terbaik<UiInput
+              />
+              <small id="edge-sample-every-hint" class="ai-setup-view__field-hint">
+                Seberapa sering AI memeriksa frame; angka lebih kecil lebih responsif, tetapi
+                memakai lebih banyak CPU. Ini bukan FPS kamera. Nilai awal: 5.
+              </small>
+            </label>
+            <label class="ai-setup-view__field">
+              Frame terbaik
+              <UiInput
+                id="edge-best-frame-count"
                 v-model.number="edgeForm.best_frame_count"
+                aria-describedby="edge-best-frame-count-hint"
                 type="number"
                 min="1"
                 max="20"
                 required
-            /></label>
-            <label
-              >Riwayat maksimum<UiInput
+              />
+              <small id="edge-best-frame-count-hint" class="ai-setup-view__field-hint">
+                Jumlah bukti terbaik yang dipakai mengambil keputusan; minimal sama dengan frame
+                sepakat. Nilai awal: 5.
+              </small>
+            </label>
+            <label class="ai-setup-view__field">
+              Riwayat maksimum
+              <UiInput
+                id="edge-max-history"
                 v-model.number="edgeForm.max_history_frames"
+                aria-describedby="edge-max-history-hint"
                 type="number"
                 min="1"
                 max="60"
                 required
-            /></label>
-            <label class="ai-setup-view__form-wide"
-              >Referensi laporan kalibrasi<UiInput
+              />
+              <small id="edge-max-history-hint" class="ai-setup-view__field-hint">
+                Batas bukti yang disimpan selama wajah terlacak; harus minimal sama dengan frame
+                terbaik. Nilai awal: 10.
+              </small>
+            </label>
+            <label class="ai-setup-view__form-wide ai-setup-view__field">
+              Referensi laporan kalibrasi
+              <UiInput
+                id="edge-calibration-reference"
                 v-model="edgeForm.calibration_reference"
+                aria-describedby="edge-calibration-reference-hint"
                 type="text"
                 maxlength="200"
                 :required="edgeThresholdsConfigured"
-                placeholder="ID/nama laporan kalibrasi yang disetujui"
-            /></label>
+                placeholder="ID laporan lokal; preset mengisi label sementara"
+              />
+              <small id="edge-calibration-reference-hint" class="ai-setup-view__field-hint">
+                Wajib untuk audit saat threshold identitas diisi. Ganti label preset dengan ID
+                laporan setelah kalibrasi lokal.
+              </small>
+            </label>
             <p v-if="edgeUsesFactoryDefaults" class="ai-setup-view__note" role="status">
-              Berjalan dengan default aman sementara - presensi meragukan akan diminta mengulang
-              atau dicatat manual. Kalibrasi lokal wajib sebelum produksi.
+              Preset sementara aktif. Hasil ambigu tetap perlu verifikasi petugas; kalibrasi lokal
+              wajib sebelum penggunaan operasional.
             </p>
             <div class="master-data__form-actions ai-setup-view__form-wide">
               <UiButton
                 variant="text"
                 type="button"
                 :disabled="isSaving"
+                data-testid="edge-default-preset"
                 @click="applyFactoryDefaults"
               >
-                Pakai default aman
+                Isi preset uji lokal
               </UiButton>
               <UiButton variant="primary" type="submit" :disabled="isSaving">
                 {{ isSaving ? 'Menyimpan…' : 'Terapkan ke perangkat' }}
@@ -699,8 +773,12 @@ onBeforeUnmount(() => {
               </div>
             </dl>
             <p v-if="!edgeThresholdsConfigured" role="status">
-              Nilai quality dan sampling bisa diterapkan sekarang. Agent baru mengidentifikasi siswa
-              setelah Top-1 dan margin diisi dari laporan kalibrasi.
+              Identifikasi masih dijeda. Isi preset uji lokal untuk smoke test terawasi, atau
+              masukkan Top-1 dan margin dari laporan kalibrasi untuk penggunaan operasional.
+            </p>
+            <p v-else-if="edgeUsesFactoryDefaults" role="status">
+              Untuk menguji identitas, harus ada sesi aktif dengan siswa terdaftar di roster. Tanpa
+              sesi, preview hanya memeriksa kondisi kamera.
             </p>
           </aside>
         </template>

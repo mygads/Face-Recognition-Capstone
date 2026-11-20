@@ -191,8 +191,12 @@ atau metadata template. Token hanya di frame pertama, tidak di query/log.
 Layar operator untuk ADMIN/LABORANT: pilih kelas aktif, tinjau status template
 per siswa (`not_enrolled` / `enrolled` / `needs_reenrollment` dari metadata;
 endpoint status tidak mengembalikan image/embedding/model/quality score),
-buka kamera, capture 4 frame setelah countdown 3 detik, konfirmasi identitas
-sebelum lanjut ke siswa berikut. Stream berhenti saat ganti/tinggalkan
+buka kamera, lalu capture 4 frame setelah countdown 3 detik. UI memandu posisi
+lurus, sedikit ke kiri, sedikit ke kanan, lalu kembali lurus; tiap arahan tampil
+sebelum frame diambil. Panduan ini membantu variasi sampel, bukan syarat pose
+atau pemeriksaan liveness. Server tetap menilai satu wajah, ukuran, ketajaman,
+dan pencahayaan; minimal 3 dari 4 frame harus lolos. Operator mengonfirmasi
+identitas sebelum lanjut ke siswa berikut. Stream berhenti saat ganti/tinggalkan
 kelas, batal, atau konfirmasi identitas.
 
 `POST /api/v1/enrollments/captures` menerima 3–10 image bounded; menolak format

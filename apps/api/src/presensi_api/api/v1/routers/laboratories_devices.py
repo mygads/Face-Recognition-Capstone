@@ -605,6 +605,45 @@ def set_laboratory_display_pin(
     return _laboratory_response(laboratory)
 
 
+@router.delete(
+    "/laboratories/{laboratory_id}/display-pin",
+    response_model=LaboratoryResponse,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Remove display PIN and revoke public lab display sessions",
+    dependencies=[Depends(require_permissions(Permission.MANAGE_MASTER_DATA))],
+)
+def remove_laboratory_display_pin(
+    laboratory_id: UUID, session: DbSession
+) -> LaboratoryResponse:
+    from presensi_api.display_notify import (
+        notify_display_changed,
+        pg_notify_display_changed,
+    )
+
+    laboratory = session.get(Laboratory, laboratory_id)
+    if laboratory is None:
+        raise _not_found("Laboratory")
+    had_pin = bool(laboratory.display_pin_hash)
+    laboratory.display_pin_hash = None
+    laboratory.display_pin_updated_at = None
+    laboratory.display_pin_fail_count = 0
+    laboratory.display_pin_locked_until = None
+    session.add(
+        AuditLog(
+            action="laboratory.display_pin_removed",
+            entity_type="laboratory",
+            entity_id=laboratory.id,
+            before_state={"has_display_pin": had_pin},
+            after_state={"has_display_pin": False},
+        )
+    )
+    pg_notify_display_changed(session, laboratory.id)
+    session.commit()
+    notify_display_changed()
+    session.refresh(laboratory)
+    return _laboratory_response(laboratory)
+
+
 @router.get(
     "/laboratories/{laboratory_id}/laborant-assignments",
     responses=OPENAPI_ERROR_RESPONSES,

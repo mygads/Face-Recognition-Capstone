@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
   listKiosks: vi.fn(),
   listLaboratories: vi.fn(),
   resetKioskPin: vi.fn(),
+  revokeLaboratoryDisplayPin: vi.fn(),
   revokeKiosk: vi.fn(),
   setLaboratoryDisplayPin: vi.fn(),
   updateKiosk: vi.fn(),
@@ -51,38 +52,73 @@ const kiosk = {
   updated_at: '2026-11-06T00:00:00Z',
 }
 
+const device = {
+  device_id: 'device-1',
+  laboratory_id: 'lab-1',
+  name: 'PClab Uji',
+  laboratory_name: 'Lab Kimia 1',
+}
+
 describe('kiosks view ttl', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     api.listKiosks.mockResolvedValue({ items: [kiosk], pagination: { total: 1 } })
-    api.listDevices.mockResolvedValue({ items: [], pagination: { total: 0 } })
+    api.listDevices.mockResolvedValue({ items: [device], pagination: { total: 1 } })
     api.listLaboratories.mockResolvedValue({ items: [], pagination: { total: 0 } })
     api.setLaboratoryDisplayPin.mockResolvedValue(undefined)
+    api.revokeLaboratoryDisplayPin.mockResolvedValue(undefined)
   })
 
-  it('menampilkan TTL Default untuk kiosk tanpa TTL dan mengirim 8 jam saat diubah', async () => {
+  it('menampilkan masa sesi default dan mengubahnya lewat modal edit layar', async () => {
     const wrapper = mount(KiosksView, { global: { plugins: [adminPinia()] } })
     await flushPromises()
-    const selects = wrapper.findAll('[data-testid="kiosk-ttl-row"]')
-    expect(selects).toHaveLength(1)
-    expect((selects[0].element as HTMLSelectElement).value).toBe('')
+    expect(wrapper.find('[data-testid="kiosk-row"]').text()).toContain('Default server')
+    await wrapper.get('[data-testid="edit-kiosk-kiosk-1"]').trigger('click')
+    expect(wrapper.find('[data-testid="kiosk-edit-dialog"]').exists()).toBe(true)
     api.updateKiosk.mockResolvedValueOnce({ ...kiosk, token_ttl_hours: 8 })
-    await selects[0].setValue('8')
+    await wrapper.get('[data-testid="edit-kiosk-ttl"]').setValue('8')
+    await wrapper.find('#kiosk-edit-form').trigger('submit.prevent')
     await flushPromises()
-    expect(api.updateKiosk).toHaveBeenCalledWith('kiosk-1', { token_ttl_hours: 8 })
+    expect(api.updateKiosk).toHaveBeenCalledWith(
+      'kiosk-1',
+      expect.objectContaining({ token_ttl_hours: 8 }),
+    )
+    expect(wrapper.find('[data-testid="kiosk-edit-dialog"]').exists()).toBe(false)
   })
 
-  it('form pendaftaran mengirim TTL yang dipilih', async () => {
+  it('menampilkan Buat PIN jika layar belum memiliki PIN', async () => {
+    api.listKiosks.mockResolvedValue({
+      items: [{ ...kiosk, has_pin: false }],
+      pagination: { total: 1 },
+    })
     const wrapper = mount(KiosksView, { global: { plugins: [adminPinia()] } })
     await flushPromises()
+
+    expect(wrapper.get('[data-testid="kiosk-pin-action-kiosk-1"]').text()).toBe('Buat PIN')
+    wrapper.unmount()
+  })
+
+  it('tombol pendaftaran membuka modal dan memilih lab dari perangkat', async () => {
+    const wrapper = mount(KiosksView, { global: { plugins: [adminPinia()] } })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="kiosk-registration-dialog"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="open-kiosk-registration"]').trigger('click')
+    expect(wrapper.find('[data-testid="kiosk-registration-dialog"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="selected-kiosk-lab"]').text()).toContain('Lab Kimia 1')
     await wrapper.find('[data-testid="kiosk-name"]').setValue('Kiosk Baru')
     await wrapper.find('[data-testid="kiosk-ttl"]').setValue('2')
     api.createKiosk.mockResolvedValueOnce({ ...kiosk, id: 'kiosk-2' })
-    await wrapper.find('form').trigger('submit.prevent')
+    await wrapper.find('#kiosk-registration-form').trigger('submit.prevent')
     await flushPromises()
     expect(api.createKiosk).toHaveBeenCalledWith(
-      expect.objectContaining({ display_name: 'Kiosk Baru', token_ttl_hours: 2 }),
+      expect.objectContaining({
+        display_name: 'Kiosk Baru',
+        device_id: 'device-1',
+        laboratory_id: 'lab-1',
+        token_ttl_hours: 2,
+      }),
     )
+    expect(wrapper.find('[data-testid="kiosk-registration-dialog"]').exists()).toBe(false)
   })
 
   it('membuka layar kiosk di tab baru', async () => {
@@ -133,5 +169,39 @@ describe('kiosks view ttl', () => {
     )
     expect(wrapper.find('[data-testid="laboratory-display-pin-dialog"]').exists()).toBe(false)
     wrapper.unmount()
+  })
+
+  it('menghapus PIN publik lewat konfirmasi dan mencabut sesi layar aktif', async () => {
+    api.listLaboratories.mockResolvedValue({
+      items: [
+        {
+          id: 'lab-1',
+          code: 'LAB-1',
+          name: 'Lab Kimia 1',
+          location: null,
+          is_active: true,
+          created_at: '2026-11-06T00:00:00Z',
+          updated_at: '2026-11-06T00:00:00Z',
+          has_display_pin: true,
+        },
+      ],
+      pagination: { total: 1 },
+    })
+    const wrapper = mount(KiosksView, { global: { plugins: [adminPinia()] } })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="delete-public-pin-lab-1"]').trigger('click')
+    expect(wrapper.find('[data-testid="delete-public-pin-dialog"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="delete-public-pin-dialog"]').text().toLowerCase()).toContain(
+      'sesi layar publik yang sedang aktif juga akan dicabut',
+    )
+    await wrapper.get('[data-testid="confirm-delete-public-pin"]').trigger('click')
+    await flushPromises()
+
+    expect(api.revokeLaboratoryDisplayPin).toHaveBeenCalledWith('lab-1')
+    expect(wrapper.find('[data-testid="delete-public-pin-dialog"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="laboratory-display-pin-table"]').text()).toContain(
+      'Belum diatur',
+    )
   })
 })

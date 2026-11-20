@@ -12,7 +12,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from presensi_api.api.security.dependencies import get_current_user
+from presensi_api.api.security.config import AuthSettings
+from presensi_api.api.security.dependencies import get_auth_settings, get_current_user
+from presensi_api.api.security.passwords import hash_password
 from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
 from presensi_api.db.base import Base
 from presensi_api.db.models import Device, Laboratory, User
@@ -73,6 +75,18 @@ def post_json(path: str, payload: dict[str, object]) -> httpx.Response:
             transport=httpx.ASGITransport(app=app), base_url="http://testserver"
         ) as client:
             return await client.post(path, json=payload)
+
+    return asyncio.run(send())
+
+
+def request(
+    method: str, path: str, payload: dict[str, object] | None = None
+) -> httpx.Response:
+    async def send() -> httpx.Response:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            return await client.request(method, path, json=payload)
 
     return asyncio.run(send())
 
@@ -223,3 +237,40 @@ def test_register_kiosk_writes_audit_with_row_id(
         )
         assert audits, "registrasi kiosk harus tercatat di audit"
         assert {str(a.entity_id) for a in audits} == {kiosk_id}
+
+
+def test_remove_lab_display_pin_revokes_active_sessions_and_blocks_new_login(
+    kiosk_database: sessionmaker[Session],
+) -> None:
+    app.dependency_overrides[get_auth_settings] = lambda: AuthSettings(
+        signing_secret="p" * 40
+    )
+    try:
+        with kiosk_database.begin() as session:
+            lab = session.query(Laboratory).one()
+            lab.display_pin_hash = hash_password("1234")
+            lab_id = str(lab.id)
+
+        opened = post_json(
+            "/api/v1/public/display/session",
+            {"laboratory_id": lab_id, "pin": "1234"},
+        )
+        assert opened.status_code == 200, opened.text
+
+        removed = request("DELETE", f"/api/v1/laboratories/{lab_id}/display-pin")
+        assert removed.status_code == 200, removed.text
+        assert removed.json()["has_display_pin"] is False
+
+        token = opened.json()["display_token"]
+        snapshot = request("GET", f"/api/v1/public/display?token={token}")
+        assert snapshot.status_code == 401
+        assert snapshot.json()["error"]["code"] == "display_token_invalid"
+
+        relogin = post_json(
+            "/api/v1/public/display/session",
+            {"laboratory_id": lab_id, "pin": "1234"},
+        )
+        assert relogin.status_code == 403
+        assert relogin.json()["error"]["code"] == "display_pin_not_set"
+    finally:
+        app.dependency_overrides.pop(get_auth_settings, None)
