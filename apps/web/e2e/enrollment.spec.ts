@@ -30,7 +30,12 @@ async function stubFallbackFirst(page: Page): Promise<void> {
   )
 }
 
-async function stubLocalAgentPreview(page: Page): Promise<void> {
+async function stubLocalAgentPreview(
+  page: Page,
+  options: { failFirstStream?: boolean } = {},
+): Promise<void> {
+  let sessionNumber = 0
+  let streamRequestNumber = 0
   const origin = 'http://127.0.0.1:4173'
   const headers = {
     'access-control-allow-origin': origin,
@@ -52,7 +57,7 @@ async function stubLocalAgentPreview(page: Page): Promise<void> {
       return route.fulfill({
         status: 201,
         headers,
-        json: { preview_token: 'synthetic-agent-token' },
+        json: { preview_token: `synthetic-agent-token-${++sessionNumber}` },
       })
     }
     if (url.pathname === '/v1/session' && request.method() === 'DELETE') {
@@ -91,6 +96,9 @@ async function stubLocalAgentPreview(page: Page): Promise<void> {
       })
     }
     if (url.pathname === '/v1/frame.jpg' || url.pathname === '/v1/stream') {
+      if (options.failFirstStream && url.pathname === '/v1/stream' && streamRequestNumber++ === 0) {
+        return route.fulfill({ status: 401, headers, json: { error: 'unauthorized' } })
+      }
       return route.fulfill({
         status: 200,
         headers: { ...headers, 'content-type': 'image/png' },
@@ -137,6 +145,51 @@ async function loginAsLaborant(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Masuk' }).click()
   await expect(page).toHaveURL(/\/app\/dashboard$/)
 }
+
+async function stubEnrollmentRoster(page: Page): Promise<void> {
+  await page.route('**/api/v1/classes?**', (route) =>
+    route.fulfill({
+      status: 200,
+      json: {
+        items: [
+          {
+            id: classId,
+            code: 'X-A',
+            name: 'Kelas X A',
+            grade: 10,
+            academic_year: '2026-2027',
+            homeroom_teacher_id: null,
+            is_active: true,
+            created_at: '2026-10-01T00:00:00Z',
+            updated_at: '2026-10-01T00:00:00Z',
+          },
+        ],
+        pagination: { total: 1, limit: 100, offset: 0 },
+      },
+    }),
+  )
+  await page.route('**/api/v1/enrollments/class-status?**', (route) =>
+    route.fulfill({
+      status: 200,
+      json: roster.map((student, index) => ({
+        ...student,
+        template_status: index === 2 ? 'enrolled' : 'not_enrolled',
+      })),
+    }),
+  )
+}
+
+test('enrollment reconnects AI_EDGE stream after an expired preview token', async ({ page }) => {
+  await stubFallbackFirst(page)
+  await stubLocalAgentPreview(page, { failFirstStream: true })
+  await stubEnrollmentRoster(page)
+  await loginAsLaborant(page)
+  await page.getByTestId('enrollment-link').click()
+
+  const stream = page.getByTestId('enrollment-lab-stream')
+  await expect(stream).toBeVisible()
+  await expect(stream).toHaveAttribute('src', /synthetic-agent-token-2/, { timeout: 8000 })
+})
 
 test('laborant captures a student, confirms identity, and advances to the next student', async ({
   page,
@@ -220,7 +273,9 @@ test('laborant captures a student, confirms identity, and advances to the next s
 
   await expect(page.getByTestId('enrollment-lab-stream')).toBeVisible()
   await expect(page.getByTestId('enrollment-face-guidance')).toContainText('Wajah siap ditangkap')
-  await expect(page.locator('.face-overlay__skeleton')).toHaveCount(4)
+  // Fixture agent only has five diagnostic points and a 1px image; it is not
+  // a dense local mesh and should not render a misleading face skeleton.
+  await expect(page.locator('.face-overlay__skeleton')).toHaveCount(0)
   await page.getByTestId('start-enrollment-capture').click()
   await expect(page.getByText(/capture dimulai dalam 3 detik/i)).toBeVisible()
   await expect(page.getByText('Pengambilan 1 dari 4.')).toBeVisible({ timeout: 5000 })

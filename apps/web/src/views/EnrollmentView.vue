@@ -140,6 +140,9 @@ const labFaceMesh = useFaceLandmarks(
 let flowVersion = 0
 let previewGeneration = 0
 let statusTimer: number | undefined
+let streamRetryTimer: number | undefined
+let streamRetryAttempts = 0
+const MAX_STREAM_RETRIES = 3
 
 const cameraObservationLabel = computed(() => {
   if (cameraSource.value === 'lab' && localPreviewRecognitionState.value === 'camera_disabled') {
@@ -264,7 +267,11 @@ function updateDeviceFrameDimensions(): void {
 }
 
 function handleLabStreamLoad(event: Event): void {
+  if (streamRetryTimer) window.clearTimeout(streamRetryTimer)
+  streamRetryTimer = undefined
+  streamRetryAttempts = 0
   labStreamFailed.value = false
+  localPreviewError.value = null
   const image = event.currentTarget
   if (!(image instanceof HTMLImageElement) || image.naturalWidth < 1 || image.naturalHeight < 1) {
     return
@@ -353,7 +360,10 @@ function stopLocalPreview(): void {
   previewGeneration += 1
   isOpeningLocalPreview.value = false
   if (statusTimer) window.clearTimeout(statusTimer)
+  if (streamRetryTimer) window.clearTimeout(streamRetryTimer)
   statusTimer = undefined
+  streamRetryTimer = undefined
+  streamRetryAttempts = 0
   const token = localPreviewToken.value
   localPreviewToken.value = null
   cameraObservation.value = null
@@ -384,6 +394,8 @@ async function fetchLocalPreview(path: '/v1/status' | '/v1/frame.jpg'): Promise<
     localPreviewToken.value = nextToken
     void closeLocalPreviewSession(requestToken)
     labStreamKey.value += 1
+    labStreamFailed.value = false
+    localPreviewError.value = null
     response = await fetchWithPreviewTimeout(`${previewBaseUrl}${path}`, {
       headers: { 'X-Presensi-Preview-Token': localPreviewToken.value },
       cache: 'no-store',
@@ -448,6 +460,7 @@ async function startLocalPreview(): Promise<void> {
     }
     localPreviewToken.value = token
     labStreamKey.value += 1
+    streamRetryAttempts = 0
     void pollLocalPreviewStatus(generation)
   } catch (error) {
     if (generation === previewGeneration) {
@@ -459,18 +472,61 @@ async function startLocalPreview(): Promise<void> {
   }
 }
 
-function retryLabStream(): void {
-  labStreamFailed.value = false
+function scheduleLabStreamRetry(): void {
+  if (streamRetryTimer || streamRetryAttempts >= MAX_STREAM_RETRIES) return
+  streamRetryAttempts += 1
+  const delay = Math.min(500 * 2 ** (streamRetryAttempts - 1), 4000)
+  streamRetryTimer = window.setTimeout(() => {
+    streamRetryTimer = undefined
+    void retryLabStream(true)
+  }, delay)
+}
+
+async function retryLabStream(automatic = false): Promise<void> {
+  if (streamRetryTimer) window.clearTimeout(streamRetryTimer)
+  streamRetryTimer = undefined
+  if (!automatic) streamRetryAttempts = 0
+  if (cameraSource.value !== 'lab' || isOpeningLocalPreview.value) return
   if (!localPreviewToken.value) {
     void startLocalPreview()
-  } else {
+    return
+  }
+
+  const generation = previewGeneration
+  const previousToken = localPreviewToken.value
+  isOpeningLocalPreview.value = true
+  localPreviewError.value = null
+  try {
+    const nextToken = await openLocalPreviewSession()
+    if (
+      generation !== previewGeneration ||
+      cameraSource.value !== 'lab' ||
+      localPreviewToken.value !== previousToken
+    ) {
+      void closeLocalPreviewSession(nextToken)
+      return
+    }
+    localPreviewToken.value = nextToken
     labStreamKey.value += 1
+    labStreamFailed.value = false
+    streamRetryAttempts = 0
+    void closeLocalPreviewSession(previousToken)
+  } catch (error) {
+    if (generation === previewGeneration && cameraSource.value === 'lab') {
+      localPreviewError.value =
+        error instanceof Error ? error.message : 'Preview AI_EDGE tidak dapat dibuka.'
+      labStreamFailed.value = true
+      if (automatic) scheduleLabStreamRetry()
+    }
+  } finally {
+    if (generation === previewGeneration) isOpeningLocalPreview.value = false
   }
 }
 
 function handleLabStreamError(): void {
   labStreamFailed.value = true
   cameraObservation.value = null
+  scheduleLabStreamRetry()
 }
 
 async function loadClasses(): Promise<void> {
@@ -996,6 +1052,7 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
               size="sm"
               type="button"
               :disabled="isOpeningLocalPreview"
+              data-testid="retry-lab-stream"
               @click="retryLabStream"
             >
               Coba lagi

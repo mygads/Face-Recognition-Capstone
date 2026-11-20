@@ -39,6 +39,7 @@ const pendingStudent = {
 }
 
 function mountView() {
+  let previewSessionCounter = 0
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -47,7 +48,9 @@ function mountView() {
         return {
           ok: true,
           status: 201,
-          json: async () => ({ preview_token: 'synthetic-preview-token' }),
+          json: async () => ({
+            preview_token: `synthetic-preview-token-${++previewSessionCounter}`,
+          }),
         } as Response
       }
       if (url.endsWith('/v1/session') && init?.method === 'DELETE') {
@@ -285,6 +288,42 @@ describe('enrollment camera source', () => {
     expect(wrapper.find('[data-testid="enrollment-lab-stream"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('Satu kamera satu pemilik')
     wrapper.unmount()
+  })
+
+  it('memperbarui sesi AI_EDGE saat stream gagal lalu menyambungkannya kembali', async () => {
+    api.listClasses.mockResolvedValue({
+      items: [
+        {
+          id: 'class-1',
+          code: 'XII-RPL-1',
+          name: 'Kelas XII RPL 1',
+          academic_year: '2026-2027',
+          grade: 12,
+          homeroom_teacher_id: null,
+          is_active: true,
+        },
+      ],
+      pagination: { total: 1, limit: 100, offset: 0 },
+    })
+    api.listClassEnrollmentStatus.mockResolvedValue([pendingStudent])
+    const wrapper = mountView()
+    try {
+      await flushPromises()
+      const firstStream = wrapper.get('[data-testid="enrollment-lab-stream"]')
+      const firstUrl = firstStream.attributes('src')
+
+      await firstStream.trigger('error')
+      expect(wrapper.find('[data-testid="enrollment-lab-stream"]').exists()).toBe(false)
+
+      await wrapper.get('[data-testid="retry-lab-stream"]').trigger('click')
+      await flushPromises()
+
+      const reconnectedStream = wrapper.get('[data-testid="enrollment-lab-stream"]')
+      expect(reconnectedStream.attributes('src')).not.toBe(firstUrl)
+      expect(reconnectedStream.attributes('src')).toContain('synthetic-preview-token-2')
+    } finally {
+      wrapper.unmount()
+    }
   })
 
   it('membuka webcam browser sendiri dan menggambar mesh tanpa kotak wajah', async () => {
