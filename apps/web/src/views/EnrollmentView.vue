@@ -26,10 +26,35 @@ import {
   UiTextarea,
 } from '../components/ui'
 import FaceOverlay from '../components/FaceOverlay.vue'
-import { agentStreamUrl, readKioskStreamToken } from '../utils/agentPreview'
+import { useFaceLandmarks } from '../composables/useFaceLandmarks'
+import { useAuthStore } from '../stores/auth'
+import { fetchWithPreviewTimeout } from '../utils/previewFetch'
 
 type CapturePhase = 'ready' | 'countdown' | 'capturing' | 'processing' | 'confirming' | 'complete'
+type CameraFaceObservation = {
+  x: number
+  y: number
+  width: number
+  height: number
+  landmarks?: number[][] | null
+  acceptable?: boolean
+  reason_codes?: string[]
+}
+type CameraObservation = {
+  state: 'pending' | 'ready' | 'adjust' | 'no_face' | 'multiple_faces' | 'unavailable'
+  message: string
+  frame_width: number
+  frame_height: number
+  face_count: number
+  faces: CameraFaceObservation[]
+}
+type LocalPreviewStatus = {
+  camera_open: boolean
+  recognition_state?: string
+  camera_observation?: CameraObservation
+}
 
+const auth = useAuthStore()
 const classes = ref<SchoolClass[]>([])
 const students = ref<EnrollmentStudentStatus[]>([])
 const selectedClassId = ref('')
@@ -52,11 +77,24 @@ const pendingCount = computed(
 )
 const videoElement = ref<HTMLVideoElement | null>(null)
 const labImageElement = ref<HTMLImageElement | null>(null)
-const cameraSource = ref<'device' | 'lab'>('device')
+const deviceFrameDimensions = ref({ width: 0, height: 0 })
+const labFrameDimensions = ref({ width: 0, height: 0 })
+const isLocalAIEdgeHost = ['localhost', '127.0.0.1'].includes(window.location.hostname)
+const cameraSource = ref<'device' | 'lab'>(isLocalAIEdgeHost ? 'lab' : 'device')
 const labStreamKey = ref(0)
 const labStreamFailed = ref(false)
+const localPreviewToken = ref<string | null>(null)
+const cameraObservation = ref<CameraObservation | null>(null)
+const localPreviewRecognitionState = ref<string | null>(null)
+const localPreviewError = ref<string | null>(null)
+const isOpeningLocalPreview = ref(false)
 const devicePreviewError = ref<string | null>(null)
-const labStreamSrc = computed(() => agentStreamUrl(readKioskStreamToken()))
+const previewHost = isLocalAIEdgeHost ? window.location.hostname : null
+const previewBaseUrl = previewHost ? `http://${previewHost}:8765` : null
+const labStreamSrc = computed(() => {
+  if (!previewBaseUrl || !localPreviewToken.value) return null
+  return `${previewBaseUrl}/v1/stream?token=${encodeURIComponent(localPreviewToken.value)}&retry=${labStreamKey.value}`
+})
 const capturePhase = ref<CapturePhase>('ready')
 const countdownValue = ref(3)
 const captureIndex = ref(0)
@@ -74,10 +112,118 @@ const pageMessage = ref<string | null>(null)
 const isLoading = ref(false)
 const isStarting = ref(false)
 const stream = ref<MediaStream | null>(null)
-let flowVersion = 0
-
 const selectedStudent = computed(
   () => students.value.find((student) => student.id === selectedStudentId.value) ?? null,
+)
+const enrollmentCameraFrameStyle = computed(() => {
+  const size =
+    cameraSource.value === 'device' ? deviceFrameDimensions.value : labFrameDimensions.value
+  return {
+    aspectRatio: size.width > 0 && size.height > 0 ? `${size.width} / ${size.height}` : '4 / 3',
+  }
+})
+const deviceFaceMesh = useFaceLandmarks(
+  videoElement,
+  computed(() => cameraSource.value === 'device' && stream.value !== null),
+)
+const labFaceMesh = useFaceLandmarks(
+  labImageElement,
+  computed(
+    () =>
+      cameraSource.value === 'lab' &&
+      selectedStudent.value !== null &&
+      Boolean(labStreamSrc.value) &&
+      !labStreamFailed.value &&
+      !localPreviewError.value,
+  ),
+)
+let flowVersion = 0
+let previewGeneration = 0
+let statusTimer: number | undefined
+
+const cameraObservationLabel = computed(() => {
+  if (cameraSource.value === 'lab' && localPreviewRecognitionState.value === 'camera_disabled') {
+    return 'Kamera dijeda'
+  }
+  switch (cameraObservation.value?.state) {
+    case 'ready':
+      return 'Wajah siap ditangkap'
+    case 'adjust':
+      return 'Atur posisi atau pencahayaan'
+    case 'no_face':
+      return 'Mencari wajah'
+    case 'multiple_faces':
+      return 'Pastikan satu orang di dalam frame'
+    case 'unavailable':
+      return 'Pemeriksaan wajah tidak tersedia'
+    default:
+      return 'Menyiapkan deteksi wajah AI_EDGE'
+  }
+})
+const cameraObservationMessage = computed(
+  () =>
+    localPreviewError.value ??
+    cameraObservation.value?.message ??
+    'Menunggu hasil deteksi wajah dari AI_EDGE…',
+)
+const deviceCameraGuidanceLabel = computed(() => {
+  if (devicePreviewError.value) return 'Kamera perangkat belum siap'
+  if (deviceFaceMesh.state.value === 'loading') return 'Menyiapkan deteksi wajah…'
+  if (deviceFaceMesh.state.value === 'unavailable') return 'Deteksi wajah tidak tersedia'
+  if (deviceFaceMesh.state.value === 'ready') {
+    return deviceFaceMesh.faces.value.length ? 'Wajah terdeteksi' : 'Mencari wajah'
+  }
+  return stream.value ? 'Menghubungkan deteksi wajah…' : 'Kamera perangkat belum aktif'
+})
+const deviceCameraGuidanceMessage = computed(() => {
+  if (devicePreviewError.value) return devicePreviewError.value
+  if (deviceFaceMesh.state.value === 'loading') {
+    return 'Model mesh lokal sedang disiapkan untuk kamera ini.'
+  }
+  if (deviceFaceMesh.state.value === 'ready' && deviceFaceMesh.faces.value.length) {
+    const points = deviceFaceMesh.faces.value[0]?.landmarks?.length ?? 478
+    return `Mesh aktif · ${points} titik. Capture tetap divalidasi oleh server.`
+  }
+  if (deviceFaceMesh.state.value === 'ready' && !deviceFaceMesh.faces.value.length) {
+    return 'Posisikan satu wajah di depan kamera dengan pencahayaan yang cukup.'
+  }
+  if (deviceFaceMesh.state.value === 'unavailable') {
+    return deviceFaceMesh.errorMessage.value ?? 'Periksa dukungan kamera dan browser.'
+  }
+  return 'Kamera ini diproses di browser. Capture pendaftaran tetap divalidasi oleh server.'
+})
+const labMeshStatus = computed(() => {
+  if (localPreviewRecognitionState.value === 'camera_disabled') {
+    return 'Mesh lokal menunggu kamera dilanjutkan.'
+  }
+  if (localPreviewError.value) return localPreviewError.value
+  if (!labStreamSrc.value || labStreamFailed.value) return 'Menunggu stream AI_EDGE.'
+  if (labFaceMesh.state.value === 'loading') return 'Memuat model mesh lokal…'
+  if (labFaceMesh.state.value === 'unavailable') {
+    return labFaceMesh.errorMessage.value ?? 'Mesh lokal tidak tersedia.'
+  }
+  if (labFaceMesh.state.value !== 'ready') return 'Menunggu frame kamera…'
+  if (!labFaceMesh.frameSize.value.width) return 'Model siap · menunggu frame kamera.'
+  const face = labFaceMesh.faces.value[0]
+  if (!face) return 'Model siap · mencari wajah di frame.'
+  const points = face.landmarks?.length ?? 478
+  const fps = labFaceMesh.fps.value === null ? '' : ` · ${labFaceMesh.fps.value} FPS`
+  return `Mesh aktif · ${points} titik${fps}.`
+})
+const deviceCameraGuidanceTone = computed(() => {
+  if (devicePreviewError.value || deviceFaceMesh.state.value === 'unavailable') return 'unavailable'
+  if (deviceFaceMesh.faces.value.length) return 'ready'
+  if (deviceFaceMesh.state.value === 'ready') return 'no_face'
+  return deviceFaceMesh.state.value
+})
+const canStartAgentCapture = computed(
+  () =>
+    cameraSource.value !== 'lab' ||
+    Boolean(
+      localPreviewToken.value &&
+      cameraObservation.value?.state === 'ready' &&
+      !labStreamFailed.value,
+    ),
 )
 const eligibleStudents = computed(() =>
   students.value.filter((student) => student.template_status !== 'enrolled'),
@@ -111,10 +257,29 @@ function stopCamera(): void {
   if (videoElement.value) videoElement.value.srcObject = null
 }
 
+function updateDeviceFrameDimensions(): void {
+  const video = videoElement.value
+  if (!video || video.videoWidth < 1 || video.videoHeight < 1) return
+  deviceFrameDimensions.value = { width: video.videoWidth, height: video.videoHeight }
+}
+
+function handleLabStreamLoad(event: Event): void {
+  labStreamFailed.value = false
+  const image = event.currentTarget
+  if (!(image instanceof HTMLImageElement) || image.naturalWidth < 1 || image.naturalHeight < 1) {
+    return
+  }
+  labFrameDimensions.value = { width: image.naturalWidth, height: image.naturalHeight }
+}
+
 async function startDevicePreview(): Promise<void> {
-  if (cameraSource.value !== 'device' || stream.value) return
+  if (cameraSource.value !== 'device' || !selectedStudent.value || stream.value) return
+  if (!window.isSecureContext) {
+    devicePreviewError.value = 'Kamera browser hanya tersedia lewat localhost atau HTTPS.'
+    return
+  }
   if (!navigator.mediaDevices?.getUserMedia) {
-    devicePreviewError.value = 'Browser ini tidak dapat membuka kamera.'
+    devicePreviewError.value = 'Browser ini tidak dapat membuka kamera. Periksa izin dan perangkat.'
     return
   }
   const currentFlow = ++flowVersion
@@ -135,16 +300,177 @@ async function startDevicePreview(): Promise<void> {
   } catch (error) {
     if (currentFlow !== flowVersion) return
     stopCamera()
-    devicePreviewError.value =
-      error instanceof DOMException && error.name === 'NotAllowedError'
-        ? 'Akses kamera belum diizinkan. Izinkan kamera pada browser lalu muat ulang preview.'
-        : 'Preview kamera tidak dapat dibuka. Periksa kamera lalu coba lagi.'
+    if (error instanceof DOMException && error.name === 'NotAllowedError') {
+      devicePreviewError.value =
+        'Akses kamera belum diizinkan. Izinkan kamera pada browser lalu muat ulang preview.'
+    } else if (error instanceof DOMException && error.name === 'NotReadableError') {
+      devicePreviewError.value =
+        'Kamera sedang dipakai aplikasi lain. Jika ini kamera lab, pilih Kamera lab via AI_EDGE.'
+    } else {
+      devicePreviewError.value = 'Preview kamera tidak dapat dibuka. Periksa kamera lalu coba lagi.'
+    }
+  }
+}
+
+async function openLocalPreviewSession(): Promise<string> {
+  if (!previewBaseUrl) {
+    throw new Error('Preview AI_EDGE hanya tersedia di komputer lab yang menjalankan agent.')
+  }
+  const accessToken = auth.getValidAccessToken()
+  if (!accessToken)
+    throw new Error('Sesi login berakhir. Masuk kembali lalu buka pendaftaran wajah.')
+  const response = await fetchWithPreviewTimeout(`${previewBaseUrl}/v1/session`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: 'no-store',
+  })
+  if (!response.ok) {
+    if (response.status === 403) {
+      throw new Error('Preview AI_EDGE hanya tersedia untuk Admin atau Laboran.')
+    }
+    throw new Error(
+      'Agent AI_EDGE tidak merespons. Pastikan service kamera berjalan di komputer ini.',
+    )
+  }
+  const result = (await response.json()) as { preview_token?: unknown }
+  if (typeof result.preview_token !== 'string') {
+    throw new Error('Agent AI_EDGE mengirim token preview yang tidak valid.')
+  }
+  return result.preview_token
+}
+
+async function closeLocalPreviewSession(token: string): Promise<void> {
+  if (!previewBaseUrl) return
+  await fetch(`${previewBaseUrl}/v1/session`, {
+    method: 'DELETE',
+    headers: { 'X-Presensi-Preview-Token': token },
+    cache: 'no-store',
+    keepalive: true,
+  }).catch(() => undefined)
+}
+
+function stopLocalPreview(): void {
+  previewGeneration += 1
+  isOpeningLocalPreview.value = false
+  if (statusTimer) window.clearTimeout(statusTimer)
+  statusTimer = undefined
+  const token = localPreviewToken.value
+  localPreviewToken.value = null
+  cameraObservation.value = null
+  localPreviewRecognitionState.value = null
+  localPreviewError.value = null
+  if (token) void closeLocalPreviewSession(token)
+}
+
+async function fetchLocalPreview(path: '/v1/status' | '/v1/frame.jpg'): Promise<Response> {
+  if (!previewBaseUrl || !localPreviewToken.value) {
+    throw new Error('Sesi preview AI_EDGE belum aktif.')
+  }
+  const requestToken = localPreviewToken.value
+  let response = await fetchWithPreviewTimeout(`${previewBaseUrl}${path}`, {
+    headers: { 'X-Presensi-Preview-Token': requestToken },
+    cache: 'no-store',
+  })
+  if (
+    response.status === 401 &&
+    localPreviewToken.value === requestToken &&
+    cameraSource.value === 'lab'
+  ) {
+    const nextToken = await openLocalPreviewSession()
+    if (localPreviewToken.value !== requestToken || cameraSource.value !== 'lab') {
+      void closeLocalPreviewSession(nextToken)
+      throw new Error('Sesi preview AI_EDGE telah ditutup.')
+    }
+    localPreviewToken.value = nextToken
+    void closeLocalPreviewSession(requestToken)
+    labStreamKey.value += 1
+    response = await fetchWithPreviewTimeout(`${previewBaseUrl}${path}`, {
+      headers: { 'X-Presensi-Preview-Token': localPreviewToken.value },
+      cache: 'no-store',
+    })
+  }
+  return response
+}
+
+async function pollLocalPreviewStatus(generation: number): Promise<void> {
+  if (generation !== previewGeneration || cameraSource.value !== 'lab' || !selectedStudent.value) {
+    return
+  }
+  try {
+    const response = await fetchLocalPreview('/v1/status')
+    if (!response.ok) throw new Error('Status kamera AI_EDGE belum tersedia.')
+    const status = (await response.json()) as LocalPreviewStatus
+    if (generation === previewGeneration) {
+      localPreviewRecognitionState.value = status.recognition_state ?? null
+      cameraObservation.value = status.camera_open ? (status.camera_observation ?? null) : null
+      localPreviewError.value = status.camera_open
+        ? null
+        : status.recognition_state === 'camera_disabled'
+          ? 'Kamera dijeda dari halaman Perangkat. Lanjutkan kamera untuk menampilkan preview.'
+          : 'Agent belum membuka kamera. Periksa kamera dan service AI_EDGE.'
+    }
+  } catch (error) {
+    if (generation === previewGeneration) {
+      localPreviewRecognitionState.value = null
+      cameraObservation.value = null
+      localPreviewError.value =
+        error instanceof Error ? error.message : 'Status deteksi AI_EDGE tidak tersedia.'
+    }
+  } finally {
+    if (generation === previewGeneration && cameraSource.value === 'lab') {
+      statusTimer = window.setTimeout(() => void pollLocalPreviewStatus(generation), 500)
+    }
+  }
+}
+
+async function startLocalPreview(): Promise<void> {
+  if (
+    cameraSource.value !== 'lab' ||
+    !selectedStudent.value ||
+    localPreviewToken.value ||
+    isOpeningLocalPreview.value
+  ) {
+    return
+  }
+  if (!previewBaseUrl) {
+    localPreviewError.value = 'Pilih kamera perangkat ini atau buka aplikasi di komputer AI_EDGE.'
+    return
+  }
+  const generation = ++previewGeneration
+  isOpeningLocalPreview.value = true
+  localPreviewError.value = null
+  labStreamFailed.value = false
+  try {
+    const token = await openLocalPreviewSession()
+    if (generation !== previewGeneration || cameraSource.value !== 'lab') {
+      void closeLocalPreviewSession(token)
+      return
+    }
+    localPreviewToken.value = token
+    labStreamKey.value += 1
+    void pollLocalPreviewStatus(generation)
+  } catch (error) {
+    if (generation === previewGeneration) {
+      localPreviewError.value =
+        error instanceof Error ? error.message : 'Preview AI_EDGE tidak dapat dibuka.'
+    }
+  } finally {
+    if (generation === previewGeneration) isOpeningLocalPreview.value = false
   }
 }
 
 function retryLabStream(): void {
   labStreamFailed.value = false
-  labStreamKey.value += 1
+  if (!localPreviewToken.value) {
+    void startLocalPreview()
+  } else {
+    labStreamKey.value += 1
+  }
+}
+
+function handleLabStreamError(): void {
+  labStreamFailed.value = true
+  cameraObservation.value = null
 }
 
 async function loadClasses(): Promise<void> {
@@ -164,6 +490,7 @@ async function loadClasses(): Promise<void> {
 async function loadRoster(classId: string): Promise<void> {
   flowVersion += 1
   stopCamera()
+  stopLocalPreview()
   isStarting.value = false
   students.value = []
   activeTemplates.value = []
@@ -185,19 +512,23 @@ async function loadRoster(classId: string): Promise<void> {
     isLoading.value = false
   }
   if (cameraSource.value === 'device') void startDevicePreview()
+  else if (selectedStudent.value) void startLocalPreview()
 }
 
 onMounted(() => {
   void loadClasses()
-  void startDevicePreview()
 })
 
-watch(cameraSource, () => {
+watch(cameraSource, (source) => {
   flowVersion += 1
   stopCamera()
   labStreamFailed.value = false
-  if (cameraSource.value === 'device') void startDevicePreview()
-  else labStreamKey.value += 1
+  if (source === 'device') {
+    stopLocalPreview()
+    void startDevicePreview()
+  } else {
+    void startLocalPreview()
+  }
 })
 
 watch(selectedClassId, (classId, previousClassId) => {
@@ -207,31 +538,26 @@ watch(selectedClassId, (classId, previousClassId) => {
 onBeforeUnmount(() => {
   flowVersion += 1
   stopCamera()
+  stopLocalPreview()
 })
 
-function captureVideoFrame(): Promise<Blob> {
-  const canvas = document.createElement('canvas')
+async function captureVideoFrame(): Promise<Blob> {
   if (cameraSource.value === 'lab') {
-    const image = labImageElement.value
-    if (!image || image.naturalWidth < 1 || image.naturalHeight < 1) {
-      return Promise.reject(new Error('Stream lab belum siap.'))
-    }
-    canvas.width = image.naturalWidth
-    canvas.height = image.naturalHeight
-    const context = canvas.getContext('2d')
-    if (!context) return Promise.reject(new Error('Kamera belum siap.'))
-    context.drawImage(image, 0, 0, canvas.width, canvas.height)
-  } else {
-    const video = videoElement.value
-    if (!video || video.videoWidth < 1 || video.videoHeight < 1) {
-      return Promise.reject(new Error('Kamera belum siap.'))
-    }
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    const context = canvas.getContext('2d')
-    if (!context) return Promise.reject(new Error('Kamera belum siap.'))
-    context.drawImage(video, 0, 0, canvas.width, canvas.height)
+    const response = await fetchLocalPreview('/v1/frame.jpg')
+    if (!response.ok) throw new Error('Frame kamera AI_EDGE belum siap.')
+    return response.blob()
   }
+
+  const canvas = document.createElement('canvas')
+  const video = videoElement.value
+  if (!video || video.videoWidth < 1 || video.videoHeight < 1) {
+    throw new Error('Kamera belum siap.')
+  }
+  canvas.width = video.videoWidth
+  canvas.height = video.videoHeight
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('Kamera belum siap.')
+  context.drawImage(video, 0, 0, canvas.width, canvas.height)
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (image) => (image ? resolve(image) : reject(new Error('Capture kamera gagal.'))),
@@ -253,11 +579,17 @@ async function startEnrollment(): Promise<void> {
 
   try {
     if (cameraSource.value === 'lab') {
-      // Single-owner: kamera lab dipegang agent; browser hanya membaca
-      // stream MJPEG yang sama dengan inference, lalu capture via canvas.
+      // Single-owner: stream dan frame capture berasal dari agent yang sama
+      // dengan deteksi YuNet; browser tidak membuka webcam kedua.
       stopCamera()
-      if (!labImageElement.value || labStreamFailed.value) {
-        throw new Error('Stream kamera lab belum tersedia di perangkat ini.')
+      if (!localPreviewToken.value || labStreamFailed.value) {
+        throw new Error(localPreviewError.value ?? 'Stream kamera lab belum tersedia.')
+      }
+      if (cameraObservation.value?.state !== 'ready') {
+        throw new Error(
+          cameraObservation.value?.message ??
+            'Tunggu sampai deteksi AI_EDGE menemukan satu wajah siap.',
+        )
       }
     } else {
       if (!stream.value) await startDevicePreview()
@@ -313,6 +645,7 @@ function cancelCapture(): void {
   captureIndex.value = 0
   stopCamera()
   if (cameraSource.value === 'device') void startDevicePreview()
+  else void startLocalPreview()
 }
 
 function selectStudent(student: EnrollmentStudentStatus): void {
@@ -403,7 +736,6 @@ function confirmIdentityAndContinue(): void {
   captureResult.value = null
   identityConfirmed.value = false
   stopCamera()
-  if (cameraSource.value === 'device') void startDevicePreview()
 
   const nextStudent =
     students.value
@@ -411,10 +743,13 @@ function confirmIdentityAndContinue(): void {
       .find((student) => student.template_status !== 'enrolled') ?? null
   if (nextStudent) {
     selectedStudentId.value = nextStudent.id
+    if (cameraSource.value === 'device') void startDevicePreview()
     pageMessage.value = `${nextStudent.full_name} dipilih. Pastikan siswa yang benar sebelum memulai.`
     return
   }
   selectedStudentId.value = ''
+  stopLocalPreview()
+  stopCamera()
   capturePhase.value = 'complete'
   pageMessage.value = 'Semua siswa yang dipilih untuk kelas ini sudah diproses.'
 }
@@ -568,7 +903,13 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
       <div v-if="selectedStudent" class="enrollment-view__capture-layout">
         <div class="enrollment-view__source-toggle" role="radiogroup" aria-label="Sumber kamera">
           <label>
-            <input v-model="cameraSource" type="radio" value="device" name="camera-source" />
+            <input
+              v-model="cameraSource"
+              type="radio"
+              value="device"
+              name="camera-source"
+              data-testid="enrollment-source-device"
+            />
             Kamera perangkat ini
           </label>
           <label>
@@ -577,57 +918,64 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
               type="radio"
               value="lab"
               name="camera-source"
+              :disabled="!previewBaseUrl"
               data-testid="enrollment-source-lab"
             />
-            Kamera lab via agent
+            Kamera lab via AI_EDGE · deteksi aktif
           </label>
         </div>
         <p v-if="cameraSource === 'lab'" class="st-table__muted">
           Satu kamera satu pemilik: stream lab berasal dari agent yang sama dengan pengenalan,
           browser tidak membuka kamera kedua.
         </p>
-        <div class="enrollment-view__camera-frame">
+        <div class="enrollment-view__camera-frame" :style="enrollmentCameraFrameStyle">
           <video
             v-if="cameraSource === 'device'"
             ref="videoElement"
-            class="enrollment-view__camera"
+            class="enrollment-view__camera enrollment-view__camera--mirror"
             autoplay
             muted
             playsinline
             aria-label="Preview kamera siswa"
             data-testid="enrollment-camera"
-          />
-          <img
-            v-else-if="!labStreamFailed"
-            ref="labImageElement"
-            :key="labStreamKey"
-            :src="labStreamSrc"
-            class="enrollment-view__camera"
-            alt="Stream kamera lab dari agent"
-            data-testid="enrollment-lab-stream"
-            @error="labStreamFailed = true"
-            @load="labStreamFailed = false"
+            @loadedmetadata="updateDeviceFrameDimensions"
           />
           <FaceOverlay
-            :faces="[
-              {
-                x: 0.28,
-                y: 0.18,
-                width: 0.44,
-                height: 0.55,
-                landmarks: [
-                  [0.38, 0.35],
-                  [0.55, 0.35],
-                  [0.465, 0.47],
-                  [0.4, 0.58],
-                  [0.53, 0.58],
-                ],
-              },
-            ]"
-            label="Sejajarkan wajah"
+            v-if="cameraSource === 'device' && deviceFaceMesh.faces.value.length"
+            :faces="deviceFaceMesh.faces.value"
+            :image-width="deviceFaceMesh.frameSize.value.width"
+            :image-height="deviceFaceMesh.frameSize.value.height"
+            fit="contain"
+            mirrored
+            class="enrollment-view__face-overlay"
+            data-testid="enrollment-device-mesh"
+          />
+          <img
+            v-else-if="labStreamSrc && !labStreamFailed && !localPreviewError"
+            :key="labStreamKey"
+            ref="labImageElement"
+            :src="labStreamSrc"
+            class="enrollment-view__camera enrollment-view__camera--mirror"
+            alt="Stream kamera lab dari agent"
+            data-testid="enrollment-lab-stream"
+            @error="handleLabStreamError"
+            @load="handleLabStreamLoad"
+          />
+          <FaceOverlay
+            v-if="cameraSource === 'lab' && labFaceMesh.faces.value.length"
+            :faces="labFaceMesh.faces.value"
+            :image-width="labFaceMesh.frameSize.value.width"
+            :image-height="labFaceMesh.frameSize.value.height"
+            fit="contain"
+            mirrored
+            class="enrollment-view__face-overlay"
+            data-testid="enrollment-lab-mesh"
           />
           <div
-            v-if="(cameraSource === 'device' && !stream) || labStreamFailed"
+            v-if="
+              (cameraSource === 'device' && !stream) ||
+              (cameraSource === 'lab' && (!labStreamSrc || labStreamFailed || localPreviewError))
+            "
             class="enrollment-view__camera-placeholder"
           >
             <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
@@ -639,12 +987,15 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
               devicePreviewError
             }}</span>
             <span v-else-if="cameraSource === 'device'">Membuka preview kamera…</span>
-            <span v-else>Stream lab tidak terjangkau dari perangkat ini.</span>
+            <span v-else-if="localPreviewError">{{ localPreviewError }}</span>
+            <span v-else-if="isOpeningLocalPreview">Menghubungkan ke kamera AI_EDGE…</span>
+            <span v-else>Stream kamera lab belum tersedia.</span>
             <UiButton
               v-if="cameraSource === 'lab'"
               variant="secondary"
               size="sm"
               type="button"
+              :disabled="isOpeningLocalPreview"
               @click="retryLabStream"
             >
               Coba lagi
@@ -658,6 +1009,35 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             >
               Muat ulang preview
             </UiButton>
+          </div>
+          <div
+            v-if="cameraSource === 'lab'"
+            class="enrollment-view__face-guidance"
+            :class="`is-${cameraObservation?.state ?? 'pending'}`"
+            role="status"
+            data-testid="enrollment-face-guidance"
+          >
+            <span class="enrollment-view__face-guidance-dot" aria-hidden="true" />
+            <span>
+              <strong>{{ cameraObservationLabel }}</strong>
+              <small>{{ cameraObservationMessage }}</small>
+              <small v-if="!localPreviewError" data-testid="enrollment-lab-mesh-status">{{
+                labMeshStatus
+              }}</small>
+            </span>
+          </div>
+          <div
+            v-else
+            class="enrollment-view__face-guidance"
+            :class="`is-${deviceCameraGuidanceTone}`"
+            role="status"
+            data-testid="enrollment-device-guidance"
+          >
+            <span class="enrollment-view__face-guidance-dot" aria-hidden="true" />
+            <span>
+              <strong>{{ deviceCameraGuidanceLabel }}</strong>
+              <small>{{ deviceCameraGuidanceMessage }}</small>
+            </span>
           </div>
           <span
             v-if="capturePhase === 'countdown'"
@@ -830,7 +1210,10 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             variant="primary"
             type="button"
             data-testid="start-enrollment-capture"
-            :disabled="isStarting"
+            :disabled="isStarting || !canStartAgentCapture"
+            :title="
+              cameraSource === 'lab' && !canStartAgentCapture ? cameraObservationMessage : undefined
+            "
             @click="startEnrollment"
           >
             {{
@@ -844,3 +1227,72 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
     </UiCard>
   </div>
 </template>
+
+<style scoped>
+.enrollment-view__camera {
+  transform: none;
+}
+
+.enrollment-view__camera--mirror {
+  transform: scaleX(-1);
+}
+
+.enrollment-view__face-overlay {
+  z-index: 1;
+}
+
+.enrollment-view__face-guidance {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 12px;
+  color: #f7fbff;
+  background: rgb(12 21 31 / 84%);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  backdrop-filter: blur(8px);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.enrollment-view__face-guidance > span:last-child {
+  display: grid;
+  gap: 2px;
+}
+
+.enrollment-view__face-guidance small {
+  color: #d0d9e4;
+}
+
+.enrollment-view__face-guidance-dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border-radius: 50%;
+  background: #91a0b2;
+  box-shadow: 0 0 0 4px rgb(145 160 178 / 16%);
+}
+
+.enrollment-view__face-guidance.is-ready .enrollment-view__face-guidance-dot {
+  background: #51e2ab;
+  box-shadow: 0 0 0 4px rgb(81 226 171 / 18%);
+}
+
+.enrollment-view__face-guidance.is-adjust .enrollment-view__face-guidance-dot,
+.enrollment-view__face-guidance.is-multiple_faces .enrollment-view__face-guidance-dot {
+  background: #ffc66d;
+  box-shadow: 0 0 0 4px rgb(255 198 109 / 18%);
+}
+
+.enrollment-view__face-guidance.is-unavailable .enrollment-view__face-guidance-dot {
+  background: #ff807a;
+  box-shadow: 0 0 0 4px rgb(255 128 122 / 18%);
+}
+</style>

@@ -30,6 +30,77 @@ async function stubFallbackFirst(page: Page): Promise<void> {
   )
 }
 
+async function stubLocalAgentPreview(page: Page): Promise<void> {
+  const origin = 'http://127.0.0.1:4173'
+  const headers = {
+    'access-control-allow-origin': origin,
+    'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
+    'access-control-allow-headers': 'Authorization, Content-Type, X-Presensi-Preview-Token',
+    'access-control-allow-private-network': 'true',
+  }
+  const pixel = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2lA3sAAAAASUVORK5CYII=',
+    'base64',
+  )
+  await page.route('http://127.0.0.1:8765/**', async (route) => {
+    const request = route.request()
+    const url = new URL(request.url())
+    if (request.method() === 'OPTIONS') {
+      return route.fulfill({ status: 204, headers })
+    }
+    if (url.pathname === '/v1/session' && request.method() === 'POST') {
+      return route.fulfill({
+        status: 201,
+        headers,
+        json: { preview_token: 'synthetic-agent-token' },
+      })
+    }
+    if (url.pathname === '/v1/session' && request.method() === 'DELETE') {
+      return route.fulfill({ status: 200, headers, json: { closed: true } })
+    }
+    if (url.pathname === '/v1/status') {
+      return route.fulfill({
+        status: 200,
+        headers,
+        json: {
+          camera_open: true,
+          camera_observation: {
+            state: 'ready',
+            message: 'Satu wajah siap diperiksa.',
+            frame_width: 640,
+            frame_height: 480,
+            face_count: 1,
+            faces: [
+              {
+                x: 0.25,
+                y: 0.12,
+                width: 0.5,
+                height: 0.7,
+                acceptable: true,
+                landmarks: [
+                  [0.4, 0.35],
+                  [0.6, 0.35],
+                  [0.5, 0.48],
+                  [0.42, 0.6],
+                  [0.58, 0.6],
+                ],
+              },
+            ],
+          },
+        },
+      })
+    }
+    if (url.pathname === '/v1/frame.jpg' || url.pathname === '/v1/stream') {
+      return route.fulfill({
+        status: 200,
+        headers: { ...headers, 'content-type': 'image/png' },
+        body: pixel,
+      })
+    }
+    return route.fulfill({ status: 404, headers, json: { error: 'not_found' } })
+  })
+}
+
 async function loginAsLaborant(page: Page): Promise<void> {
   await stubNoActiveBrowserSession(page)
   await page.route('**/api/v1/sessions?**', (route) =>
@@ -70,23 +141,8 @@ async function loginAsLaborant(page: Page): Promise<void> {
 test('laborant captures a student, confirms identity, and advances to the next student', async ({
   page,
 }) => {
-  await page.addInitScript(() => {
-    const canvas = document.createElement('canvas')
-    canvas.width = 640
-    canvas.height = 480
-    const context = canvas.getContext('2d')
-    if (context) {
-      context.fillStyle = '#48627c'
-      context.fillRect(0, 0, canvas.width, canvas.height)
-    }
-    const stream = canvas.captureStream(12)
-    Object.defineProperty(navigator, 'mediaDevices', {
-      configurable: true,
-      value: { getUserMedia: async () => stream },
-    })
-  })
-
   await stubFallbackFirst(page)
+  await stubLocalAgentPreview(page)
   const templateStatus: Record<string, 'not_enrolled' | 'enrolled' | 'needs_reenrollment'> = {
     [roster[0].id]: 'not_enrolled',
     [roster[1].id]: 'needs_reenrollment',
@@ -162,8 +218,10 @@ test('laborant captures a student, confirms identity, and advances to the next s
     page.getByTestId(`enrollment-student-${roster[2].id}`).getByText('Terdaftar'),
   ).toBeVisible()
 
+  await expect(page.getByTestId('enrollment-lab-stream')).toBeVisible()
+  await expect(page.getByTestId('enrollment-face-guidance')).toContainText('Wajah siap ditangkap')
+  await expect(page.locator('.face-overlay__skeleton')).toHaveCount(4)
   await page.getByTestId('start-enrollment-capture').click()
-  await expect(page.getByTestId('enrollment-camera')).toBeVisible()
   await expect(page.getByText(/capture dimulai dalam 3 detik/i)).toBeVisible()
   await expect(page.getByText('Pengambilan 1 dari 4.')).toBeVisible({ timeout: 5000 })
   await expect(page.getByText(/4 dari 4 capture siap/i)).toBeVisible({ timeout: 10_000 })

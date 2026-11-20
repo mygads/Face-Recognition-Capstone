@@ -6,6 +6,7 @@ import CameraPreviewView from './CameraPreviewView.vue'
 
 const mockRouteQuery = vi.hoisted(() => ({ value: {} as Record<string, string> }))
 vi.mock('vue-router', () => ({
+  RouterLink: { template: '<a><slot /></a>' },
   useRoute: () => ({ query: mockRouteQuery.value }),
   useRouter: () => ({ replace: vi.fn() }),
 }))
@@ -18,6 +19,7 @@ vi.mock('../api/client', () => ({
         name: 'Kamera Lab 1',
         laboratory_id: 'lab-1',
         laboratory_name: 'LAB-1',
+        deployment_profile: 'AI_EDGE',
         health_status: 'healthy',
       },
       {
@@ -25,14 +27,11 @@ vi.mock('../api/client', () => ({
         name: 'Kamera Lab 2',
         laboratory_id: 'lab-1',
         laboratory_name: 'LAB-1',
+        deployment_profile: 'AI_EDGE',
         health_status: 'healthy',
       },
     ],
     pagination: { page: 1, per_page: 50, total_items: 2, total_pages: 1 },
-  })),
-  listLaboratories: vi.fn(async () => ({
-    items: [{ id: 'lab-1', code: 'LAB-1', name: 'Lab 1' }],
-    pagination: { page: 1, per_page: 50, total_items: 1, total_pages: 1 },
   })),
 }))
 
@@ -72,6 +71,7 @@ describe('camera preview confidence companion', () => {
           ok: true,
           status: 200,
           json: async () => ({
+            device_id: 'dev-1',
             camera_open: true,
             session_active: false,
             recognition_state: 'preview_only',
@@ -122,9 +122,16 @@ describe('camera preview confidence companion', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('bukan tingkat akurasi')
+    expect(wrapper.find('[data-testid="preview-device-select"]').exists()).toBe(true)
+    expect(wrapper.find('input[type="password"]').exists()).toBe(false)
+    expect(
+      wrapper.findAll('input').some((input) => input.attributes('inputmode') === 'numeric'),
+    ).toBe(false)
     const streamImg = wrapper.find('[data-testid="preview-stream-img"]')
     expect(streamImg.exists()).toBe(true)
     expect(streamImg.attributes('src')).toContain('/v1/stream?token=preview-1')
+    expect(wrapper.findAll('.face-overlay__point')).toHaveLength(0)
+    expect(wrapper.findAll('[data-testid^="face-mark-"]')).toHaveLength(0)
     const forbidden = fetchCalls.filter(
       (url) =>
         url.includes('recognition-event') ||
@@ -133,6 +140,124 @@ describe('camera preview confidence companion', () => {
     )
     expect(forbidden).toEqual([])
     wrapper.unmount()
+  })
+
+  it('explains why a visible face has no matched student candidate', async () => {
+    const nowSeconds = Date.now() / 1000
+    const stubFetch = vi.fn(async (input: unknown) => {
+      const url = String(input)
+      if (url.endsWith('/v1/session')) {
+        return { ok: true, status: 200, json: async () => ({ preview_token: 'preview-1' }) }
+      }
+      if (url.endsWith('/v1/status')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            device_id: 'dev-1',
+            camera_open: true,
+            session_active: false,
+            recognition_state: 'waiting_for_session',
+            display_name: null,
+            diagnostic_candidate: null,
+            attendance_result: null,
+            updated_at: nowSeconds,
+            camera_observation: {
+              state: 'ready',
+              message: 'Wajah siap diperiksa.',
+              frame_width: 640,
+              frame_height: 480,
+              face_count: 1,
+              faces: [{ x: 0.2, y: 0.1, width: 0.6, height: 0.75, acceptable: true }],
+            },
+          }),
+        }
+      }
+      return { ok: false, status: 404, json: async () => ({}), blob: async () => new Blob() }
+    })
+    vi.stubGlobal('fetch', stubFetch)
+    Object.defineProperty(window, 'location', {
+      value: { hostname: '127.0.0.1' },
+      writable: true,
+    })
+
+    const wrapper = mount(CameraPreviewView, { global: { plugins: [laborantPinia()] } })
+    try {
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      await flushPromises()
+
+      expect(wrapper.get('[data-testid="preview-unmatched-face"]').text()).toContain(
+        'Wajah terdeteksi, tetapi belum ada kandidat yang cocok',
+      )
+      expect(wrapper.get('[aria-label="Status pengenalan siswa"]').text()).toContain(
+        'Wajah terdeteksi · sesi belum aktif',
+      )
+      expect(wrapper.get('[aria-label="Status pengenalan siswa"]').text()).toContain(
+        'Identitas belum diperiksa karena sesi presensi belum dibuka',
+      )
+      expect(wrapper.get('[data-testid="preview-unmatched-face"]').text()).toContain(
+        'Buka sesi pada jadwal dan kelas yang benar agar roster serta template wajah siswa dimuat',
+      )
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('explains when the AI_EDGE camera is paused and waits before attaching the stream', async () => {
+    const nowSeconds = Date.now() / 1000
+    const stubFetch = vi.fn(async (input: unknown) => {
+      const url = String(input)
+      if (url.endsWith('/v1/session')) {
+        return { ok: true, status: 201, json: async () => ({ preview_token: 'preview-1' }) }
+      }
+      if (url.endsWith('/v1/status')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            device_id: 'dev-1',
+            camera_open: false,
+            session_active: false,
+            recognition_state: 'camera_disabled',
+            display_name: null,
+            updated_at: nowSeconds,
+            camera_observation: {
+              state: 'unavailable',
+              message: 'Frame kamera terputus.',
+              frame_width: 0,
+              frame_height: 0,
+              face_count: 0,
+              faces: [],
+            },
+          }),
+        }
+      }
+      return { ok: false, status: 404, json: async () => ({}) }
+    })
+    vi.stubGlobal('fetch', stubFetch)
+    Object.defineProperty(window, 'location', {
+      value: { hostname: '127.0.0.1' },
+      writable: true,
+    })
+
+    const wrapper = mount(CameraPreviewView, { global: { plugins: [laborantPinia()] } })
+    try {
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      await flushPromises()
+
+      expect(wrapper.get('[data-testid="preview-mesh-status"]').text()).toContain('Kamera dijeda')
+      expect(wrapper.get('[data-testid="preview-mesh-status"]').text()).toContain('Tidak aktif')
+      expect(wrapper.get('[data-testid="preview-capture-fps"]').text()).toBe('Jeda')
+      expect(wrapper.get('[data-testid="preview-camera-placeholder"]').text()).toContain(
+        'Lanjutkan kamera dari halaman Perangkat',
+      )
+      expect(wrapper.find('[data-testid="preview-stream-img"]').exists()).toBe(false)
+      expect(wrapper.find('.face-overlay').exists()).toBe(false)
+    } finally {
+      wrapper.unmount()
+    }
   })
 
   it('falls back to frame polling when the stream errors', async () => {
@@ -149,6 +274,7 @@ describe('camera preview confidence companion', () => {
           ok: true,
           status: 200,
           json: async () => ({
+            device_id: 'dev-1',
             camera_open: true,
             session_active: false,
             recognition_state: 'preview_only',
@@ -189,7 +315,7 @@ describe('camera preview confidence companion', () => {
     await flushPromises()
 
     expect(fetchCalls.some((url) => url.endsWith('/v1/frame.jpg'))).toBe(true)
-    expect(wrapper.find('.camera-preview-view__frame-stage img').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="camera-frame"] img').exists()).toBe(true)
     wrapper.unmount()
   })
 })
@@ -217,6 +343,7 @@ describe('camera preview source switching', () => {
           ok: true,
           status: 200,
           json: async () => ({
+            device_id: 'dev-1',
             camera_open: true,
             session_active: false,
             recognition_state: 'preview_only',
@@ -256,13 +383,14 @@ describe('camera preview source switching', () => {
     await flushPromises()
     await new Promise((resolve) => setTimeout(resolve, 200))
     await flushPromises()
-    expect(wrapper.find('.camera-preview-view__frame-stage img').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="camera-frame"] img').exists()).toBe(true)
 
     await wrapper.find('[data-testid="preview-device-select"]').setValue('dev-2')
     await flushPromises()
 
-    expect(wrapper.find('.camera-preview-view__frame-stage img').exists()).toBe(false)
-    expect(wrapper.text()).toContain('Menghubungkan ke agent')
+    expect(wrapper.find('[data-testid="camera-frame"] img').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Perangkat kamera berbeda')
+    expect(wrapper.text()).toContain('Agent pada komputer ini milik Kamera Lab 1')
     wrapper.unmount()
   })
 
@@ -275,7 +403,7 @@ describe('camera preview source switching', () => {
     Object.defineProperty(root, 'requestFullscreen', { value: requestFullscreen, writable: true })
     const button = wrapper
       .findAll('button')
-      .find((candidate) => candidate.text().includes('Tampilan depan kamera'))
+      .find((candidate) => candidate.text().includes('Layar penuh'))
     expect(button?.exists()).toBe(true)
     await button?.trigger('click')
     await flushPromises()
@@ -289,7 +417,7 @@ describe('camera preview source switching', () => {
     await flushPromises()
     await new Promise((resolve) => setTimeout(resolve, 150))
     await flushPromises()
-    expect(wrapper.find('.camera-preview-view__frame-stage img').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="camera-frame"] img').exists()).toBe(true)
     expect(wrapper.find('[data-testid="preview-stale-warning"]').exists()).toBe(false)
 
     const realNow = Date.now()

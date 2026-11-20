@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import FaceOverlay from '../components/FaceOverlay.vue'
+import CameraFrame from '../components/CameraFrame.vue'
+import { useFaceLandmarks } from '../composables/useFaceLandmarks'
 import { UiBadge, UiButton, UiEmptyState, UiInput } from '../components/ui'
 import { shortDisplayName } from '../utils/displayName'
 import {
@@ -30,22 +31,85 @@ import {
   type PublicLaboratory,
 } from '../api/client'
 
+const DISPLAY_SESSION_STORAGE_KEY = 'presensi.display_session.v1'
+
+interface PersistedDisplaySession {
+  token: string
+  laboratoryId: string
+  deviceId: string
+  expiresAt: number
+}
+
+function readPersistedDisplaySession(): PersistedDisplaySession | null {
+  try {
+    const raw = window.sessionStorage.getItem(DISPLAY_SESSION_STORAGE_KEY)
+    if (!raw) return null
+    const value = JSON.parse(raw) as Partial<PersistedDisplaySession>
+    if (
+      typeof value.token !== 'string' ||
+      value.token.length < 16 ||
+      typeof value.laboratoryId !== 'string' ||
+      typeof value.deviceId !== 'string' ||
+      typeof value.expiresAt !== 'number' ||
+      value.expiresAt <= Date.now()
+    ) {
+      window.sessionStorage.removeItem(DISPLAY_SESSION_STORAGE_KEY)
+      return null
+    }
+    return value as PersistedDisplaySession
+  } catch {
+    return null
+  }
+}
+
+const restoredSession = readPersistedDisplaySession()
+
+function persistDisplaySession(token: string, expiresInSeconds: number | undefined): void {
+  if (!expiresInSeconds || expiresInSeconds <= 0) return
+  try {
+    window.sessionStorage.setItem(
+      DISPLAY_SESSION_STORAGE_KEY,
+      JSON.stringify({
+        token,
+        laboratoryId: labId.value,
+        deviceId: deviceId.value,
+        expiresAt: Date.now() + expiresInSeconds * 1000,
+      } satisfies PersistedDisplaySession),
+    )
+  } catch {
+    // Browser storage may be disabled; the current page session still works.
+  }
+}
+
+function clearPersistedDisplaySession(): void {
+  try {
+    window.sessionStorage.removeItem(DISPLAY_SESSION_STORAGE_KEY)
+  } catch {
+    // Ignore unavailable browser storage.
+  }
+}
+
 const labs = ref<PublicLaboratory[]>([])
 const kiosks = ref<PublicKioskOption[]>([])
-const labId = ref('')
-const deviceId = ref('')
+const labId = ref(restoredSession?.laboratoryId ?? '')
+const deviceId = ref(restoredSession?.deviceId ?? '')
 const pin = ref('')
 const display = ref<PublicDisplay | null>(null)
 const live = ref<KioskLiveUpdate | null>(null)
 const seenSpotlightIds = ref<Set<string>>(new Set())
-const displayToken = ref('')
+const displayToken = ref(restoredSession?.token ?? '')
+const displayRoot = ref<HTMLElement | null>(null)
 const error = ref<string | null>(null)
+const fullscreenError = ref<string | null>(null)
 const isLoadingLabs = ref(false)
 const isLoadingDisplay = ref(false)
+const isRestoringDisplay = ref(Boolean(restoredSession))
 const isFullscreen = ref(false)
 const streamState = ref<'off' | 'sse' | 'polling'>('off')
 const cameraState = ref<'idle' | 'active' | 'unavailable' | 'insecure'>('idle')
+const localFrameSize = ref({ width: 1280, height: 720 })
 const agentStreamState = ref<'idle' | 'live' | 'failed'>('idle')
+let initializingDisplay = true
 // Upaya koneksi ulang stream MJPEG kios (cache-buster `retry=N` memaksa
 // <img> request ulang). 503 awal = buffer JPEG agent belum ada, bukan kamera
 // mati: tanpa retry, kios gagal permanen saat dibuka sebelum frame pertama.
@@ -61,9 +125,10 @@ function clearAgentStreamRetry(): void {
 }
 const showBrowserCamera = ref(false)
 // Resolusi natural frame MJPEG (default = operasi 640x480); dikoreksi saat
-// frame pertama termuat agar overlay bbox selaras dengan crop object-fit cover.
+// frame pertama termuat agar overlay mesh selaras dengan gambar object-fit contain.
 const agentFrameSize = ref({ width: 640, height: 480 })
 const agentImage = ref<HTMLImageElement | null>(null)
+const agentHint = ref<AgentHint | null>(null)
 // Kesegaran hint: poll gagal >3 dtk berarti agent tak menjawab (frame <img>
 // bisa beku menampilkan gambar lama) -> tandai stale, jangan percaya gambar.
 const hintFresh = ref(true)
@@ -94,8 +159,6 @@ const agentFaces = computed(() => {
   if (!hintFresh.value) return []
   return agentHint.value?.faces ?? []
 })
-const agentFaceCount = computed(() => (hintFresh.value ? agentHint.value?.face_count : 0) ?? 0)
-const agentLargestOk = computed(() => agentFaces.value.some((face) => face.acceptable === true))
 const localVideo = ref<HTMLVideoElement | null>(null)
 let pollTimer: ReturnType<typeof setInterval> | undefined
 let rotationTimer: ReturnType<typeof setTimeout> | undefined
@@ -103,6 +166,7 @@ let eventSource: EventSource | null = null
 let fetchAbort: AbortController | null = null
 let localStream: MediaStream | null = null
 const ROTATE_AHEAD_SECONDS = 1800
+const schoolLogoUrl = '/logo-sekolah.png'
 
 // Sinyal generik dari agent di PC kiosk yang sama (tanpa identitas):
 // wajah terlihat / kirim menunggu konfirmasi. Best-effort; SSE tetap
@@ -181,7 +245,31 @@ const agentPairingUnverified = computed(() => {
   const hinted = agentHint.value?.device_id
   return typeof hinted !== 'string' || !hinted
 })
-const agentHint = ref<AgentHint | null>(null)
+const kioskMesh = useFaceLandmarks(
+  agentImage,
+  computed(() => agentVideoVisible.value && !agentVideoStale.value),
+)
+const kioskFaces = computed(() => {
+  if (!kioskMesh.faces.value.length) return agentFaces.value
+  return kioskMesh.faces.value.map((face, index) => ({
+    ...agentFaces.value[index],
+    ...face,
+  }))
+})
+const kioskMeshSize = computed(() => kioskMesh.frameSize.value)
+const kioskFrameSize = computed(() =>
+  showBrowserCamera.value && localFrameSize.value.width > 0 && localFrameSize.value.height > 0
+    ? localFrameSize.value
+    : kioskMeshSize.value.width > 0 && kioskMeshSize.value.height > 0
+      ? kioskMeshSize.value
+      : agentFrameSize.value,
+)
+const agentFaceCount = computed(() => (hintFresh.value ? agentHint.value?.face_count : 0) ?? 0)
+// The agent only publishes face counts while a session is active. Keep the
+// kiosk's visible face indicator useful before that by using the same local
+// dense mesh that draws the overlay. A detected face is not an identity match.
+const kioskFaceCount = computed(() => Math.max(agentFaceCount.value, kioskMesh.faces.value.length))
+const agentLargestOk = computed(() => agentFaces.value.some((face) => face.acceptable === true))
 let hintTimer: ReturnType<typeof setInterval> | undefined
 let hintAbort: AbortController | null = null
 
@@ -274,16 +362,42 @@ async function loadLabs(): Promise<void> {
   }
 }
 
-async function loadKiosks(): Promise<void> {
+async function loadKiosks(preserveSelection = false): Promise<void> {
+  const preferredDeviceId = deviceId.value
   kiosks.value = []
-  deviceId.value = ''
-  if (!labId.value) return
+  if (!labId.value) {
+    deviceId.value = ''
+    return
+  }
   try {
     kiosks.value = await listPublicKioskScreens(labId.value)
-    if (kiosks.value.length === 1) deviceId.value = kiosks.value[0].device_id
+    if (preserveSelection) {
+      deviceId.value = preferredDeviceId
+    } else {
+      deviceId.value = kiosks.value.length === 1 ? kiosks.value[0].device_id : ''
+    }
   } catch {
     kiosks.value = []
+    if (!preserveSelection) deviceId.value = ''
   }
+}
+
+async function initializeDisplay(): Promise<void> {
+  loadKioskStreamToken()
+  await loadLabs()
+  await loadKiosks(Boolean(restoredSession))
+  initializingDisplay = false
+
+  if (!restoredSession) {
+    isRestoringDisplay.value = false
+    return
+  }
+  await loadDisplay()
+  if (display.value) {
+    connectStream()
+    scheduleRotation(Math.ceil((restoredSession.expiresAt - Date.now()) / 1000))
+  }
+  isRestoringDisplay.value = false
 }
 
 function toLive(snapshot: PublicDisplay): KioskLiveUpdate {
@@ -298,6 +412,7 @@ function toLive(snapshot: PublicDisplay): KioskLiveUpdate {
     laboratory_name: snapshot.laboratory_name,
     session_id: snapshot.session_id ?? null,
     subject: snapshot.subject ?? null,
+    class_name: snapshot.class_name ?? null,
     status: snapshot.status ?? null,
     opened_at: snapshot.opened_at ?? null,
     present_count: snapshot.present_count ?? present,
@@ -334,7 +449,14 @@ async function loadDisplay(silent = false): Promise<void> {
     error.value = null
   } catch (err) {
     if (!silent) error.value = formatError(err)
-    if (err instanceof ApiError && err.status === 401) stopLive()
+    if (err instanceof ApiError && (err.status === 401 || err.status === 404)) {
+      stopLive()
+      clearPersistedDisplaySession()
+      displayToken.value = ''
+      display.value = null
+      live.value = null
+      error.value = 'Sesi layar berakhir. Masukkan PIN petugas untuk mengaktifkan kembali.'
+    }
   } finally {
     if (!silent) isLoadingDisplay.value = false
   }
@@ -387,6 +509,7 @@ function applySnapshotEvent(raw: string): void {
         laboratory_name: update.laboratory_name,
         session_id: update.session_id,
         subject: update.subject,
+        class_name: update.class_name,
         status: update.status,
         opened_at: update.opened_at,
         students: [],
@@ -472,11 +595,19 @@ async function rotateToken(): Promise<void> {
       ? await rotateKioskDisplaySession(displayToken.value)
       : await rotatePublicDisplaySession(displayToken.value)
     displayToken.value = rotated.display_token
+    persistDisplaySession(rotated.display_token, rotated.expires_in_seconds)
     applyPollSnapshot(rotated.snapshot)
     connectStream()
     scheduleRotation(rotated.expires_in_seconds)
-  } catch {
-    /* biarkan stream lama berjalan; 401 mengembalikan ke aktivasi */
+  } catch (err) {
+    if (err instanceof ApiError && (err.status === 401 || err.status === 404)) {
+      stopLive()
+      clearPersistedDisplaySession()
+      displayToken.value = ''
+      display.value = null
+      live.value = null
+      error.value = 'Sesi layar berakhir. Masukkan PIN petugas untuk mengaktifkan kembali.'
+    }
   }
 }
 
@@ -531,6 +662,14 @@ async function attachLocalStream(stream: MediaStream): Promise<void> {
   await nextTick()
   if (localVideo.value) {
     localVideo.value.srcObject = stream
+    const updateFrameSize = (): void => {
+      const video = localVideo.value
+      if (video && video.videoWidth > 0 && video.videoHeight > 0) {
+        localFrameSize.value = { width: video.videoWidth, height: video.videoHeight }
+      }
+    }
+    localVideo.value.onloadedmetadata = updateFrameSize
+    updateFrameSize()
     const play = localVideo.value.play() as unknown as Promise<void> | undefined
     if (play && typeof play.catch === 'function') await play.catch(() => undefined)
   }
@@ -556,6 +695,9 @@ function enableBrowserFallback(): void {
 
 async function submit(): Promise<void> {
   if (!labId.value || !pin.value) return
+  // Request fullscreen during the activation click. Browsers require a direct
+  // user gesture and will reject an attempt made after the PIN request awaits.
+  requestKioskFullscreen()
   isLoadingDisplay.value = true
   error.value = null
   try {
@@ -563,6 +705,8 @@ async function submit(): Promise<void> {
       ? await openKioskDisplaySession(deviceId.value, pin.value)
       : await openPublicDisplaySession(labId.value, pin.value)
     displayToken.value = opened.display_token
+    clearPersistedDisplaySession()
+    persistDisplaySession(opened.display_token, opened.expires_in_seconds)
     applyPollSnapshot(opened.snapshot)
     pin.value = ''
     connectStream()
@@ -580,22 +724,45 @@ async function submit(): Promise<void> {
   }
 }
 
-function toggleFullscreen(): void {
-  const el = document.querySelector('.display-view')
-  if (!document.fullscreenElement && el instanceof HTMLElement) {
-    void el
-      .requestFullscreen()
-      .then(() => {
-        isFullscreen.value = true
+function syncFullscreenState(): void {
+  isFullscreen.value = Boolean(document.fullscreenElement)
+  if (isFullscreen.value) fullscreenError.value = null
+}
+
+const fullscreenFailureMessage =
+  'Chrome menolak fullscreen. Buka kiosk di tab Chrome biasa, lalu tekan tombol Layar penuh.'
+
+function requestKioskFullscreen(): void {
+  const root = displayRoot.value
+  if (!root?.requestFullscreen || document.fullscreenElement) return
+  try {
+    void root
+      .requestFullscreen({ navigationUI: 'hide' })
+      .then(syncFullscreenState)
+      .catch(() => {
+        syncFullscreenState()
+        fullscreenError.value = fullscreenFailureMessage
       })
-      .catch(() => undefined)
-  } else if (document.fullscreenElement) {
-    void document
-      .exitFullscreen()
-      .then(() => {
-        isFullscreen.value = false
-      })
-      .catch(() => undefined)
+  } catch {
+    syncFullscreenState()
+    fullscreenError.value = fullscreenFailureMessage
+  }
+}
+
+async function toggleFullscreen(): Promise<void> {
+  fullscreenError.value = null
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen()
+    } else if (displayRoot.value?.requestFullscreen) {
+      await displayRoot.value.requestFullscreen({ navigationUI: 'hide' })
+    } else {
+      throw new Error('Fullscreen tidak didukung browser ini.')
+    }
+    syncFullscreenState()
+  } catch {
+    syncFullscreenState()
+    fullscreenError.value = fullscreenFailureMessage
   }
 }
 
@@ -645,8 +812,85 @@ const terminalId = computed(() => {
 const waitingCount = computed(() => live.value?.waiting_count ?? 0)
 
 const boardTitle = computed(() => display.value?.laboratory_name ?? 'Layar presensi')
+const sessionStateLabel = computed(() => {
+  if (!display.value) return 'Menunggu aktivasi petugas'
+  if (live.value?.status === 'scheduled') return 'Sesi belum dibuka'
+  if (live.value?.status === 'closed') return 'Sesi sudah ditutup'
+  if (live.value?.status === 'cancelled') return 'Sesi dibatalkan'
+  if (!live.value?.session_id) return 'Tidak ada sesi berlangsung'
+  return live.value.status === 'manual_override'
+    ? 'Sesi aktif · dibuka manual'
+    : 'Sesi aktif · sudah dibuka'
+})
+const sessionDetailsLabel = computed(() => {
+  if (!display.value) return ''
+  const subject = live.value?.subject ?? 'Tidak ada praktikum berlangsung'
+  const className = live.value?.class_name ?? 'Tidak ada kelas aktif'
+  return `${subject} · ${className} · ${display.value.laboratory_name}`
+})
+const sessionOpenedLabel = computed(() => {
+  if (!display.value) return ''
+  if (live.value?.status === 'scheduled') {
+    return 'Belum dibuka oleh guru atau laboran.'
+  }
+  if (!live.value?.session_id || !live.value.opened_at) return 'Tidak ada jadwal aktif sekarang.'
+  return `Dibuka ${formatRecordedTime(live.value.opened_at)} WIB`
+})
 
 const spotlight = computed(() => live.value?.spotlight ?? null)
+
+const kioskRecognitionMessage = computed(() => {
+  if (live.value?.status === 'scheduled') {
+    return kioskFaceCount.value > 0
+      ? 'Wajah terdeteksi. AI menunggu sesi dibuka agar bisa mencocokkan wajah dengan roster jadwal ini.'
+      : 'Jadwal sudah ada, tetapi guru atau laboran belum membuka sesi. Pengenalan wajah belum dimulai.'
+  }
+  if (!live.value?.session_id) {
+    return kioskFaceCount.value > 0
+      ? 'Wajah terdeteksi, tetapi identitas belum diperiksa karena sesi belum dibuka. Minta guru atau laboran membuka sesi agar AI memakai roster yang benar.'
+      : 'Belum ada sesi presensi aktif. Minta guru atau laboran membuka sesi agar roster dan template siswa dimuat.'
+  }
+  if (agentDeviceMismatch.value) {
+    return 'Perangkat kamera berbeda dari kiosk ini. Identitas tidak akan diperiksa sampai perangkatnya cocok.'
+  }
+  if (agentPairingUnverified.value) {
+    return 'Menunggu verifikasi pasangan perangkat kamera kiosk.'
+  }
+  if (agentCameraDown.value) {
+    return 'Kamera agent sedang dijeda atau tidak tersedia. Aktifkan kamera pada perangkat lab.'
+  }
+  if (agentHint.value?.recognition_state === 'waiting_for_calibration') {
+    return 'AI belum dikalibrasi, sehingga identitas belum dapat diverifikasi.'
+  }
+  if (
+    agentHint.value?.recognition_state === 'checking' ||
+    agentHint.value?.recognition_state === 'collecting'
+  ) {
+    return 'AI sedang memeriksa beberapa frame. Tahan posisi dan pastikan hanya satu siswa di depan kamera.'
+  }
+  if (agentHint.value?.recognition_state === 'retry_frontal') {
+    return 'Wajah belum cukup jelas untuk dicocokkan. Hadapkan wajah lurus ke kamera.'
+  }
+  if (agentHint.value?.recognition_state === 'rejected') {
+    return 'Wajah terlihat, tetapi belum cocok atau kualitas frame belum cukup. Periksa posisi dan fokus kamera.'
+  }
+  if (agentHint.value?.recognition_state === 'accepted') {
+    return 'Identitas cocok sementara. Menunggu Core API memvalidasi roster sebelum nama ditampilkan.'
+  }
+  if (agentHint.value && !agentHint.value.session_active) {
+    return 'Agent belum menerima roster sesi aktif. Pastikan sesi dibuka untuk lab dan kelas yang benar.'
+  }
+  if (!hintFresh.value || !agentHint.value) {
+    return 'Menunggu status AI dari agent kamera. Nama hanya tampil setelah hasil presensi dikonfirmasi.'
+  }
+  if (agentHint.value.attendance_result === 'pending') {
+    return 'Wajah sedang diperiksa. Nama dan status akan tampil setelah Core API mengonfirmasi presensi.'
+  }
+  if (agentHint.value.face_present) {
+    return 'Wajah terdeteksi. Nama kandidat tidak ditampilkan di kiosk; nama muncul setelah presensi cocok dan dikonfirmasi.'
+  }
+  return 'Sesi aktif. Berdiri satu orang di depan kamera; nama akan tampil setelah presensi dikonfirmasi.'
+})
 
 const spotlightFresh = computed(() => {
   void now.value
@@ -681,6 +925,7 @@ function resetSession(): void {
   stopLive()
   clearRotation()
   stopLocalCamera()
+  clearPersistedDisplaySession()
   displayToken.value = ''
   display.value = null
   live.value = null
@@ -688,19 +933,23 @@ function resetSession(): void {
 }
 
 watch(labId, () => {
+  if (initializingDisplay) return
   resetSession()
   void loadKiosks()
 })
-watch(deviceId, () => resetSession())
+watch(deviceId, () => {
+  if (!initializingDisplay) resetSession()
+})
 
 onMounted(() => {
-  loadKioskStreamToken()
-  void loadLabs()
+  void initializeDisplay()
+  document.addEventListener('fullscreenchange', syncFullscreenState)
   clockTimer = setInterval(() => {
     now.value = new Date()
   }, 1000)
 })
 onBeforeUnmount(() => {
+  document.removeEventListener('fullscreenchange', syncFullscreenState)
   stopLive()
   clearRotation()
   stopLocalCamera()
@@ -709,12 +958,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="display-view kiosk" aria-label="Layar presensi publik">
+  <section ref="displayRoot" class="display-view kiosk" aria-label="Layar presensi publik">
     <header class="kiosk__top">
       <div class="kiosk__brand">
         <img
           class="kiosk__logo"
-          src="/logo-sekolah.png"
+          :src="schoolLogoUrl"
           alt="Logo SMA Cimahi"
           width="56"
           height="56"
@@ -727,15 +976,18 @@ onBeforeUnmount(() => {
       <p class="kiosk__session-pill" data-testid="display-session-pill">
         <span
           class="kiosk__dot"
-          :class="{ 'kiosk__dot--live': !!display, 'kiosk__dot--idle': !display }"
+          :class="{ 'kiosk__dot--live': !!live?.session_id, 'kiosk__dot--idle': !live?.session_id }"
           aria-hidden="true"
         />
-        <span v-if="!display">Menunggu Aktivasi Petugas</span>
-        <span v-else>{{
-          display.subject
-            ? `${display.subject} · ${display.laboratory_name}`
-            : display.laboratory_name
-        }}</span>
+        <span class="kiosk__session-copy">
+          <strong data-testid="display-session-state">{{ sessionStateLabel }}</strong>
+          <small v-if="display" data-testid="display-session-details">{{
+            sessionDetailsLabel
+          }}</small>
+          <small v-if="display" data-testid="display-session-opened">{{
+            sessionOpenedLabel
+          }}</small>
+        </span>
       </p>
       <div class="kiosk__clock">
         <strong>{{ clockWib }} <small>WIB</small></strong>
@@ -743,7 +995,11 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <main v-if="!display" class="kiosk__activate-wrap">
+    <main v-if="isRestoringDisplay" class="kiosk__restore" role="status">
+      Memulihkan sesi kiosk…
+    </main>
+
+    <main v-else-if="!display" class="kiosk__activate-wrap">
       <div class="kiosk__activate-info">
         <p class="kiosk__eyebrow">Kiosk mandiri · tanpa login staf</p>
         <h1>Aktivasi Layar Presensi Kiosk</h1>
@@ -821,6 +1077,9 @@ onBeforeUnmount(() => {
             />
           </label>
           <p v-if="error" class="kiosk__error" role="alert">{{ error }}</p>
+          <p v-if="fullscreenError" class="kiosk__error" role="alert">
+            {{ fullscreenError }}
+          </p>
           <UiButton variant="primary" type="submit" :disabled="isLoadingDisplay" class="kiosk__cta">
             {{ isLoadingDisplay ? 'Memuat…' : 'Mulai Layar Presensi' }}
           </UiButton>
@@ -865,12 +1124,18 @@ onBeforeUnmount(() => {
                           : 'Menghubungkan Kamera Lab…'
             }}
           </p>
-          <div class="kiosk__frame">
+          <CameraFrame
+            :faces="agentVideoVisible && !agentVideoStale ? kioskFaces : []"
+            :image-width="kioskFrameSize.width"
+            :image-height="kioskFrameSize.height"
+            :label="kioskFaceCount > 1 ? `Wajah utama · ${kioskFaceCount} wajah` : 'Wajah utama'"
+          >
             <img
               v-if="agentVideoVisible && !agentVideoStale"
               ref="agentImage"
               :src="agentStreamSrc"
-              class="kiosk__video"
+              crossorigin="anonymous"
+              class="camera-frame__media"
               alt="Preview kamera lab dari agent (sumber inference yang sama)"
               data-testid="display-agent-video"
               @load="onAgentStreamLoad"
@@ -878,36 +1143,24 @@ onBeforeUnmount(() => {
             />
             <span
               v-else-if="agentCameraDown || agentVideoStale"
-              class="kiosk__silhouette"
+              class="camera-frame__placeholder"
               aria-hidden="true"
               >{{ agentCameraDown ? 'Kamera tidak tersedia' : 'Menghubungkan ulang…' }}</span
             >
             <video
               v-else-if="showBrowserCamera && cameraState === 'active'"
               ref="localVideo"
-              class="kiosk__video"
+              class="camera-frame__media"
               playsinline
               autoplay
               muted
               aria-label="Preview kamera perangkat (diagnostik)"
               data-testid="display-local-video"
             />
-            <span v-else class="kiosk__silhouette" aria-hidden="true"
+            <span v-else class="camera-frame__placeholder" aria-hidden="true"
               >Berdiri di dalam bingkai</span
             >
-            <FaceOverlay
-              v-if="agentVideoVisible && !agentVideoStale && agentFaces.length"
-              :faces="agentFaces"
-              :image-width="agentFrameSize.width"
-              :image-height="agentFrameSize.height"
-              fit="cover"
-              :label="agentFaceCount > 1 ? `Wajah utama · ${agentFaceCount} wajah` : 'Wajah utama'"
-            />
-            <span class="kiosk__frame-corner kiosk__frame-corner--tl" aria-hidden="true" />
-            <span class="kiosk__frame-corner kiosk__frame-corner--tr" aria-hidden="true" />
-            <span class="kiosk__frame-corner kiosk__frame-corner--bl" aria-hidden="true" />
-            <span class="kiosk__frame-corner kiosk__frame-corner--br" aria-hidden="true" />
-          </div>
+          </CameraFrame>
           <p v-if="agentDeviceMismatch" class="kiosk__muted" role="alert">
             Layar ini dipasangkan ke kamera lain. Video disembunyikan agar tidak menyesatkan.
             Hubungi operator untuk memasangkan ulang perangkat yang benar.
@@ -918,17 +1171,17 @@ onBeforeUnmount(() => {
           </p>
           <p class="kiosk__camera-meta">
             <UiBadge
-              :tone="agentFaceCount > 1 ? 'late' : agentFaceCount === 1 ? 'present' : 'neutral'"
+              :tone="kioskFaceCount > 1 ? 'late' : kioskFaceCount === 1 ? 'present' : 'neutral'"
             >
               {{
-                agentFaceCount > 1
-                  ? `${agentFaceCount} wajah`
-                  : agentFaceCount === 1
+                kioskFaceCount > 1
+                  ? `${kioskFaceCount} wajah`
+                  : kioskFaceCount === 1
                     ? '1 wajah'
                     : 'Belum ada wajah'
               }}
             </UiBadge>
-            <span v-if="agentFaceCount > 1" class="kiosk__muted">Satu siswa di depan kamera.</span>
+            <span v-if="kioskFaceCount > 1" class="kiosk__muted">Satu siswa di depan kamera.</span>
             <span v-else-if="agentLargestOk" class="kiosk__muted"
               >Bingkai hijau siap diverifikasi.</span
             >
@@ -953,11 +1206,19 @@ onBeforeUnmount(() => {
             Mode polling 5 detik (stream realtime tidak tersedia).
           </p>
           <div class="kiosk__board-actions">
-            <UiButton variant="secondary" type="button" @click="toggleFullscreen">
+            <UiButton variant="secondary" type="button" @click="void toggleFullscreen()">
               {{ isFullscreen ? 'Keluar fullscreen' : 'Fullscreen' }}
             </UiButton>
             <UiButton variant="text" type="button" @click="resetSession">Ganti layar</UiButton>
           </div>
+          <p
+            v-if="fullscreenError"
+            class="kiosk__error"
+            role="alert"
+            data-testid="fullscreen-error"
+          >
+            {{ fullscreenError }}
+          </p>
         </div>
         <div class="kiosk__result">
           <div v-if="spotlight" class="kiosk__result-card" data-testid="display-spotlight">
@@ -1010,7 +1271,12 @@ onBeforeUnmount(() => {
               {{ display.status }} · Hadir {{ live?.present_count ?? 0 }} · Terlambat
               {{ live?.late_count ?? 0 }} / {{ live?.total_roster ?? 0 }}
             </p>
-            <p class="kiosk__muted">Silakan berdiri di dalam bingkai kamera.</p>
+            <p class="kiosk__muted" data-testid="display-recognition-status">
+              {{ kioskRecognitionMessage }}
+            </p>
+            <p class="kiosk__muted" data-testid="display-recognition-policy">
+              Nama siswa hanya ditampilkan setelah presensi dikonfirmasi oleh Core API.
+            </p>
             <p
               v-if="showVerifying"
               class="kiosk__verifying"
@@ -1041,7 +1307,7 @@ onBeforeUnmount(() => {
   background: #0b2036;
   color: #f1f5f9;
   font-family: var(--st-font);
-  padding: 0 0 32px;
+  padding: 0;
 }
 .kiosk__top {
   display: flex;
@@ -1095,6 +1361,21 @@ onBeforeUnmount(() => {
   font-weight: 600;
   max-width: 100%;
 }
+.kiosk__session-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+.kiosk__session-copy strong {
+  color: #f1f5f9;
+  font-size: 0.82rem;
+}
+.kiosk__session-copy small {
+  color: #a9bccd;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
 .kiosk__dot {
   width: 10px;
   height: 10px;
@@ -1134,6 +1415,14 @@ onBeforeUnmount(() => {
   max-width: 1060px;
   margin: 32px auto 0;
   padding: 0 24px;
+}
+.kiosk__restore {
+  display: grid;
+  min-height: calc(100vh - 88px);
+  place-items: center;
+  padding: 24px;
+  color: #c6d4d3;
+  font-size: 1rem;
 }
 .kiosk__activate-info h1 {
   margin: 8px 0;
@@ -1288,24 +1577,61 @@ onBeforeUnmount(() => {
   color: #f1f5f9;
 }
 .kiosk__board {
-  max-width: 1180px;
-  margin: 24px auto 0;
-  padding: 0 24px;
+  box-sizing: border-box;
+  width: 100%;
+  height: calc(100vh - 88px);
+  min-height: 0;
+  max-width: none;
+  margin: 0;
+  padding: 16px clamp(16px, 2vw, 32px);
 }
 .kiosk__stage {
   display: grid;
-  grid-template-columns: minmax(0, 7fr) minmax(300px, 5fr);
-  gap: 20px;
-  align-items: start;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 25vw);
+  gap: clamp(16px, 1.5vw, 24px);
+  align-items: stretch;
 }
 .kiosk__camera {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   background: #152223;
   border: 1px solid #1e3a52;
-  border-radius: 24px;
-  padding: 20px;
-  display: grid;
+  border-radius: 16px;
+  padding: clamp(12px, 1.25vw, 20px);
+  display: flex;
+  flex-direction: column;
   gap: 12px;
+  justify-items: stretch;
+}
+.kiosk__camera :deep(.camera-frame) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 0;
+  flex: 1 1 0;
+  align-content: center;
   justify-items: center;
+}
+.kiosk__camera :deep(.camera-frame__viewport) {
+  width: auto;
+  height: 100%;
+  flex: 0 1 auto;
+  align-self: center;
+  max-width: 100%;
+  min-height: 0;
+  border-radius: var(--radius-lg, 16px);
+}
+.kiosk__camera :deep(.camera-frame__media) {
+  object-fit: contain;
+  border-radius: inherit;
 }
 .kiosk__camera-badge {
   display: inline-flex;
@@ -1320,66 +1646,6 @@ onBeforeUnmount(() => {
   color: var(--st-gold);
   align-self: start;
 }
-.kiosk__frame {
-  position: relative;
-  width: min(360px, 100%);
-  height: 440px;
-  border-radius: 180px;
-  border: 2px solid var(--st-gold);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  background: radial-gradient(circle at 50% 35%, #14324a 0%, #0b2036 70%);
-}
-.kiosk__video {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: inherit;
-}
-.kiosk__frame-corner {
-  position: absolute;
-  z-index: 2;
-  width: 32px;
-  height: 32px;
-  border: 4px solid #fbbf24;
-  pointer-events: none;
-}
-.kiosk__frame-corner--tl {
-  top: -2px;
-  left: -2px;
-  border-right: 0;
-  border-bottom: 0;
-  border-top-left-radius: 12px;
-}
-.kiosk__frame-corner--tr {
-  top: -2px;
-  right: -2px;
-  border-left: 0;
-  border-bottom: 0;
-  border-top-right-radius: 12px;
-}
-.kiosk__frame-corner--bl {
-  bottom: -2px;
-  left: -2px;
-  border-right: 0;
-  border-top: 0;
-  border-bottom-left-radius: 12px;
-}
-.kiosk__frame-corner--br {
-  bottom: -2px;
-  right: -2px;
-  border-left: 0;
-  border-top: 0;
-  border-bottom-right-radius: 12px;
-}
-.kiosk__silhouette {
-  color: #a9bccd;
-  font-size: 0.85rem;
-}
 .kiosk__camera-meta {
   margin: 0;
   color: #a9bccd;
@@ -1390,12 +1656,17 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 12px;
-  justify-content: center;
+  justify-content: flex-start;
+  margin-top: auto;
 }
 .kiosk__result {
   display: grid;
   gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
   align-content: start;
+  overflow-y: auto;
 }
 .kiosk__result-card {
   background: var(--st-primary-container);
@@ -1505,10 +1776,89 @@ onBeforeUnmount(() => {
   border-color: #e6f7f6;
   color: #0f2a28;
 }
-@media (max-width: 960px) {
+.display-view.kiosk:fullscreen,
+.display-view.kiosk:-webkit-full-screen {
+  position: fixed;
+  z-index: 2147483000;
+  inset: 0;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  min-width: 100vw;
+  min-height: 100dvh;
+  max-width: none;
+  margin: 0;
+  overflow: hidden;
+  padding: 0;
+}
+.display-view.kiosk:fullscreen .kiosk__top,
+.display-view.kiosk:-webkit-full-screen .kiosk__top {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 72px;
+  padding: 8px clamp(16px, 2vw, 32px);
+  flex-wrap: nowrap;
+}
+.display-view.kiosk:fullscreen .kiosk__board,
+.display-view.kiosk:-webkit-full-screen .kiosk__board {
+  height: 100%;
+  margin: 0;
+  padding: 12px clamp(16px, 2vw, 32px);
+}
+.display-view.kiosk:fullscreen .kiosk__stage,
+.display-view.kiosk:-webkit-full-screen .kiosk__stage {
+  height: 100%;
+  min-height: 0;
+}
+.display-view.kiosk:fullscreen .kiosk__result,
+.display-view.kiosk:-webkit-full-screen .kiosk__result {
+  align-content: center;
+}
+@media (max-width: 850px) {
   .kiosk__activate-wrap,
   .kiosk__stage {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .kiosk__board {
+    height: auto;
+    min-height: calc(100vh - 160px);
+    padding: 16px;
+  }
+  .kiosk__stage {
+    height: auto;
+  }
+  .kiosk__camera {
+    height: auto;
+    min-height: 0;
+  }
+  .kiosk__camera :deep(.camera-frame) {
+    flex: 0 0 auto;
+    height: auto;
+  }
+  .kiosk__camera :deep(.camera-frame__viewport) {
+    width: 100%;
+    height: auto;
+  }
+  .kiosk__result {
+    height: auto;
+    overflow: visible;
+  }
+  .display-view.kiosk:fullscreen,
+  .display-view.kiosk:-webkit-full-screen {
+    height: 100dvh;
+    overflow: auto;
+  }
+  .display-view.kiosk:fullscreen .kiosk__top,
+  .display-view.kiosk:-webkit-full-screen .kiosk__top {
+    flex-wrap: wrap;
+  }
+  .display-view.kiosk:fullscreen .kiosk__board,
+  .display-view.kiosk:-webkit-full-screen .kiosk__board {
+    height: auto;
+    min-height: calc(100dvh - 160px);
   }
   .kiosk__top {
     padding: 12px 16px;

@@ -1,9 +1,9 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import FaceOverlay from './FaceOverlay.vue'
 
 describe('FaceOverlay', () => {
-  it('menyorot wajah terbesar dan menggambar lima titik landmark', () => {
+  it('tidak menggambar landmark lima titik agent sebagai mesh wajah', () => {
     const wrapper = mount(FaceOverlay, {
       props: {
         label: 'Wajah utama',
@@ -37,18 +37,66 @@ describe('FaceOverlay', () => {
         ],
       },
     })
-    const marks = wrapper.findAll('[data-testid^="face-box-"]')
-    expect(marks).toHaveLength(2)
-    expect(marks[1].classes()).toContain('is-primary')
-    expect(marks[0].classes()).toContain('is-secondary')
-    expect(wrapper.findAll('.face-overlay__point')).toHaveLength(10)
-    expect(wrapper.text()).toContain('Wajah utama')
+    expect(wrapper.findAll('[data-testid^="face-mark-"]')).toHaveLength(0)
+    expect(wrapper.findAll('.face-overlay__point')).toHaveLength(0)
+    expect(wrapper.findAll('.face-overlay__skeleton')).toHaveLength(0)
+    expect(wrapper.findAll('rect')).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('Wajah utama')
   })
 
   it('aman tanpa wajah', () => {
     const wrapper = mount(FaceOverlay, { props: { faces: [] } })
     expect(wrapper.find('[data-testid="face-overlay"]').exists()).toBe(true)
-    expect(wrapper.findAll('[data-testid^="face-box-"]')).toHaveLength(0)
+    expect(wrapper.findAll('[data-testid^="face-mark-"]')).toHaveLength(0)
+  })
+
+  it('menggambar mesh 478 titik melalui topology canvas yang sama untuk preview dan kiosk', () => {
+    const context = {
+      beginPath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      stroke: vi.fn(),
+      setTransform: vi.fn(),
+      clearRect: vi.fn(),
+      arc: vi.fn(),
+      fill: vi.fn(),
+    } as unknown as CanvasRenderingContext2D
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context)
+    Object.defineProperty(Element.prototype, 'clientWidth', {
+      value: 640,
+      configurable: true,
+    })
+    Object.defineProperty(Element.prototype, 'clientHeight', {
+      value: 480,
+      configurable: true,
+    })
+
+    try {
+      const landmarks = Array.from({ length: 478 }, (_, index) => [
+        0.25 + (index % 20) * 0.02,
+        0.2 + Math.floor(index / 20) * 0.01,
+      ])
+      const wrapper = mount(FaceOverlay, {
+        props: {
+          faces: [{ x: 0.2, y: 0.15, width: 0.6, height: 0.6, landmarks }],
+        },
+      })
+
+      expect(getContext).toHaveBeenCalledWith('2d')
+      expect(context.stroke).toHaveBeenCalled()
+      expect(context.arc).toHaveBeenCalledTimes(478)
+      wrapper.unmount()
+    } finally {
+      getContext.mockRestore()
+      Object.defineProperty(Element.prototype, 'clientWidth', {
+        value: 0,
+        configurable: true,
+      })
+      Object.defineProperty(Element.prototype, 'clientHeight', {
+        value: 0,
+        configurable: true,
+      })
+    }
   })
 })
 
@@ -65,7 +113,15 @@ describe('FaceOverlay cover mapping', () => {
     try {
       const wrapper = mount(FaceOverlay, {
         props: {
-          faces: [{ x: 0.5, y: 0.5, width: 0.2, height: 0.2 }],
+          faces: [
+            {
+              x: 0.5,
+              y: 0.5,
+              width: 0.2,
+              height: 0.2,
+              landmarks: Array.from({ length: 478 }, () => [0.5, 0.5]),
+            },
+          ],
           imageWidth: 640,
           imageHeight: 480,
           fit: 'cover',
@@ -73,11 +129,12 @@ describe('FaceOverlay cover mapping', () => {
       })
       // Pengukuran box terjadi di onMounted; beri kesempatan re-render reaktif.
       await wrapper.vm.$nextTick()
-      const rect = wrapper.find('[data-testid="face-box-0"] rect')
+      const face = wrapper.get('[data-testid="face-mark-0"]')
       // Tengah frame tetap di tengah box; lebar 0.2 frame -> ~0.326 box.
-      expect(Number(rect.attributes('x'))).toBeCloseTo(0.5, 5)
-      expect(Number(rect.attributes('y'))).toBeCloseTo(0.5, 5)
-      expect(Number(rect.attributes('width'))).toBeCloseTo(0.3259, 3)
+      expect(Number(face.attributes('data-x'))).toBeCloseTo(0.5, 5)
+      expect(Number(face.attributes('data-y'))).toBeCloseTo(0.5, 5)
+      expect(Number(face.attributes('data-width'))).toBeCloseTo(0.3259, 3)
+      expect(wrapper.findAll('rect')).toHaveLength(0)
     } finally {
       Object.defineProperty(Element.prototype, 'clientWidth', {
         value: 0,

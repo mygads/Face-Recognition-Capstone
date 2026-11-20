@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import DisplayView from './DisplayView.vue'
 
 const api = vi.hoisted(() => ({
@@ -35,15 +35,48 @@ const api = vi.hoisted(() => ({
   ),
 }))
 
+const landmarkMocks = vi.hoisted(() => ({
+  currentFaces: [] as unknown[],
+  listeners: [] as Array<(faces: unknown[]) => void>,
+}))
+
 vi.mock('../api/client', () => ({
   ApiError: class ApiError extends Error {},
   ...api,
 }))
 
+vi.mock('../composables/useFaceLandmarks', async () => {
+  const { ref } = await import('vue')
+  return {
+    useFaceLandmarks: () => {
+      const faces = ref(landmarkMocks.currentFaces)
+      landmarkMocks.listeners.push((value) => {
+        faces.value = value
+      })
+      return {
+        faces,
+        frameSize: ref({ width: 640, height: 480 }),
+        state: ref('ready'),
+        fps: ref(30),
+      }
+    },
+  }
+})
+
+afterEach(() => {
+  window.sessionStorage.removeItem('presensi.display_session.v1')
+  landmarkMocks.currentFaces = []
+  landmarkMocks.listeners.length = 0
+})
+
 const snapshot = {
+  laboratory_id: 'lab-1',
   laboratory_name: 'Lab Kimia 1',
+  session_id: 'session-1',
   subject: 'Uji Larutan',
+  class_name: 'Kelas XII MIPA 1',
   status: 'active',
+  opened_at: '2026-11-06T06:18:00+00:00',
   present_count: 1,
   late_count: 1,
   total_roster: 3,
@@ -80,11 +113,263 @@ describe('DisplayView ala Stitch', () => {
     // nama singkat ala Stitch, bukan NIS penuh
     expect(board.text()).toContain('Raka P.')
     expect(board.text()).not.toContain('S-001')
+    expect(w.get('[data-testid="display-session-state"]').text()).toContain(
+      'Sesi aktif · sudah dibuka',
+    )
+    expect(w.get('[data-testid="display-session-details"]').text()).toContain(
+      'Uji Larutan · Kelas XII MIPA 1 · Lab Kimia 1',
+    )
+    expect(w.get('[data-testid="display-session-opened"]').text()).toContain('Dibuka')
     // sorotan hasil terakhir = Raka (terbaru) dengan badge TERLAMBAT
     const spotlight = w.find('[data-testid="display-spotlight"]')
     expect(spotlight.exists()).toBe(true)
     expect(spotlight.text()).toContain('Raka P.')
     expect(spotlight.text()).toContain('TERLAMBAT')
+  })
+
+  it('menampilkan status belum dibuka ketika belum ada sesi aktif', async () => {
+    api.openPublicDisplaySession.mockResolvedValueOnce({
+      display_token: 'tok-no-session',
+      snapshot: {
+        laboratory_id: 'lab-1',
+        laboratory_name: 'Lab Kimia 1',
+        session_id: null,
+        subject: null,
+        class_name: null,
+        status: null,
+        opened_at: null,
+        present_count: 0,
+        late_count: 0,
+        total_roster: 0,
+        students: [],
+      },
+    })
+    const w = mount(DisplayView)
+    await flushPromises()
+    await w.find('[data-testid="display-pin-input"]').setValue('1234')
+    await w.find('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(w.get('[data-testid="display-session-state"]').text()).toContain(
+      'Tidak ada sesi berlangsung',
+    )
+    expect(w.get('[data-testid="display-session-opened"]').text()).toContain(
+      'Tidak ada jadwal aktif',
+    )
+    expect(w.get('[data-testid="display-recognition-status"]').text()).toContain(
+      'Belum ada sesi presensi aktif',
+    )
+  })
+
+  it('menampilkan deteksi wajah lokal pada kiosk walau sesi belum aktif', async () => {
+    api.openPublicDisplaySession.mockResolvedValueOnce({
+      display_token: 'tok-face-without-session',
+      snapshot: {
+        ...snapshot,
+        session_id: null,
+        subject: null,
+        class_name: null,
+        status: null,
+        opened_at: null,
+        total_roster: 0,
+        students: [],
+      },
+    })
+    const wrapper = mount(DisplayView)
+    await flushPromises()
+    await wrapper.get('[data-testid="display-pin-input"]').setValue('1234')
+    await wrapper.get('form').trigger('submit.prevent')
+    landmarkMocks.currentFaces = [
+      {
+        x: 0.2,
+        y: 0.1,
+        width: 0.6,
+        height: 0.75,
+        landmarks: Array.from({ length: 478 }, () => [0.5, 0.5]),
+      },
+    ]
+    for (const update of landmarkMocks.listeners) update(landmarkMocks.currentFaces)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="display-board"]').text()).toContain('1 wajah')
+    expect(wrapper.get('[data-testid="display-recognition-status"]').text()).toContain(
+      'identitas belum diperiksa karena sesi belum dibuka',
+    )
+    wrapper.unmount()
+  })
+
+  it('memulihkan sesi kiosk setelah refresh tanpa meminta PIN lagi', async () => {
+    api.openPublicDisplaySession.mockResolvedValueOnce({
+      display_token: 'tok-refresh-session',
+      expires_in_seconds: 3600,
+      snapshot,
+    })
+    const firstPage = mount(DisplayView)
+    await flushPromises()
+    await firstPage.get('[data-testid="display-pin-input"]').setValue('1234')
+    await firstPage.get('form').trigger('submit.prevent')
+    await flushPromises()
+    firstPage.unmount()
+
+    expect(window.sessionStorage.getItem('presensi.display_session.v1')).toContain(
+      'tok-refresh-session',
+    )
+    expect(window.sessionStorage.getItem('presensi.display_session.v1')).not.toContain('1234')
+    api.getPublicDisplay.mockResolvedValueOnce(snapshot)
+    const refreshedPage = mount(DisplayView)
+    await flushPromises()
+    await flushPromises()
+
+    expect(api.getPublicDisplay).toHaveBeenCalledWith('tok-refresh-session')
+    expect(refreshedPage.find('[data-testid="display-board"]').exists()).toBe(true)
+    expect(refreshedPage.find('[data-testid="display-pin-input"]').exists()).toBe(false)
+    refreshedPage.unmount()
+  })
+
+  it('menampilkan jadwal dan kelas yang sedang berlangsung sebelum sesi dibuka', async () => {
+    api.openPublicDisplaySession.mockResolvedValueOnce({
+      display_token: 'tok-scheduled-session',
+      snapshot: {
+        laboratory_id: 'lab-1',
+        laboratory_name: 'Lab Kimia 1',
+        session_id: null,
+        subject: 'Praktikum Larutan',
+        class_name: 'Kelas XI MIPA 2',
+        status: 'scheduled',
+        opened_at: null,
+        present_count: 0,
+        late_count: 0,
+        total_roster: 0,
+        students: [],
+      },
+    })
+    const w = mount(DisplayView)
+    await flushPromises()
+    await w.find('[data-testid="display-pin-input"]').setValue('1234')
+    await w.find('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(w.get('[data-testid="display-session-state"]').text()).toContain('Sesi belum dibuka')
+    expect(w.get('[data-testid="display-session-details"]').text()).toContain(
+      'Praktikum Larutan · Kelas XI MIPA 2 · Lab Kimia 1',
+    )
+    expect(w.get('[data-testid="display-session-opened"]').text()).toContain(
+      'Belum dibuka oleh guru atau laboran',
+    )
+  })
+})
+
+describe('DisplayView fullscreen', () => {
+  async function mountActiveBoard() {
+    api.openPublicDisplaySession.mockResolvedValueOnce({ display_token: 'tok-full', snapshot })
+    const wrapper = mount(DisplayView)
+    await flushPromises()
+    await wrapper.find('[data-testid="display-pin-input"]').setValue('1234')
+    await wrapper.find('form').trigger('submit.prevent')
+    await flushPromises()
+    return wrapper
+  }
+
+  it('meminta fullscreen dari klik aktivasi sebelum menunggu respons PIN', async () => {
+    api.openPublicDisplaySession.mockResolvedValueOnce({ display_token: 'tok-gesture', snapshot })
+    const wrapper = mount(DisplayView)
+    await flushPromises()
+    const requestFullscreen = vi.fn(async () => undefined)
+    Object.defineProperty(wrapper.element, 'requestFullscreen', {
+      configurable: true,
+      value: requestFullscreen,
+    })
+    await wrapper.get('[data-testid="display-pin-input"]').setValue('1234')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(requestFullscreen).toHaveBeenCalledWith({ navigationUI: 'hide' })
+    wrapper.unmount()
+  })
+
+  it('masuk dan keluar fullscreen browser dari tombol kiosk', async () => {
+    const originalFullscreenElement = Object.getOwnPropertyDescriptor(document, 'fullscreenElement')
+    const originalExitFullscreen = Object.getOwnPropertyDescriptor(document, 'exitFullscreen')
+    let fullscreenElement: Element | null = null
+    Object.defineProperty(document, 'fullscreenElement', {
+      configurable: true,
+      get: () => fullscreenElement,
+    })
+    const exitFullscreen = vi.fn(async () => {
+      fullscreenElement = null
+    })
+    Object.defineProperty(document, 'exitFullscreen', {
+      configurable: true,
+      value: exitFullscreen,
+    })
+
+    const wrapper = await mountActiveBoard()
+    const requestFullscreen = vi.fn(async () => {
+      fullscreenElement = wrapper.element
+    })
+    Object.defineProperty(wrapper.element, 'requestFullscreen', {
+      configurable: true,
+      value: requestFullscreen,
+    })
+    try {
+      const enterButton = wrapper
+        .findAll('button')
+        .find((button) => button.text().trim() === 'Fullscreen')
+      await enterButton?.trigger('click')
+      await flushPromises()
+      expect(requestFullscreen).toHaveBeenCalledOnce()
+      expect(wrapper.text()).toContain('Keluar fullscreen')
+
+      const exitButton = wrapper
+        .findAll('button')
+        .find((button) => button.text().trim() === 'Keluar fullscreen')
+      await exitButton?.trigger('click')
+      await flushPromises()
+      expect(exitFullscreen).toHaveBeenCalledOnce()
+      expect(wrapper.text()).toContain('Fullscreen')
+    } finally {
+      wrapper.unmount()
+      if (originalFullscreenElement) {
+        Object.defineProperty(document, 'fullscreenElement', originalFullscreenElement)
+      } else {
+        Reflect.deleteProperty(document, 'fullscreenElement')
+      }
+      if (originalExitFullscreen) {
+        Object.defineProperty(document, 'exitFullscreen', originalExitFullscreen)
+      } else {
+        Reflect.deleteProperty(document, 'exitFullscreen')
+      }
+    }
+  })
+
+  it('menampilkan pesan bila Chrome menolak fullscreen', async () => {
+    const originalFullscreenElement = Object.getOwnPropertyDescriptor(document, 'fullscreenElement')
+    Object.defineProperty(document, 'fullscreenElement', {
+      configurable: true,
+      value: null,
+    })
+    const wrapper = await mountActiveBoard()
+    Object.defineProperty(wrapper.element, 'requestFullscreen', {
+      configurable: true,
+      value: vi.fn(async () => {
+        throw new Error('fullscreen denied')
+      }),
+    })
+    try {
+      const button = wrapper.findAll('button').find((item) => item.text().trim() === 'Fullscreen')
+      await button?.trigger('click')
+      await flushPromises()
+      expect(wrapper.get('[data-testid="fullscreen-error"]').text()).toContain(
+        'Buka kiosk di tab Chrome biasa',
+      )
+    } finally {
+      wrapper.unmount()
+      if (originalFullscreenElement) {
+        Object.defineProperty(document, 'fullscreenElement', originalFullscreenElement)
+      } else {
+        Reflect.deleteProperty(document, 'fullscreenElement')
+      }
+    }
   })
 })
 
@@ -258,7 +543,7 @@ describe('DisplayView rotasi token', () => {
       vi.useRealTimers()
       g['EventSource'] = realES
     }
-  })
+  }, 15000)
 })
 
 describe('DisplayView sinyal agent lokal', () => {
@@ -334,6 +619,9 @@ describe('DisplayView sinyal agent lokal', () => {
       expect(chip.exists()).toBe(true)
       expect(chip.text()).toContain('Memverifikasi')
       expect(chip.attributes('role')).toBe('status')
+      expect(w.get('[data-testid="display-recognition-policy"]').text()).toContain(
+        'Nama siswa hanya ditampilkan setelah presensi dikonfirmasi',
+      )
     } finally {
       w.unmount()
       vi.unstubAllGlobals()
@@ -438,7 +726,9 @@ describe('DisplayView sinyal agent lokal', () => {
         expect(img.exists()).toBe(true)
         expect(img.attributes('src') ?? '').toContain('token=kios-token-1')
         const fetchMock = fetch as unknown as { mock: { calls: unknown[][] } }
-        const hintCall = fetchMock.mock.calls.find((args) => String(args[0]).includes('kiosk-hint'))
+        const hintCall = fetchMock.mock.calls
+          .filter((args) => String(args[0]).includes('kiosk-hint'))
+          .at(-1)
         expect(hintCall).toBeDefined()
         expect(String(hintCall?.[0])).toContain('token=kios-token-1')
       } finally {

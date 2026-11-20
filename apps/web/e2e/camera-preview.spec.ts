@@ -73,7 +73,15 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
     route.fulfill({
       status: 200,
       json: {
-        items: [{ deployment_profile: 'AI_EDGE', is_active: true }],
+        items: [
+          {
+            device_id: 'synthetic-camera-device',
+            name: 'Synthetic camera',
+            laboratory_id: 'synthetic-lab',
+            deployment_profile: 'AI_EDGE',
+            is_active: true,
+          },
+        ],
         pagination: { total: 1, limit: 10, offset: 0 },
       },
     }),
@@ -86,6 +94,10 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
   )
   await page.route('http://127.0.0.1:8765/**', async (route) => {
     const request = route.request()
+    const syntheticFrame = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nAAAAABJRU5ErkJggg==',
+      'base64',
+    )
     const headers = {
       'Access-Control-Allow-Origin': 'http://127.0.0.1:4173',
       'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Presensi-Preview-Token',
@@ -100,17 +112,24 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
         headers,
         json: { preview_token: 'synthetic-local-preview-token' },
       })
+    } else if (request.url().includes('/v1/stream?')) {
+      await route.fulfill({
+        status: 200,
+        headers: { ...headers, 'Content-Type': 'image/png' },
+        body: syntheticFrame,
+      })
     } else if (request.url().endsWith('/v1/frame.jpg')) {
       await route.fulfill({
         status: 200,
-        headers: { ...headers, 'Content-Type': 'image/jpeg' },
-        body: Buffer.from('/9j/4AAQSkZJRgABAQAAAQABAAD/2Q==', 'base64'),
+        headers: { ...headers, 'Content-Type': 'image/png' },
+        body: syntheticFrame,
       })
     } else if (request.url().endsWith('/v1/status')) {
       await route.fulfill({
         status: 200,
         headers,
         json: {
+          device_id: 'synthetic-camera-device',
           camera_open: true,
           session_active: true,
           recognition_state: recognitionState,
@@ -173,7 +192,8 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
   await expect(page.getByRole('heading', { name: 'Preview kamera presensi' })).toBeVisible()
   await expect(page.getByRole('img', { name: 'Preview langsung kamera presensi' })).toBeVisible()
   await expect(page.getByTestId('face-overlay')).toBeVisible()
-  await expect(page.getByTestId('face-box-0')).toBeAttached()
+  await expect(page.getByTestId('face-mark-0')).toBeAttached()
+  await expect(page.getByTestId('face-overlay').locator('rect')).toHaveCount(0)
   await expect(page.getByText('Frame siap diperiksa', { exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Yoga' })).toBeVisible()
   await expect(
@@ -188,7 +208,7 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
   await expect(page.getByRole('heading', { name: 'Uji kecocokan kamera' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: /Ambil sampel/ })).toHaveCount(0)
 
-  await page.getByRole('button', { name: 'Tampilan depan kamera' }).click()
+  await page.getByRole('button', { name: 'Layar penuh' }).click()
   await expect(page.getByText('Kandidat sementara · belum diverifikasi presensi')).toBeVisible()
   await page.getByRole('button', { name: 'Keluar layar penuh' }).click()
   await expect(page.getByText('Kandidat sementara · belum diverifikasi presensi')).toBeVisible()
@@ -196,9 +216,9 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
   recognitionState = 'accepted'
   await expect(page.getByRole('heading', { name: 'Yoga' })).toBeVisible()
   await expect(page.getByText(/Identitas cocok. Mengirim presensi/)).toBeVisible()
-  await expect(page.locator('.camera-preview-view__frame-stage img')).toHaveCount(1)
+  await expect(page.getByTestId('preview-stream-img')).toHaveCount(1)
 
-  await page.getByRole('button', { name: 'Tampilan depan kamera' }).click()
+  await page.getByRole('button', { name: 'Layar penuh' }).click()
   await expect(page.locator('.camera-preview-view__layout')).toBeVisible()
   await expect(page.getByText('Kandidat sementara · belum diverifikasi presensi')).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Yoga' })).toBeVisible()

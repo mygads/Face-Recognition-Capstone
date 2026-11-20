@@ -38,6 +38,9 @@ tests/fixtures/biometric/
 tests/deployment-benchmark/datasets/
 tests/deployment-benchmark/reports/runs/
 models/weights/
+apps/web/public/models/face_landmarker.task
+apps/web/public/models/face_landmarker.task.download
+.playwright-mcp/
 apps/edge-agent/config/edge-agent.yaml
 apps/edge-agent/config/stb-gateway.yaml
 presensi-device-setup*.json

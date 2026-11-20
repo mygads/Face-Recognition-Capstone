@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { fetchWithPreviewTimeout } from '../utils/previewFetch'
 import { deviceHealthLabel } from '../utils/attendanceStatus'
 import { useAuthStore } from '../stores/auth'
-import { listDevices, listLaboratories, type Device, type Laboratory } from '../api/client'
-import FaceOverlay from '../components/FaceOverlay.vue'
+import { listDevices, type Device } from '../api/client'
+import CameraFrame from '../components/CameraFrame.vue'
+import { useFaceLandmarks } from '../composables/useFaceLandmarks'
 import { UiBadge, UiButton, UiCard, UiPageHeader, UiSelect } from '../components/ui'
 
 type PreviewStatus = {
+  device_id?: string | null
   camera_open: boolean
   session_active: boolean
   recognition_state: string
@@ -80,47 +82,37 @@ const route = useRoute()
 const router = useRouter()
 const pageRoot = ref<HTMLElement | null>(null)
 const previewToken = ref<string | null>(null)
-const openedRemotely = ref(false)
 const devices = ref<Device[]>([])
-const laboratories = ref<Laboratory[]>([])
 const selectedDeviceId = ref('')
-const selectedLabId = ref('')
 const deviceLoadError = ref<string | null>(null)
+const selectedDevice = computed(
+  () => devices.value.find((device) => device.device_id === selectedDeviceId.value) ?? null,
+)
 
 function syncSelectionToUrl(): void {
   void router.replace({
     query: {
       ...route.query,
-      lab: selectedLabId.value || undefined,
+      lab: selectedDevice.value?.laboratory_id || undefined,
       device: selectedDeviceId.value || undefined,
     },
   })
 }
 
-async function loadDevicesAndLabs(): Promise<void> {
+async function loadDevices(): Promise<void> {
   try {
-    const [devicePage, labPage] = await Promise.all([
-      listDevices({ limit: 100, offset: 0 }),
-      listLaboratories({ limit: 100, offset: 0 }),
-    ])
+    const devicePage = await listDevices({ limit: 100, offset: 0, is_active: true })
     devices.value = devicePage.items
-    laboratories.value = labPage.items
-    const queryLab = typeof route.query.lab === 'string' ? route.query.lab : ''
     const queryDevice = typeof route.query.device === 'string' ? route.query.device : ''
     if (queryDevice && devices.value.some((d) => d.device_id === queryDevice)) {
       selectedDeviceId.value = queryDevice
-      const dev = devices.value.find((d) => d.device_id === queryDevice)
-      selectedLabId.value = queryLab || dev?.laboratory_id || ''
     } else {
-      if (!selectedDeviceId.value && devices.value.length)
-        selectedDeviceId.value = devices.value[0].device_id
-      const firstLab = devices.value[0]?.laboratory_id ?? laboratories.value[0]?.id
-      if (!selectedLabId.value && firstLab) selectedLabId.value = firstLab
-      syncSelectionToUrl()
+      selectedDeviceId.value = devices.value[0]?.device_id ?? ''
     }
+    syncSelectionToUrl()
   } catch (err) {
     deviceLoadError.value =
-      err instanceof Error ? err.message : 'Daftar perangkat tidak dapat dimuat.'
+      err instanceof Error ? err.message : 'Daftar perangkat AI_EDGE tidak dapat dimuat.'
   }
 }
 
@@ -128,33 +120,55 @@ function onDeviceChange(event: Event): void {
   const el = event.target
   if (el instanceof HTMLSelectElement) {
     selectedDeviceId.value = el.value
-    const dev = devices.value.find((d) => d.device_id === el.value)
-    if (dev) selectedLabId.value = dev.laboratory_id
-    openedRemotely.value = false
     resetPreviewFeed()
+    void refreshStatus().catch((error) => {
+      errorMessage.value = error instanceof Error ? error.message : 'Status kamera tidak tersedia.'
+    })
     syncSelectionToUrl()
   }
-}
-
-function onLabChange(event: Event): void {
-  const el = event.target
-  if (el instanceof HTMLSelectElement) {
-    selectedLabId.value = el.value
-    openedRemotely.value = false
-    resetPreviewFeed()
-    syncSelectionToUrl()
-  }
-}
-
-function openOnLabDevice(): void {
-  // Feed kamera hanya bisa dibuka dari PC lab yang dipasangi agent (loopback companion);
-  // tombol ini menandai admin sudah membuka halaman ini di perangkat lab tersebut.
-  openedRemotely.value = true
 }
 const frameUrl = ref<string | null>(null)
 const previewStatus = ref<PreviewStatus | null>(null)
 const cameraObservation = computed(() => previewStatus.value?.camera_observation ?? null)
 const cameraMetrics = computed(() => previewStatus.value?.camera_metrics ?? null)
+const selectedDeviceMatchesAgent = computed(() => {
+  const agentDeviceId = previewStatus.value?.device_id
+  return Boolean(
+    selectedDeviceId.value &&
+    agentDeviceId &&
+    agentDeviceId.toLowerCase() === selectedDeviceId.value.toLowerCase(),
+  )
+})
+const devicePairingMismatch = computed(() => {
+  const agentDeviceId = previewStatus.value?.device_id
+  return Boolean(
+    selectedDeviceId.value &&
+    agentDeviceId &&
+    agentDeviceId.toLowerCase() !== selectedDeviceId.value.toLowerCase(),
+  )
+})
+const devicePairingUnverified = computed(() =>
+  Boolean(selectedDeviceId.value && previewStatus.value && !previewStatus.value.device_id),
+)
+const localAgentDeviceName = computed(() => {
+  const agentDeviceId = previewStatus.value?.device_id?.toLowerCase()
+  return devices.value.find((device) => device.device_id.toLowerCase() === agentDeviceId)?.name
+})
+const previewPlaceholderMessage = computed(() => {
+  if (!selectedDeviceId.value) return 'Daftarkan dan siapkan perangkat AI_EDGE terlebih dahulu.'
+  if (previewStatus.value?.recognition_state === 'camera_disabled') {
+    return 'Kamera sedang dijeda. Lanjutkan kamera dari halaman Perangkat untuk mengaktifkan preview.'
+  }
+  if (devicePairingMismatch.value) {
+    return localAgentDeviceName.value
+      ? `Agent pada komputer ini milik ${localAgentDeviceName.value}. Buka preview dari komputer perangkat yang dipilih.`
+      : 'Agent pada komputer ini terpasang untuk perangkat lain. Buka preview dari komputer perangkat yang dipilih.'
+  }
+  if (devicePairingUnverified.value) {
+    return 'Agent belum melaporkan identitas perangkat. Periksa provisioning agent sebelum menampilkan video.'
+  }
+  return 'Pastikan agent AI_EDGE berjalan pada komputer kamera yang dipilih.'
+})
 const previewFps = ref<number | null>(null)
 const previewFrameTimes: number[] = []
 let lastPreviewFpsUpdate = 0
@@ -202,6 +216,12 @@ const diagnosticCandidate = computed(() => {
   if (!candidate || Date.now() / 1000 - candidate.updated_at > 3) return null
   return candidate
 })
+const unmatchedObservedFace = computed(
+  () =>
+    cameraRunning.value &&
+    ((cameraObservation.value?.face_count ?? 0) > 0 || faceMesh.faces.value.length > 0) &&
+    !diagnosticCandidate.value,
+)
 const diagnosticSimilarityPercent = computed(() => {
   const similarity = diagnosticCandidate.value?.similarity
   return similarity === undefined ? null : `${(similarity * 100).toFixed(1)}%`
@@ -223,10 +243,55 @@ const streamUrl = computed(() => {
 })
 const hasFeed = computed(
   () =>
-    (transport.value === 'poll' && frameUrl.value !== null) ||
-    (transport.value === 'stream' && streamUrl.value !== null),
+    selectedDeviceMatchesAgent.value &&
+    ((transport.value === 'poll' && frameUrl.value !== null) ||
+      (transport.value === 'stream' && streamUrl.value !== null)),
 )
+const cameraRunning = computed(() => hasFeed.value && previewStatus.value?.camera_open === true)
+const previewImage = ref<HTMLImageElement | null>(null)
+const faceMesh = useFaceLandmarks(previewImage, cameraRunning)
+// The agent's sparse recognition landmarks are not a visual face mesh.
+// Draw only dense local FaceLandmarker results, as on the kiosk.
+const activeCameraFaces = computed(() => faceMesh.faces.value)
+const previewFrameWidth = computed(
+  () => faceMesh.frameSize.value.width || cameraObservation.value?.frame_width || undefined,
+)
+const previewFrameHeight = computed(
+  () => faceMesh.frameSize.value.height || cameraObservation.value?.frame_height || undefined,
+)
+const meshFpsLabel = computed(() =>
+  !cameraRunning.value
+    ? 'Tidak aktif'
+    : faceMesh.fps.value === null
+      ? 'Mengukur…'
+      : String(faceMesh.fps.value) + ' FPS',
+)
+const meshStatusLabel = computed(() => {
+  if (previewStatus.value?.recognition_state === 'camera_disabled') {
+    return 'Kamera dijeda · tidak ada frame'
+  }
+  if (!cameraRunning.value || (transport.value === 'stream' && !streamAlive.value)) {
+    return 'Menunggu frame kamera dari agent'
+  }
+  if (faceMesh.state.value === 'loading') return 'Menyiapkan deteksi wajah…'
+  if (faceMesh.state.value === 'unavailable') return 'Deteksi wajah tidak tersedia'
+  if (faceMesh.state.value === 'ready') {
+    if (!faceMesh.frameSize.value.width) return 'Model siap · menunggu frame kamera'
+    if (faceMesh.faces.value.length) {
+      return `Mesh aktif · ${faceMesh.faces.value[0]?.landmarks?.length ?? 478} titik · proses lokal`
+    }
+    if ((cameraObservation.value?.face_count ?? 0) > 0) {
+      return 'Agent mendeteksi wajah · mesh detail menunggu posisi lebih frontal dan fokus'
+    }
+    return 'Model siap · mencari wajah'
+  }
+  return 'Deteksi wajah menunggu kamera'
+})
 const placeholderTitle = computed(() => {
+  if (previewStatus.value?.recognition_state === 'camera_disabled') return 'Kamera dijeda'
+  if (devicePairingMismatch.value) return 'Perangkat kamera berbeda'
+  if (devicePairingUnverified.value) return 'Identitas kamera belum terverifikasi'
+  if (!selectedDeviceId.value) return 'Belum ada perangkat kamera'
   if (errorMessage.value) return 'Preview belum tersedia'
   if (transport.value === 'stream' && !streamAlive.value) return 'Menghubungkan ke stream…'
   return isStarting.value ? 'Menghubungkan ke agent…' : 'Preview belum tersedia'
@@ -270,10 +335,10 @@ function onStreamError(): void {
   if (stopped) return
   streamAlive.value = false
   if (transport.value === 'stream') {
-    // Agent lama tanpa /v1/stream (atau token bermasalah): fallback polling.
+    // Fallback keeps the picture visible while a one-connection MJPEG stream
+    // is retried; a temporary stream error must not strand preview in polling.
     transport.value = 'poll'
     void pollFrame()
-    return
   }
   scheduleStreamReconnect()
 }
@@ -293,6 +358,13 @@ async function reconnectStream(): Promise<void> {
   try {
     previewToken.value = await openPreviewSession()
     if (stopped || generation !== feedGeneration) return
+    feedGeneration += 1
+    if (frameTimer) clearTimeout(frameTimer)
+    frameTimer = undefined
+    if (frameUrl.value) {
+      URL.revokeObjectURL(frameUrl.value)
+      frameUrl.value = null
+    }
     streamRetry.value += 1
     transport.value = 'stream'
     errorMessage.value = null
@@ -358,6 +430,12 @@ const cameraObservationLabel = computed(() => {
       return 'Menyiapkan pemeriksaan kamera'
   }
 })
+const cameraFrameMessage = computed(() => {
+  if (previewStatus.value?.recognition_state === 'camera_disabled') {
+    return 'Kamera sedang dijeda. Lanjutkan dari halaman Perangkat untuk menampilkan preview.'
+  }
+  return cameraObservation.value?.message ?? 'Menunggu status kamera…'
+})
 
 const cameraQualityLabel = computed(() => {
   const state = cameraObservation.value?.state ?? cameraMetrics.value?.quality_state
@@ -384,6 +462,7 @@ const cameraResolutionLabel = computed(() => {
 })
 
 const cameraFpsLabel = computed(() => {
+  if (previewStatus.value?.recognition_state === 'camera_disabled') return 'Jeda'
   const fps = cameraMetrics.value?.capture_fps
   return typeof fps === 'number' ? `${fps.toFixed(1)} FPS` : 'Mengukur…'
 })
@@ -416,6 +495,9 @@ const identityTitle = computed(() => {
   if (diagnosticCandidate.value) return diagnosticCandidate.value.display_name
   if (previewStatus.value?.recognition_state === 'accepted') {
     return previewStatus.value.display_name ?? 'Identitas cocok'
+  }
+  if (!previewStatus.value?.session_active && (cameraObservation.value?.face_count ?? 0) > 0) {
+    return 'Wajah terdeteksi · sesi belum aktif'
   }
   if (!isFullscreen.value) {
     if (previewStatus.value?.recognition_state === 'waiting_for_calibration') {
@@ -460,6 +542,9 @@ const identityDisplayMessage = computed(() => {
       ? `${className}${score} Identitas masih kandidat; presensi menunggu kebijakan pengenalan dan validasi API.`
       : `${className}${score} Preview saja; presensi belum dimulai.`
   }
+  if (!previewStatus.value?.session_active && (cameraObservation.value?.face_count ?? 0) > 0) {
+    return 'Identitas belum diperiksa karena sesi presensi belum dibuka. Buka sesi untuk kelas yang memuat siswa ini; AI hanya mencocokkan wajah dari roster sesi.'
+  }
   if (!isFullscreen.value) {
     return recognitionMessage.value
   }
@@ -486,6 +571,9 @@ const previewBaseUrl = computed(() =>
 
 const recognitionMessage = computed(() => {
   if (!previewStatus.value) return 'Menghubungkan ke kamera pada komputer ini…'
+  if (previewStatus.value.recognition_state === 'camera_disabled') {
+    return 'Kamera sedang dijeda dari halaman Perangkat. Lanjutkan kamera jika ingin melihat preview.'
+  }
   if (!previewStatus.value.camera_open)
     return 'Kamera belum terbuka. Periksa agent dan koneksi kamera.'
   if (!previewStatus.value.session_active)
@@ -593,6 +681,7 @@ function syncFullscreenState(): void {
 
 async function pollFrame(): Promise<void> {
   if (stopped) return
+  const generation = feedGeneration
   const requestStartedAt = performance.now()
   try {
     const response = await authorizedFetch('/v1/frame.jpg')
@@ -608,7 +697,7 @@ async function pollFrame(): Promise<void> {
     }
     consecutiveUnavailable = 0
     const nextUrl = URL.createObjectURL(await response.blob())
-    if (stopped) {
+    if (stopped || generation !== feedGeneration) {
       URL.revokeObjectURL(nextUrl)
       return
     }
@@ -623,9 +712,11 @@ async function pollFrame(): Promise<void> {
       errorMessage.value = error instanceof Error ? error.message : 'Preview kamera tidak tersedia.'
     }
   } finally {
-    const targetFrameIntervalMs = 1000 / 15
+    const targetFrameIntervalMs = 1000 / 30
     const waitMs = Math.max(0, targetFrameIntervalMs - (performance.now() - requestStartedAt))
-    if (!stopped) frameTimer = setTimeout(() => void pollFrame(), waitMs)
+    if (!stopped && generation === feedGeneration) {
+      frameTimer = setTimeout(() => void pollFrame(), waitMs)
+    }
   }
 }
 
@@ -644,7 +735,7 @@ async function pollStatus(): Promise<void> {
 
 onMounted(async () => {
   document.addEventListener('fullscreenchange', syncFullscreenState)
-  void loadDevicesAndLabs()
+  void loadDevices()
   try {
     previewToken.value = await openPreviewSession()
     if (stopped) return
@@ -677,11 +768,16 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="pageRoot" class="st-page" aria-label="Preview kamera AI_EDGE">
+  <div
+    ref="pageRoot"
+    class="st-page camera-preview-view"
+    aria-label="Preview kamera AI_EDGE"
+    data-testid="camera-preview-page"
+  >
     <UiPageHeader
-      eyebrow="AI_EDGE · pilih perangkat & lab"
+      eyebrow="AI_EDGE · perangkat kamera"
       title="Preview Kamera Presensi"
-      description="Preview menggunakan stream yang sama dengan agent di PC lab ini; halaman ini tidak membuka webcam kedua."
+      description="Video dan bingkai sama dengan layar kiosk. Preview memakai agent perangkat yang dipilih dan tidak meminta PIN kiosk."
     >
       <template #actions>
         <UiBadge :tone="previewStatus?.camera_open ? 'present' : 'neutral'">
@@ -694,65 +790,41 @@ onBeforeUnmount(() => {
           }}
         </UiBadge>
         <UiButton variant="secondary" type="button" @click="toggleFullscreen">
-          {{ isFullscreen ? 'Keluar layar penuh' : 'Tampilan depan kamera' }}
+          {{ isFullscreen ? 'Keluar layar penuh' : 'Layar penuh' }}
         </UiButton>
       </template>
     </UiPageHeader>
     <UiCard
-      title="Sumber preview"
-      subtitle="Lab → perangkat/kamera → hubungkan. Mengganti sumber melepas sambungan lama."
+      v-if="!isFullscreen"
+      title="Perangkat kamera"
+      subtitle="Pilih perangkat bila ada lebih dari satu. Preview hanya menampilkan agent yang cocok pada komputer ini."
     >
-      <div>
-        <p class="st-table__muted">
-          Bila ada 2 kamera / 2 lab, pilih perangkat di bawah untuk melihat konteks jadwal &amp;
-          statusnya - video tetap dari kamera PC ini.
-        </p>
-        <div class="st-grid2">
-          <label class="st-field"
-            ><span>Perangkat</span>
-            <UiSelect
-              :model-value="selectedDeviceId"
-              aria-label="Pilih perangkat kamera"
-              data-testid="preview-device-select"
-              @change="onDeviceChange"
-            >
-              <option v-for="d in devices" :key="d.device_id" :value="d.device_id">
-                {{ d.name }} · {{ d.laboratory_name }} · {{ deviceHealthLabel(d.health_status) }}
-              </option>
-            </UiSelect>
-          </label>
-          <label class="st-field"
-            ><span>Laboratorium</span>
-            <UiSelect
-              :model-value="selectedLabId"
-              aria-label="Pilih laboratorium"
-              data-testid="preview-lab-select"
-              @change="onLabChange"
-            >
-              <option v-for="lab in laboratories" :key="lab.id" :value="lab.id">
-                {{ lab.code }} - {{ lab.name }}
-              </option>
-            </UiSelect>
-          </label>
-        </div>
-        <p v-if="deviceLoadError" class="st-alert st-alert--error" role="alert">
-          {{ deviceLoadError }}
-        </p>
-        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
-          <UiButton
-            variant="secondary"
-            type="button"
-            data-testid="open-on-lab-device"
-            @click="openOnLabDevice"
-          >
-            Buka di perangkat lab
-          </UiButton>
-          <p v-if="openedRemotely" class="st-table__muted" role="status">
-            Dibuka dari perangkat lab: pastikan halaman ini dijalankan di PC lab yang memasang agent
-            agar feed kamera lokal tersedia.
-          </p>
-        </div>
-      </div>
+      <label v-if="devices.length > 1" class="st-field">
+        <span>Pilih perangkat kamera</span>
+        <UiSelect
+          :model-value="selectedDeviceId"
+          aria-label="Pilih perangkat kamera"
+          data-testid="preview-device-select"
+          @change="onDeviceChange"
+        >
+          <option v-for="device in devices" :key="device.device_id" :value="device.device_id">
+            {{ device.name }} · {{ device.laboratory_name }} ·
+            {{ deviceHealthLabel(device.health_status) }}
+          </option>
+        </UiSelect>
+      </label>
+      <p v-else-if="selectedDevice" class="st-table__muted" data-testid="preview-single-device">
+        <strong>{{ selectedDevice.name }}</strong> · {{ selectedDevice.laboratory_name }} ·
+        {{ deviceHealthLabel(selectedDevice.health_status) }}
+      </p>
+      <p v-else class="st-alert st-alert--error" role="status">
+        Belum ada perangkat aktif.
+        <RouterLink to="/app/devices">Daftarkan perangkat AI_EDGE</RouterLink>
+        terlebih dahulu.
+      </p>
+      <p v-if="deviceLoadError" class="st-alert st-alert--error" role="alert">
+        {{ deviceLoadError }}
+      </p>
     </UiCard>
     <p v-if="errorMessage" class="st-alert st-alert--error" role="alert">{{ errorMessage }}</p>
 
@@ -767,7 +839,7 @@ onBeforeUnmount(() => {
       </div>
       <div>
         <span>FPS capture aktual</span>
-        <strong>{{ cameraFpsLabel }}</strong>
+        <strong data-testid="preview-capture-fps">{{ cameraFpsLabel }}</strong>
         <small>
           Target {{ cameraMetrics?.requested_fps ?? '-' }} FPS · driver
           {{ cameraMetrics?.driver_fps ?? '-' }} FPS
@@ -783,6 +855,9 @@ onBeforeUnmount(() => {
               : `${previewFps} FPS`
         }}</strong>
         <small v-if="transport === 'stream'">MJPEG satu koneksi, tanpa polling.</small>
+        <small data-testid="preview-mesh-status">
+          {{ meshStatusLabel }} · {{ meshFpsLabel }}
+        </small>
       </div>
       <div>
         <span>Kualitas frame</span>
@@ -790,50 +865,60 @@ onBeforeUnmount(() => {
         <small v-if="cameraMetrics?.quality_source === 'frame_filter'">
           Pemeriksaan cahaya dan ketajaman ringan dari gateway.
         </small>
-        <small v-else>Ketajaman, cahaya, dan ukuran wajah terlihat pada kotak kamera.</small>
+        <small v-else>Mesh lokal aktif saat kamera berjalan dan menghasilkan frame.</small>
       </div>
     </section>
 
     <div class="camera-preview-view__layout">
       <figure class="camera-preview-view__frame">
-        <div v-if="hasFeed" class="camera-preview-view__frame-stage">
+        <CameraFrame
+          :faces="cameraRunning ? activeCameraFaces : []"
+          :image-width="previewFrameWidth"
+          :image-height="previewFrameHeight"
+          :label="identityMatched ? 'Cocok galeri' : faceOverlayLabel"
+          fit="contain"
+        >
           <img
-            v-if="transport === 'stream' && streamUrl"
+            v-if="cameraRunning && transport === 'stream' && streamUrl"
+            ref="previewImage"
             :src="streamUrl"
+            crossorigin="anonymous"
+            class="camera-frame__media"
             alt="Preview langsung kamera presensi"
             data-testid="preview-stream-img"
             @load="onStreamLoad"
             @error="onStreamError"
           />
           <img
-            v-else-if="transport === 'poll' && frameUrl"
+            v-else-if="cameraRunning && transport === 'poll' && frameUrl"
+            ref="previewImage"
             :src="frameUrl"
+            class="camera-frame__media"
             alt="Preview langsung kamera presensi"
             @load="recordPreviewFrame"
           />
-          <FaceOverlay
-            v-if="cameraObservation && cameraObservation.faces.length"
-            :faces="cameraObservation.faces"
-            :label="identityMatched ? 'Cocok galeri' : faceOverlayLabel"
-            class="camera-preview-view__face-overlay"
-          />
           <div
+            v-if="cameraRunning"
             class="camera-preview-view__guidance"
             :class="`is-${cameraObservation?.state ?? 'pending'}`"
             role="status"
           >
             <strong>{{ cameraObservationLabel }}</strong>
-            <span>{{ cameraObservation?.message ?? 'Menunggu status kamera…' }}</span>
+            <span>{{ cameraFrameMessage }}</span>
             <div v-if="cameraFaceMetrics.length" class="camera-preview-view__metrics">
               <span v-for="metric in cameraFaceMetrics" :key="metric">{{ metric }}</span>
             </div>
           </div>
-        </div>
-        <div v-else class="camera-preview-view__placeholder" role="status">
-          <span aria-hidden="true">◉</span>
-          <strong>{{ placeholderTitle }}</strong>
-          <p>Pastikan agent AI_EDGE berjalan pada komputer yang sama dengan browser ini.</p>
-        </div>
+          <div
+            v-else
+            class="camera-frame__placeholder camera-preview-view__placeholder"
+            role="status"
+            data-testid="preview-camera-placeholder"
+          >
+            <strong>{{ placeholderTitle }}</strong>
+            <p>{{ previewPlaceholderMessage }}</p>
+          </div>
+        </CameraFrame>
         <p
           v-if="transport === 'poll' && frameStale"
           class="st-table__muted"
@@ -883,6 +968,31 @@ onBeforeUnmount(() => {
             preview tidak membuat presensi. Presensi hanya dicatat oleh Core API saat sesi aktif dan
             kebijakan pengenalan lolos.
           </small>
+        </div>
+        <div
+          v-else-if="unmatchedObservedFace"
+          class="camera-preview-view__candidate-empty"
+          role="status"
+          data-testid="preview-unmatched-face"
+        >
+          <strong>Wajah terdeteksi, tetapi belum ada kandidat yang cocok</strong>
+          <small v-if="previewStatus?.recognition_state === 'waiting_for_calibration'">
+            Pengenalan belum aktif. Minta admin memeriksa konfigurasi AI sebelum uji identitas.
+          </small>
+          <small v-else-if="!previewStatus?.session_active">
+            Identitas belum diperiksa karena belum ada sesi aktif. Buka sesi pada jadwal dan kelas
+            yang benar agar roster serta template wajah siswa dimuat.
+          </small>
+          <small
+            v-else-if="
+              previewStatus?.recognition_state === 'rejected' ||
+              previewStatus?.recognition_state === 'retry_frontal'
+            "
+          >
+            Belum cocok atau kualitas wajah belum cukup. Periksa posisi, fokus, dan keanggotaan
+            roster sesi.
+          </small>
+          <small v-else>{{ recognitionMessage }}</small>
         </div>
         <div
           v-else-if="previewStatus?.recognition_state === 'preview_only'"
