@@ -626,6 +626,23 @@ textarea:focus {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  border-radius: var(--st-radius-sm);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
+}
+.st-rowbtn:hover {
+  background: var(--st-info-tint);
+  color: var(--st-info);
+}
+.st-rowbtn:focus-visible {
+  outline: 2px solid var(--st-primary-container);
+  outline-offset: 2px;
+  background: var(--st-info-tint);
+}
+.st-rowbtn:active {
+  background: var(--st-neutral-tint);
 }
 .st-rowbtn .st-material-icon {
   font-size: 18px;

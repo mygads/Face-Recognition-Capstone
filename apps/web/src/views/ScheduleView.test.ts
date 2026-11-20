@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   createSchedule: vi.fn(),
   duplicateSchedule: vi.fn(),
   updateSchedule: vi.fn(),
+  deleteSchedule: vi.fn(),
 }))
 
 vi.mock('../api/client', () => ({
@@ -104,6 +105,7 @@ beforeEach(() => {
       { ...schedule, id: 'sch-4', subject: 'Pertemuan 4 - Praktikum Web' },
     ],
   })
+  api.deleteSchedule.mockResolvedValue({ action: 'deleted', message: 'Jadwal dihapus permanen.' })
 })
 
 describe('schedule view (Stitch B02-09/10)', () => {
@@ -116,6 +118,62 @@ describe('schedule view (Stitch B02-09/10)', () => {
     expect(wrapper.text()).toContain('Jadwal Saya')
     expect(wrapper.text()).toContain('Praktikum Web')
     expect(wrapper.text()).toContain('Lab Komputer 1')
+    wrapper.unmount()
+  })
+
+  it('menerapkan rentang minggu berjalan dan memperbarui filter hari secara langsung', async () => {
+    const r = router()
+    r.push('/app/schedules')
+    await r.isReady()
+    const wrapper = mount(ScheduleView, { global: { plugins: [piniaTeacher(), r] } })
+    await flushPromises()
+
+    const initialQuery = api.listSchedules.mock.calls.at(-1)?.[0] as Record<string, unknown>
+    expect(initialQuery.starts_on).toEqual(expect.any(String))
+    expect(initialQuery.ends_on).toEqual(expect.any(String))
+    expect(
+      (new Date(`${initialQuery.ends_on}T00:00:00Z`).getTime() -
+        new Date(`${initialQuery.starts_on}T00:00:00Z`).getTime()) /
+        86_400_000,
+    ).toBe(6)
+
+    await wrapper.get('select[aria-label="Filter hari"]').setValue('0')
+    await flushPromises()
+    const mondayQuery = api.listSchedules.mock.calls.at(-1)?.[0] as Record<string, unknown>
+    expect(mondayQuery.weekday).toBe(0)
+    expect(mondayQuery.starts_on).toBe(initialQuery.starts_on)
+    expect(mondayQuery.ends_on).toBe(initialQuery.ends_on)
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text().trim() === 'Semua Jadwal')!
+      .trigger('click')
+    await flushPromises()
+    const allQuery = api.listSchedules.mock.calls.at(-1)?.[0] as Record<string, unknown>
+    expect(allQuery.starts_on).toBeUndefined()
+    expect(allQuery.ends_on).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('menghapus jadwal dari daftar setelah konfirmasi dan menampilkan hasilnya', async () => {
+    const r = router()
+    r.push('/app/schedules')
+    await r.isReady()
+    const wrapper = mount(ScheduleView, { global: { plugins: [piniaTeacher(), r] } })
+    await flushPromises()
+    api.listSchedules.mockResolvedValueOnce({
+      items: [],
+      pagination: { total: 0, limit: 10, offset: 0 },
+    })
+
+    await wrapper.get('[data-testid="delete-schedule-sch-1"]').trigger('click')
+    expect(wrapper.text()).toContain('riwayat sesi')
+    await wrapper.get('[data-testid="confirm-delete-schedule"]').trigger('click')
+    await flushPromises()
+
+    expect(api.deleteSchedule).toHaveBeenCalledWith('sch-1')
+    expect(wrapper.text()).toContain('Jadwal dihapus permanen.')
+    expect(wrapper.find('[data-testid="delete-schedule-sch-1"]').exists()).toBe(false)
     wrapper.unmount()
   })
 

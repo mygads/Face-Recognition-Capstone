@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Generator
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -15,7 +15,13 @@ from sqlalchemy.pool import StaticPool
 from presensi_api.api.security.dependencies import get_current_user
 from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
 from presensi_api.db.base import Base
-from presensi_api.db.models import PracticumSchedule, Role, User, UserRole
+from presensi_api.db.models import (
+    AttendanceSession,
+    PracticumSchedule,
+    Role,
+    User,
+    UserRole,
+)
 from presensi_api.db.seed_roles import seed_roles
 from presensi_api.db.session import get_db_session
 from presensi_api.main import app
@@ -458,3 +464,164 @@ def test_list_schedules_pagination_stable_on_identical_weekday_start(
     second_id = page_two.json()["items"][0]["id"]
     assert first_id != second_id
     assert {first_id, second_id} == {first.json()["id"], second.json()["id"]}
+
+
+def test_list_schedules_filters_by_effective_date_window_and_weekday(
+    api_database: sessionmaker[Session],
+) -> None:
+    class_a, class_b, labs = setup_master_data()
+    teacher_a = str(UUID(int=43))
+    teacher_b = str(UUID(int=44))
+    schedules = [
+        payload(
+            class_a["id"],
+            labs["a"]["id"],
+            teacher_a,
+            effective_from="2026-11-17",
+            effective_through="2026-11-17",
+            weekday=1,
+        ),
+        payload(
+            class_a["id"],
+            labs["a"]["id"],
+            teacher_a,
+            effective_from="2026-11-10",
+            effective_through="2026-11-15",
+            weekday=2,
+        ),
+        payload(
+            class_b["id"],
+            labs["b"]["id"],
+            teacher_b,
+            effective_from="2026-10-01",
+            effective_through=None,
+            weekday=3,
+        ),
+        payload(
+            class_b["id"],
+            labs["b"]["id"],
+            teacher_b,
+            effective_from="2026-11-23",
+            effective_through="2026-12-01",
+            weekday=4,
+        ),
+    ]
+    created = [request("POST", "/api/v1/schedules", body) for body in schedules]
+    assert all(response.status_code == 201 for response in created), [
+        response.text for response in created
+    ]
+
+    week = request("GET", "/api/v1/schedules?starts_on=2026-11-16&ends_on=2026-11-22")
+    assert week.status_code == 200, week.text
+    assert week.json()["pagination"]["total"] == 2
+    monday = request(
+        "GET",
+        "/api/v1/schedules?starts_on=2026-11-16&ends_on=2026-11-22&weekday=1",
+    )
+    assert monday.status_code == 200, monday.text
+    assert monday.json()["pagination"]["total"] == 1
+    invalid_range = request(
+        "GET", "/api/v1/schedules?starts_on=2026-11-23&ends_on=2026-11-22"
+    )
+    assert invalid_range.status_code == 422
+
+
+def test_schedule_delete_preserves_history_and_blocks_active_session(
+    api_database: sessionmaker[Session],
+) -> None:
+    class_a, _, labs = setup_master_data()
+    teacher_a = str(UUID(int=43))
+
+    unused = request(
+        "POST",
+        "/api/v1/schedules",
+        payload(
+            class_a["id"],
+            labs["a"]["id"],
+            teacher_a,
+            effective_from="2026-09-01",
+            effective_through="2026-09-01",
+        ),
+    )
+    assert unused.status_code == 201, unused.text
+    removed = request("DELETE", f"/api/v1/schedules/{unused.json()['id']}")
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["action"] == "deleted"
+
+    historical = request(
+        "POST",
+        "/api/v1/schedules",
+        payload(
+            class_a["id"],
+            labs["a"]["id"],
+            teacher_a,
+            effective_from="2026-09-02",
+            effective_through="2026-09-02",
+        ),
+    )
+    assert historical.status_code == 201, historical.text
+    opened_at = datetime.now(UTC)
+    with api_database.begin() as session:
+        session.add(
+            AttendanceSession(
+                practicum_schedule_id=UUID(historical.json()["id"]),
+                status="closed",
+                opened_at=opened_at,
+                closed_at=opened_at + timedelta(minutes=30),
+            )
+        )
+    archived = request("DELETE", f"/api/v1/schedules/{historical.json()['id']}")
+    assert archived.status_code == 200, archived.text
+    assert archived.json()["action"] == "archived"
+    with api_database() as session:
+        stored = session.get(PracticumSchedule, UUID(historical.json()["id"]))
+        assert stored is not None and stored.is_active is False
+
+    active = request(
+        "POST",
+        "/api/v1/schedules",
+        payload(
+            class_a["id"],
+            labs["a"]["id"],
+            teacher_a,
+            effective_from="2026-09-03",
+            effective_through="2026-09-03",
+        ),
+    )
+    assert active.status_code == 201, active.text
+    with api_database.begin() as session:
+        session.add(
+            AttendanceSession(
+                practicum_schedule_id=UUID(active.json()["id"]),
+                status="active",
+                opened_at=datetime.now(UTC),
+            )
+        )
+    blocked = request("DELETE", f"/api/v1/schedules/{active.json()['id']}")
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "schedule_has_active_session"
+
+
+def test_class_delete_archives_schedules_and_prevents_new_sessions(
+    api_database: sessionmaker[Session],
+) -> None:
+    class_a, _, labs = setup_master_data()
+    created = request(
+        "POST",
+        "/api/v1/schedules",
+        payload(
+            class_a["id"],
+            labs["a"]["id"],
+            str(UUID(int=43)),
+            effective_from="2026-11-21",
+            effective_through=None,
+        ),
+    )
+    assert created.status_code == 201, created.text
+
+    archived = request("DELETE", f"/api/v1/classes/{class_a['id']}")
+    assert archived.status_code == 200, archived.text
+    assert archived.json()["action"] == "archived"
+    with api_database() as session:
+        stored_schedule = session.get(PracticumSchedule, UUID(created.json()["id"]))
+        assert stored_schedule is not None and stored_schedule.is_active is False

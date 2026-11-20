@@ -124,12 +124,11 @@ describe('AI_EDGE recognition setup', () => {
   it('explains each field and fills a clearly marked local test preset', async () => {
     const wrapper = mountAiSetup()
     await flushPromises()
-    await wrapper.get('[aria-label="Kelompok pengaturan"] button:nth-child(2)').trigger('click')
+    await wrapper.get('[data-testid="edit-edge-recognition"]').trigger('click')
     await flushPromises()
 
-    expect(wrapper.get('[data-testid="edge-preset-note"]').text()).toContain(
-      'Preset bukan hasil kalibrasi',
-    )
+    expect(wrapper.text()).toContain('Konfigurasi pengenalan AI_EDGE')
+    expect(wrapper.text()).toContain('preset uji bukan hasil kalibrasi')
     expect(wrapper.get('#edge-top1-hint').text()).toContain('Nilai awal uji: 0,65')
     expect(wrapper.get('#edge-sample-every-hint').text()).toContain('bukan FPS kamera')
 
@@ -141,19 +140,19 @@ describe('AI_EDGE recognition setup', () => {
       (wrapper.get('#edge-calibration-reference').element as HTMLInputElement).value,
     ).toContain('DEFAULT-AMAN-SEMENTARA')
     expect(wrapper.text()).toContain('Preset sementara aktif')
-    expect(wrapper.text()).toContain('harus ada sesi aktif dengan siswa terdaftar di roster')
+    expect(wrapper.text()).toContain('kalibrasi lokal wajib sebelum penggunaan operasional')
     wrapper.unmount()
   })
 
   it('publishes the test preset only after the admin submits it', async () => {
     const wrapper = mountAiSetup()
     await flushPromises()
-    await wrapper.get('[aria-label="Kelompok pengaturan"] button:nth-child(2)').trigger('click')
+    await wrapper.get('[data-testid="edit-edge-recognition"]').trigger('click')
     await flushPromises()
     await wrapper.get('[data-testid="edge-default-preset"]').trigger('click')
 
     expect(api.saveEdgeDeviceConfiguration).not.toHaveBeenCalled()
-    await wrapper.get('form.ai-setup-view__form').trigger('submit')
+    await wrapper.get('#edge-recognition-form').trigger('submit')
     await flushPromises()
 
     expect(api.saveEdgeDeviceConfiguration).toHaveBeenCalledWith(

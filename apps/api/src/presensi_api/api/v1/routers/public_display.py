@@ -334,15 +334,19 @@ def _build_live_update(
         schedule = _find_current_schedule(lab, session, now)
         if schedule is not None:
             school_class = session.get(SchoolClass, schedule.class_id)
-            latest = _find_schedule_session_today(schedule, session, now)
+            latest_session = _find_schedule_session_today(schedule, session, now)
             return KioskLiveUpdate(
                 laboratory_id=lab.id,
                 laboratory_name=lab.name,
-                session_id=latest.id if latest else None,
+                session_id=latest_session.id if latest_session else None,
                 subject=schedule.subject,
                 class_name=school_class.name if school_class else None,
-                status=latest.status if latest else "scheduled",
-                opened_at=(as_utc(latest.opened_at).isoformat() if latest else None),
+                status=latest_session.status if latest_session else "scheduled",
+                opened_at=(
+                    as_utc(latest_session.opened_at).isoformat()
+                    if latest_session
+                    else None
+                ),
                 server_time=now.isoformat(),
             )
         return KioskLiveUpdate(

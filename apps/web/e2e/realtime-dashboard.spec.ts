@@ -102,6 +102,26 @@ test('teacher sees live roster counts on the active session card and detail', as
     if (url.pathname.endsWith('/session-1/roster') && route.request().method() === 'GET') {
       return route.fulfill({ status: 200, json: rosterEntries() })
     }
+    if (url.pathname.endsWith('/session-1/dashboard') && route.request().method() === 'GET') {
+      return route.fulfill({
+        status: 200,
+        json: {
+          session_id: 'session-1',
+          session_status: 'active',
+          generated_at: timestamp,
+          summary: {
+            total_roster: 3,
+            present: presentCount,
+            late: 0,
+            excused: 0,
+            absent: 0,
+            not_present: 3 - presentCount,
+          },
+          devices: [],
+          recent_activity: [],
+        },
+      })
+    }
     if (url.pathname.endsWith('/sessions/session-1') && route.request().method() === 'GET') {
       return route.fulfill({ status: 200, json: session })
     }
@@ -119,8 +139,9 @@ test('teacher sees live roster counts on the active session card and detail', as
   await expect(page.getByRole('heading', { name: 'Sesi Presensi' })).toBeVisible()
 
   const livePanel = page.getByLabel('Roster langsung')
-  await expect(livePanel).toContainText('Live roster kehadiran')
-  await expect(livePanel).toContainText('1 / 3 Terdata')
+  await expect(livePanel).toContainText('Presensi tercatat')
+  await expect(livePanel).toContainText('Ringkasan kehadiran sesi')
+  await expect(livePanel).toContainText('1 / 3')
 
   await page.getByTestId('show-status-session-1').click()
   await expect(page).toHaveURL(/\/app\/sessions\/session-1$/)

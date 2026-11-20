@@ -2,8 +2,7 @@ import { onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vu
 import wasmLoaderPath from '@mediapipe/tasks-vision/vision_wasm_module_internal.js?url'
 import wasmBinaryPath from '@mediapipe/tasks-vision/vision_wasm_module_internal.wasm?url'
 import type { OverlayFace } from '../components/FaceOverlay.vue'
-
-const TARGET_PREVIEW_FPS = 30
+import { FACE_MESH_TARGET_FPS, getFaceMeshInputSize } from '../utils/faceMeshPerformance'
 
 type WorkerResponse =
   | { type: 'ready'; delegate: 'GPU' | 'CPU' }
@@ -71,10 +70,16 @@ export function useFaceLandmarks<TSource extends LandmarkSource>(
   }
 
   function scheduleCapture(activeGeneration: number): void {
-    if (activeGeneration !== generation || !worker) return
+    if (
+      activeGeneration !== generation ||
+      !worker ||
+      (typeof document !== 'undefined' && document.hidden)
+    ) {
+      return
+    }
     frameTimer = setTimeout(() => {
       void captureFrame(activeGeneration)
-    }, 1000 / TARGET_PREVIEW_FPS)
+    }, 1000 / FACE_MESH_TARGET_FPS)
   }
 
   async function captureFrame(activeGeneration: number): Promise<void> {
@@ -85,6 +90,7 @@ export function useFaceLandmarks<TSource extends LandmarkSource>(
       activeGeneration !== generation ||
       !activeWorker ||
       frameInFlight ||
+      (typeof document !== 'undefined' && document.hidden) ||
       !source ||
       !frame?.ready ||
       frame.width < 1 ||
@@ -96,7 +102,15 @@ export function useFaceLandmarks<TSource extends LandmarkSource>(
 
     frameInFlight = true
     try {
-      const bitmap = await createImageBitmap(source)
+      const meshSize = getFaceMeshInputSize(frame.width, frame.height)
+      const bitmap =
+        meshSize.width === frame.width && meshSize.height === frame.height
+          ? await createImageBitmap(source)
+          : await createImageBitmap(source, {
+              resizeWidth: meshSize.width,
+              resizeHeight: meshSize.height,
+              resizeQuality: 'low',
+            })
       if (activeGeneration !== generation || activeWorker !== worker) {
         bitmap.close()
         frameInFlight = false
@@ -173,14 +187,31 @@ export function useFaceLandmarks<TSource extends LandmarkSource>(
     })
   }
 
+  function onVisibilityChange(): void {
+    if (typeof document === 'undefined') return
+    if (document.hidden) {
+      if (frameTimer) clearTimeout(frameTimer)
+      frameTimer = undefined
+      faces.value = []
+      return
+    }
+    if (worker && state.value === 'ready') scheduleCapture(generation)
+  }
+
   watch(
     () => [image.value, enabled.value] as const,
     ([source, active]) => startForSource(source, active),
     { flush: 'post' },
   )
-  onMounted(() => startForSource(image.value, enabled.value))
+  onMounted(() => {
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    startForSource(image.value, enabled.value)
+  })
 
-  onBeforeUnmount(stop)
+  onBeforeUnmount(() => {
+    document.removeEventListener('visibilitychange', onVisibilityChange)
+    stop()
+  })
 
   return { faces, state, fps, frameSize, delegate, errorMessage }
 }

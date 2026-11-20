@@ -6,13 +6,14 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from presensi_api.api.errors import OPENAPI_ERROR_RESPONSES, ApiProblem
 from presensi_api.api.security.dependencies import require_permissions
 from presensi_api.api.security.roles import AuthenticatedUser, Permission, RoleCode
-from presensi_api.api.security.scope import laborant_lab_ids
-from presensi_api.api.v1.schemas.common import PageResponse, Pagination
+from presensi_api.api.security.scope import ensure_schedule_operate, laborant_lab_ids
+from presensi_api.api.v1.schemas.common import DeleteResult, PageResponse, Pagination
 from presensi_api.api.v1.schemas.schedules import (
     ScheduleCreateRequest,
     ScheduleDuplicateRequest,
@@ -22,6 +23,8 @@ from presensi_api.api.v1.schemas.schedules import (
     ScheduleUpdateRequest,
 )
 from presensi_api.db.models import (
+    AttendanceSession,
+    AuditLog,
     Laboratory,
     PracticumSchedule,
     Role,
@@ -285,10 +288,18 @@ def list_schedules(
     offset: Annotated[int, Query(ge=0)] = 0,
     search: Annotated[str | None, Query(min_length=1, max_length=120)] = None,
     weekday: Annotated[int | None, Query(ge=0, le=6)] = None,
+    starts_on: date | None = None,
+    ends_on: date | None = None,
     is_active: bool | None = None,
     class_id: UUID | None = None,
     laboratory_id: UUID | None = None,
 ) -> PageResponse[ScheduleResponse]:
+    if starts_on is not None and ends_on is not None and starts_on > ends_on:
+        raise ApiProblem(
+            422,
+            "invalid_schedule_date_range",
+            "Tanggal mulai filter tidak boleh setelah tanggal akhir.",
+        )
     filters: list[Any] = []
     if RoleCode.ADMIN not in principal.roles:
         if RoleCode.TEACHER in principal.roles:
@@ -312,6 +323,15 @@ def list_schedules(
                 filters.append(PracticumSchedule.id.is_(None))
     if weekday is not None:
         filters.append(PracticumSchedule.weekday == weekday)
+    if ends_on is not None:
+        filters.append(PracticumSchedule.effective_from <= ends_on)
+    if starts_on is not None:
+        filters.append(
+            or_(
+                PracticumSchedule.effective_through.is_(None),
+                PracticumSchedule.effective_through >= starts_on,
+            )
+        )
     if is_active is not None:
         filters.append(PracticumSchedule.is_active.is_(is_active))
     if class_id is not None:
@@ -430,12 +450,7 @@ def duplicate_schedule_weekly(
     schedule = session.get(PracticumSchedule, schedule_id)
     if schedule is None:
         raise ApiProblem(404, "schedule_not_found", "Jadwal tidak ditemukan.")
-    from presensi_api.api.security.scope import ensure_schedule_operate as _eso
-
-    try:
-        _eso(session, principal, schedule)
-    except Exception:
-        raise ApiProblem(404, "schedule_not_found", "Jadwal tidak ditemukan.")
+    ensure_schedule_operate(session, principal, schedule)
     if not schedule.is_active:
         raise ApiProblem(
             422,
@@ -576,12 +591,7 @@ def update_schedule(
     schedule = session.get(PracticumSchedule, schedule_id)
     if schedule is None:
         raise ApiProblem(404, "schedule_not_found", "Jadwal tidak ditemukan.")
-    from presensi_api.api.security.scope import ensure_schedule_operate as _eso
-
-    try:
-        _eso(session, principal, schedule)
-    except Exception:
-        raise ApiProblem(404, "schedule_not_found", "Jadwal tidak ditemukan.")
+    ensure_schedule_operate(session, principal, schedule)
     changes = request.model_dump(exclude_unset=True)
     candidate = {
         field: getattr(schedule, field) for field in ScheduleCreateRequest.model_fields
@@ -627,3 +637,86 @@ def update_schedule(
     session.commit()
     session.refresh(schedule)
     return _response(session, schedule)
+
+
+@router.delete(
+    "/{schedule_id}",
+    response_model=DeleteResult,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary=(
+        "Archive a schedule with attendance history or permanently "
+        "delete an unused schedule"
+    ),
+)
+def delete_schedule(
+    schedule_id: UUID,
+    principal: Annotated[
+        AuthenticatedUser, Depends(require_permissions(Permission.SCHEDULE_MANAGE))
+    ],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> DeleteResult:
+    schedule = session.scalar(
+        select(PracticumSchedule)
+        .where(PracticumSchedule.id == schedule_id)
+        .with_for_update()
+    )
+    if schedule is None:
+        raise ApiProblem(404, "schedule_not_found", "Jadwal tidak ditemukan.")
+    ensure_schedule_operate(session, principal, schedule)
+
+    sessions = session.scalars(
+        select(AttendanceSession).where(
+            AttendanceSession.practicum_schedule_id == schedule_id
+        )
+    ).all()
+    if any(item.status in {"active", "manual_override"} for item in sessions):
+        raise ApiProblem(
+            409,
+            "schedule_has_active_session",
+            "Jadwal masih memiliki sesi presensi aktif. "
+            "Tutup sesi sebelum menghapus jadwal.",
+        )
+
+    if sessions:
+        was_active = schedule.is_active
+        schedule.is_active = False
+        session.add(
+            AuditLog(
+                actor_user_id=principal.id,
+                action="schedule.archived",
+                entity_type="practicum_schedule",
+                entity_id=schedule.id,
+                before_state={"is_active": was_active},
+                after_state={
+                    "is_active": False,
+                    "attendance_session_count": len(sessions),
+                },
+            )
+        )
+        session.commit()
+        return DeleteResult(
+            action="archived",
+            message="Jadwal diarsipkan agar riwayat sesi dan presensi tetap tersimpan.",
+        )
+
+    session.add(
+        AuditLog(
+            actor_user_id=principal.id,
+            action="schedule.deleted",
+            entity_type="practicum_schedule",
+            entity_id=schedule.id,
+            after_state={"action": "deleted", "reason": "no_attendance_sessions"},
+        )
+    )
+    session.delete(schedule)
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        # A concurrent session insert may land after the reference check.
+        raise ApiProblem(
+            409,
+            "schedule_in_use",
+            "Jadwal memiliki sesi terkait. Muat ulang, lalu jadwal akan diarsipkan.",
+        ) from exc
+    return DeleteResult(action="deleted", message="Jadwal dihapus permanen.")

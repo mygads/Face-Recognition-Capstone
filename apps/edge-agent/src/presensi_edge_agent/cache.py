@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Protocol, cast
 from uuid import UUID
@@ -178,10 +178,14 @@ def parse_session_cache(
         raise ValueError("max_offline_seconds must be between 0 and 86400.")
     # Server expiry is authoritative; the local freshness policy can only
     # shorten it. An old bundle can never be made valid by a distant expiry.
+    # generated_at is the stable gallery content version used by conditional
+    # polling. It may be older than the current response when the roster has
+    # not changed, so offline freshness must be measured from this successful
+    # fetch instead.
     expires_at = min(
         expires_at,
         session_ends_at,
-        generated_at + timedelta(seconds=max_offline_seconds),
+        current_time + timedelta(seconds=max_offline_seconds),
     )
     if (
         expires_at <= current_time
@@ -233,7 +237,7 @@ def parse_preview_gallery(
         raise ValueError("max_offline_seconds must be between 0 and 86400.")
     expires_at = min(
         expires_at,
-        generated_at + timedelta(seconds=max_offline_seconds),
+        current_time + timedelta(seconds=max_offline_seconds),
     )
     if expires_at <= current_time or generated_at > current_time:
         raise CacheSchemaError(
@@ -272,6 +276,36 @@ class ActiveSessionCache:
     def replace(self, bundle: SessionCacheBundle) -> None:
         with self._lock:
             self._bundle = bundle
+
+    def refresh_freshness(
+        self,
+        *,
+        max_offline_seconds: float,
+        now: datetime | None = None,
+    ) -> bool:
+        """Extend a cached gallery after Core API confirms it is unchanged."""
+        if (
+            not math.isfinite(max_offline_seconds)
+            or max_offline_seconds <= 0
+            or max_offline_seconds > 86400
+        ):
+            raise ValueError("max_offline_seconds must be between 0 and 86400.")
+        current_time = (now or datetime.now(UTC)).astimezone(UTC)
+        with self._lock:
+            bundle = self._bundle
+            if bundle is None:
+                return False
+            if (
+                bundle.session_ends_at is not None
+                and bundle.session_ends_at <= current_time
+            ):
+                self._bundle = None
+                return False
+            expires_at = current_time + timedelta(seconds=max_offline_seconds)
+            if bundle.session_ends_at is not None:
+                expires_at = min(expires_at, bundle.session_ends_at)
+            self._bundle = replace(bundle, expires_at=expires_at)
+            return True
 
     def current(self, *, now: datetime | None = None) -> SessionCacheBundle | None:
         with self._lock:

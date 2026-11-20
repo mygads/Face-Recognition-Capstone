@@ -218,6 +218,7 @@ interface AgentHint {
   session_active: boolean
   camera_open: boolean
   recognition_state: string | null
+  recognition_reason_code: string | null
   face_present: boolean
   face_count: number
   faces: AgentHintFace[]
@@ -296,6 +297,8 @@ async function pollAgentHint(): Promise<void> {
       session_active: data.session_active === true,
       camera_open: data.camera_open === true,
       recognition_state: typeof data.recognition_state === 'string' ? data.recognition_state : null,
+      recognition_reason_code:
+        typeof data.recognition_reason_code === 'string' ? data.recognition_reason_code : null,
       face_present: data.face_present === true,
       face_count: typeof data.face_count === 'number' ? data.face_count : 0,
       faces: rawFaces.filter(
@@ -348,6 +351,16 @@ const STATUS_GUIDE = [
 function formatError(err: unknown): string {
   if (err instanceof ApiError) return err.message
   return 'Layar tidak dapat dimuat.'
+}
+
+function expireDisplaySession(): void {
+  stopLive()
+  clearPersistedDisplaySession()
+  displayToken.value = ''
+  display.value = null
+  live.value = null
+  error.value =
+    'Sesi layar perlu diaktifkan kembali. Minta petugas memasukkan PIN untuk melanjutkan.'
 }
 
 async function loadLabs(): Promise<void> {
@@ -449,13 +462,8 @@ async function loadDisplay(silent = false): Promise<void> {
     error.value = null
   } catch (err) {
     if (!silent) error.value = formatError(err)
-    if (err instanceof ApiError && (err.status === 401 || err.status === 404)) {
-      stopLive()
-      clearPersistedDisplaySession()
-      displayToken.value = ''
-      display.value = null
-      live.value = null
-      error.value = 'Sesi layar berakhir. Masukkan PIN petugas untuk mengaktifkan kembali.'
+    if (err instanceof ApiError && [401, 403, 404].includes(err.status)) {
+      expireDisplaySession()
     }
   } finally {
     if (!silent) isLoadingDisplay.value = false
@@ -563,9 +571,7 @@ function connectStream(): void {
       if (event === 'error') {
         if (data.includes('display_token_invalid')) {
           done()
-          void loadDisplay(true).then(() => {
-            if (fetchAbort === controller) connectEventSourceFallback()
-          })
+          expireDisplaySession()
           return
         }
         return
@@ -574,8 +580,9 @@ function connectStream(): void {
     }).catch((error: unknown) => {
       if (fetchAbort !== controller) return
       fetchAbort = null
-      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
-        void loadDisplay(true)
+      if (error instanceof ApiError && [401, 403, 404].includes(error.status)) {
+        expireDisplaySession()
+        return
       }
       connectEventSourceFallback()
     })
@@ -600,13 +607,8 @@ async function rotateToken(): Promise<void> {
     connectStream()
     scheduleRotation(rotated.expires_in_seconds)
   } catch (err) {
-    if (err instanceof ApiError && (err.status === 401 || err.status === 404)) {
-      stopLive()
-      clearPersistedDisplaySession()
-      displayToken.value = ''
-      display.value = null
-      live.value = null
-      error.value = 'Sesi layar berakhir. Masukkan PIN petugas untuk mengaktifkan kembali.'
+    if (err instanceof ApiError && [401, 403, 404].includes(err.status)) {
+      expireDisplaySession()
     }
   }
 }
@@ -863,6 +865,9 @@ const kioskResultTitle = computed(() => {
   if (agentHint.value?.recognition_state === 'waiting_for_calibration') {
     return 'Pengenalan belum siap'
   }
+  if (agentHint.value?.recognition_reason_code === 'single_identity_gallery') {
+    return 'Butuh identitas pembanding'
+  }
   if (
     agentHint.value?.recognition_state === 'checking' ||
     agentHint.value?.recognition_state === 'collecting' ||
@@ -895,6 +900,9 @@ const kioskRecognitionMessage = computed(() => {
   }
   if (agentHint.value?.recognition_state === 'waiting_for_calibration') {
     return 'Pengenalan wajah belum siap. Hubungi petugas untuk menyelesaikan kalibrasi.'
+  }
+  if (agentHint.value?.recognition_reason_code === 'single_identity_gallery') {
+    return 'Sesi hanya memiliki satu identitas dengan acuan wajah. AI menolak memastikan kecocokan tanpa pembanding agar tidak salah presensi. Gunakan penandaan manual atau uji dengan sesi yang memiliki minimal dua identitas terdaftar.'
   }
   if (
     agentHint.value?.recognition_state === 'checking' ||

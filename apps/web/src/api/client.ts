@@ -35,6 +35,7 @@ export type ScheduleUpdate = components['schemas']['ScheduleUpdateRequest']
 export type ScheduleDuplicateRequest = components['schemas']['ScheduleDuplicateRequest']
 export type ScheduleDuplicateResult = components['schemas']['ScheduleDuplicateResponse']
 export type ScheduleTeacher = components['schemas']['ScheduleTeacherResponse']
+export type DeleteResult = components['schemas']['DeleteResult']
 export type AttendanceSession = components['schemas']['AttendanceSessionResponse']
 export type SessionOpeningPolicy = components['schemas']['SessionOpeningPolicy']
 export type SessionOpeningPolicyResponse = components['schemas']['SessionOpeningPolicyResponse']
@@ -378,6 +379,16 @@ export async function enrollStudent(classId: string, studentId: string): Promise
   return unwrap(result)
 }
 
+export async function moveStudentToClass(
+  classId: string,
+  studentId: string,
+): Promise<ClassStudent> {
+  const result = await apiClient.PUT('/api/v1/students/{student_id}/class-memberships/{class_id}', {
+    params: { path: { student_id: studentId, class_id: classId } },
+  })
+  return unwrap(result)
+}
+
 export async function removeStudentFromClass(classId: string, studentId: string): Promise<void> {
   const result = await apiClient.DELETE('/api/v1/classes/{class_id}/students/{student_id}', {
     params: { path: { class_id: classId, student_id: studentId } },
@@ -448,9 +459,15 @@ export async function setDeviceCameraEnabled(deviceId: string, enabled: boolean)
   )
 }
 
-export async function deleteDevice(deviceId: string): Promise<void> {
+export async function deleteDevice(
+  deviceId: string,
+  options: { permanent?: boolean } = {},
+): Promise<void> {
   const result = await apiClient.DELETE('/api/v1/devices/{device_id}', {
-    params: { path: { device_id: deviceId } },
+    params: {
+      path: { device_id: deviceId },
+      query: { permanent: options.permanent },
+    },
   })
   if (!result.response.ok) throw toApiError(result.response.status, result.error)
 }
@@ -478,6 +495,8 @@ export async function listSchedules(query: {
   offset: number
   search?: string
   weekday?: number
+  starts_on?: string
+  ends_on?: string
   is_active?: boolean
 }): Promise<Page<Schedule>> {
   const result = await apiClient.GET('/api/v1/schedules', { params: { query } })
@@ -511,6 +530,27 @@ export async function updateSchedule(scheduleId: string, body: ScheduleUpdate): 
   const result = await apiClient.PATCH('/api/v1/schedules/{schedule_id}', {
     params: { path: { schedule_id: scheduleId } },
     body,
+  })
+  return unwrap(result)
+}
+
+export async function deleteSchedule(scheduleId: string): Promise<DeleteResult> {
+  const result = await apiClient.DELETE('/api/v1/schedules/{schedule_id}', {
+    params: { path: { schedule_id: scheduleId } },
+  })
+  return unwrap(result)
+}
+
+export async function deleteStudent(studentId: string): Promise<DeleteResult> {
+  const result = await apiClient.DELETE('/api/v1/students/{student_id}', {
+    params: { path: { student_id: studentId } },
+  })
+  return unwrap(result)
+}
+
+export async function deleteClass(classId: string): Promise<DeleteResult> {
+  const result = await apiClient.DELETE('/api/v1/classes/{class_id}', {
+    params: { path: { class_id: classId } },
   })
   return unwrap(result)
 }

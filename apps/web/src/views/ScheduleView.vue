@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { todayLocalISO } from '../utils/dateFormat'
 import {
   createSchedule,
+  deleteSchedule,
   duplicateSchedule,
   listClasses,
   listLaboratories,
@@ -74,6 +75,9 @@ const duplicateStartDate = ref('')
 const duplicateThroughDate = ref('')
 const duplicateError = ref<string | null>(null)
 const successMessage = ref<string | null>(null)
+const pendingDelete = ref<Schedule | null>(null)
+const isDeleting = ref(false)
+const deleteError = ref<string | null>(null)
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 
@@ -221,12 +225,24 @@ async function loadRows(): Promise<void> {
   isLoading.value = true
   errorMessage.value = null
   try {
+    const today = todayLocalISO()
+    const todayDate = dateValue(today)
+    const weekdayFromMonday = (todayDate.getUTCDay() + 6) % 7
+    const weekStartDate = addDays(today, -weekdayFromMonday)
+    const weekEndDate = addDays(weekStartDate, 6)
+    const dateRange =
+      dayScope.value === 'today'
+        ? { starts_on: today, ends_on: today }
+        : dayScope.value === 'week'
+          ? { starts_on: weekStartDate, ends_on: weekEndDate }
+          : {}
     const result = await listSchedules({
       limit: pageSize,
       offset: page.value * pageSize,
       search: search.value || undefined,
       weekday: weekdayFilter.value === '' ? undefined : Number(weekdayFilter.value),
       is_active: statusFilter.value === 'all' ? undefined : statusFilter.value === 'active',
+      ...dateRange,
     })
     rows.value = result.items
     total.value = result.pagination.total
@@ -400,6 +416,45 @@ function setScope(scope: 'today' | 'week' | 'all'): void {
   void loadRows()
 }
 
+function changeWeekday(value: string): void {
+  weekdayFilter.value = value
+  const today = dateValue(todayLocalISO())
+  const currentWeekday = String((today.getUTCDay() + 6) % 7)
+  if (dayScope.value === 'today' && value !== currentWeekday) {
+    dayScope.value = 'week'
+  }
+  page.value = 0
+  void loadRows()
+}
+
+function changeStatus(value: string): void {
+  statusFilter.value = value
+  page.value = 0
+  void loadRows()
+}
+
+function requestDelete(schedule: Schedule): void {
+  pendingDelete.value = schedule
+  deleteError.value = null
+}
+
+async function confirmDelete(): Promise<void> {
+  if (!pendingDelete.value || isDeleting.value) return
+  isDeleting.value = true
+  deleteError.value = null
+  try {
+    const result = await deleteSchedule(pendingDelete.value.id)
+    successMessage.value = result.message
+    pendingDelete.value = null
+    selected.value = null
+    await loadRows()
+  } catch (error) {
+    deleteError.value = formatError(error)
+  } finally {
+    isDeleting.value = false
+  }
+}
+
 function applyAltLab(laboratoryId: string): void {
   form.value.laboratory_id = laboratoryId
   formError.value = null
@@ -459,11 +514,19 @@ function goToPage(nextPage: number): void {
           Semua Jadwal
         </button>
       </div>
-      <UiSelect v-model="weekdayFilter" aria-label="Filter hari" @change="submitFilters">
+      <UiSelect
+        :model-value="weekdayFilter"
+        aria-label="Filter hari"
+        @update:model-value="changeWeekday"
+      >
         <option value="">Semua Hari</option>
         <option v-for="(day, index) in weekdays" :key="day" :value="index">{{ day }}</option>
       </UiSelect>
-      <UiSelect v-model="statusFilter" aria-label="Filter status" @change="submitFilters">
+      <UiSelect
+        :model-value="statusFilter"
+        aria-label="Filter status"
+        @update:model-value="changeStatus"
+      >
         <option value="active">Terjadwal</option>
         <option value="inactive">Nonaktif</option>
         <option value="all">Semua status</option>
@@ -522,6 +585,15 @@ function goToPage(nextPage: number): void {
               @click="openDuplicate(schedule)"
             >
               Duplikasi mingguan
+            </button>
+            <button
+              v-if="canManageSchedule"
+              type="button"
+              class="st-link st-link--danger"
+              :data-testid="`delete-schedule-${schedule.id}`"
+              @click="requestDelete(schedule)"
+            >
+              Hapus
             </button>
           </div>
         </div>
@@ -586,8 +658,34 @@ function goToPage(nextPage: number): void {
         <UiButton v-if="canManageSchedule" variant="primary" @click="selected && openEdit(selected)"
           >Ubah Jadwal</UiButton
         >
+        <UiButton v-if="canManageSchedule" variant="danger-soft" @click="requestDelete(selected)">
+          Hapus Jadwal
+        </UiButton>
       </template>
     </UiDrawer>
+
+    <UiModal v-if="pendingDelete" title="Hapus jadwal?" @close="pendingDelete = null">
+      <p>
+        Jadwal <strong>{{ pendingDelete.subject }}</strong> akan diperiksa keterkaitannya. Jika
+        sudah memiliki riwayat sesi, jadwal diarsipkan agar presensi tetap tersimpan. Jika belum
+        pernah dipakai, jadwal dihapus permanen.
+      </p>
+      <p class="st-table__muted">Tutup sesi yang masih berlangsung sebelum menghapus jadwal.</p>
+      <p v-if="deleteError" class="st-alert st-alert--error" role="alert">{{ deleteError }}</p>
+      <template #footer>
+        <UiButton variant="secondary" :disabled="isDeleting" @click="pendingDelete = null">
+          Batal
+        </UiButton>
+        <UiButton
+          variant="danger"
+          :disabled="isDeleting"
+          data-testid="confirm-delete-schedule"
+          @click="confirmDelete"
+        >
+          {{ isDeleting ? 'Memproses…' : 'Lanjutkan' }}
+        </UiButton>
+      </template>
+    </UiModal>
 
     <UiModal
       v-if="isDuplicateOpen && duplicateTarget"

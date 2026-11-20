@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Generator
+from typing import cast
 from uuid import UUID
 
 import httpx
@@ -13,7 +14,17 @@ from sqlalchemy.pool import StaticPool
 from presensi_api.api.security.dependencies import get_current_user
 from presensi_api.api.security.roles import AuthenticatedUser, RoleCode
 from presensi_api.db.base import Base
-from presensi_api.db.models import AuditLog, Device, FaceTemplate, Laboratory, User
+from presensi_api.db.models import (
+    AuditLog,
+    ClassStudent,
+    Device,
+    FaceTemplate,
+    KioskScreen,
+    Laboratory,
+    SchoolClass,
+    Student,
+    User,
+)
 from presensi_api.db.session import get_db_session
 from presensi_api.main import app
 
@@ -235,6 +246,128 @@ def test_classes_laboratories_and_student_class_relationship(
     assert listed.json()["pagination"]["total"] == 1
 
 
+def test_student_filter_and_unique_active_class_membership_per_academic_year(
+    api_database: sessionmaker[Session],
+) -> None:
+    student = request(
+        "POST",
+        "/api/v1/students",
+        {"student_number": "S-YEAR-1", "full_name": "Academic Year Student"},
+    ).json()
+
+    def create_class(code: str, year: str, grade: int = 10) -> dict[str, object]:
+        response = request(
+            "POST",
+            "/api/v1/classes",
+            {
+                "code": code,
+                "name": f"Class {code}",
+                "grade": grade,
+                "academic_year": year,
+            },
+        )
+        assert response.status_code == 201
+        return cast(dict[str, object], response.json())
+
+    class_a_id = str(create_class("YEAR-A", "2026-2027")["id"])
+    class_b_id = str(create_class("YEAR-B", "2026-2027")["id"])
+    next_year_id = str(create_class("YEAR-C", "2027-2028", grade=11)["id"])
+    assert (
+        request(
+            "POST",
+            f"/api/v1/classes/{class_a_id}/students",
+            {"student_id": student["id"]},
+        ).status_code
+        == 201
+    )
+
+    conflict = request(
+        "POST",
+        f"/api/v1/classes/{class_b_id}/students",
+        {"student_id": student["id"]},
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "student_already_in_class_year"
+    assert (
+        request(
+            "POST",
+            f"/api/v1/classes/{next_year_id}/students",
+            {"student_id": student["id"]},
+        ).status_code
+        == 201
+    )
+
+    filtered = request("GET", f"/api/v1/students?class_id={class_a_id}")
+    assert [row["id"] for row in filtered.json()["items"]] == [student["id"]]
+    assert (
+        request("GET", f"/api/v1/students?class_id={class_b_id}").json()["items"] == []
+    )
+
+    moved = request(
+        "PUT", f"/api/v1/students/{student['id']}/class-memberships/{class_b_id}"
+    )
+    assert moved.status_code == 200
+    memberships = request("GET", f"/api/v1/students/{student['id']}").json()["classes"]
+    assert {row["id"] for row in memberships} == {class_b_id, next_year_id}
+    with api_database() as session:
+        assert (
+            session.scalar(
+                select(AuditLog).where(
+                    AuditLog.action == "class.student_membership_moved",
+                    AuditLog.entity_id == UUID(student["id"]),
+                )
+            )
+            is not None
+        )
+
+
+def test_class_year_change_cannot_create_duplicate_active_membership(
+    api_database: sessionmaker[Session],
+) -> None:
+    student = request(
+        "POST",
+        "/api/v1/students",
+        {"student_number": "S-YEAR-2", "full_name": "Class Change Student"},
+    ).json()
+    class_a = request(
+        "POST",
+        "/api/v1/classes",
+        {
+            "code": "CHANGE-A",
+            "name": "Change Class A",
+            "grade": 10,
+            "academic_year": "2026-2027",
+        },
+    ).json()
+    class_b = request(
+        "POST",
+        "/api/v1/classes",
+        {
+            "code": "CHANGE-B",
+            "name": "Change Class B",
+            "grade": 11,
+            "academic_year": "2027-2028",
+        },
+    ).json()
+    for school_class in (class_a, class_b):
+        assert (
+            request(
+                "POST",
+                f"/api/v1/classes/{school_class['id']}/students",
+                {"student_id": student["id"]},
+            ).status_code
+            == 201
+        )
+
+    changed = request(
+        "PATCH",
+        f"/api/v1/classes/{class_a['id']}",
+        {"academic_year": "2027-2028"},
+    )
+    assert changed.status_code == 409
+    assert changed.json()["error"]["code"] == "class_year_membership_conflict"
+
+
 def test_master_data_rejects_empty_patch_and_unknown_resources(
     api_database: sessionmaker[Session],
 ) -> None:
@@ -328,6 +461,68 @@ def test_device_delete_revokes_credentials_and_preserves_audited_history(
     assert archived_devices.json()["pagination"]["total"] == 1
 
 
+def test_device_can_be_permanently_deleted_only_when_no_history_or_kiosk_exists(
+    api_database: sessionmaker[Session],
+) -> None:
+    laboratory = request(
+        "POST", "/api/v1/laboratories", {"code": "LAB-PURGE", "name": "Purge Lab"}
+    ).json()
+
+    def create_device(name: str) -> str:
+        response = request(
+            "POST",
+            "/api/v1/devices",
+            {
+                "laboratory_id": laboratory["id"],
+                "name": name,
+                "device_type": "edge_pc",
+                "deployment_profile": "AI_EDGE",
+            },
+        )
+        assert response.status_code == 201
+        return str(response.json()["device_id"])
+
+    removable_id = create_device("Removable Device")
+    assert (
+        request("DELETE", f"/api/v1/devices/{removable_id}?permanent=true").status_code
+        == 409
+    )
+    assert request("DELETE", f"/api/v1/devices/{removable_id}").status_code == 204
+    assert (
+        request("DELETE", f"/api/v1/devices/{removable_id}?permanent=true").status_code
+        == 204
+    )
+    with api_database() as session:
+        assert session.get(Device, UUID(removable_id)) is None
+        assert (
+            session.scalar(
+                select(AuditLog).where(
+                    AuditLog.action == "device.permanently_deleted",
+                    AuditLog.entity_id == UUID(removable_id),
+                )
+            )
+            is not None
+        )
+
+    retained_id = create_device("Kiosk Device")
+    assert request("DELETE", f"/api/v1/devices/{retained_id}").status_code == 204
+    with api_database.begin() as session:
+        session.add(
+            KioskScreen(
+                device_id=UUID(retained_id),
+                laboratory_id=UUID(str(laboratory["id"])),
+                display_name="Retained Kiosk",
+            )
+        )
+    blocked = request("DELETE", f"/api/v1/devices/{retained_id}?permanent=true")
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "device_has_history"
+    assert (
+        request("GET", "/api/v1/devices?is_active=false").json()["pagination"]["total"]
+        == 1
+    )
+
+
 def test_student_search_treats_percent_and_underscore_literally(
     api_database: "sessionmaker[Session]",
 ) -> None:
@@ -365,3 +560,99 @@ def test_student_search_treats_percent_and_underscore_literally(
     underscore = request("GET", "/api/v1/students?search=A_1")
     assert underscore.status_code == 200
     assert [item["student_number"] for item in underscore.json()["items"]] == ["A_1"]
+
+
+def test_student_delete_archives_biometric_history_and_deletes_unused_records(
+    api_database: sessionmaker[Session],
+) -> None:
+    unused = request(
+        "POST",
+        "/api/v1/students",
+        {"student_number": "S-UNUSED", "full_name": "Unused Synthetic Student"},
+    ).json()
+    deleted = request("DELETE", f"/api/v1/students/{unused['id']}")
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["action"] == "deleted"
+    with api_database() as session:
+        assert session.get(Student, UUID(unused["id"])) is None
+
+    referenced = request(
+        "POST",
+        "/api/v1/students",
+        {"student_number": "S-RETAIN", "full_name": "Retained Synthetic Student"},
+    ).json()
+    template_id = UUID(int=901)
+    with api_database.begin() as session:
+        session.add(
+            FaceTemplate(
+                id=template_id,
+                student_id=UUID(referenced["id"]),
+                model_name="synthetic-fixture",
+                model_version="v1",
+                embedding_ciphertext=b"synthetic-test-embedding",
+                encryption_key_id="test-key",
+                embedding_dimension=2,
+                created_by_user_id=UUID(int=42),
+            )
+        )
+
+    archived = request("DELETE", f"/api/v1/students/{referenced['id']}")
+    assert archived.status_code == 200, archived.text
+    assert archived.json()["action"] == "archived"
+    with api_database() as session:
+        retained = session.get(Student, UUID(referenced["id"]))
+        template = session.get(FaceTemplate, template_id)
+        assert retained is not None and retained.is_active is False
+        assert template is not None and template.revoked_at is not None
+        assert template.embedding_ciphertext is None
+
+
+def test_class_delete_archives_class_membership_and_hard_deletes_unused_class(
+    api_database: sessionmaker[Session],
+) -> None:
+    unused = request(
+        "POST",
+        "/api/v1/classes",
+        {
+            "code": "UNUSED",
+            "name": "Unused Synthetic Class",
+            "grade": 10,
+            "academic_year": "2026-2027",
+        },
+    ).json()
+    deleted = request("DELETE", f"/api/v1/classes/{unused['id']}")
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["action"] == "deleted"
+    with api_database() as session:
+        assert session.get(SchoolClass, UUID(unused["id"])) is None
+
+    retained = request(
+        "POST",
+        "/api/v1/classes",
+        {
+            "code": "RETAIN",
+            "name": "Retained Synthetic Class",
+            "grade": 11,
+            "academic_year": "2026-2027",
+        },
+    ).json()
+    student = request(
+        "POST",
+        "/api/v1/students",
+        {"student_number": "S-MEMBER", "full_name": "Synthetic Class Member"},
+    ).json()
+    with api_database.begin() as session:
+        session.add(
+            ClassStudent(class_id=UUID(retained["id"]), student_id=UUID(student["id"]))
+        )
+
+    archived = request("DELETE", f"/api/v1/classes/{retained['id']}")
+    assert archived.status_code == 200, archived.text
+    assert archived.json()["action"] == "archived"
+    with api_database() as session:
+        retained_class = session.get(SchoolClass, UUID(retained["id"]))
+        membership = session.get(
+            ClassStudent, (UUID(retained["id"]), UUID(student["id"]))
+        )
+        assert retained_class is not None and retained_class.is_active is False
+        assert membership is not None

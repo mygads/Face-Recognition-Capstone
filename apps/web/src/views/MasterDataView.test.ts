@@ -15,14 +15,17 @@ const api = vi.hoisted(() => ({
   listClassLaboratories: vi.fn(),
   createStudent: vi.fn(),
   updateStudent: vi.fn(),
+  deleteStudent: vi.fn(),
   createClass: vi.fn(),
   updateClass: vi.fn(),
+  deleteClass: vi.fn(),
   createLaboratory: vi.fn(),
   updateLaboratory: vi.fn(),
   getStudent: vi.fn(),
   getClass: vi.fn(),
   getLaboratory: vi.fn(),
   enrollStudent: vi.fn(),
+  moveStudentToClass: vi.fn(),
   removeStudentFromClass: vi.fn(),
   previewStudentImport: vi.fn(),
   commitStudentImport: vi.fn(),
@@ -146,6 +149,9 @@ beforeEach(() => {
   api.getClass.mockResolvedValue({ ...kelas, students: [] })
   api.getLaboratory.mockResolvedValue(lab)
   api.createStudent.mockResolvedValue(student)
+  api.deleteStudent.mockResolvedValue({ action: 'archived', message: 'Siswa diarsipkan.' })
+  api.deleteClass.mockResolvedValue({ action: 'deleted', message: 'Data kelas dihapus permanen.' })
+  api.moveStudentToClass.mockResolvedValue({})
   api.previewStudentImport.mockResolvedValue({
     total_rows: 1,
     valid_rows: 0,
@@ -179,6 +185,79 @@ describe('master data view (Stitch B02)', () => {
     })
     expect(wrapper.text()).not.toContain('Tambah Siswa')
     expect(wrapper.text()).not.toContain('Impor Siswa')
+    wrapper.unmount()
+  })
+
+  it('mengarsipkan siswa setelah konfirmasi dan memuat ulang daftar', async () => {
+    const { wrapper } = await mountAt('/app/master-data/students')
+    await wrapper.get('[data-testid="delete-student-student-1"]').trigger('click')
+    expect(wrapper.text()).toContain('acuan wajah aktif dicabut')
+    await wrapper.get('[data-testid="confirm-delete-master-data"]').trigger('click')
+    await flushPromises()
+
+    expect(api.deleteStudent).toHaveBeenCalledWith('student-1')
+    expect(wrapper.text()).toContain('Siswa diarsipkan.')
+    expect(api.listStudents).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('menghapus kelas yang belum dipakai setelah konfirmasi', async () => {
+    const { wrapper } = await mountAt('/app/master-data/classes')
+    await wrapper.get('[data-testid="delete-class-class-1"]').trigger('click')
+    await wrapper.get('[data-testid="confirm-delete-master-data"]').trigger('click')
+    await flushPromises()
+
+    expect(api.deleteClass).toHaveBeenCalledWith('class-1')
+    expect(wrapper.text()).toContain('Data kelas dihapus permanen.')
+    wrapper.unmount()
+  })
+
+  it('mengirim filter kelas yang baru dipilih sebelum memuat ulang daftar', async () => {
+    const secondClass = {
+      ...kelas,
+      id: 'class-2',
+      code: 'XII IPA 2',
+      name: 'Kelas XII IPA 2',
+      grade: 12,
+    }
+    api.listClasses.mockResolvedValue({
+      items: [kelas, secondClass],
+      pagination: { total: 2, limit: 100, offset: 0 },
+    })
+    const { wrapper } = await mountAt('/app/master-data/students')
+    api.listStudents.mockClear()
+
+    await wrapper.get('select[aria-label="Filter kelas"]').setValue('class-2')
+    await flushPromises()
+
+    expect(api.listStudents).toHaveBeenLastCalledWith({
+      limit: 10,
+      offset: 0,
+      search: undefined,
+      is_active: undefined,
+      class_id: 'class-2',
+    })
+    wrapper.unmount()
+  })
+
+  it('menampilkan tingkat tersimpan dan mengirim perubahan tingkat kelas', async () => {
+    const { wrapper } = await mountAt('/app/master-data/classes')
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text().trim() === 'Edit')!
+      .trigger('click')
+    await flushPromises()
+
+    const grade = wrapper.get('select[aria-label="Tingkat kelas"]')
+    expect((grade.element as HTMLSelectElement).value).toBe('11')
+    await grade.setValue('12')
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text().trim() === 'Simpan')!
+      .trigger('click')
+    await flushPromises()
+
+    expect(api.updateClass).toHaveBeenCalledWith('class-1', expect.objectContaining({ grade: 12 }))
     wrapper.unmount()
   })
 
@@ -267,7 +346,6 @@ describe('master data view (Stitch B02)', () => {
       items: [classNow],
       pagination: { total: 1, limit: 100, offset: 0 },
     })
-    api.enrollStudent.mockResolvedValue({})
     api.removeStudentFromClass.mockResolvedValue(undefined)
     const { wrapper } = await mountAt('/app/master-data/students', 'ADMIN')
 
@@ -285,8 +363,9 @@ describe('master data view (Stitch B02)', () => {
       .trigger('click')
     await flushPromises()
 
-    expect(api.enrollStudent).toHaveBeenCalledWith('class-2', 'student-1')
-    expect(api.removeStudentFromClass).toHaveBeenCalledWith('class-1', 'student-1')
+    expect(api.moveStudentToClass).toHaveBeenCalledWith('class-2', 'student-1')
+    expect(api.enrollStudent).not.toHaveBeenCalled()
+    expect(api.removeStudentFromClass).not.toHaveBeenCalledWith('class-1', 'student-1')
     expect(api.removeStudentFromClass).not.toHaveBeenCalledWith('class-0', 'student-1')
     wrapper.unmount()
   })

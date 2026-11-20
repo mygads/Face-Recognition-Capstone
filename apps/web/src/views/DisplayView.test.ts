@@ -672,6 +672,30 @@ describe('DisplayView sinyal agent lokal', () => {
     }
   })
 
+  it('menjelaskan bila sesi hanya punya satu identitas pembanding', async () => {
+    const w = await mountLiveBoard({
+      session_active: true,
+      camera_open: true,
+      recognition_state: 'retry_frontal',
+      recognition_reason_code: 'single_identity_gallery',
+      face_present: true,
+      face_count: 1,
+      attendance_result: null,
+    })
+    try {
+      expect(w.get('[data-testid="display-recognition-title"]').text()).toBe(
+        'Butuh identitas pembanding',
+      )
+      const message = w.get('[data-testid="display-recognition-status"]').text()
+      expect(message).toContain('satu identitas dengan acuan wajah')
+      expect(message).toContain('Gunakan penandaan manual')
+      expect(message).not.toContain('Hadapkan wajah lurus')
+    } finally {
+      w.unmount()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('menyembunyikan indikator saat hint gagal dijangkau', async () => {
     const g = globalThis as unknown as Record<string, unknown>
     const realES = g['EventSource']
@@ -1001,6 +1025,10 @@ describe('DisplayView kamera lokal', () => {
     const g = globalThis as unknown as Record<string, unknown>
     const realES = g['EventSource']
     g['EventSource'] = FakeES
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false, status: 503, json: async () => ({}) })),
+    )
     FakeES.instances = []
     const fakeTrack = { stop: vi.fn() }
     const fakeStream = { getTracks: () => [fakeTrack] }
@@ -1037,6 +1065,7 @@ describe('DisplayView kamera lokal', () => {
     } finally {
       w.unmount()
       g['EventSource'] = realES
+      vi.unstubAllGlobals()
       Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true })
       Object.defineProperty(window.navigator, 'mediaDevices', {
         value: realMediaDevices,

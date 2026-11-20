@@ -122,7 +122,10 @@ AI_EDGE: native di PC lab; enumerasi index kamera, buka mode requested
 sampling detector). Model YuNet/SFace dari path lokal (installer commissioning
 download + checksum; runtime tidak download). Quality/sampling/temporal/margin
 terkalibrasi dari dashboard per device (poll 15 detik, revision reported,
-cache non-biometrik untuk restart saat outage). Single camera track; tolak
+cache non-biometrik untuk restart saat outage). Versi gallery yang tidak berubah
+boleh tetap lebih tua dari sesi; freshness offline diperpanjang dari fetch
+sukses/HTTP 304 dan tetap dibatasi akhir sesi serta `cache_max_offline_seconds`.
+Single camera track; tolak
 frame nol/multi-wajah. Gallery memory scope device+sesi+model/version; expiry
 = min(provider expiry, akhir sesi, `cache_max_offline_seconds` default
 300 dtk); restart saat offline → fail-closed (outbox SQLite tetap durable).

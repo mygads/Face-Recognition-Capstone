@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from presensi_api.api.errors import OPENAPI_ERROR_RESPONSES, ApiProblem
 from presensi_api.api.security.dependencies import require_permissions
 from presensi_api.api.security.roles import AuthenticatedUser, Permission
-from presensi_api.api.v1.schemas.common import PageResponse, Pagination
+from presensi_api.api.v1.schemas.common import DeleteResult, PageResponse, Pagination
 from presensi_api.api.v1.schemas.students import (
     ClassCreateRequest,
     ClassDetailResponse,
@@ -28,11 +28,19 @@ from presensi_api.api.v1.schemas.students import (
     StudentUpdateRequest,
 )
 from presensi_api.db.models import (
+    AttendanceRecord,
+    AttendanceSession,
     AuditLog,
+    ClassLaboratory,
     ClassStudent,
+    EwsFollowUp,
     FaceTemplate,
+    PracticumSchedule,
+    RecognitionEvent,
     SchoolClass,
+    SessionStudent,
     Student,
+    TeacherClassAssignment,
     User,
 )
 from presensi_api.db.search import like_contains
@@ -332,6 +340,168 @@ def update_student(
     return _student_response(student)
 
 
+@router.delete(
+    "/students/{student_id}",
+    response_model=DeleteResult,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Archive a student with history or permanently delete an unused student",
+)
+def delete_student(
+    student_id: UUID,
+    session: DbSession,
+    principal: Annotated[
+        AuthenticatedUser, Depends(require_permissions(Permission.MANAGE_MASTER_DATA))
+    ],
+) -> DeleteResult:
+    student = session.scalar(
+        select(Student).where(Student.id == student_id).with_for_update()
+    )
+    if student is None:
+        raise _not_found("Student")
+
+    has_membership = (
+        session.scalar(
+            select(ClassStudent.student_id)
+            .where(ClassStudent.student_id == student_id)
+            .limit(1)
+        )
+        is not None
+    )
+    has_roster_history = (
+        session.scalar(
+            select(SessionStudent.student_id)
+            .where(SessionStudent.student_id == student_id)
+            .limit(1)
+        )
+        is not None
+    )
+    has_templates = (
+        session.scalar(
+            select(FaceTemplate.id)
+            .where(FaceTemplate.student_id == student_id)
+            .limit(1)
+        )
+        is not None
+    )
+    has_recognition_history = (
+        session.scalar(
+            select(RecognitionEvent.id)
+            .where(RecognitionEvent.recognized_student_id == student_id)
+            .limit(1)
+        )
+        is not None
+    )
+    has_attendance = (
+        session.scalar(
+            select(AttendanceRecord.id)
+            .where(AttendanceRecord.student_id == student_id)
+            .limit(1)
+        )
+        is not None
+    )
+    has_follow_up = (
+        session.scalar(
+            select(EwsFollowUp.id).where(EwsFollowUp.student_id == student_id).limit(1)
+        )
+        is not None
+    )
+
+    # Do not change a roster while its session is still collecting attendance.
+    active_session = session.scalar(
+        select(AttendanceSession.id)
+        .join(SessionStudent, SessionStudent.session_id == AttendanceSession.id)
+        .where(
+            SessionStudent.student_id == student_id,
+            AttendanceSession.status.in_(("active", "manual_override")),
+        )
+        .limit(1)
+    )
+    if active_session is not None:
+        raise ApiProblem(
+            409,
+            "student_in_active_session",
+            "Siswa masih ada di sesi presensi aktif. "
+            "Tutup sesi sebelum mengarsipkan siswa.",
+        )
+
+    if any(
+        (
+            has_membership,
+            has_roster_history,
+            has_templates,
+            has_recognition_history,
+            has_attendance,
+            has_follow_up,
+        )
+    ):
+        was_active = student.is_active
+        revoked_templates = session.scalars(
+            select(FaceTemplate)
+            .where(
+                FaceTemplate.student_id == student_id,
+                FaceTemplate.revoked_at.is_(None),
+            )
+            .with_for_update()
+        ).all()
+        now = datetime.now(UTC)
+        for template in revoked_templates:
+            template.revoked_at = now
+            template.revoked_by_user_id = principal.id
+            template.embedding_ciphertext = None
+            template.encryption_key_id = None
+            template.embedding_dimension = None
+        student.is_active = False
+        session.add(
+            AuditLog(
+                actor_user_id=principal.id,
+                action="student.archived",
+                entity_type="student",
+                entity_id=student.id,
+                before_state={"is_active": was_active},
+                after_state={
+                    "is_active": False,
+                    "revoked_template_count": len(revoked_templates),
+                },
+            )
+        )
+        if revoked_templates:
+            session.add(
+                AuditLog(
+                    actor_user_id=principal.id,
+                    action="face_template.revoked_on_student_archive",
+                    entity_type="student_face_templates",
+                    entity_id=student.id,
+                    after_state={"revoked_template_count": len(revoked_templates)},
+                )
+            )
+        session.commit()
+        return DeleteResult(
+            action="archived",
+            message="Siswa diarsipkan agar data kelas dan riwayat tetap tersimpan.",
+        )
+
+    session.add(
+        AuditLog(
+            actor_user_id=principal.id,
+            action="student.deleted",
+            entity_type="student",
+            entity_id=student.id,
+            after_state={"action": "deleted", "reason": "no_references"},
+        )
+    )
+    session.delete(student)
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise ApiProblem(
+            409,
+            "student_in_use",
+            "Siswa memiliki data terkait. Muat ulang, lalu arsipkan siswa.",
+        ) from exc
+    return DeleteResult(action="deleted", message="Data siswa dihapus permanen.")
+
+
 @router.get(
     "/classes",
     response_model=PageResponse[ClassResponse],
@@ -460,13 +630,56 @@ def get_class(class_id: UUID, session: DbSession) -> ClassDetailResponse:
 def update_class(
     class_id: UUID, request: ClassUpdateRequest, session: DbSession
 ) -> ClassResponse:
-    school_class = session.get(SchoolClass, class_id)
+    school_class = session.scalar(
+        select(SchoolClass).where(SchoolClass.id == class_id).with_for_update()
+    )
     if school_class is None:
         raise _not_found("Class")
     changes = request.model_dump(exclude_unset=True)
     teacher_id = changes.get("homeroom_teacher_id", school_class.homeroom_teacher_id)
     if teacher_id and session.get(User, teacher_id) is None:
         raise ApiProblem(422, "invalid_teacher", "Guru wali kelas tidak ditemukan.")
+    target_year = changes.get("academic_year", school_class.academic_year)
+    target_active = changes.get("is_active", school_class.is_active)
+    if target_active and (
+        target_year != school_class.academic_year or not school_class.is_active
+    ):
+        member_student_ids = session.scalars(
+            select(ClassStudent.student_id).where(
+                ClassStudent.class_id == school_class.id
+            )
+        ).all()
+        if member_student_ids:
+            session.scalars(
+                select(Student)
+                .where(Student.id.in_(member_student_ids))
+                .order_by(Student.id)
+                .with_for_update()
+            ).all()
+        other_active_student_ids = (
+            select(ClassStudent.student_id)
+            .join(SchoolClass, SchoolClass.id == ClassStudent.class_id)
+            .where(
+                ClassStudent.class_id != school_class.id,
+                SchoolClass.academic_year == target_year,
+                SchoolClass.is_active.is_(True),
+            )
+        )
+        conflicting_student_id = session.scalar(
+            select(ClassStudent.student_id)
+            .where(
+                ClassStudent.class_id == school_class.id,
+                ClassStudent.student_id.in_(other_active_student_ids),
+            )
+            .limit(1)
+        )
+        if conflicting_student_id is not None:
+            raise ApiProblem(
+                409,
+                "class_year_membership_conflict",
+                "Kelas tidak dapat diaktifkan atau dipindahkan ke tahun ajaran "
+                "tersebut karena ada siswa yang sudah terdaftar di kelas aktif lain.",
+            )
     for key, value in changes.items():
         setattr(school_class, key, value)
     _commit(
@@ -476,6 +689,129 @@ def update_class(
     )
     session.refresh(school_class)
     return _class_response(school_class)
+
+
+@router.delete(
+    "/classes/{class_id}",
+    response_model=DeleteResult,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Archive a class with history or permanently delete an unused class",
+    dependencies=[Depends(require_permissions(Permission.MANAGE_MASTER_DATA))],
+)
+def delete_class(
+    class_id: UUID,
+    session: DbSession,
+    principal: Annotated[
+        AuthenticatedUser, Depends(require_permissions(Permission.MANAGE_MASTER_DATA))
+    ],
+) -> DeleteResult:
+    school_class = session.scalar(
+        select(SchoolClass).where(SchoolClass.id == class_id).with_for_update()
+    )
+    if school_class is None:
+        raise _not_found("Class")
+
+    has_members = (
+        session.scalar(
+            select(ClassStudent.student_id)
+            .where(ClassStudent.class_id == class_id)
+            .limit(1)
+        )
+        is not None
+    )
+    related_schedules = session.scalars(
+        select(PracticumSchedule)
+        .where(PracticumSchedule.class_id == class_id)
+        .with_for_update()
+    ).all()
+    has_schedules = bool(related_schedules)
+    has_teacher_assignments = (
+        session.scalar(
+            select(TeacherClassAssignment.user_id)
+            .where(TeacherClassAssignment.class_id == class_id)
+            .limit(1)
+        )
+        is not None
+    )
+    has_lab_mappings = (
+        session.scalar(
+            select(ClassLaboratory.class_id)
+            .where(ClassLaboratory.class_id == class_id)
+            .limit(1)
+        )
+        is not None
+    )
+
+    active_session = session.scalar(
+        select(AttendanceSession.id)
+        .join(
+            PracticumSchedule,
+            PracticumSchedule.id == AttendanceSession.practicum_schedule_id,
+        )
+        .where(
+            PracticumSchedule.class_id == class_id,
+            AttendanceSession.status.in_(("active", "manual_override")),
+        )
+        .limit(1)
+    )
+    if active_session is not None:
+        raise ApiProblem(
+            409,
+            "class_has_active_session",
+            "Kelas masih memiliki sesi presensi aktif. "
+            "Tutup sesi sebelum mengarsipkan kelas.",
+        )
+
+    referenced = any(
+        (has_members, has_schedules, has_teacher_assignments, has_lab_mappings)
+    )
+    if referenced:
+        was_active = school_class.is_active
+        for schedule in related_schedules:
+            schedule.is_active = False
+        school_class.is_active = False
+        session.add(
+            AuditLog(
+                actor_user_id=principal.id,
+                action="class.archived",
+                entity_type="class",
+                entity_id=school_class.id,
+                before_state={"is_active": was_active},
+                after_state={
+                    "is_active": False,
+                    "deactivated_schedule_count": len(related_schedules),
+                },
+            )
+        )
+        session.commit()
+        return DeleteResult(
+            action="archived",
+            message=(
+                "Kelas diarsipkan agar anggota, penugasan, dan "
+                "riwayat jadwal tetap utuh."
+            ),
+        )
+
+    session.add(
+        AuditLog(
+            actor_user_id=principal.id,
+            action="class.deleted",
+            entity_type="class",
+            entity_id=school_class.id,
+            after_state={"action": "deleted", "reason": "no_references"},
+        )
+    )
+    session.delete(school_class)
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise ApiProblem(
+            409,
+            "class_in_use",
+            "Kelas memiliki data terkait. Muat ulang, lalu coba lagi.",
+        ) from exc
+    return DeleteResult(action="deleted", message="Data kelas dihapus permanen.")
 
 
 @router.post(
@@ -489,20 +825,128 @@ def update_class(
 def add_student_to_class(
     class_id: UUID, request: ClassStudentCreateRequest, session: DbSession
 ) -> ClassStudentResponse:
-    school_class = session.get(SchoolClass, class_id)
-    student = session.get(Student, request.student_id)
+    school_class = session.scalar(
+        select(SchoolClass).where(SchoolClass.id == class_id).with_for_update()
+    )
     if school_class is None:
         raise _not_found("Class")
+    # Serialize enrollment writes by student on PostgreSQL so two simultaneous
+    # requests cannot create memberships in different active classes of one year.
+    student = session.scalar(
+        select(Student).where(Student.id == request.student_id).with_for_update()
+    )
     if student is None:
         raise _not_found("Student")
     if not school_class.is_active or not student.is_active:
         raise ApiProblem(409, "inactive_roster_member", "Kelas dan siswa harus aktif.")
+    existing_class = session.scalar(
+        select(SchoolClass)
+        .join(ClassStudent, ClassStudent.class_id == SchoolClass.id)
+        .where(
+            ClassStudent.student_id == student.id,
+            SchoolClass.academic_year == school_class.academic_year,
+            SchoolClass.is_active.is_(True),
+        )
+        .limit(1)
+    )
+    if existing_class is not None:
+        if existing_class.id == school_class.id:
+            raise ApiProblem(
+                409,
+                "duplicate_class_membership",
+                "Siswa sudah terdaftar di kelas tersebut.",
+            )
+        raise ApiProblem(
+            409,
+            "student_already_in_class_year",
+            f"Siswa sudah terdaftar di {existing_class.name} untuk tahun ajaran "
+            f"{existing_class.academic_year}. Pindahkan ke kelas tujuan "
+            "terlebih dahulu.",
+        )
     link = ClassStudent(class_id=class_id, student_id=student.id)
     session.add(link)
     _commit(
         session,
         duplicate_code="duplicate_class_membership",
         duplicate_message="Siswa sudah terdaftar di kelas tersebut.",
+    )
+    return ClassStudentResponse(
+        id=student.id,
+        student_number=student.student_number,
+        full_name=student.full_name,
+        is_active=student.is_active,
+    )
+
+
+@router.put(
+    "/students/{student_id}/class-memberships/{class_id}",
+    response_model=ClassStudentResponse,
+    responses=OPENAPI_ERROR_RESPONSES,
+    summary="Move a student to another class in the same academic year",
+    dependencies=[Depends(require_permissions(Permission.MANAGE_MASTER_DATA))],
+)
+def move_student_to_class(
+    student_id: UUID,
+    class_id: UUID,
+    session: DbSession,
+    principal: Annotated[
+        AuthenticatedUser, Depends(require_permissions(Permission.MANAGE_MASTER_DATA))
+    ],
+) -> ClassStudentResponse:
+    target_class = session.scalar(
+        select(SchoolClass).where(SchoolClass.id == class_id).with_for_update()
+    )
+    if target_class is None:
+        raise _not_found("Class")
+    student = session.scalar(
+        select(Student).where(Student.id == student_id).with_for_update()
+    )
+    if student is None:
+        raise _not_found("Student")
+    if not target_class.is_active or not student.is_active:
+        raise ApiProblem(409, "inactive_roster_member", "Kelas dan siswa harus aktif.")
+
+    memberships = session.execute(
+        select(ClassStudent, SchoolClass)
+        .join(SchoolClass, SchoolClass.id == ClassStudent.class_id)
+        .where(
+            ClassStudent.student_id == student.id,
+            SchoolClass.academic_year == target_class.academic_year,
+            SchoolClass.is_active.is_(True),
+        )
+    ).all()
+    existing_target = any(link.class_id == target_class.id for link, _ in memberships)
+    removed_class_ids = [
+        link.class_id for link, _ in memberships if link.class_id != target_class.id
+    ]
+    for link, _ in memberships:
+        if link.class_id != target_class.id:
+            session.delete(link)
+    if not existing_target:
+        session.add(ClassStudent(class_id=target_class.id, student_id=student.id))
+
+    if removed_class_ids or not existing_target:
+        session.add(
+            AuditLog(
+                actor_user_id=principal.id,
+                action="class.student_membership_moved",
+                entity_type="student",
+                entity_id=student.id,
+                before_state={
+                    "class_ids": [str(value) for value in removed_class_ids]
+                    + ([str(target_class.id)] if existing_target else []),
+                    "academic_year": target_class.academic_year,
+                },
+                after_state={
+                    "class_id": str(target_class.id),
+                    "academic_year": target_class.academic_year,
+                },
+            )
+        )
+    _commit(
+        session,
+        duplicate_code="student_already_in_class_year",
+        duplicate_message="Siswa sudah terdaftar pada kelas lain di tahun ajaran ini.",
     )
     return ClassStudentResponse(
         id=student.id,

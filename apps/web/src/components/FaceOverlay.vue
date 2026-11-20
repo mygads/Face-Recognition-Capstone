@@ -82,7 +82,9 @@ function drawFaceMesh(): void {
   if (!context || width < 1 || height < 1) return
   canvasContext = context
 
-  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2)
+  // The overlay is diagnostic UI; a 1.5x backing store keeps dense mesh strokes
+  // crisp while avoiding the 4x canvas fill cost of a 2x device-pixel ratio.
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5)
   const canvasWidth = Math.round(width * pixelRatio)
   const canvasHeight = Math.round(height * pixelRatio)
   if (canvas.width !== canvasWidth || canvas.height !== canvasHeight) {

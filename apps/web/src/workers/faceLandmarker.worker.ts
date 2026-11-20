@@ -36,7 +36,9 @@ async function createLandmarker(
     {
       baseOptions: { modelAssetBuffer: modelBuffer, delegate },
       runningMode: 'VIDEO',
-      numFaces: 3,
+      // The kiosk/enrollment mesh is visual guidance for the primary student.
+      // AI_EDGE independently detects and matches every face from full frames.
+      numFaces: 1,
       minFaceDetectionConfidence: 0.5,
       minFacePresenceConfidence: 0.5,
       minTrackingConfidence: 0.5,

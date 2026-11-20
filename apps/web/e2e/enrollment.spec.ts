@@ -318,10 +318,10 @@ test('laborant captures a student, confirms identity, and advances to the next s
   await expect(page.getByTestId('enrollment-capture-pose')).toContainText('Lihat lurus ke kamera')
   await expect(page.getByTestId('enrollment-capture-pose')).toContainText('Putar sedikit ke kiri')
   await expect(page.getByTestId('enrollment-capture-pose')).toContainText('Putar sedikit ke kanan')
-  await expect(page.getByTestId('enrollment-capture-pose')).toContainText(
-    'Kembali menghadap lurus',
-  )
-  await expect(page.getByText(/4 dari 4 capture siap/i)).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByTestId('enrollment-capture-pose')).toContainText('Kembali menghadap lurus')
+  await expect(page.getByText(/4 dari 4 frame diterima, 0 tidak digunakan/i)).toBeVisible({
+    timeout: 10_000,
+  })
   await expect(
     page.getByText(/Ada kemungkinan wajah mirip dengan Synthetic Student Three/),
   ).toBeVisible()
@@ -343,6 +343,7 @@ test('laborant can revoke an active template before re-enrollment', async ({ pag
   await stubFallbackFirst(page)
   const enrolledId = roster[2].id
   let status: 'enrolled' | 'needs_reenrollment' = 'enrolled'
+  let revoked = false
   await page.route('**/api/v1/classes?**', (route) =>
     route.fulfill({
       status: 200,
@@ -377,24 +378,27 @@ test('laborant can revoke an active template before re-enrollment', async ({ pag
     route.fulfill({
       status: 200,
       json: {
-        items: [
-          {
-            id: 'template-active-1',
-            student_id: enrolledId,
-            enrollment_batch_id: 'batch-enrollment-1',
-            model_name: 'opencv-zoo-sface',
-            model_version: 'model-v1',
-            quality_metadata: {},
-            created_at: '2026-10-01T00:00:00Z',
-            revoked_at: null,
-          },
-        ],
-        pagination: { total: 1, limit: 100, offset: 0 },
+        items: revoked
+          ? []
+          : [
+              {
+                id: 'template-active-1',
+                student_id: enrolledId,
+                enrollment_batch_id: 'batch-enrollment-1',
+                model_name: 'opencv-zoo-sface',
+                model_version: 'model-v1',
+                quality_metadata: {},
+                created_at: '2026-10-01T00:00:00Z',
+                revoked_at: null,
+              },
+            ],
+        pagination: { total: revoked ? 0 : 1, limit: 100, offset: 0 },
       },
     }),
   )
   await page.route('**/api/v1/face-templates/template-active-1/revoke', async (route) => {
     status = 'needs_reenrollment'
+    revoked = true
     await route.fulfill({
       status: 200,
       json: {
@@ -416,6 +420,8 @@ test('laborant can revoke an active template before re-enrollment', async ({ pag
   await page.getByTestId('revoke-reason-input').fill('Kualitas tangkapan lama kurang baik')
   await page.getByTestId('confirm-revoke-template').click()
   await expect(enrolledStudent).toContainText('Perlu daftar ulang')
-  await expect(page.locator('p.st-alert--success')).toContainText('template dicabut')
+  await expect(page.locator('p.st-alert--success')).toContainText(
+    'semua acuan wajah aktif sudah dicabut',
+  )
   await expect(page.getByTestId('start-enrollment-capture')).toHaveText('Daftar ulang siswa')
 })

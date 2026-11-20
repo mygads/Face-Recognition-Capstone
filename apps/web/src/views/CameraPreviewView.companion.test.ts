@@ -57,7 +57,7 @@ describe('camera preview confidence companion', () => {
     mockRouteQuery.value = {}
   })
 
-  it('labels candidates as non-accuracy and never creates attendance', async () => {
+  it('does not expose identity candidates before a session and never creates attendance', async () => {
     const fetchCalls: string[] = []
     const nowSeconds = Date.now() / 1000
     const stubFetch = vi.fn(async (input: unknown) => {
@@ -121,7 +121,12 @@ describe('camera preview confidence companion', () => {
     await new Promise((resolve) => setTimeout(resolve, 50))
     await flushPromises()
 
-    expect(wrapper.text()).toContain('bukan tingkat akurasi')
+    expect(wrapper.get('[data-testid="preview-session-required"]').text()).toContain(
+      'Buka sesi untuk memeriksa nama',
+    )
+    expect(wrapper.text()).not.toContain('Siswa Sintetis')
+    expect(wrapper.text()).not.toContain('0.870')
+    expect(wrapper.text()).not.toContain('bukan tingkat akurasi')
     expect(wrapper.find('[data-testid="preview-device-select"]').exists()).toBe(true)
     expect(wrapper.find('input[type="password"]').exists()).toBe(false)
     expect(
@@ -142,7 +147,7 @@ describe('camera preview confidence companion', () => {
     wrapper.unmount()
   })
 
-  it('explains why a visible face has no matched student candidate', async () => {
+  it('explains that identity checks wait for an active session roster', async () => {
     const nowSeconds = Date.now() / 1000
     const stubFetch = vi.fn(async (input: unknown) => {
       const url = String(input)
@@ -187,18 +192,13 @@ describe('camera preview confidence companion', () => {
       await new Promise((resolve) => setTimeout(resolve, 50))
       await flushPromises()
 
-      expect(wrapper.get('[data-testid="preview-unmatched-face"]').text()).toContain(
-        'Wajah terdeteksi, tetapi belum ada kandidat yang cocok',
-      )
       expect(wrapper.get('[aria-label="Status pengenalan siswa"]').text()).toContain(
-        'Wajah terdeteksi · sesi belum aktif',
+        'Sesi belum dibuka',
       )
-      expect(wrapper.get('[aria-label="Status pengenalan siswa"]').text()).toContain(
-        'Identitas belum diperiksa karena sesi presensi belum dibuka',
+      expect(wrapper.get('[data-testid="preview-session-required"]').text()).toContain(
+        'Acuan wajah yang sudah terdaftar dipakai saat siswa ada di daftar sesi aktif',
       )
-      expect(wrapper.get('[data-testid="preview-unmatched-face"]').text()).toContain(
-        'Buka sesi pada jadwal dan kelas yang benar agar roster serta template wajah siswa dimuat',
-      )
+      expect(wrapper.find('[data-testid="preview-unmatched-face"]').exists()).toBe(false)
     } finally {
       wrapper.unmount()
     }
@@ -247,12 +247,14 @@ describe('camera preview confidence companion', () => {
       await new Promise((resolve) => setTimeout(resolve, 50))
       await flushPromises()
 
-      expect(wrapper.get('[data-testid="preview-mesh-status"]').text()).toContain('Kamera dijeda')
-      expect(wrapper.get('[data-testid="preview-mesh-status"]').text()).toContain('Tidak aktif')
-      expect(wrapper.get('[data-testid="preview-capture-fps"]').text()).toBe('Jeda')
       expect(wrapper.get('[data-testid="preview-camera-placeholder"]').text()).toContain(
         'Lanjutkan kamera dari halaman Perangkat',
       )
+      expect(wrapper.get('[aria-label="Status pengenalan siswa"]').text()).toContain(
+        'Kamera dijeda',
+      )
+      expect(wrapper.find('[data-testid="preview-mesh-status"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="preview-capture-fps"]').exists()).toBe(false)
       expect(wrapper.find('[data-testid="preview-stream-img"]').exists()).toBe(false)
       expect(wrapper.find('.face-overlay').exists()).toBe(false)
     } finally {

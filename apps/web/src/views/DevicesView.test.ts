@@ -334,11 +334,44 @@ describe('device installation setup', () => {
     await wrapper.get('[data-testid="device-delete-dialog"] .st-btn--danger').trigger('click')
     await flushPromises()
 
-    expect(api.deleteDevice).toHaveBeenCalledWith(device.device_id)
+    expect(api.deleteDevice).toHaveBeenCalledWith(device.device_id, { permanent: false })
     expect(wrapper.text()).toContain('Belum ada perangkat yang cocok.')
     expect(
       wrapper.findAll('button').some((button) => button.text().trim() === 'Siapkan kamera'),
     ).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('allows editing and permanently removing an inactive device', async () => {
+    const inactiveDevice = { ...device, is_active: false }
+    api.listDevices.mockImplementation(async (query: { is_active?: boolean }) =>
+      query.is_active === true
+        ? { items: [], pagination: { total: 0, limit: 10, offset: 0 } }
+        : { items: [inactiveDevice], pagination: { total: 1, limit: 10, offset: 0 } },
+    )
+    const wrapper = mount(DevicesView, { global: { plugins: [adminPinia()] } })
+    await flushPromises()
+
+    await wrapper.get('input[type="checkbox"]').setValue(true)
+    await flushPromises()
+    const editButton = wrapper.findAll('button').find((button) => button.text().trim() === 'Ubah')
+    expect(editButton?.attributes('disabled')).toBeUndefined()
+    await editButton!.trigger('click')
+    expect(wrapper.get('.st-modal[role="dialog"]').attributes('aria-label')).toBe('Ubah perangkat')
+    await wrapper.get('.st-modal__foot button').trigger('click')
+    await flushPromises()
+
+    const permanentDeleteButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().trim() === 'Hapus permanen')
+    expect(permanentDeleteButton?.attributes('disabled')).toBeUndefined()
+    await permanentDeleteButton!.trigger('click')
+    expect(wrapper.get('[data-testid="device-delete-dialog"]').text()).toContain('Hapus permanen')
+    expect(api.deleteDevice).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="device-delete-dialog"] .st-btn--danger').trigger('click')
+    await flushPromises()
+
+    expect(api.deleteDevice).toHaveBeenCalledWith(device.device_id, { permanent: true })
     wrapper.unmount()
   })
 

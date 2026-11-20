@@ -218,6 +218,7 @@ class EdgeService:
                     camera_open=False,
                     session_active=False,
                     recognition_state="starting",
+                    recognition_reason_code=None,
                 )
                 log_event(
                     logger,
@@ -291,6 +292,7 @@ class EdgeService:
                 self.preview.update_status(
                     camera_open=False,
                     recognition_state="stopped",
+                    recognition_reason_code=None,
                     display_name=None,
                 )
                 self.preview.stop()
@@ -312,6 +314,7 @@ class EdgeService:
                         self.preview.update_status(
                             camera_open=False,
                             recognition_state="camera_disabled",
+                            recognition_reason_code=None,
                             display_name=None,
                         )
                     self.stop_event.wait(0.25)
@@ -359,6 +362,7 @@ class EdgeService:
                         self.preview.update_status(
                             camera_open=False,
                             recognition_state="camera_unavailable",
+                            recognition_reason_code=None,
                             display_name=None,
                         )
                     log_event(
@@ -528,6 +532,7 @@ class EdgeService:
                     self.preview.update_status(
                         session_active=False,
                         recognition_state="waiting_for_session",
+                        recognition_reason_code=None,
                         display_name=None,
                     )
                 log_event(
@@ -546,6 +551,7 @@ class EdgeService:
                 self.preview.update_status(
                     session_active=False,
                     recognition_state="waiting_for_session",
+                    recognition_reason_code=None,
                     display_name=None,
                 )
                 self.preview.update_diagnostic_candidate(None, None)
@@ -582,6 +588,7 @@ class EdgeService:
                     if self.config.recognition.min_top1_similarity is None
                     or self.config.recognition.min_top1_top2_margin is None
                     else "checking",
+                    recognition_reason_code=None,
                     display_name=None,
                 )
                 self.preview.update_diagnostic_candidate(None, None)
@@ -610,6 +617,21 @@ class EdgeService:
         if self.preview is not None and self.preview.calibration_request() is not None:
             self._process_calibration_frame(frame)
             return
+        if self.preview is not None:
+            # Keep a low-rate, operator-only candidate preview available even
+            # when production recognition is calibrated. This recognizer is
+            # diagnostic_only and never enters the attendance outbox path.
+            has_viewer = self.preview.has_active_viewer()
+            if not has_viewer or not self._gallery:
+                self.preview.update_diagnostic_candidate(None, None)
+                if not has_viewer and self._preview_recognizer is not None:
+                    self._preview_recognizer.reset()
+                    self._preview_recognizer = None
+            else:
+                now = time.monotonic()
+                if now - self._last_preview_probe_at >= 1.0:
+                    self._last_preview_probe_at = now
+                    self._process_live_preview_candidate(frame, bundle)
         if (
             self.config.recognition.min_top1_similarity is None
             or self.config.recognition.min_top1_top2_margin is None
@@ -618,22 +640,10 @@ class EdgeService:
                 self.preview.update_status(
                     session_active=True,
                     recognition_state="waiting_for_calibration",
+                    recognition_reason_code=None,
                     display_name=None,
                 )
-                has_viewer = self.preview.has_active_viewer()
-                if not has_viewer or not self._gallery:
-                    self.preview.update_diagnostic_candidate(None, None)
-                    if not has_viewer and self._preview_recognizer is not None:
-                        self._preview_recognizer.reset()
-                        self._preview_recognizer = None
-                    return
-                now = time.monotonic()
-                if now - self._last_preview_probe_at >= 0.8:
-                    self._last_preview_probe_at = now
-                    self._process_live_preview_candidate(frame, bundle)
             return
-        if self.preview is not None:
-            self.preview.update_diagnostic_candidate(None, None)
         captured_at = datetime.now(UTC)
         decision = self.recognizer.process(frame, self._gallery, captured_at)
         if self.preview is not None:
@@ -654,6 +664,7 @@ class EdgeService:
             self.preview.update_status(
                 session_active=True,
                 recognition_state=decision.state,
+                recognition_reason_code=decision.decision.reason_code,
                 display_name=display_name,
             )
         if decision.state == "collecting":
@@ -731,6 +742,7 @@ class EdgeService:
         preview.update_status(
             session_active=False,
             recognition_state="preview_only",
+            recognition_reason_code=None,
             display_name=None,
         )
         preview.update_attendance_result(None)
@@ -1036,8 +1048,13 @@ class EdgeService:
             try:
                 payload = self.cache_fetch()
             except GalleryNotModified:
-                # The server confirmed our cached version is current: skip
-                # re-parsing and keep serving inference from the cache.
+                # The server confirmed the gallery is unchanged and the
+                # session is still active. Keep the snapshot, but renew its
+                # offline lease from this successful contact (bounded by the
+                # session end) rather than by the older content-version time.
+                self.cache.refresh_freshness(
+                    max_offline_seconds=self.config.api.cache_max_offline_seconds
+                )
                 log_event(
                     logger,
                     logging.DEBUG,

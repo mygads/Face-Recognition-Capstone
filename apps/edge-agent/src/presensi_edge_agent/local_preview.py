@@ -76,12 +76,14 @@ class LocalCameraPreview:
         self.config = config
         self.settings = settings or config.preview
         self._lock = threading.RLock()
+        self._frame_condition = threading.Condition(self._lock)
         self._jpeg_frame: bytes | None = None
         self._last_frame_at = 0.0
         self._status: dict[str, object] = {
             "camera_open": False,
             "session_active": False,
             "recognition_state": "starting",
+            "recognition_reason_code": None,
             "display_name": None,
             "diagnostic_candidate": None,
             "attendance_result": None,
@@ -245,6 +247,11 @@ class LocalCameraPreview:
             "session_active": status.get("session_active") is True,
             "camera_open": status.get("camera_open") is True,
             "recognition_state": state if isinstance(state, str) else None,
+            "recognition_reason_code": (
+                status.get("recognition_reason_code")
+                if isinstance(status.get("recognition_reason_code"), str)
+                else None
+            ),
             "face_present": face_present,
             "face_count": face_count,
             "faces": faces,
@@ -715,16 +722,18 @@ class LocalCameraPreview:
                 last_consumer_note_at = time.monotonic()
                 try:
                     while True:
-                        with preview._lock:
+                        with preview._frame_condition:
                             jpeg = preview._jpeg_frame
                             frame_at = preview._last_frame_at
-                        if jpeg is None or frame_at <= last_sent_at:
+                            if jpeg is None or frame_at <= last_sent_at:
+                                preview._frame_condition.wait(timeout=min_interval)
+                                jpeg = None
+                        if jpeg is None:
                             now = time.monotonic()
                             if now - last_consumer_note_at >= 1.0:
                                 preview.note_kiosk_stream_hit()
                                 preview.note_kiosk_hint_hit()
                                 last_consumer_note_at = now
-                            time.sleep(min_interval)
                             continue
                         part = (
                             boundary
@@ -774,14 +783,16 @@ class LocalCameraPreview:
                 last_sent_at = 0.0
                 try:
                     while True:
-                        with preview._lock:
+                        with preview._frame_condition:
                             jpeg = preview._jpeg_frame
                             frame_at = preview._last_frame_at
                             expiry = preview._sessions.get(supplied)
+                            if jpeg is None or frame_at <= last_sent_at:
+                                preview._frame_condition.wait(timeout=min_interval)
+                                jpeg = None
                         if expiry is None or expiry <= time.monotonic():
                             return
-                        if jpeg is None or frame_at <= last_sent_at:
-                            time.sleep(min_interval)
+                        if jpeg is None:
                             continue
                         part = (
                             boundary
@@ -979,10 +990,6 @@ class LocalCameraPreview:
 
     def update_frame(self, frame: object) -> bool:
         updated_at = time.monotonic()
-        minimum_interval = 1 / max(1, min(30, self.config.camera.fps))
-        with self._lock:
-            if updated_at - self._last_frame_at < minimum_interval:
-                return False
         try:
             import cv2
 
@@ -1006,15 +1013,14 @@ class LocalCameraPreview:
         except Exception:
             # A failed preview encode must not interrupt camera capture or inference.
             return False
-        with self._lock:
-            if updated_at - self._last_frame_at < minimum_interval:
-                return False
+        with self._frame_condition:
             self._jpeg_frame = jpeg
             self._last_frame_at = updated_at
+            self._frame_condition.notify_all()
         return True
 
     def clear_frame(self) -> None:
-        with self._lock:
+        with self._frame_condition:
             self._jpeg_frame = None
             self._last_frame_at = 0.0
             self._status["camera_observation"] = {
@@ -1025,6 +1031,7 @@ class LocalCameraPreview:
                 "face_count": 0,
                 "faces": [],
             }
+            self._frame_condition.notify_all()
             self._status["diagnostic_candidate"] = None
 
     def update_status(self, **values: object) -> None:

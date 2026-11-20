@@ -50,7 +50,7 @@ test('kiosk shows the current schedule and opens true browser fullscreen', async
   await page.getByTestId('display-pin-input').fill('1234')
   await page.getByRole('button', { name: 'Mulai Layar Presensi' }).click()
 
-  await expect(page.getByTestId('display-session-state')).toHaveText('Sesi belum dibuka')
+  await expect(page.getByTestId('display-session-state')).toHaveText('Jadwal menunggu dibuka')
   await expect(page.getByTestId('display-session-details')).toContainText(
     'Praktikum Larutan · Kelas XI MIPA 2 · Lab Kimia 1',
   )
@@ -60,7 +60,7 @@ test('kiosk shows the current schedule and opens true browser fullscreen', async
   await expect(page.getByText(/478 titik/)).toHaveCount(0)
 
   await expect(page.locator('.display-view.kiosk:fullscreen')).toHaveCount(1)
-  await expect(page.getByRole('button', { name: 'Keluar fullscreen' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Keluar layar penuh' })).toBeVisible()
   const cameraFrame = await page.locator('.camera-frame__viewport').boundingBox()
   const cameraActions = await page.locator('.kiosk__board-actions').boundingBox()
   expect(cameraFrame).not.toBeNull()
@@ -68,9 +68,9 @@ test('kiosk shows the current schedule and opens true browser fullscreen', async
   expect(Math.abs(cameraFrame!.width / cameraFrame!.height - 4 / 3)).toBeLessThan(0.03)
   expect(cameraFrame!.y + cameraFrame!.height).toBeLessThanOrEqual(cameraActions!.y)
 
-  await page.getByRole('button', { name: 'Keluar fullscreen' }).click()
+  await page.getByRole('button', { name: 'Keluar layar penuh' }).click()
   await expect(page.locator('.display-view.kiosk:fullscreen')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Fullscreen' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Masuk layar penuh' })).toBeVisible()
 
   await page.reload()
   await expect(page.getByTestId('display-board')).toBeVisible()

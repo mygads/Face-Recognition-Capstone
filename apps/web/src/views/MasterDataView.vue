@@ -10,7 +10,10 @@ import {
   createClass,
   createLaboratory,
   createStudent,
+  deleteClass,
+  deleteStudent,
   enrollStudent,
+  moveStudentToClass,
   getClass,
   getLaboratory,
   getStudent,
@@ -79,6 +82,11 @@ const nisAvailability = computed(() => {
   return taken ? ('taken' as const) : ('ok' as const)
 })
 const successMessage = ref<string | null>(null)
+const pendingDelete = ref<
+  { kind: 'student'; item: Student } | { kind: 'class'; item: SchoolClass } | null
+>(null)
+const isDeleting = ref(false)
+const deleteError = ref<string | null>(null)
 
 // form modal tambah/edit
 const isFormOpen = ref(false)
@@ -309,12 +317,31 @@ async function saveStudentClass(studentId: string, selectedClassId: string): Pro
   const selectedAlreadyAssigned = editingStudentClasses.value.some(
     (studentClass) => studentClass.id === selectedClassId,
   )
-  if (selectedClassId && !selectedAlreadyAssigned) {
-    await enrollStudent(selectedClassId, studentId)
-    const selectedClass = classOptions.value.find(
-      (studentClass) => studentClass.id === selectedClassId,
+  const selectedClass = classOptions.value.find(
+    (studentClass) => studentClass.id === selectedClassId,
+  )
+  const previousClass = editingStudentClasses.value.find(
+    (studentClass) => studentClass.id === previousClassId,
+  )
+  let membershipMoved = false
+
+  if (selectedClassId && selectedClass) {
+    const sameYearMembership = editingStudentClasses.value.some(
+      (studentClass) =>
+        studentClass.academic_year === selectedClass.academic_year &&
+        studentClass.id !== selectedClass.id,
     )
-    if (selectedClass) {
+    if (sameYearMembership) {
+      await moveStudentToClass(selectedClassId, studentId)
+      membershipMoved = true
+      editingStudentClasses.value = editingStudentClasses.value.filter(
+        (studentClass) => studentClass.academic_year !== selectedClass.academic_year,
+      )
+    } else if (!selectedAlreadyAssigned) {
+      await enrollStudent(selectedClassId, studentId)
+    }
+
+    if (!selectedAlreadyAssigned || membershipMoved) {
       editingStudentClasses.value = [
         ...editingStudentClasses.value,
         {
@@ -331,13 +358,57 @@ async function saveStudentClass(studentId: string, selectedClassId: string): Pro
     }
   }
 
-  if (previousClassId) {
+  const changesAcademicYear =
+    selectedClass && previousClass && selectedClass.academic_year !== previousClass.academic_year
+  if (previousClassId && !membershipMoved && !changesAcademicYear) {
     await removeStudentFromClass(previousClassId, studentId)
     editingStudentClasses.value = editingStudentClasses.value.filter(
       (studentClass) => studentClass.id !== previousClassId,
     )
   }
   editingStudentPrimaryClassId.value = selectedClassId || null
+}
+
+function requestDeleteStudent(item: Student): void {
+  if (!canManage.value) return
+  pendingDelete.value = { kind: 'student', item }
+  deleteError.value = null
+}
+
+function requestDeleteClass(item: SchoolClass): void {
+  if (!canManage.value) return
+  pendingDelete.value = { kind: 'class', item }
+  deleteError.value = null
+}
+
+async function confirmDelete(): Promise<void> {
+  const target = pendingDelete.value
+  if (!target || isDeleting.value) return
+  isDeleting.value = true
+  deleteError.value = null
+  try {
+    const result =
+      target.kind === 'student'
+        ? await deleteStudent(target.item.id)
+        : await deleteClass(target.item.id)
+    successMessage.value = result.message
+    pendingDelete.value = null
+    if (target.kind === 'student') {
+      if (studentDetail.value?.id === target.item.id) closeStudentDrawer()
+      await loadRows()
+    } else {
+      classDetail.value = null
+      if (route.name === 'master-data-class-detail') {
+        await router.replace(tabPaths.classes)
+      } else {
+        await loadRows()
+      }
+    }
+  } catch (error) {
+    deleteError.value = formatError(error)
+  } finally {
+    isDeleting.value = false
+  }
 }
 
 function openEditRow(row: SchoolClass | Laboratory): void {
@@ -630,6 +701,16 @@ function submitSearch(): void {
   void loadRows()
 }
 
+function onClassFilterChange(value: string): void {
+  classFilter.value = value
+  submitSearch()
+}
+
+function onStatusFilterChange(value: string): void {
+  statusFilter.value = value
+  submitSearch()
+}
+
 function resetFilters(): void {
   searchText.value = ''
   search.value = ''
@@ -756,13 +837,21 @@ function labStatusTone(lab: Laboratory): 'present' | 'neutral' {
           placeholder="Cari nomor siswa atau nama…"
           aria-label="Cari siswa"
         />
-        <UiSelect v-model="classFilter" aria-label="Filter kelas" @change="submitSearch">
+        <UiSelect
+          :model-value="classFilter"
+          aria-label="Filter kelas"
+          @update:model-value="onClassFilterChange"
+        >
           <option value="">Semua Kelas</option>
           <option v-for="cls in classOptions" :key="cls.id" :value="cls.id">
             {{ cls.code }} - {{ cls.name }}
           </option>
         </UiSelect>
-        <UiSelect v-model="statusFilter" aria-label="Filter status" @change="submitSearch">
+        <UiSelect
+          :model-value="statusFilter"
+          aria-label="Filter status"
+          @update:model-value="onStatusFilterChange"
+        >
           <option value="">Semua Status</option>
           <option value="active">Aktif</option>
           <option value="inactive">Nonaktif</option>
@@ -823,6 +912,15 @@ function labStatusTone(lab: Laboratory): 'present' | 'neutral' {
                     @click="openEditStudent(row)"
                   >
                     Edit
+                  </button>
+                  <button
+                    v-if="canManage"
+                    type="button"
+                    class="st-link st-link--danger"
+                    :data-testid="`delete-student-${row.id}`"
+                    @click="requestDeleteStudent(row)"
+                  >
+                    Hapus
                   </button>
                 </td>
               </tr>
@@ -914,6 +1012,15 @@ function labStatusTone(lab: Laboratory): 'present' | 'neutral' {
                   <button v-if="canManage" type="button" class="st-link" @click="openEditRow(row)">
                     Edit
                   </button>
+                  <button
+                    v-if="canManage"
+                    type="button"
+                    class="st-link st-link--danger"
+                    :data-testid="`delete-class-${row.id}`"
+                    @click="requestDeleteClass(row)"
+                  >
+                    Hapus
+                  </button>
                 </td>
               </tr>
               <tr v-if="!isLoading && rows.length === 0">
@@ -948,6 +1055,9 @@ function labStatusTone(lab: Laboratory): 'present' | 'neutral' {
           <UiButton v-if="canManage" variant="primary" @click="openEditRow(classDetail)"
             >Ubah Kelas</UiButton
           >
+          <UiButton v-if="canManage" variant="danger-soft" @click="requestDeleteClass(classDetail)">
+            Hapus Kelas
+          </UiButton>
         </template>
       </UiPageHeader>
 
@@ -1213,6 +1323,39 @@ function labStatusTone(lab: Laboratory): 'present' | 'neutral' {
       </div>
     </section>
 
+    <UiModal
+      v-if="pendingDelete"
+      :title="pendingDelete.kind === 'student' ? 'Hapus data siswa?' : 'Hapus kelas?'"
+      @close="pendingDelete = null"
+    >
+      <p v-if="pendingDelete.kind === 'student'">
+        Data <strong>{{ pendingDelete.item.full_name }}</strong> akan diperiksa keterkaitannya. Jika
+        memiliki kelas, template wajah, atau riwayat, siswa diarsipkan agar data tetap utuh dan
+        acuan wajah aktif dicabut. Jika belum pernah digunakan, data dihapus permanen. Tutup sesi
+        presensi aktif terlebih dahulu.
+      </p>
+      <p v-else>
+        Kelas <strong>{{ pendingDelete.item.code }} · {{ pendingDelete.item.name }}</strong> akan
+        diperiksa keterkaitannya. Jika memiliki anggota, jadwal, atau penugasan, kelas beserta
+        jadwal aktifnya diarsipkan agar riwayat tetap utuh. Jika belum pernah digunakan, data
+        dihapus permanen. Tutup sesi presensi aktif terlebih dahulu.
+      </p>
+      <p v-if="deleteError" class="st-alert st-alert--error" role="alert">{{ deleteError }}</p>
+      <template #footer>
+        <UiButton variant="secondary" :disabled="isDeleting" @click="pendingDelete = null">
+          Batal
+        </UiButton>
+        <UiButton
+          variant="danger"
+          :disabled="isDeleting"
+          data-testid="confirm-delete-master-data"
+          @click="confirmDelete"
+        >
+          {{ isDeleting ? 'Memproses…' : 'Lanjutkan' }}
+        </UiButton>
+      </template>
+    </UiModal>
+
     <!-- ============ DRAWER FORMULIR MASTER (B02-02) ============ -->
     <UiDrawer
       v-if="isFormOpen"
@@ -1310,6 +1453,18 @@ function labStatusTone(lab: Laboratory): 'present' | 'neutral' {
               required
               @update:model-value="form.name = $event"
             />
+          </UiField>
+          <UiField label="Tingkat" required>
+            <UiSelect
+              :model-value="String(form.grade ?? 10)"
+              name="grade"
+              aria-label="Tingkat kelas"
+              @update:model-value="form.grade = Number($event)"
+            >
+              <option v-for="grade in 12" :key="grade" :value="String(grade)">
+                Kelas {{ grade }}
+              </option>
+            </UiSelect>
           </UiField>
           <UiField label="Tahun Ajaran" required>
             <UiInput

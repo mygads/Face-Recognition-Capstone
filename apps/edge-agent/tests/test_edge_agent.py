@@ -577,6 +577,106 @@ def test_live_operator_preview_shows_diagnostic_candidate_without_attendance(
         outbox.close()
 
 
+def test_calibrated_active_operator_preview_keeps_candidate_diagnostic_only(
+    tmp_path: Path,
+) -> None:
+    config = load_config(
+        EXAMPLE_CONFIG,
+        environ={
+            "PRESENSI_EDGE_DEVICE_ID": str(DEVICE_ID),
+            "PRESENSI_EDGE_MIN_TOP1_SIMILARITY": "0.65",
+            "PRESENSI_EDGE_MIN_TOP1_TOP2_MARGIN": "0.2",
+        },
+    )
+    bundle = parse_session_cache(
+        sample_bundle_payload(),
+        device_id=DEVICE_ID,
+        model_name=MODEL_NAME,
+        model_version=MODEL_VERSION,
+    )
+
+    class FakeCamera:
+        def open(self) -> None: ...
+
+        def read(self) -> tuple[bool, object | None]:
+            return False, None
+
+        def close(self) -> None: ...
+
+    class FakeApi:
+        def close(self) -> None: ...
+
+    class AttendanceRecognizer:
+        process_calls = 0
+
+        def process(self, _frame, _gallery, _captured_at) -> TrackDecision:
+            self.process_calls += 1
+            return TrackDecision(
+                track_id="active-session",
+                state="collecting",
+                decision=RecognitionDecision(
+                    outcome="retry", reason_code="single_identity_gallery"
+                ),
+                observation_count=1,
+            )
+
+        def reset(self) -> None: ...
+
+    class DiagnosticRecognizer:
+        process_calls = 0
+        reset_calls = 0
+
+        def process(self, _frame, _gallery, _captured_at) -> TrackDecision:
+            self.process_calls += 1
+            return TrackDecision(
+                track_id="operator-preview",
+                state="accepted",
+                decision=RecognitionDecision(
+                    outcome="matched",
+                    student_id=STUDENT_ID,
+                    confidence=0.951,
+                    margin=0.1,
+                ),
+                observation_count=1,
+            )
+
+        def reset(self) -> None:
+            self.reset_calls += 1
+
+    outbox = EventOutbox(tmp_path / "calibrated-preview-outbox.sqlite3", max_pending=10)
+    attendance = AttendanceRecognizer()
+    service = EdgeService(
+        config,
+        FakeCamera(),
+        FakeApi(),  # type: ignore[arg-type]
+        outbox,
+        attendance,  # type: ignore[arg-type]
+        lambda: {},
+    )
+    diagnostic = DiagnosticRecognizer()
+    service._create_preview_recognizer = lambda: diagnostic  # type: ignore[method-assign]
+    service.cache.replace(bundle)
+    assert service.preview is not None
+    service.preview._sessions["synthetic-operator-viewer"] = time.monotonic() + 30
+
+    try:
+        service._process_frame(object())
+
+        status = service.preview.status()
+        candidate = status["diagnostic_candidate"]
+        assert status["session_active"] is True
+        assert status["recognition_reason_code"] == "single_identity_gallery"
+        assert isinstance(candidate, dict)
+        assert candidate["display_name"] == "Synthetic Student"
+        assert candidate["similarity"] == pytest.approx(0.902)
+        assert attendance.process_calls == 1
+        assert diagnostic.process_calls == 1
+        assert diagnostic.reset_calls == 1
+        assert outbox.counts() == (0, 0)
+    finally:
+        outbox.close()
+
+
 def test_off_session_preview_identifies_candidate_without_queuing_attendance(
     tmp_path: Path,
 ) -> None:
@@ -1076,18 +1176,21 @@ def test_cache_expiry_is_capped_by_session_end_and_local_offline_policy() -> Non
     cache.replace(bundle)
     assert cache.current(now=session_end) is None
 
-    stale_payload = sample_bundle_payload(now=now - timedelta(minutes=6))
-    stale_payload["expires_at"] = (now + timedelta(hours=1)).isoformat()
-    stale_payload["session_ends_at"] = (now + timedelta(hours=1)).isoformat()
-    with pytest.raises(CacheSchemaError, match="expired"):
-        parse_session_cache(
-            stale_payload,
-            device_id=DEVICE_ID,
-            model_name=MODEL_NAME,
-            model_version=MODEL_VERSION,
-            max_offline_seconds=300,
-            now=now,
-        )
+    unchanged_version_payload = sample_bundle_payload(now=now - timedelta(minutes=6))
+    unchanged_version_payload["expires_at"] = (now + timedelta(hours=1)).isoformat()
+    unchanged_version_payload["session_ends_at"] = (
+        now + timedelta(hours=1)
+    ).isoformat()
+    unchanged_version = parse_session_cache(
+        unchanged_version_payload,
+        device_id=DEVICE_ID,
+        model_name=MODEL_NAME,
+        model_version=MODEL_VERSION,
+        max_offline_seconds=300,
+        now=now,
+    )
+    assert unchanged_version.generated_at == now - timedelta(minutes=6)
+    assert unchanged_version.expires_at == now + timedelta(seconds=300)
 
 
 def test_expired_cache_prevents_service_from_running_another_decision(
@@ -1712,8 +1815,17 @@ def test_refresh_cache_keeps_current_gallery_when_server_reports_not_modified(
         Recognizer(),  # type: ignore[arg-type]
         not_modified,
     )
+    bundle = parse_session_cache(
+        sample_bundle_payload(),
+        device_id=DEVICE_ID,
+        model_name=MODEL_NAME,
+        model_version=MODEL_VERSION,
+    )
+    service.cache.replace(bundle)
     assert service._refresh_cache() is True
-    assert service.cache.current() is None
+    refreshed = service.cache.current()
+    assert refreshed is not None
+    assert refreshed.expires_at > bundle.expires_at
     service.outbox.close()
 
 

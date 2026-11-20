@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Generic, TypeVar
+from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,6 +25,11 @@ class Pagination(ApiSchema):
 class PageResponse(ApiSchema, Generic[T]):
     items: list[T]
     pagination: Pagination
+
+
+class DeleteResult(ApiSchema):
+    action: Literal["deleted", "archived"]
+    message: str
 
 
 class ErrorDetail(ApiSchema):

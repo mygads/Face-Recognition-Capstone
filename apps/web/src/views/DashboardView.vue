@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   ApiError,
   listAtRiskStudents,
   listAttendanceSessions,
   listDevices,
+  getAttendanceReportSummary,
   listLaborantAssignments,
   listLaboratories,
   listMyClasses,
   type AtRiskStudentRow,
   type AttendanceSession,
+  type AttendanceReportSummary,
   type Device,
   type Laboratory,
   type SchoolClass,
@@ -21,7 +23,6 @@ import UiBadge from '../components/ui/UiBadge.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiCard from '../components/ui/UiCard.vue'
 import UiEmptyState from '../components/ui/UiEmptyState.vue'
-import UiInput from '../components/ui/UiInput.vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiSelect from '../components/ui/UiSelect.vue'
 
@@ -44,7 +45,12 @@ const firstName = computed(() => (auth.account?.full_name ?? 'Staf').split(' ').
 const isLoading = ref(true)
 const pageError = ref<string | null>(null)
 const labFilter = ref('')
-const dateFilter = ref('')
+const dateFilter = ref(jakartaDateInputValue())
+const dateInputRef = ref<HTMLInputElement | null>(null)
+const attendanceSummary = ref<AttendanceReportSummary | null>(null)
+const attendanceSummaryLoading = ref(false)
+const attendanceSummaryError = ref<string | null>(null)
+let attendanceSummaryRequest = 0
 
 const labs = ref<Laboratory[]>([])
 const devices = ref<Device[]>([])
@@ -101,6 +107,48 @@ function atRiskReason(row: AtRiskStudentRow): string {
   return `Absen ${row.absent_count}x dari ${row.total_sessions} sesi`
 }
 
+function jakartaDateInputValue(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return `${value.year}-${value.month}-${value.day}`
+}
+
+async function loadAttendanceSummary(): Promise<void> {
+  if (!isAdmin.value || !dateFilter.value) return
+  const requestId = ++attendanceSummaryRequest
+  attendanceSummary.value = null
+  attendanceSummaryError.value = null
+  attendanceSummaryLoading.value = true
+  try {
+    const result = await getAttendanceReportSummary({
+      starts_on: dateFilter.value,
+      ends_on: dateFilter.value,
+      timezone_name: 'Asia/Jakarta',
+      laboratory_id: labFilter.value || undefined,
+    })
+    if (requestId === attendanceSummaryRequest) attendanceSummary.value = result
+  } catch (error) {
+    if (requestId === attendanceSummaryRequest) attendanceSummaryError.value = errMsg(error)
+  } finally {
+    if (requestId === attendanceSummaryRequest) attendanceSummaryLoading.value = false
+  }
+}
+
+function openDatePicker(): void {
+  const input = dateInputRef.value
+  if (!input) return
+  if (typeof input.showPicker === 'function') input.showPicker()
+  else {
+    input.focus()
+    input.click()
+  }
+}
+
 async function load(): Promise<void> {
   isLoading.value = true
   pageError.value = null
@@ -120,6 +168,7 @@ async function load(): Promise<void> {
       devices.value = devPage.items ?? []
       activeSessions.value = sessPage.items ?? []
       atRisk.value = (riskPage.items ?? []) as AtRiskStudentRow[]
+      await loadAttendanceSummary()
     } else if (isTeacher.value) {
       const [clsPage, sessPage, riskPage] = await Promise.all([
         listMyClasses({ limit: 50 }).catch(() => ({ items: [] as SchoolClass[] })),
@@ -163,6 +212,10 @@ async function load(): Promise<void> {
   }
 }
 
+watch([dateFilter, labFilter], () => {
+  if (isAdmin.value) void loadAttendanceSummary()
+})
+
 function go(path: string): void {
   void router.push(path)
 }
@@ -186,12 +239,27 @@ onMounted(load)
               <option value="">Semua Laboratorium</option>
               <option v-for="lab in labs" :key="lab.id" :value="lab.id">{{ lab.name }}</option>
             </UiSelect>
-            <UiInput
-              v-model="dateFilter"
-              type="date"
-              aria-label="Filter tanggal"
-              style="max-width: 180px"
-            />
+            <div class="dashboard__date-filter">
+              <input
+                ref="dateInputRef"
+                v-model="dateFilter"
+                class="st-input"
+                type="date"
+                aria-label="Filter tanggal"
+              />
+              <button
+                class="dashboard__calendar-button"
+                type="button"
+                aria-label="Buka kalender"
+                title="Buka kalender"
+                @click="openDatePicker"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M7 2v3m10-3v3M4 9h16M5 4h14a1 1 0 0 1 1 1v15H4V5a1 1 0 0 1 1-1Z" />
+                  <path d="M8 13h2m4 0h2m-8 4h2m4 0h2" />
+                </svg>
+              </button>
+            </div>
           </template>
         </UiPageHeader>
 
@@ -221,6 +289,49 @@ onMounted(load)
             </p>
           </UiCard>
         </div>
+
+        <UiCard
+          title="Ringkasan presensi"
+          :subtitle="`Rekap kehadiran untuk ${dateFilter || 'tanggal yang dipilih'}`"
+          data-testid="dashboard-attendance-summary"
+        >
+          <p v-if="attendanceSummaryLoading" role="status">Memuat rekap presensi…</p>
+          <p v-else-if="attendanceSummaryError" class="master-data__alert" role="alert">
+            {{ attendanceSummaryError }}
+          </p>
+          <div v-else-if="attendanceSummary" class="st-kpi dashboard__attendance-summary">
+            <div>
+              <p class="st-kpi__label">Total roster</p>
+              <p class="st-kpi__value" data-testid="report-total">
+                {{ attendanceSummary.total_rows }}
+              </p>
+            </div>
+            <div>
+              <p class="st-kpi__label">Hadir</p>
+              <p class="st-kpi__value" data-testid="report-present">
+                {{ attendanceSummary.present_count }}
+              </p>
+            </div>
+            <div>
+              <p class="st-kpi__label">Terlambat</p>
+              <p class="st-kpi__value" data-testid="report-late">
+                {{ attendanceSummary.late_count }}
+              </p>
+            </div>
+            <div>
+              <p class="st-kpi__label">Absen</p>
+              <p class="st-kpi__value" data-testid="report-absent">
+                {{ attendanceSummary.absent_count }}
+              </p>
+            </div>
+            <div>
+              <p class="st-kpi__label">Izin</p>
+              <p class="st-kpi__value" data-testid="report-excused">
+                {{ attendanceSummary.excused_count }}
+              </p>
+            </div>
+          </div>
+        </UiCard>
 
         <div class="st-grid2">
           <UiCard
@@ -482,6 +593,50 @@ onMounted(load)
 </template>
 
 <style scoped>
+.dashboard__date-filter {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: min(230px, 100%);
+}
+.dashboard__date-filter .st-input {
+  padding-right: 44px;
+}
+.dashboard__calendar-button {
+  position: absolute;
+  right: 4px;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--st-radius-sm);
+  background: transparent;
+  color: var(--st-text-muted);
+  cursor: pointer;
+}
+.dashboard__calendar-button:hover,
+.dashboard__calendar-button:focus-visible {
+  background: var(--st-surface-container);
+  color: var(--st-primary);
+}
+.dashboard__calendar-button svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+.dashboard__attendance-summary {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+@media (max-width: 760px) {
+  .dashboard__attendance-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 .st-kpi__label {
   margin: 0 0 6px;
   font-size: 0.72rem;

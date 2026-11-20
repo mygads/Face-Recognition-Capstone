@@ -55,9 +55,9 @@ class CoreApiClient:
         self._last_heartbeat_expiry: datetime | None = None
         self._camera_status_provider: Callable[[], str] | None = None
         self._camera_metrics_provider: Callable[[], dict[str, object]] | None = None
-        self._latency_summary_provider: (
-            Callable[[], dict[str, float] | None] | None
-        ) = None
+        self._latency_summary_provider: Callable[[], dict[str, float] | None] | None = (
+            None
+        )
         self._queue_status_provider: Callable[[], dict[str, object]] | None = None
         self._gallery_version_provider: Callable[[], str | None] | None = None
         self._client = client or httpx.Client(

@@ -189,39 +189,32 @@ test('AI_EDGE dashboard shows its single preview and accepted student identity',
   await expect(page.getByTestId('camera-preview-link')).toBeVisible({ timeout: 5000 })
   await page.getByTestId('camera-preview-link').click()
 
-  await expect(page.getByRole('heading', { name: 'Preview kamera presensi' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Preview Kamera Presensi' })).toBeVisible()
   await expect(page.getByRole('img', { name: 'Preview langsung kamera presensi' })).toBeVisible()
-  await expect(page.getByTestId('face-overlay')).toBeVisible()
-  await expect(page.getByTestId('face-mark-0')).toBeAttached()
-  await expect(page.getByTestId('face-overlay').locator('rect')).toHaveCount(0)
-  await expect(page.getByText('Frame siap diperiksa', { exact: true })).toBeVisible()
+  // Fixture frame berukuran 1×1 px, jadi mesh wajah lokal memang tidak dapat dibuat.
+  await expect(page.getByTestId('face-overlay')).toHaveCount(0)
+  await expect(page.getByText('Wajah terlihat jelas', { exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Yoga' })).toBeVisible()
-  await expect(
-    page.getByText(/MIPA 1.*Kemiripan model 90.2%.*Identitas masih kandidat/),
-  ).toBeVisible()
   await expect(page.getByRole('link', { name: 'Atur kualitas & pengenalan' })).toBeVisible()
-  await expect(page.getByText('Kandidat sementara · belum diverifikasi presensi')).toBeVisible()
   const candidatePanel = page.locator('.camera-preview-view__candidate')
+  await expect(candidatePanel).toContainText('Nama kandidat · menunggu konfirmasi')
   await expect(candidatePanel).toContainText('Yoga')
   await expect(candidatePanel).toContainText('MIPA 1')
-  await expect(page.getByText(/90.2% kemiripan · bukan tingkat akurasi/)).toBeVisible()
+  await expect(candidatePanel).not.toContainText(/90\.2|similarity/i)
   await expect(page.getByRole('heading', { name: 'Uji kecocokan kamera' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: /Ambil sampel/ })).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Layar penuh' }).click()
-  await expect(page.getByText('Kandidat sementara · belum diverifikasi presensi')).toBeVisible()
+  await expect(candidatePanel).toContainText('Yoga')
   await page.getByRole('button', { name: 'Keluar layar penuh' }).click()
-  await expect(page.getByText('Kandidat sementara · belum diverifikasi presensi')).toBeVisible()
+  await expect(candidatePanel).toContainText('Yoga')
 
   recognitionState = 'accepted'
-  await expect(page.getByRole('heading', { name: 'Yoga' })).toBeVisible()
-  await expect(page.getByText(/Identitas cocok. Mengirim presensi/)).toBeVisible()
+  await expect(page.getByText('Identitas cocok · menunggu konfirmasi server')).toBeVisible()
   await expect(page.getByTestId('preview-stream-img')).toHaveCount(1)
 
   await page.getByRole('button', { name: 'Layar penuh' }).click()
   await expect(page.locator('.camera-preview-view__layout')).toBeVisible()
-  await expect(page.getByText('Kandidat sementara · belum diverifikasi presensi')).toHaveCount(0)
-  await expect(page.getByRole('heading', { name: 'Yoga' })).toBeVisible()
   await expect(page.getByText('Identitas cocok · menunggu konfirmasi server')).toBeVisible()
   attendanceRecorded = true
   await expect(page.getByRole('heading', { name: 'Yoga' })).toBeVisible({

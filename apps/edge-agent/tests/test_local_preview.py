@@ -265,6 +265,48 @@ def test_preview_encodes_only_an_in_memory_downscaled_frame(
         preview.stop()
 
 
+def test_preview_keeps_each_camera_frame_without_a_second_fps_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Frame:
+        shape = (240, 320, 3)
+
+    encoded_frames: list[bytes] = []
+
+    class Encoded:
+        def __init__(self, value: bytes) -> None:
+            self.value = value
+
+        def tobytes(self) -> bytes:
+            return self.value
+
+    def encode(*_args: object, **_kwargs: object) -> tuple[bool, Encoded]:
+        value = f"frame-{len(encoded_frames) + 1}".encode()
+        encoded_frames.append(value)
+        return True, Encoded(value)
+
+    fake_cv2: Any = SimpleNamespace(
+        IMWRITE_JPEG_QUALITY=2,
+        imencode=encode,
+    )
+    monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
+    preview, _port, _token = _start_preview(monkeypatch, ["LABORANT"])
+    # Reproduces a low FPS driver configuration: the browser preview should
+    # still publish every capture-loop frame that arrives sooner than this.
+    preview.config = replace(
+        preview.config,
+        camera=replace(preview.config.camera, fps=1),
+    )
+    try:
+        assert preview.update_frame(Frame()) is True
+        assert preview.update_frame(Frame()) is True
+        assert encoded_frames == [b"frame-1", b"frame-2"]
+        with preview._lock:
+            assert preview._jpeg_frame == b"frame-2"
+    finally:
+        preview.stop()
+
+
 def _nth_marker_end(buf: bytes, marker: bytes, count: int) -> int | None:
     """Offset tepat setelah kemunculan marker ke-count (None bila belum ada)."""
     if count < 1:
@@ -609,7 +651,8 @@ def test_kiosk_hint_serves_generic_state_without_token_or_identity(
         preview.update_status(
             camera_open=True,
             session_active=True,
-            recognition_state="collecting",
+            recognition_state="retry_frontal",
+            recognition_reason_code="single_identity_gallery",
             display_name="Siswa Rahasia",
         )
         preview.update_diagnostic_candidate("Siswa Rahasia", 0.95)
@@ -653,7 +696,8 @@ def test_kiosk_hint_serves_generic_state_without_token_or_identity(
             hint = json.loads(response.read())
         assert hint["session_active"] is True
         assert hint["camera_open"] is True
-        assert hint["recognition_state"] == "collecting"
+        assert hint["recognition_state"] == "retry_frontal"
+        assert hint["recognition_reason_code"] == "single_identity_gallery"
         assert hint["face_present"] is True
         assert hint["face_count"] == 1
         assert hint["attendance_result"] is None

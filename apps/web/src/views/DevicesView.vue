@@ -895,9 +895,9 @@ async function confirmDeviceDeletion(): Promise<void> {
   isDeletingDevice.value = true
   deleteError.value = null
   try {
-    await deleteDevice(device.device_id)
+    await deleteDevice(device.device_id, { permanent: !device.is_active })
     devicePendingDeletion.value = null
-    if (device.deployment_profile === 'AI_EDGE') {
+    if (device.is_active && device.deployment_profile === 'AI_EDGE') {
       edgeDeviceCount.value = Math.max(0, edgeDeviceCount.value - 1)
     }
     if (devices.value.length === 1 && page.value > 0) page.value -= 1
@@ -1582,10 +1582,19 @@ onBeforeUnmount(() => {
                 <UiButton
                   variant="danger"
                   type="button"
-                  :disabled="!device.is_active"
+                  :aria-label="
+                    device.is_active
+                      ? `Nonaktifkan ${device.name}`
+                      : `Hapus permanen ${device.name}`
+                  "
+                  :title="
+                    device.is_active
+                      ? 'Menonaktifkan perangkat dan mencabut kredensialnya'
+                      : 'Menghapus perangkat nonaktif jika tidak memiliki riwayat atau layar kiosk'
+                  "
                   @click="requestDeviceDeletion(device)"
                 >
-                  Hapus
+                  {{ device.is_active ? 'Hapus' : 'Hapus permanen' }}
                 </UiButton>
               </div>
             </td>
@@ -2131,13 +2140,29 @@ onBeforeUnmount(() => {
       >
         <header class="devices-view__credential-heading">
           <div>
-            <p class="master-data__eyebrow">Konfirmasi penghapusan</p>
-            <h2 id="device-delete-title">Hapus {{ devicePendingDeletion.name }}?</h2>
+            <p class="master-data__eyebrow">
+              {{
+                devicePendingDeletion.is_active
+                  ? 'Konfirmasi penonaktifan'
+                  : 'Konfirmasi hapus permanen'
+              }}
+            </p>
+            <h2 id="device-delete-title">
+              {{ devicePendingDeletion.is_active ? 'Nonaktifkan' : 'Hapus permanen' }}
+              {{ devicePendingDeletion.name }}?
+            </h2>
           </div>
         </header>
         <p id="device-delete-description" class="devices-view__credential-warning">
-          Perangkat akan dinonaktifkan dan kredensialnya dicabut. Data presensi dan audit lama tetap
-          tersimpan. Anda dapat melihatnya kembali dengan filter perangkat nonaktif.
+          <template v-if="devicePendingDeletion.is_active">
+            Perangkat akan dinonaktifkan dan kredensialnya dicabut. Data presensi dan audit lama
+            tetap tersimpan. Anda dapat melihatnya kembali dengan filter perangkat nonaktif.
+          </template>
+          <template v-else>
+            Perangkat dihapus dari daftar hanya jika tidak memiliki riwayat pengenalan atau layar
+            kiosk. Data presensi dan audit tetap tersimpan; perangkat yang masih terhubung ke data
+            tersebut akan ditolak dan tetap nonaktif.
+          </template>
         </p>
         <p v-if="deleteError" class="master-data__alert" role="alert">{{ deleteError }}</p>
         <div class="master-data__form-actions">
@@ -2155,7 +2180,15 @@ onBeforeUnmount(() => {
             :disabled="isDeletingDevice"
             @click="confirmDeviceDeletion"
           >
-            {{ isDeletingDevice ? 'Menonaktifkan…' : 'Ya, hapus perangkat' }}
+            {{
+              isDeletingDevice
+                ? devicePendingDeletion.is_active
+                  ? 'Menonaktifkan…'
+                  : 'Menghapus…'
+                : devicePendingDeletion.is_active
+                  ? 'Ya, nonaktifkan perangkat'
+                  : 'Ya, hapus permanen'
+            }}
           </UiButton>
         </div>
       </section>

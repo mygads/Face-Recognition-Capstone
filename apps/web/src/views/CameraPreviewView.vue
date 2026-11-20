@@ -14,6 +14,7 @@ type PreviewStatus = {
   camera_open: boolean
   session_active: boolean
   recognition_state: string
+  recognition_reason_code?: string | null
   display_name: string | null
   diagnostic_candidate?: DiagnosticCandidate | null
   updated_at: number | null
@@ -130,7 +131,6 @@ function onDeviceChange(event: Event): void {
 const frameUrl = ref<string | null>(null)
 const previewStatus = ref<PreviewStatus | null>(null)
 const cameraObservation = computed(() => previewStatus.value?.camera_observation ?? null)
-const cameraMetrics = computed(() => previewStatus.value?.camera_metrics ?? null)
 const selectedDeviceMatchesAgent = computed(() => {
   const agentDeviceId = previewStatus.value?.device_id
   return Boolean(
@@ -169,42 +169,6 @@ const previewPlaceholderMessage = computed(() => {
   }
   return 'Pastikan agent AI_EDGE berjalan pada komputer kamera yang dipilih.'
 })
-const previewFps = ref<number | null>(null)
-const previewFrameTimes: number[] = []
-let lastPreviewFpsUpdate = 0
-const cameraFaceMetrics = computed(() => {
-  const face = cameraObservation.value?.faces[0]
-  if (!face) return []
-  const metrics: string[] = []
-  if (face.quality_score !== undefined) {
-    metrics.push(`Kualitas frame ${(face.quality_score * 100).toFixed(0)}% · bukan akurasi`)
-  }
-  if (face.detection_confidence !== undefined) {
-    metrics.push(
-      `Confidence deteksi ${Math.round(face.detection_confidence * 100)}% · bukan akurasi identitas`,
-    )
-  }
-  if (face.face_pixels !== undefined) {
-    const minimum = face.min_face_pixels
-    metrics.push(
-      `Ukuran wajah ${Math.round(face.face_pixels)} px${minimum === undefined ? '' : ` · min ${Math.round(minimum)} px`}`,
-    )
-  }
-  if (face.sharpness !== undefined) {
-    const minimum = face.min_sharpness
-    metrics.push(
-      `Ketajaman ${face.sharpness.toFixed(1)}${minimum === undefined ? '' : ` · min ${minimum.toFixed(1)}`}`,
-    )
-  }
-  if (face.brightness !== undefined) {
-    const range =
-      face.min_brightness === undefined || face.max_brightness === undefined
-        ? ''
-        : ` · target ${Math.round(face.min_brightness)}-${Math.round(face.max_brightness)}`
-    metrics.push(`Cahaya ${face.brightness.toFixed(1)}${range}`)
-  }
-  return metrics
-})
 const faceOverlayLabel = computed(() => {
   const count = cameraObservation.value?.face_count ?? 0
   if (count > 1) return `Wajah utama · ${count} wajah`
@@ -219,13 +183,16 @@ const diagnosticCandidate = computed(() => {
 const unmatchedObservedFace = computed(
   () =>
     cameraRunning.value &&
+    previewStatus.value?.session_active === true &&
     ((cameraObservation.value?.face_count ?? 0) > 0 || faceMesh.faces.value.length > 0) &&
     !diagnosticCandidate.value,
 )
-const diagnosticSimilarityPercent = computed(() => {
-  const similarity = diagnosticCandidate.value?.similarity
-  return similarity === undefined ? null : `${(similarity * 100).toFixed(1)}%`
-})
+const sessionRequired = computed(
+  () =>
+    Boolean(previewStatus.value) &&
+    previewStatus.value?.session_active === false &&
+    previewStatus.value?.recognition_state !== 'camera_disabled',
+)
 const errorMessage = ref<string | null>(null)
 const isStarting = ref(true)
 const isFullscreen = ref(false)
@@ -259,34 +226,6 @@ const previewFrameWidth = computed(
 const previewFrameHeight = computed(
   () => faceMesh.frameSize.value.height || cameraObservation.value?.frame_height || undefined,
 )
-const meshFpsLabel = computed(() =>
-  !cameraRunning.value
-    ? 'Tidak aktif'
-    : faceMesh.fps.value === null
-      ? 'Mengukur…'
-      : String(faceMesh.fps.value) + ' FPS',
-)
-const meshStatusLabel = computed(() => {
-  if (previewStatus.value?.recognition_state === 'camera_disabled') {
-    return 'Kamera dijeda · tidak ada frame'
-  }
-  if (!cameraRunning.value || (transport.value === 'stream' && !streamAlive.value)) {
-    return 'Menunggu frame kamera dari agent'
-  }
-  if (faceMesh.state.value === 'loading') return 'Menyiapkan deteksi wajah…'
-  if (faceMesh.state.value === 'unavailable') return 'Deteksi wajah tidak tersedia'
-  if (faceMesh.state.value === 'ready') {
-    if (!faceMesh.frameSize.value.width) return 'Model siap · menunggu frame kamera'
-    if (faceMesh.faces.value.length) {
-      return `Mesh aktif · ${faceMesh.faces.value[0]?.landmarks?.length ?? 478} titik · proses lokal`
-    }
-    if ((cameraObservation.value?.face_count ?? 0) > 0) {
-      return 'Agent mendeteksi wajah · mesh detail menunggu posisi lebih frontal dan fokus'
-    }
-    return 'Model siap · mencari wajah'
-  }
-  return 'Deteksi wajah menunggu kamera'
-})
 const placeholderTitle = computed(() => {
   if (previewStatus.value?.recognition_state === 'camera_disabled') return 'Kamera dijeda'
   if (devicePairingMismatch.value) return 'Perangkat kamera berbeda'
@@ -315,9 +254,6 @@ function resetPreviewFeed(): void {
   transport.value = routeTransport === 'poll' ? 'poll' : 'stream'
   streamAlive.value = false
   previewStatus.value = null
-  previewFps.value = null
-  previewFrameTimes.length = 0
-  lastPreviewFpsUpdate = 0
   lastFrameAt.value = null
   consecutiveUnavailable = 0
   errorMessage.value = null
@@ -417,67 +353,25 @@ const identityPanelClass = computed(() => {
 const cameraObservationLabel = computed(() => {
   switch (cameraObservation.value?.state) {
     case 'ready':
-      return 'Frame siap diperiksa'
+      return 'Wajah terlihat jelas'
     case 'adjust':
       return 'Atur posisi atau kualitas'
     case 'no_face':
-      return 'Mencari wajah'
+      return 'Arahkan wajah ke kamera'
     case 'multiple_faces':
-      return 'Pastikan satu orang di frame'
+      return 'Satu orang per bingkai'
     case 'unavailable':
-      return 'Pemeriksaan kamera tidak tersedia'
+      return 'Kamera belum siap diperiksa'
     default:
-      return 'Menyiapkan pemeriksaan kamera'
+      return 'Menyiapkan kamera'
   }
 })
 const cameraFrameMessage = computed(() => {
   if (previewStatus.value?.recognition_state === 'camera_disabled') {
     return 'Kamera sedang dijeda. Lanjutkan dari halaman Perangkat untuk menampilkan preview.'
   }
-  return cameraObservation.value?.message ?? 'Menunggu status kamera…'
+  return cameraObservation.value?.message ?? 'Menghubungkan ke kamera…'
 })
-
-const cameraQualityLabel = computed(() => {
-  const state = cameraObservation.value?.state ?? cameraMetrics.value?.quality_state
-  switch (state) {
-    case 'ready':
-      return 'Wajah siap diperiksa'
-    case 'adjust':
-      return 'Perlu atur posisi atau cahaya'
-    case 'no_face':
-      return 'Wajah belum terdeteksi'
-    case 'multiple_faces':
-      return 'Lebih dari satu wajah'
-    case 'unavailable':
-      return 'Pemeriksaan tidak tersedia'
-    default:
-      return 'Belum diuji'
-  }
-})
-
-const cameraResolutionLabel = computed(() => {
-  const width = cameraMetrics.value?.frame_width ?? cameraObservation.value?.frame_width
-  const height = cameraMetrics.value?.frame_height ?? cameraObservation.value?.frame_height
-  return width && height ? `${width} × ${height}` : 'Belum tersedia'
-})
-
-const cameraFpsLabel = computed(() => {
-  if (previewStatus.value?.recognition_state === 'camera_disabled') return 'Jeda'
-  const fps = cameraMetrics.value?.capture_fps
-  return typeof fps === 'number' ? `${fps.toFixed(1)} FPS` : 'Mengukur…'
-})
-
-function recordPreviewFrame(): void {
-  const now = performance.now()
-  previewFrameTimes.push(now)
-  while (previewFrameTimes.length > 1 && now - previewFrameTimes[0] > 3000) {
-    previewFrameTimes.shift()
-  }
-  if (previewFrameTimes.length < 2 || now - lastPreviewFpsUpdate < 500) return
-  const elapsed = now - previewFrameTimes[0]
-  if (elapsed > 0) previewFps.value = Math.round(((previewFrameTimes.length - 1) * 1000) / elapsed)
-  lastPreviewFpsUpdate = now
-}
 
 const identityTitle = computed(() => {
   if (recentAttendanceResult.value?.decision === 'recorded') {
@@ -492,28 +386,34 @@ const identityTitle = computed(() => {
   if (recentAttendanceResult.value?.decision === 'delivery_failed') {
     return recentAttendanceResult.value.display_name ?? 'Presensi belum tercatat'
   }
-  if (diagnosticCandidate.value) return diagnosticCandidate.value.display_name
   if (previewStatus.value?.recognition_state === 'accepted') {
     return previewStatus.value.display_name ?? 'Identitas cocok'
   }
-  if (!previewStatus.value?.session_active && (cameraObservation.value?.face_count ?? 0) > 0) {
-    return 'Wajah terdeteksi · sesi belum aktif'
+  if (sessionRequired.value) {
+    return 'Sesi belum dibuka'
   }
+  if (previewStatus.value?.recognition_state === 'camera_disabled') return 'Kamera dijeda'
+  if (previewStatus.value?.recognition_reason_code === 'single_identity_gallery') {
+    return 'Butuh identitas pembanding'
+  }
+  if (diagnosticCandidate.value) return diagnosticCandidate.value.display_name
+  if (cameraObservation.value?.state === 'no_face') return 'Arahkan wajah ke kamera'
+  if (cameraObservation.value?.state === 'multiple_faces') return 'Satu orang per bingkai'
   if (!isFullscreen.value) {
     if (previewStatus.value?.recognition_state === 'waiting_for_calibration') {
-      return 'AI belum dikalibrasi'
+      return 'Pengenalan belum siap'
     }
-    return 'Belum teridentifikasi'
+    return 'Menunggu wajah'
   }
   if (previewStatus.value?.recognition_state === 'waiting_for_calibration') {
-    return 'AI belum dikalibrasi'
+    return 'Pengenalan belum siap'
   }
   if (
     recentAttendanceResult.value?.decision === 'pending' ||
     previewStatus.value?.recognition_state === 'accepted'
   )
     return 'Memeriksa presensi'
-  if (cameraObservation.value?.state === 'ready') return 'Wajah siap diperiksa'
+  if (cameraObservation.value?.state === 'ready') return 'Memeriksa wajah'
   return 'Posisikan wajah di kamera'
 })
 
@@ -534,22 +434,20 @@ const identityDisplayMessage = computed(() => {
   if (recentAttendanceResult.value?.decision === 'delivery_failed') {
     return 'Identitas cocok, tetapi server menolak data presensi. Minta petugas memeriksa status perangkat.'
   }
-  if (diagnosticCandidate.value) {
-    const candidate = diagnosticCandidate.value
-    const className = candidate.class_name ? `${candidate.class_name}. ` : ''
-    const score = `Kemiripan model ${(candidate.similarity * 100).toFixed(1)}% (bukan akurasi).`
-    return previewStatus.value?.session_active
-      ? `${className}${score} Identitas masih kandidat; presensi menunggu kebijakan pengenalan dan validasi API.`
-      : `${className}${score} Preview saja; presensi belum dimulai.`
+  if (sessionRequired.value) {
+    return 'Buka sesi untuk kelas siswa. AI hanya memeriksa siswa yang ada di daftar sesi tersebut.'
   }
-  if (!previewStatus.value?.session_active && (cameraObservation.value?.face_count ?? 0) > 0) {
-    return 'Identitas belum diperiksa karena sesi presensi belum dibuka. Buka sesi untuk kelas yang memuat siswa ini; AI hanya mencocokkan wajah dari roster sesi.'
+  if (diagnosticCandidate.value) {
+    return 'Nama ini masih kandidat. Presensi belum tercatat sampai hasil dikonfirmasi server.'
   }
   if (!isFullscreen.value) {
     return recognitionMessage.value
   }
   if (!previewStatus.value?.session_active) return recognitionMessage.value
   if (previewStatus.value?.recognition_state === 'waiting_for_calibration') {
+    return recognitionMessage.value
+  }
+  if (previewStatus.value?.recognition_reason_code === 'single_identity_gallery') {
     return recognitionMessage.value
   }
   if (
@@ -577,20 +475,23 @@ const recognitionMessage = computed(() => {
   if (!previewStatus.value.camera_open)
     return 'Kamera belum terbuka. Periksa agent dan koneksi kamera.'
   if (!previewStatus.value.session_active)
-    return 'Kamera aktif untuk preview siswa di kelas yang dijadwalkan. Presensi tidak dicatat sebelum sesi dibuka.'
+    return 'Kamera aktif. Buka sesi presensi untuk mulai memeriksa identitas siswa.'
   switch (previewStatus.value.recognition_state) {
     case 'waiting_for_calibration':
-      return 'Pengenalan belum aktif karena admin belum menerapkan threshold Top-1 dan margin hasil benchmark. Presensi belum dibuat. Minta admin memeriksa konfigurasi AI & kamera.'
+      return 'Pengenalan belum siap. Minta admin memeriksa pengaturan AI.'
     case 'preview_only':
       return 'Pencocokan preview berjalan untuk kelas terjadwal di laboratorium ini. Hasilnya belum menjadi presensi.'
     case 'checking':
     case 'collecting':
-      return 'Sedang memeriksa beberapa frame. Minta siswa menghadap kamera.'
+      return 'Menyesuaikan wajah. Hadapkan wajah ke kamera dan tahan sebentar.'
     case 'accepted':
       return previewStatus.value.display_name
         ? 'Identitas cocok. Mengirim presensi untuk konfirmasi server.'
         : 'Identitas cocok, tetapi nama roster tidak tersedia.'
     case 'retry_frontal':
+      if (previewStatus.value.recognition_reason_code === 'single_identity_gallery') {
+        return 'Belum cukup pembanding untuk memastikan identitas. Gunakan sesi dengan lebih dari satu siswa terdaftar.'
+      }
       return 'Belum cukup yakin. Minta siswa menghadap lurus ke kamera.'
     case 'rejected':
       return 'Belum cocok atau kualitas gambar belum cukup. Periksa posisi dan pencahayaan.'
@@ -777,7 +678,7 @@ onBeforeUnmount(() => {
     <UiPageHeader
       eyebrow="AI_EDGE · perangkat kamera"
       title="Preview Kamera Presensi"
-      description="Video dan bingkai sama dengan layar kiosk. Preview memakai agent perangkat yang dipilih dan tidak meminta PIN kiosk."
+      description="Periksa posisi wajah dan kesiapan kamera. Pengenalan dimulai setelah sesi presensi dibuka."
     >
       <template #actions>
         <UiBadge :tone="previewStatus?.camera_open ? 'present' : 'neutral'">
@@ -797,7 +698,7 @@ onBeforeUnmount(() => {
     <UiCard
       v-if="!isFullscreen"
       title="Perangkat kamera"
-      subtitle="Pilih perangkat bila ada lebih dari satu. Preview hanya menampilkan agent yang cocok pada komputer ini."
+      subtitle="Pilih kamera yang akan diperiksa."
     >
       <label v-if="devices.length > 1" class="st-field">
         <span>Pilih perangkat kamera</span>
@@ -828,47 +729,6 @@ onBeforeUnmount(() => {
     </UiCard>
     <p v-if="errorMessage" class="st-alert st-alert--error" role="alert">{{ errorMessage }}</p>
 
-    <section
-      v-if="!isFullscreen"
-      class="camera-preview-view__telemetry"
-      aria-label="Kualitas dan kinerja kamera"
-    >
-      <div>
-        <span>Resolusi aktual</span>
-        <strong>{{ cameraResolutionLabel }}</strong>
-      </div>
-      <div>
-        <span>FPS capture aktual</span>
-        <strong data-testid="preview-capture-fps">{{ cameraFpsLabel }}</strong>
-        <small>
-          Target {{ cameraMetrics?.requested_fps ?? '-' }} FPS · driver
-          {{ cameraMetrics?.driver_fps ?? '-' }} FPS
-        </small>
-      </div>
-      <div>
-        <span>FPS preview browser</span>
-        <strong>{{
-          transport === 'stream'
-            ? 'Stream langsung'
-            : previewFps === null
-              ? 'Mengukur…'
-              : `${previewFps} FPS`
-        }}</strong>
-        <small v-if="transport === 'stream'">MJPEG satu koneksi, tanpa polling.</small>
-        <small data-testid="preview-mesh-status">
-          {{ meshStatusLabel }} · {{ meshFpsLabel }}
-        </small>
-      </div>
-      <div>
-        <span>Kualitas frame</span>
-        <strong>{{ cameraQualityLabel }}</strong>
-        <small v-if="cameraMetrics?.quality_source === 'frame_filter'">
-          Pemeriksaan cahaya dan ketajaman ringan dari gateway.
-        </small>
-        <small v-else>Mesh lokal aktif saat kamera berjalan dan menghasilkan frame.</small>
-      </div>
-    </section>
-
     <div class="camera-preview-view__layout">
       <figure class="camera-preview-view__frame">
         <CameraFrame
@@ -895,7 +755,6 @@ onBeforeUnmount(() => {
             :src="frameUrl"
             class="camera-frame__media"
             alt="Preview langsung kamera presensi"
-            @load="recordPreviewFrame"
           />
           <div
             v-if="cameraRunning"
@@ -905,9 +764,6 @@ onBeforeUnmount(() => {
           >
             <strong>{{ cameraObservationLabel }}</strong>
             <span>{{ cameraFrameMessage }}</span>
-            <div v-if="cameraFaceMetrics.length" class="camera-preview-view__metrics">
-              <span v-for="metric in cameraFaceMetrics" :key="metric">{{ metric }}</span>
-            </div>
           </div>
           <div
             v-else
@@ -928,9 +784,7 @@ onBeforeUnmount(() => {
           <UiBadge tone="late">Frame beku</UiBadge>
           <span>Frame terakhir {{ frameAgeLabel }} lalu - koneksi mungkin beku.</span>
         </p>
-        <figcaption>
-          Gambar ditampilkan sementara di browser dan tidak disimpan oleh halaman ini.
-        </figcaption>
+        <figcaption>Video hanya ditampilkan sementara dan tidak disimpan.</figcaption>
       </figure>
 
       <aside
@@ -938,7 +792,7 @@ onBeforeUnmount(() => {
         :class="identityPanelClass"
         aria-label="Status pengenalan siswa"
       >
-        <p class="master-data__eyebrow">Hasil pengenalan</p>
+        <p class="master-data__eyebrow">Status presensi</p>
         <h3>{{ identityTitle }}</h3>
         <span v-if="identityMatched" class="camera-preview-view__match-badge" role="status">
           <span aria-hidden="true">✓</span>
@@ -952,22 +806,37 @@ onBeforeUnmount(() => {
                 : 'Identitas cocok · menunggu konfirmasi server'
           }}
         </span>
-        <p>{{ identityDisplayMessage }}</p>
+        <p v-if="!sessionRequired">{{ identityDisplayMessage }}</p>
         <div
-          v-if="diagnosticCandidate"
+          v-if="sessionRequired"
+          class="camera-preview-view__next-step"
+          role="status"
+          data-testid="preview-session-required"
+        >
+          <span>Langkah selanjutnya</span>
+          <strong>Buka sesi untuk memeriksa nama</strong>
+          <p>
+            Acuan wajah yang sudah terdaftar dipakai saat siswa ada di daftar sesi aktif. Pilih
+            jadwal dan kelas siswa yang benar.
+          </p>
+          <RouterLink
+            v-if="!isFullscreen"
+            class="button button--primary camera-preview-view__settings-link"
+            to="/app/sessions"
+          >
+            Buka sesi presensi
+          </RouterLink>
+        </div>
+        <div
+          v-if="diagnosticCandidate && !sessionRequired"
           class="camera-preview-view__candidate"
           role="status"
           aria-live="polite"
         >
-          <span>Kandidat sementara · belum diverifikasi presensi</span>
+          <span>Nama kandidat · menunggu konfirmasi</span>
           <strong>{{ diagnosticCandidate.display_name }}</strong>
           <b>{{ diagnosticCandidate.class_name || 'Kelas tidak tersedia' }}</b>
-          <b>{{ diagnosticSimilarityPercent }} kemiripan · bukan tingkat akurasi</b>
-          <small>
-            Nama adalah kandidat terdekat dari kelas yang terjadwal di laboratorium hari ini. Hasil
-            preview tidak membuat presensi. Presensi hanya dicatat oleh Core API saat sesi aktif dan
-            kebijakan pengenalan lolos.
-          </small>
+          <small>Presensi baru tercatat setelah hasil dikonfirmasi server.</small>
         </div>
         <div
           v-else-if="unmatchedObservedFace"
@@ -975,13 +844,9 @@ onBeforeUnmount(() => {
           role="status"
           data-testid="preview-unmatched-face"
         >
-          <strong>Wajah terdeteksi, tetapi belum ada kandidat yang cocok</strong>
+          <strong>Belum menemukan kecocokan</strong>
           <small v-if="previewStatus?.recognition_state === 'waiting_for_calibration'">
-            Pengenalan belum aktif. Minta admin memeriksa konfigurasi AI sebelum uji identitas.
-          </small>
-          <small v-else-if="!previewStatus?.session_active">
-            Identitas belum diperiksa karena belum ada sesi aktif. Buka sesi pada jadwal dan kelas
-            yang benar agar roster serta template wajah siswa dimuat.
+            Minta admin menyiapkan pengenalan AI sebelum mencoba lagi.
           </small>
           <small
             v-else-if="
@@ -989,26 +854,20 @@ onBeforeUnmount(() => {
               previewStatus?.recognition_state === 'retry_frontal'
             "
           >
-            Belum cocok atau kualitas wajah belum cukup. Periksa posisi, fokus, dan keanggotaan
-            roster sesi.
+            Pastikan wajah terlihat jelas dan siswa tercantum di kelas pada sesi ini.
           </small>
           <small v-else>{{ recognitionMessage }}</small>
         </div>
         <div
-          v-else-if="previewStatus?.recognition_state === 'preview_only'"
+          v-else-if="previewStatus?.recognition_state === 'preview_only' && !sessionRequired"
           class="camera-preview-view__candidate-empty"
           role="status"
         >
-          <strong>Mencari siswa dari jadwal lab hari ini</strong>
-          <small v-if="!previewStatus?.session_active">
-            Kamera dapat menampilkan kandidat sebelum sesi dibuka. Presensi belum dicatat.
-          </small>
-          <small v-else-if="cameraObservation?.state !== 'ready'">
+          <strong>Mencari kecocokan</strong>
+          <small v-if="cameraObservation?.state !== 'ready'">
             {{ cameraObservation?.message ?? 'Menunggu satu wajah dengan kualitas yang cukup.' }}
           </small>
-          <small v-else>
-            Pastikan siswa sudah terdaftar dan memiliki template aktif untuk sesi ini.
-          </small>
+          <small v-else> Hadapkan wajah ke kamera dan tahan sebentar. </small>
         </div>
         <RouterLink
           v-if="auth.account?.roles.includes('ADMIN') && !isFullscreen"
@@ -1017,7 +876,7 @@ onBeforeUnmount(() => {
         >
           Atur kualitas &amp; pengenalan
         </RouterLink>
-        <dl>
+        <dl v-if="!sessionRequired">
           <div>
             <dt>Sesi praktikum</dt>
             <dd>{{ previewStatus?.session_active ? 'Aktif' : 'Belum aktif' }}</dd>
@@ -1027,18 +886,8 @@ onBeforeUnmount(() => {
             <dd>{{ previewStatus?.camera_open ? 'Terhubung' : 'Tidak terhubung' }}</dd>
           </div>
         </dl>
-        <p class="camera-preview-view__privacy">
-          <template v-if="isFullscreen && !previewStatus?.session_active">
-            Kandidat preview belum terverifikasi dan tidak membuat presensi. Buka sesi sesuai jadwal
-            untuk mulai mencatat kehadiran.
-          </template>
-          <template v-else-if="isFullscreen">
-            Presensi hanya dinyatakan berhasil setelah Core API mengonfirmasi hasil.
-          </template>
-          <template v-else>
-            Kandidat pada uji kamera hanya untuk petugas. Presensi baru tercatat setelah threshold
-            aktif dan Core API mengonfirmasi hasil.
-          </template>
+        <p v-if="previewStatus?.session_active" class="camera-preview-view__privacy">
+          Presensi tercatat setelah server mengonfirmasi hasil.
         </p>
       </aside>
     </div>

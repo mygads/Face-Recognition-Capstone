@@ -133,8 +133,8 @@ test('teacher opens and manually closes a session with a roster snapshot', async
   await loginAsTeacher(page)
   await page.getByTestId('sessions-link').click()
   await expect(page.getByRole('heading', { name: 'Sesi presensi' })).toBeVisible()
-  await page.getByLabel('Grace period dalam menit').fill('5')
   await page.getByTestId('open-session-schedule-1').click()
+  await expect(page.getByRole('dialog')).toContainText('grace 15 mnt')
   await page.getByTestId('confirm-open-session').click()
   await expect(page.locator('p.st-alert--success')).toContainText('2 siswa di roster')
   // Sesi aktif tampil di kartu "Sedang Berlangsung", bukan di tabel riwayat.
@@ -145,7 +145,7 @@ test('teacher opens and manually closes a session with a roster snapshot', async
   await expect(page.locator('p.st-alert--success')).toContainText('telah ditutup')
   // Sesi yang ditutup pindah ke tabel "Riwayat Sesi Terakhir".
   await expect(page.getByRole('cell', { name: /Praktikum Biologi/ })).toBeVisible()
-  await expect(page.getByRole('cell', { name: /grace 5 mnt/ })).toBeVisible()
+  await expect(page.getByRole('cell', { name: /grace 15 mnt/ })).toBeVisible()
   await expect(page.getByRole('cell', { name: 'Ditutup' })).toBeVisible()
 })
 

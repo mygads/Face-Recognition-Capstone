@@ -209,9 +209,10 @@ describe('drawer kelola staf per role', () => {
     })
     try {
       api.grantOptionalPermission.mockClear()
-      const selectAll = wrapper
-        .findAll('label')
-        .find((label) => label.text().includes('Pilih semua Sesi dan Kehadiran'))
+      const sessionPermissions = wrapper
+        .findAll('.accounts-view__permission-group')
+        .find((group) => group.find('h4').text() === 'Sesi dan Kehadiran')
+      const selectAll = sessionPermissions?.find('label.accounts-view__select-all')
       expect(selectAll).toBeDefined()
       await selectAll!.get('input[type="checkbox"]').setValue(true)
       await flushPromises()

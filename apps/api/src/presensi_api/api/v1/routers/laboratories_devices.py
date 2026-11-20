@@ -29,7 +29,13 @@ from presensi_api.api.v1.schemas.laboratories import (
     LaboratoryResponse,
     LaboratoryUpdateRequest,
 )
-from presensi_api.db.models import AuditLog, Device, Laboratory
+from presensi_api.db.models import (
+    AuditLog,
+    Device,
+    KioskScreen,
+    Laboratory,
+    RecognitionEvent,
+)
 from presensi_api.db.search import like_contains
 from presensi_api.db.session import get_db_session
 from presensi_api.device_health import device_health_status, heartbeat_timeout_seconds
@@ -508,10 +514,55 @@ def deactivate_device(
     principal: Annotated[
         AuthenticatedUser, Depends(require_permissions(Permission.MANAGE_MASTER_DATA))
     ],
+    permanent: bool = Query(default=False),
 ) -> None:
     device = session.get(Device, device_id)
     if device is None:
         raise _not_found("Device")
+    if permanent:
+        if device.is_active:
+            raise ApiProblem(
+                409,
+                "device_must_be_inactive",
+                "Nonaktifkan perangkat terlebih dahulu sebelum menghapus permanen.",
+            )
+        has_recognition_history = bool(
+            session.scalar(
+                select(func.count())
+                .select_from(RecognitionEvent)
+                .where(RecognitionEvent.device_id == device.id)
+            )
+        )
+        has_registered_screen = bool(
+            session.scalar(
+                select(func.count())
+                .select_from(KioskScreen)
+                .where(KioskScreen.device_id == device.id)
+            )
+        )
+        if has_recognition_history or has_registered_screen:
+            raise ApiProblem(
+                409,
+                "device_has_history",
+                "Perangkat memiliki riwayat pengenalan atau layar kiosk. "
+                "Perangkat tetap nonaktif agar riwayat dan relasinya terjaga.",
+            )
+        session.add(
+            AuditLog(
+                actor_user_id=principal.id,
+                action="device.permanently_deleted",
+                entity_type="device",
+                entity_id=device.id,
+                before_state={
+                    "name": device.name,
+                    "laboratory_id": str(device.laboratory_id),
+                    "is_active": False,
+                },
+            )
+        )
+        session.delete(device)
+        session.commit()
+        return
     if device.is_active:
         session.add(
             AuditLog(

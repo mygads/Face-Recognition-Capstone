@@ -66,6 +66,7 @@ test('AI_EDGE admin confirms device removal and can inspect the inactive device'
     })
   })
   let isActive = true
+  let isRemoved = false
   let deleteRequests = 0
   const device = {
     device_id: deviceId,
@@ -119,13 +120,16 @@ test('AI_EDGE admin confirms device removal and can inspect the inactive device'
     const request = route.request()
     if (request.method() === 'DELETE') {
       deleteRequests += 1
-      isActive = false
+      const permanent = new URL(request.url()).searchParams.get('permanent') === 'true'
+      if (permanent) isRemoved = true
+      else isActive = false
       return route.fulfill({ status: 204 })
     }
     const url = new URL(request.url())
     const activeFilter = url.searchParams.get('is_active')
     const profileFilter = url.searchParams.get('deployment_profile')
     const visible =
+      !isRemoved &&
       (profileFilter === null || profileFilter === 'AI_EDGE') &&
       (activeFilter === null || String(isActive) === activeFilter)
     return route.fulfill({
@@ -142,13 +146,15 @@ test('AI_EDGE admin confirms device removal and can inspect the inactive device'
   await expect(deviceRow).toBeVisible()
   await expect(page.getByRole('button', { name: 'Siapkan kamera' })).toHaveCount(0)
 
-  await deviceRow.getByRole('button', { name: 'Hapus', exact: true }).click()
+  await deviceRow.getByRole('button', { name: 'Nonaktifkan tes-perangkat1' }).click()
   const confirmation = page.getByRole('alertdialog')
   await expect(confirmation).toContainText('Data presensi dan audit lama tetap tersimpan')
-  await expect(confirmation.getByRole('button', { name: 'Ya, hapus perangkat' })).toBeVisible()
+  await expect(
+    confirmation.getByRole('button', { name: 'Ya, nonaktifkan perangkat' }),
+  ).toBeVisible()
   expect(deleteRequests).toBe(0)
 
-  await confirmation.getByRole('button', { name: 'Ya, hapus perangkat' }).click()
+  await confirmation.getByRole('button', { name: 'Ya, nonaktifkan perangkat' }).click()
   await expect(page.getByText('Belum ada perangkat yang cocok.')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Siapkan kamera' })).toBeVisible()
   expect(deleteRequests).toBe(1)
@@ -157,6 +163,14 @@ test('AI_EDGE admin confirms device removal and can inspect the inactive device'
   const inactiveDeviceRow = page.getByRole('row').filter({ hasText: 'tes-perangkat1' })
   await expect(inactiveDeviceRow).toBeVisible()
   await expect(inactiveDeviceRow.getByRole('button', { name: 'Lanjutkan setup' })).toBeDisabled()
+  await inactiveDeviceRow.getByRole('button', { name: 'Hapus permanen tes-perangkat1' }).click()
+  const permanentConfirmation = page.getByRole('alertdialog')
+  await expect(permanentConfirmation).toContainText(
+    'dihapus dari daftar hanya jika tidak memiliki riwayat',
+  )
+  await permanentConfirmation.getByRole('button', { name: 'Ya, hapus permanen' }).click()
+  await expect(page.getByText('Belum ada perangkat yang cocok.')).toBeVisible()
+  expect(deleteRequests).toBe(2)
 })
 
 test('AI_EDGE admin can pause and reactivate the camera without removing the device', async ({

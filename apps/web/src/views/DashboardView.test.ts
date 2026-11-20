@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({
   listLaboratories: vi.fn(),
   listDevices: vi.fn(),
   listAttendanceSessions: vi.fn(),
+  getAttendanceReportSummary: vi.fn(),
   listAtRiskStudents: vi.fn(),
   listMyClasses: vi.fn(),
   listLaborantAssignments: vi.fn(),
@@ -56,6 +57,17 @@ const atRisk = {
       reasons: ['tingkat_absen'],
     },
   ],
+}
+const attendanceSummary = {
+  starts_on: '2026-11-21',
+  ends_on: '2026-11-21',
+  total_rows: 1,
+  present_count: 1,
+  late_count: 0,
+  absent_count: 0,
+  excused_count: 0,
+  not_recorded_count: 0,
+  generated_at: '2026-11-21T01:00:00Z',
 }
 
 function testRouter() {
@@ -112,6 +124,7 @@ beforeEach(() => {
   api.listLaboratories.mockResolvedValue({ items: labs })
   api.listDevices.mockResolvedValue({ items: devices, pagination: { total: 1 } })
   api.listAttendanceSessions.mockResolvedValue({ items: sessions, pagination: { total: 1 } })
+  api.getAttendanceReportSummary.mockResolvedValue(attendanceSummary)
   api.listAtRiskStudents.mockResolvedValue(atRisk)
   api.listMyClasses.mockResolvedValue({
     items: [{ id: 'c1', name: 'XI IPA 1', academic_year: '2026/2027' }],
@@ -136,6 +149,44 @@ describe('dashboard admin ala Stitch B01-03', () => {
     expect(text).toContain('Lab Kimia 1')
     expect(text).toContain('Buka Sesi Presensi')
     expect(text).toContain('melewati ambang')
+  })
+
+  it('memuat ringkasan sesuai tanggal dan memperbaruinya saat tanggal diganti', async () => {
+    const wrapper = mount(DashboardView, {
+      global: { plugins: [piniaWith(adminAccount), testRouter()] },
+    })
+    await flushPromises()
+
+    const dateInput = wrapper.get('input[aria-label="Filter tanggal"]')
+    const initialDate = (dateInput.element as HTMLInputElement).value
+    expect(api.getAttendanceReportSummary).toHaveBeenLastCalledWith({
+      starts_on: initialDate,
+      ends_on: initialDate,
+      timezone_name: 'Asia/Jakarta',
+      laboratory_id: undefined,
+    })
+    expect(wrapper.get('[data-testid="report-total"]').text()).toBe('1')
+    expect(wrapper.find('button[aria-label="Buka kalender"]').exists()).toBe(true)
+
+    api.getAttendanceReportSummary.mockResolvedValue({
+      ...attendanceSummary,
+      starts_on: '2026-11-20',
+      ends_on: '2026-11-20',
+      total_rows: 9,
+      present_count: 5,
+    })
+    await dateInput.setValue('2026-11-20')
+    await flushPromises()
+
+    expect(api.getAttendanceReportSummary).toHaveBeenLastCalledWith({
+      starts_on: '2026-11-20',
+      ends_on: '2026-11-20',
+      timezone_name: 'Asia/Jakarta',
+      laboratory_id: undefined,
+    })
+    expect(wrapper.get('[data-testid="report-total"]').text()).toBe('9')
+    expect(wrapper.get('[data-testid="report-present"]').text()).toBe('5')
+    wrapper.unmount()
   })
 })
 
