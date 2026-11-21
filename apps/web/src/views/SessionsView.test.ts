@@ -241,7 +241,7 @@ describe('sessions view', () => {
     await flushPromises()
     expect(api.markManualAttendance).toHaveBeenCalledWith('session-1', {
       student_id: 'student-9',
-      status: 'present',
+      status: 'absent',
       note: 'ralat TU',
     })
   })
@@ -395,6 +395,29 @@ describe('session roster overview', () => {
     expect(wrapper.text()).toContain('Belum tercatat (1)')
     expect(wrapper.text()).toContain('Hadir')
     expect(wrapper.text()).toContain('Terlambat')
+  })
+
+  it('shows unrecorded roster members as absent after a session closes', async () => {
+    const closedSession = {
+      ...overrideSession,
+      status: 'closed',
+      closed_at: '2026-10-05T04:00:00Z',
+    }
+    api.listAttendanceSessions.mockResolvedValue({
+      items: [closedSession],
+      pagination: { total: 1, limit: 50, offset: 0 },
+    })
+    api.getAttendanceSessionStatus.mockResolvedValue(closedSession)
+    const wrapper = mount(SessionsView, {
+      global: { plugins: [teacherPinia(['attendance_correct_closed'])] },
+    })
+    await flushPromises()
+    await wrapper.get('[data-testid^="show-status-"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Absen (1)')
+    expect(wrapper.text()).toContain('Belum tercatat (0)')
+    expect(wrapper.text()).toContain('Absen')
   })
 
   it('shows a monitor-only banner for laboran without operate permission', async () => {

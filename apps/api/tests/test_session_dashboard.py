@@ -397,3 +397,26 @@ def test_dashboard_summary_separates_excused_absent_and_unmarked(
         "absent": 1,
         "not_present": 0,
     }
+
+
+def test_closed_session_counts_unrecorded_roster_as_absent(
+    dashboard_database: tuple[sessionmaker[Session], dict[str, UUID]],
+) -> None:
+    factory, ids = dashboard_database
+    with factory.begin() as db:
+        attendance_session = db.get(AttendanceSession, ids["session"])
+        assert attendance_session is not None
+        attendance_session.status = "closed"
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/v1/sessions/{ids['session']}/dashboard")
+
+    assert response.status_code == 200
+    assert response.json()["summary"] == {
+        "total_roster": 3,
+        "present": 1,
+        "late": 0,
+        "excused": 0,
+        "absent": 2,
+        "not_present": 0,
+    }

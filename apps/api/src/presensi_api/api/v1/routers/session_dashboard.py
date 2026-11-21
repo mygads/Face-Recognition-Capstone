@@ -143,6 +143,11 @@ def _build_snapshot(
     late = status_counts.get("late", 0)
     excused = status_counts.get("excused", 0)
     absent = status_counts.get("absent", 0)
+    # Closing a session finalizes roster members without an explicit attendance
+    # record as absent. Keep this aligned with attendance reports, which apply
+    # the same effective status without manufacturing an audit record.
+    if attendance_session.status == "closed":
+        absent += max(total_roster - present - late - excused - absent, 0)
 
     recognition_rows = db.execute(
         select(

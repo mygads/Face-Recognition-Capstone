@@ -208,24 +208,30 @@ const rosterStatusCounts = computed<Record<RosterStatusFilter, number>>(() => {
     excused: 0,
   }
   for (const entry of roster.value) {
-    if (entry.record_status === null || entry.record_status === undefined) {
+    const status = effectiveRosterStatus(entry)
+    if (status === null || status === undefined) {
       counts.unmarked += 1
     } else {
-      counts[entry.record_status] += 1
+      counts[status] += 1
     }
   }
   return counts
 })
 
+function effectiveRosterStatus(entry: SessionRosterEntry): SessionRosterEntry['record_status'] {
+  // Closed sessions treat unrecorded roster members as absent. This is an
+  // effective status only; corrections still create an audited record.
+  if (selected.value?.status === 'closed' && entry.record_status == null) return 'absent'
+  return entry.record_status
+}
+
 const filteredRoster = computed(() => {
   const query = rosterSearch.value.trim().toLowerCase()
   return roster.value.filter((entry) => {
+    const status = effectiveRosterStatus(entry)
     if (rosterStatusFilter.value === 'unmarked') {
-      if (entry.record_status !== null && entry.record_status !== undefined) return false
-    } else if (
-      rosterStatusFilter.value !== 'all' &&
-      entry.record_status !== rosterStatusFilter.value
-    ) {
+      if (status !== null && status !== undefined) return false
+    } else if (rosterStatusFilter.value !== 'all' && status !== rosterStatusFilter.value) {
       return false
     }
     if (!query) return true
@@ -273,12 +279,9 @@ const closeLate = computed(() => {
 })
 const closeAbsent = computed(() => {
   if (!closingSession.value) return 0
-  const total = closingSession.value.student_count
   if (selected.value?.id === closingSession.value.id && roster.value.length) {
-    const known = roster.value.filter(
-      (entry) => entry.record_status === 'present' || entry.record_status === 'late',
-    ).length
-    return Math.max(0, total - known)
+    const alreadyAbsent = roster.value.filter((entry) => entry.record_status === 'absent').length
+    return alreadyAbsent + closeUnmarked.value
   }
   return 0
 })
@@ -671,7 +674,7 @@ async function returnToSessionList(): Promise<void> {
 function openAttendanceEditor(entry: SessionRosterEntry): void {
   if (!canManualMark.value) return
   const draft = draftFor(entry.student_id)
-  draft.status = entry.record_status ?? 'present'
+  draft.status = effectiveRosterStatus(entry) ?? 'present'
   draft.note = ''
   draft.error = null
   manualMarkMessage.value = null
@@ -736,7 +739,7 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
     manualMarkMessage.value =
       'Kehadiran ' +
       entry.full_name +
-      (entry.record_status ? ' diperbarui langsung.' : ' ditandai manual.')
+      (effectiveRosterStatus(entry) ? ' diperbarui langsung.' : ' ditandai manual.')
     await loadRoster(selected.value.id)
     closeAttendanceEditor()
   } catch (error) {
@@ -1185,18 +1188,18 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
                 <td>
                   <UiBadge
                     :tone="
-                      entry.record_status === 'present'
+                      effectiveRosterStatus(entry) === 'present'
                         ? 'present'
-                        : entry.record_status === 'late'
+                        : effectiveRosterStatus(entry) === 'late'
                           ? 'late'
-                          : entry.record_status === 'excused'
+                          : effectiveRosterStatus(entry) === 'excused'
                             ? 'info'
-                            : entry.record_status === 'absent'
+                            : effectiveRosterStatus(entry) === 'absent'
                               ? 'absent'
                               : 'neutral'
                     "
                   >
-                    {{ rosterStatusLabel(entry.record_status) }}
+                    {{ rosterStatusLabel(effectiveRosterStatus(entry)) }}
                   </UiBadge>
                 </td>
                 <td v-if="canManualMark" class="st-table__actions">
@@ -1234,7 +1237,9 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
     <UiDrawer
       v-if="editingRosterEntry && canManualMark"
       data-testid="attendance-edit-drawer"
-      :title="editingRosterEntry.record_status ? 'Ubah kehadiran' : 'Tandai kehadiran manual'"
+      :title="
+        effectiveRosterStatus(editingRosterEntry) ? 'Ubah kehadiran' : 'Tandai kehadiran manual'
+      "
       :subtitle="`${editingRosterEntry.full_name} · ${editingRosterEntry.student_number}`"
       @close="closeAttendanceEditor"
     >
@@ -1245,13 +1250,13 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
       >
         <p class="attendance-edit-form__summary">
           Status saat ini:
-          <strong>{{ rosterStatusLabel(editingRosterEntry.record_status) }}</strong>
+          <strong>{{ rosterStatusLabel(effectiveRosterStatus(editingRosterEntry)) }}</strong>
         </p>
         <p v-if="isClosedSelected" class="st-alert" role="note">
           Sesi sudah ditutup. Perubahan adalah koreksi pascasesi dan alasan wajib diisi serta
           dicatat pada audit.
         </p>
-        <p v-else-if="editingRosterEntry.record_status" class="st-table__muted">
+        <p v-else-if="effectiveRosterStatus(editingRosterEntry)" class="st-table__muted">
           Perubahan status memerlukan alasan dan akan dicatat pada audit.
         </p>
         <p v-else class="st-table__muted">
@@ -1270,8 +1275,12 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
           </UiSelect>
         </UiField>
         <UiField
-          :label="editingRosterEntry.record_status ? 'Alasan perubahan' : 'Alasan atau keterangan'"
-          :required="Boolean(editingRosterEntry.record_status) || isClosedSelected"
+          :label="
+            effectiveRosterStatus(editingRosterEntry)
+              ? 'Alasan perubahan'
+              : 'Alasan atau keterangan'
+          "
+          :required="Boolean(effectiveRosterStatus(editingRosterEntry)) || isClosedSelected"
           :error="draftFor(editingRosterEntry.student_id).error"
         >
           <UiInput
@@ -1279,7 +1288,7 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
             type="text"
             maxlength="500"
             :placeholder="
-              editingRosterEntry.record_status
+              effectiveRosterStatus(editingRosterEntry)
                 ? 'Tuliskan alasan perubahan'
                 : 'Opsional untuk sesi aktif'
             "
@@ -1305,7 +1314,7 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
           {{
             draftFor(editingRosterEntry.student_id).saving
               ? 'Menyimpan…'
-              : editingRosterEntry.record_status
+              : effectiveRosterStatus(editingRosterEntry)
                 ? 'Simpan perubahan'
                 : 'Tandai kehadiran'
           }}
