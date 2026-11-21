@@ -121,6 +121,8 @@ def test_preview_requires_operator_session_and_serves_no_store_status(
                             [0.56, 0.64],
                         ],
                         "acceptable": True,
+                        "role": "primary",
+                        "is_primary": True,
                         "quality_score": 0.9,
                         "embedding": [1.0, 2.0],
                         "student_name": "Should not be exposed",
@@ -146,6 +148,8 @@ def test_preview_requires_operator_session_and_serves_no_store_status(
             [0.45, 0.64],
             [0.56, 0.64],
         ]
+        assert status["camera_observation"]["faces"][0]["role"] == "primary"
+        assert status["camera_observation"]["faces"][0]["is_primary"] is True
         candidate = status["diagnostic_candidate"]
         assert isinstance(candidate, dict)
         assert candidate["display_name"] == "Candidate Adult"

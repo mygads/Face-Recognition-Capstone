@@ -36,9 +36,10 @@ async function createLandmarker(
     {
       baseOptions: { modelAssetBuffer: modelBuffer, delegate },
       runningMode: 'VIDEO',
-      // The kiosk/enrollment mesh is visual guidance for the primary student.
-      // AI_EDGE independently detects and matches every face from full frames.
-      numFaces: 1,
+      // A few faces are needed to color the agent-selected foreground face
+      // and background faces consistently. The overlay draws a dense mesh
+      // only for the primary face to keep kiosk rendering inexpensive.
+      numFaces: 3,
       minFaceDetectionConfidence: 0.5,
       minFacePresenceConfidence: 0.5,
       minTrackingConfidence: 0.5,

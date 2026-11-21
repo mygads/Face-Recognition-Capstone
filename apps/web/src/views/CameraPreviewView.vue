@@ -8,6 +8,7 @@ import { listDevices, type Device } from '../api/client'
 import CameraFrame from '../components/CameraFrame.vue'
 import { useFaceLandmarks } from '../composables/useFaceLandmarks'
 import { UiBadge, UiButton, UiCard, UiPageHeader, UiSelect } from '../components/ui'
+import { associateFaceRoles } from '../utils/faceLandmarks'
 
 type PreviewStatus = {
   device_id?: string | null
@@ -41,6 +42,8 @@ type CameraFaceObservation = {
   width: number
   height: number
   landmarks?: number[][] | null
+  role?: 'primary' | 'background' | 'ambiguous' | null
+  is_primary?: boolean
   detection_confidence?: number
   acceptable: boolean
   quality_score?: number
@@ -52,6 +55,7 @@ type CameraFaceObservation = {
   min_sharpness?: number
   min_brightness?: number
   max_brightness?: number
+  [key: string]: unknown
 }
 
 type CameraObservation = {
@@ -219,7 +223,9 @@ const previewImage = ref<HTMLImageElement | null>(null)
 const faceMesh = useFaceLandmarks(previewImage, cameraRunning)
 // The agent's sparse recognition landmarks are not a visual face mesh.
 // Draw only dense local FaceLandmarker results, as on the kiosk.
-const activeCameraFaces = computed(() => faceMesh.faces.value)
+const activeCameraFaces = computed(() =>
+  associateFaceRoles(faceMesh.faces.value, cameraObservation.value?.faces ?? []),
+)
 const previewFrameWidth = computed(
   () => faceMesh.frameSize.value.width || cameraObservation.value?.frame_width || undefined,
 )

@@ -125,6 +125,7 @@ def test_pipeline_invokes_stages_in_order_and_delegates_temporal_decision() -> N
         "temporal_sampling",
         "preprocess",
         "detect",
+        "face_selection",
         "quality",
         "align",
         "liveness",
@@ -379,6 +380,107 @@ def test_multiple_faces_skip_quality_and_request_temporal_handling() -> None:
     assert calls == ["sample", "preprocess", "detect", "temporal"]
     assert temporal.quality is not None
     assert temporal.quality.reason_codes == ("multiple_faces",)
+
+
+def test_pipeline_matches_only_the_clearly_dominant_foreground_face() -> None:
+    calls: list[str] = []
+    foreground = FaceDetection(box=BoundingBox(120, 70, 220, 250), confidence=0.98)
+    background = FaceDetection(box=BoundingBox(520, 50, 52, 64), confidence=0.95)
+
+    class SelectedFaceQualityAssessor:
+        min_face_pixels = 80
+
+        def __init__(self) -> None:
+            self.assessed: list[FaceDetection] = []
+
+        def assess(self, _frame: object, detection: FaceDetection) -> FaceQuality:
+            self.assessed.append(detection)
+            calls.append("quality")
+            return FaceQuality(score=0.95, acceptable=True)
+
+    assessor = SelectedFaceQualityAssessor()
+    decision = TrackDecision(
+        track_id=TEACHER_TRACK,
+        state="collecting",
+        decision=RecognitionDecision(outcome="retry", reason_code="awaiting_consensus"),
+        observation_count=1,
+    )
+    pipeline = RecognitionPipeline(
+        preprocessor=FakePreprocessor(calls),
+        detector=FakeFaceDetector(calls, (foreground, background)),
+        quality_assessor=assessor,
+        aligner=FakeFaceAligner(calls),
+        liveness_config=LivenessConfig(enabled=False, required=False),
+        liveness_model=None,
+        embedder=FakeFaceEmbedder(
+            calls, FaceEmbedding((1.0,), "fake-embedder", "test", True)
+        ),
+        matcher=FakeMatcher(calls, ()),
+        temporal_decision=FakeTemporalDecisionEngine(calls, decision),
+    )
+
+    result = pipeline.process(
+        any_frame(), (), FrameObservation(TEACHER_TRACK, datetime.now(UTC))
+    )
+
+    assert result == decision
+    assert assessor.assessed == [foreground]
+    assert "align" in calls
+    assert "embed" in calls
+
+
+def test_pipeline_resets_temporal_track_when_selected_face_jumps_to_new_target() -> (
+    None
+):
+    calls: list[str] = []
+    moving_faces = [
+        FaceDetection(BoundingBox(70, 70, 210, 240), 0.98),
+        FaceDetection(BoundingBox(420, 70, 210, 240), 0.98),
+    ]
+
+    class MovingDetector:
+        def __init__(self) -> None:
+            self.index = 0
+
+        def detect(self, _frame: object) -> tuple[FaceDetection, ...]:
+            calls.append("detect")
+            face = moving_faces[self.index]
+            self.index += 1
+            return (face,)
+
+    decision = TrackDecision(
+        track_id=TEACHER_TRACK,
+        state="collecting",
+        decision=RecognitionDecision(outcome="retry", reason_code="awaiting_consensus"),
+        observation_count=1,
+    )
+    pipeline = RecognitionPipeline(
+        preprocessor=FakePreprocessor(calls),
+        detector=MovingDetector(),
+        quality_assessor=FakeFaceQualityAssessor(
+            calls, FaceQuality(score=0.9, acceptable=True)
+        ),
+        aligner=FakeFaceAligner(calls),
+        liveness_config=LivenessConfig(enabled=False, required=False),
+        liveness_model=None,
+        embedder=FakeFaceEmbedder(
+            calls, FaceEmbedding((1.0,), "fake-embedder", "test", True)
+        ),
+        matcher=FakeMatcher(calls, ()),
+        temporal_decision=FakeTemporalDecisionEngine(calls, decision),
+    )
+    frame = type("Frame", (), {"shape": (480, 640, 3)})()
+
+    pipeline.process(frame, (), FrameObservation(TEACHER_TRACK, datetime.now(UTC)))
+    pipeline.process(
+        frame,
+        (),
+        FrameObservation(
+            TEACHER_TRACK, datetime.now(UTC) + timedelta(milliseconds=500)
+        ),
+    )
+
+    assert calls.count("reset") == 1
 
 
 def test_pipeline_sampling_skips_before_preprocess_and_model_work() -> None:

@@ -7,6 +7,7 @@ from typing import Any, cast
 
 from presensi_edge_agent.config import EdgeConfig
 from recognition_core.domain import FaceDetection, FaceQuality
+from recognition_core.face_selection import FaceRole, select_primary_face
 from recognition_core.opencv_models import YuNetConfig, YuNetFaceDetector
 from recognition_core.opencv_quality import OpenCVFaceQualityAssessor
 from recognition_core.protocols import FaceDetector, FaceQualityAssessor, ImageFrame
@@ -60,24 +61,43 @@ class CameraFrameInspector:
                 faces=(),
             )
 
-        single_face = len(detections) == 1
-        faces = tuple(
-            self._face_payload(detection, width, height, frame, single_face)
-            for detection in detections
+        selection = select_primary_face(
+            detections,
+            min_face_pixels=float(
+                getattr(self.quality_assessor, "min_face_pixels", 0.0)
+            ),
         )
-        if not single_face:
+        faces = tuple(
+            self._face_payload(
+                detection,
+                width,
+                height,
+                frame,
+                assess_quality=index == selection.selected_index,
+                role=selection.roles[index],
+            )
+            for index, detection in enumerate(detections)
+        )
+        if selection.selected_index is None:
             state = "multiple_faces"
             message = (
-                "Ada beberapa wajah di frame. Pastikan satu siswa di depan kamera."
+                "Ada dua wajah yang sama-sama dekat. "
+                "Minta siswa bergantian di depan kamera."
             )
-        elif bool(faces[0]["acceptable"]):
+        elif bool(faces[selection.selected_index]["acceptable"]):
             state = "ready"
-            message = (
-                "Frame siap diperiksa. Indikator ini belum memastikan identitas "
-                "atau mencatat presensi."
-            )
+            if len(detections) > 1:
+                message = (
+                    "Wajah utama siap diperiksa. Wajah lain berada di belakang "
+                    "dan tidak ikut dicocokkan."
+                )
+            else:
+                message = (
+                    "Frame siap diperiksa. Indikator ini belum memastikan identitas "
+                    "atau mencatat presensi."
+                )
         else:
-            reasons = cast(list[str], faces[0]["reason_codes"])
+            reasons = cast(list[str], faces[selection.selected_index]["reason_codes"])
             state, message = self._quality_message(reasons)
         return CameraFrameDiagnostics(
             state=state,
@@ -94,7 +114,9 @@ class CameraFrameInspector:
         frame_width: int,
         frame_height: int,
         frame: ImageFrame,
+        *,
         assess_quality: bool,
+        role: FaceRole,
     ) -> dict[str, object]:
         box = detection.box
         quality = (
@@ -103,7 +125,9 @@ class CameraFrameInspector:
             else FaceQuality(
                 score=0.0,
                 acceptable=False,
-                reason_codes=("multiple_faces",),
+                reason_codes=(
+                    "multiple_faces" if role == "ambiguous" else "background_face",
+                ),
             )
         )
         signals = dict(quality.signals)
@@ -121,6 +145,8 @@ class CameraFrameInspector:
             "width": min(1.0, box.width / frame_width),
             "height": min(1.0, box.height / frame_height),
             "landmarks": normalized_landmarks,
+            "role": role,
+            "is_primary": role == "primary",
             "detection_confidence": detection.confidence,
             "acceptable": quality.acceptable,
             "quality_score": quality.score,

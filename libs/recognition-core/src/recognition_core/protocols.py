@@ -57,6 +57,8 @@ class TemporalDecisionEngine(Protocol):
 
     def on_skipped(self, observation: FrameObservation) -> TrackDecision: ...
 
+    def reset_track(self, track_id: str) -> None: ...
+
     def decide(
         self,
         observation: FrameObservation,

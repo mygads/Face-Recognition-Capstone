@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { toFaceOverlayFaces } from './faceLandmarks'
+import { associateFaceRoles, toFaceOverlayFaces } from './faceLandmarks'
 
 describe('toFaceOverlayFaces', () => {
   it('converts all 478 normalized 3D landmarks and pads a matching face box', () => {
@@ -39,5 +39,30 @@ describe('toFaceOverlayFaces', () => {
     expect(faces[0].x).toBe(0)
     expect(faces[0].y).toBeGreaterThan(0.98)
     expect(faces[0].y + faces[0].height).toBeLessThanOrEqual(1)
+  })
+})
+
+describe('associateFaceRoles', () => {
+  const mesh = [
+    { x: 0.1, y: 0.1, width: 0.3, height: 0.4, landmarks: [] },
+    { x: 0.65, y: 0.2, width: 0.12, height: 0.16, landmarks: [] },
+  ]
+
+  it('maps agent-selected face roles by overlap, independent of detection order', () => {
+    const mapped = associateFaceRoles(mesh, [
+      { x: 0.64, y: 0.19, width: 0.14, height: 0.18, role: 'background' },
+      { x: 0.08, y: 0.08, width: 0.34, height: 0.44, role: 'primary' },
+    ])
+
+    expect(mapped[0].role).toBe('primary')
+    expect(mapped[1].role).toBe('background')
+  })
+
+  it('leaves unmatched meshes unclassified rather than pairing by array index', () => {
+    const mapped = associateFaceRoles(mesh, [
+      { x: 0.3, y: 0.6, width: 0.1, height: 0.1, role: 'primary' },
+    ])
+
+    expect(mapped).toEqual(mesh)
   })
 })

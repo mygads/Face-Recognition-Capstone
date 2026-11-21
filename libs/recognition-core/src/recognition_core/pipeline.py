@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Final, TypeVar
 
 from recognition_core.domain import (
@@ -14,6 +15,7 @@ from recognition_core.domain import (
     RecognitionDecision,
     TrackDecision,
 )
+from recognition_core.face_selection import FaceTargetTracker, select_primary_face
 from recognition_core.liveness import (
     LivenessConfig,
     apply_liveness_policy,
@@ -64,10 +66,17 @@ class RecognitionPipeline:
     matcher: Matcher
     temporal_decision: TemporalDecisionEngine
     max_candidates: int = 2
+    foreground_dominance_ratio: float = 1.8
+    target_tracker: FaceTargetTracker = field(default_factory=FaceTargetTracker)
 
     def __post_init__(self) -> None:
         if self.max_candidates < 1:
             raise ValueError("max_candidates must be positive.")
+        if (
+            not math.isfinite(self.foreground_dominance_ratio)
+            or self.foreground_dominance_ratio <= 1
+        ):
+            raise ValueError("foreground_dominance_ratio must be greater than 1.")
         if self.liveness_config.enabled and self.liveness_model is None:
             raise ValueError("Enabled liveness requires a configured model.")
 
@@ -102,7 +111,20 @@ class RecognitionPipeline:
         )
         matches: tuple[CandidateMatch, ...] = ()
 
-        if len(detections) != 1:
+        selection = _timed_stage(
+            timing_observer,
+            "face_selection",
+            lambda: select_primary_face(
+                tuple(detections),
+                min_face_pixels=float(
+                    getattr(self.quality_assessor, "min_face_pixels", 0.0)
+                ),
+                dominance_ratio=self.foreground_dominance_ratio,
+            ),
+        )
+
+        if selection.selected_index is None:
+            self.target_tracker.clear(observation.track_id)
             code = _NO_DETECTION if not detections else _MULTIPLE_DETECTIONS
             quality = FaceQuality(
                 score=0.0,
@@ -111,7 +133,18 @@ class RecognitionPipeline:
             )
             liveness = liveness_not_evaluated(self.liveness_config, reason_code=code)
         else:
-            detection = detections[0]
+            detection = detections[selection.selected_index]
+            frame_shape = getattr(processed, "shape", None)
+            frame_height = int(frame_shape[0]) if frame_shape is not None else 0
+            frame_width = int(frame_shape[1]) if frame_shape is not None else 0
+            target_switched = self.target_tracker.update(
+                observation.track_id,
+                detection,
+                frame_width=frame_width,
+                frame_height=frame_height,
+            )
+            if target_switched:
+                self.temporal_decision.reset_track(observation.track_id)
             quality = _timed_stage(
                 timing_observer,
                 "quality",

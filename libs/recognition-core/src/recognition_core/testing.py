@@ -116,6 +116,10 @@ class FakeTemporalDecisionEngine:
         self.calls.append("skip")
         return self.result
 
+    def reset_track(self, track_id: str) -> None:
+        del track_id
+        self.calls.append("reset")
+
     def decide(
         self,
         observation: FrameObservation,

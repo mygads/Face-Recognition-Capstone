@@ -120,7 +120,17 @@ Windows service: ACL akun service).
 AI_EDGE: native di PC lab; enumerasi index kamera, buka mode requested
 (resolusi/FPS), `recognition-core` dengan frame stride (capture cadence ≠
 sampling detector). Model YuNet/SFace dari path lokal (installer commissioning
-download + checksum; runtime tidak download). Quality/sampling/temporal/margin
+download + checksum; runtime tidak download). Core mendeteksi semua wajah,
+lalu memilih hanya satu foreground bila satu-satunya wajah lolos ukuran minimum
+atau ukurannya jelas dominan atas wajah lain (default rasio ukuran tampak 1.8).
+Rasio itu hanya perkiraan relatif untuk kamera RGB tunggal, bukan jarak fisik
+atau ambang identitas; perlu diuji dan disetel pada posisi kamera sekolah.
+Dua wajah yang sama-sama cukup besar tetapi tidak jelas berbeda ukuran tetap
+`multiple_faces` dan menghapus bukti temporal, sehingga tidak ada auto-accept.
+Target wajah yang berubah juga dibatasi oleh reset temporal saat Top-1 siswa
+berubah. Kualitas hanya diperiksa penuh pada satu target terpilih agar wajah
+latar tidak ikut masuk ke embedding/matching.
+Quality/sampling/temporal/margin
 terkalibrasi dari dashboard per device (poll 15 detik, revision reported,
 cache non-biometrik untuk restart saat outage). Versi gallery yang tidak berubah
 boleh tetap lebih tua dari sesi; freshness offline diperpanjang dari fetch
@@ -143,6 +153,12 @@ pencahayaan) — hijau bukan match identitas. Nama kandidat/frame/template hanya
 di memory; layar depan publik hanya menampilkan roster + hasil final setelah
 Core API konfirmasi. Threshold belum terkalibrasi → recognition dijeda
 (`waiting_for_calibration`), preview tetap jalan.
+
+FaceMesh browser menampilkan maksimal tiga wajah; peran foreground/background/
+ambiguous berasal dari diagnostik agent dan dipasangkan dengan mesh berdasarkan
+IoU bbox, bukan urutan daftar detector. Hanya wajah utama yang mendapat mesh
+478 titik penuh; wajah latar/ambigu mendapat kontur oranye ringkas untuk
+mengurangi beban render. Kiosk tetap tidak menampilkan nama kandidat.
 
 Log diagnostik dev: `PRESENSI_EDGE_PERFORMANCE_LOGS=1` → record JSON
 `edge_performance_window` tiap 10 detik (FPS capture/preview, p50/p95 per

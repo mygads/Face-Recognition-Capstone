@@ -97,3 +97,43 @@ def test_no_face_and_multiple_faces_have_distinct_guidance() -> None:
     assert multiple.state == "multiple_faces"
     assert multiple.face_count == 2
     assert all(face["acceptable"] is False for face in multiple.faces)
+
+
+def test_clear_foreground_face_is_ready_while_smaller_face_is_background() -> None:
+    inspector = CameraFrameInspector(
+        FakeDetector(
+            (
+                FaceDetection(BoundingBox(x=300, y=130, width=220, height=260), 0.98),
+                FaceDetection(BoundingBox(x=900, y=90, width=52, height=64), 0.95),
+            )
+        ),
+        FakeQualityAssessor(
+            FaceQuality(score=0.9, acceptable=True, signals=(("sharpness", 80.0),))
+        ),
+    )
+
+    result = inspector.inspect(_frame())
+
+    assert result.state == "ready"
+    assert result.face_count == 2
+    assert result.faces[0]["role"] == "primary"
+    assert result.faces[0]["is_primary"] is True
+    assert result.faces[0]["acceptable"] is True
+    assert result.faces[1]["role"] == "background"
+    assert result.faces[1]["acceptable"] is False
+    assert "tidak ikut dicocokkan" in result.message
+
+
+def test_two_similarly_sized_faces_are_ambiguous_and_never_marked_ready() -> None:
+    inspector = CameraFrameInspector(
+        FakeDetector((_face(x=200), _face(x=600))),
+        FakeQualityAssessor(FaceQuality(score=0.9, acceptable=True)),
+    )
+
+    result = inspector.inspect(_frame())
+
+    assert result.state == "multiple_faces"
+    assert result.faces[0]["role"] == "ambiguous"
+    assert result.faces[1]["role"] == "ambiguous"
+    assert not any(face["acceptable"] for face in result.faces)
+    assert "bergantian" in result.message

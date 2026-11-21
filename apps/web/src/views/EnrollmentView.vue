@@ -27,6 +27,7 @@ import {
 } from '../components/ui'
 import FaceOverlay from '../components/FaceOverlay.vue'
 import { useFaceLandmarks } from '../composables/useFaceLandmarks'
+import { associateFaceRoles } from '../utils/faceLandmarks'
 import { useAuthStore } from '../stores/auth'
 import { fetchWithPreviewTimeout } from '../utils/previewFetch'
 
@@ -37,8 +38,11 @@ type CameraFaceObservation = {
   width: number
   height: number
   landmarks?: number[][] | null
+  role?: 'primary' | 'background' | 'ambiguous' | null
+  is_primary?: boolean
   acceptable?: boolean
   reason_codes?: string[]
+  [key: string]: unknown
 }
 type CameraObservation = {
   state: 'pending' | 'ready' | 'adjust' | 'no_face' | 'multiple_faces' | 'unavailable'
@@ -140,6 +144,9 @@ const labFaceMesh = useFaceLandmarks(
       !labStreamFailed.value &&
       !localPreviewError.value,
   ),
+)
+const labFaceOverlays = computed(() =>
+  associateFaceRoles(labFaceMesh.faces.value, cameraObservation.value?.faces ?? []),
 )
 let flowVersion = 0
 let previewGeneration = 0
@@ -1037,7 +1044,7 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
           />
           <FaceOverlay
             v-if="cameraSource === 'lab' && labFaceMesh.faces.value.length"
-            :faces="labFaceMesh.faces.value"
+            :faces="labFaceOverlays"
             :image-width="labFaceMesh.frameSize.value.width"
             :image-height="labFaceMesh.frameSize.value.height"
             fit="cover"

@@ -6,6 +6,8 @@ export interface NormalizedFacePoint {
   z?: number
 }
 
+export type FaceSelectionRole = 'primary' | 'background' | 'ambiguous'
+
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value))
 }
@@ -54,5 +56,54 @@ export function toFaceOverlayFaces(
         landmarks,
       },
     ]
+  })
+}
+
+function intersectionOverUnion(a: OverlayFace, b: OverlayFace): number {
+  const left = Math.max(a.x, b.x)
+  const top = Math.max(a.y, b.y)
+  const right = Math.min(a.x + a.width, b.x + b.width)
+  const bottom = Math.min(a.y + a.height, b.y + b.height)
+  const intersection = Math.max(0, right - left) * Math.max(0, bottom - top)
+  const union = a.width * a.height + b.width * b.height - intersection
+  return union > 0 ? intersection / union : 0
+}
+
+/**
+ * Attach agent selection roles to browser meshes by geometric overlap. The
+ * array order of YuNet and MediaPipe detections is unrelated and must not be
+ * used to pair faces.
+ */
+export function associateFaceRoles(
+  meshFaces: readonly OverlayFace[],
+  agentFaces: readonly OverlayFace[],
+): OverlayFace[] {
+  if (agentFaces.length === 0) return [...meshFaces]
+  const pairs = meshFaces.flatMap((mesh, meshIndex) =>
+    agentFaces.flatMap((candidate, agentIndex) => {
+      const overlap = intersectionOverUnion(mesh, candidate)
+      return overlap > 0.04 ? [{ meshIndex, agentIndex, overlap }] : []
+    }),
+  )
+  pairs.sort((a, b) => b.overlap - a.overlap)
+  const assignedMeshes = new Set<number>()
+  const assignedAgents = new Set<number>()
+  const assignment = new Map<number, number>()
+  for (const pair of pairs) {
+    if (assignedMeshes.has(pair.meshIndex) || assignedAgents.has(pair.agentIndex)) continue
+    assignedMeshes.add(pair.meshIndex)
+    assignedAgents.add(pair.agentIndex)
+    assignment.set(pair.meshIndex, pair.agentIndex)
+  }
+  return meshFaces.map((mesh, index) => {
+    const agentIndex = assignment.get(index)
+    if (agentIndex === undefined) return mesh
+    const selected = agentFaces[agentIndex]
+    return {
+      ...mesh,
+      role: selected.role,
+      acceptable: selected.acceptable,
+      reason_codes: selected.reason_codes,
+    }
   })
 }

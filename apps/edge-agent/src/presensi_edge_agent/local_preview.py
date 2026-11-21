@@ -235,6 +235,11 @@ class LocalCameraPreview:
                             if isinstance(landmarks, list)
                             else [],
                             "acceptable": entry.get("acceptable") is True,
+                            "role": entry.get("role")
+                            if entry.get("role")
+                            in {"primary", "background", "ambiguous"}
+                            else None,
+                            "is_primary": entry.get("is_primary") is True,
                             "quality_score": entry.get("quality_score"),
                             "reason_codes": entry.get("reason_codes")
                             if isinstance(entry.get("reason_codes"), list)
@@ -1102,6 +1107,10 @@ class LocalCameraPreview:
                 ):
                     continue
                 safe_face: dict[str, object] = box
+                role = face.get("role")
+                if role in {"primary", "background", "ambiguous"}:
+                    safe_face["role"] = role
+                    safe_face["is_primary"] = role == "primary"
                 raw_landmarks = face.get("landmarks")
                 if isinstance(raw_landmarks, list):
                     safe_landmarks: list[list[float]] = []

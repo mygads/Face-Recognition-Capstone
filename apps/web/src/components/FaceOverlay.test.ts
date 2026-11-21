@@ -98,6 +98,49 @@ describe('FaceOverlay', () => {
       })
     }
   })
+
+  it('menggambar mesh rapat hanya pada wajah utama dan garis oranye untuk wajah latar', async () => {
+    const clearRect = vi.fn()
+    const context = {
+      beginPath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      stroke: vi.fn(),
+      setTransform: vi.fn(),
+      clearRect,
+      arc: vi.fn(),
+      fill: vi.fn(),
+    } as unknown as CanvasRenderingContext2D
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context)
+    Object.defineProperty(Element.prototype, 'clientWidth', { value: 640, configurable: true })
+    Object.defineProperty(Element.prototype, 'clientHeight', { value: 480, configurable: true })
+    const landmarks = Array.from({ length: 478 }, (_, index) => [
+      0.1 + (index % 20) * 0.01,
+      0.1 + Math.floor(index / 20) * 0.01,
+    ])
+
+    try {
+      const wrapper = mount(FaceOverlay, {
+        props: {
+          faces: [
+            { x: 0.1, y: 0.1, width: 0.3, height: 0.4, landmarks, role: 'primary' },
+            { x: 0.7, y: 0.2, width: 0.12, height: 0.15, landmarks, role: 'background' },
+          ],
+        },
+      })
+      await wrapper.vm.$nextTick()
+
+      expect(context.arc).toHaveBeenCalledTimes(478 * clearRect.mock.calls.length)
+      expect(wrapper.get('[data-testid="face-mark-0"]').attributes('data-role')).toBe('primary')
+      expect(wrapper.get('[data-testid="face-mark-1"]').attributes('data-role')).toBe('background')
+      expect(wrapper.get('[data-testid="face-mark-1"]').text()).toContain('Di belakang')
+      wrapper.unmount()
+    } finally {
+      getContext.mockRestore()
+      Object.defineProperty(Element.prototype, 'clientWidth', { value: 0, configurable: true })
+      Object.defineProperty(Element.prototype, 'clientHeight', { value: 0, configurable: true })
+    }
+  })
 })
 
 describe('FaceOverlay cover mapping', () => {

@@ -74,9 +74,9 @@ function drawFaceMesh(): void {
   const canvas = canvasRef.value
   if (!canvas) return
   const { width, height } = boxSize.value
-  const denseFaces = boxes.value.filter(
-    (face) => Array.isArray(face.landmarks) && face.landmarks.length >= 400,
-  )
+  const denseFaces = boxes.value
+    .map((face, index) => ({ face, index }))
+    .filter(({ face }) => Array.isArray(face.landmarks) && face.landmarks.length >= 400)
   if (denseFaces.length === 0 && !canvasContext) return
   const context = canvasContext ?? canvas.getContext('2d')
   if (!context || width < 1 || height < 1) return
@@ -94,33 +94,41 @@ function drawFaceMesh(): void {
   context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
   context.clearRect(0, 0, width, height)
 
-  denseFaces.forEach((face) => {
+  denseFaces.forEach(({ face, index }) => {
     const points = face.landmarks
     if (!Array.isArray(points)) return
-    const isPrimary = face === boxes.value[largestIndex.value]
-    context.lineWidth = isPrimary ? 0.72 : 0.62
-    context.strokeStyle = isPrimary ? 'rgba(235, 250, 255, 0.66)' : 'rgba(255, 190, 92, 0.55)'
-    drawConnections(context, points, FACE_MESH_TESSELLATION, width, height)
+    const isPrimary = index === visualPrimaryIndex.value
+    if (isPrimary) {
+      context.lineWidth = 0.72
+      context.strokeStyle = 'rgba(245, 252, 255, 0.72)'
+      drawConnections(context, points, FACE_MESH_TESSELLATION, width, height)
+    }
 
     context.lineWidth = 1.15
     context.strokeStyle = isPrimary ? '#68f4d5' : '#ffc16c'
-    drawConnections(context, points, FACE_MESH_CONTOURS, width, height)
     drawConnections(context, points, FACE_MESH_FACE_OVAL, width, height)
 
-    context.lineWidth = 1
-    context.strokeStyle = 'rgba(255,255,255,0.9)'
-    drawConnections(context, points, FACE_MESH_LIPS, width, height)
-    drawConnections(context, points, FACE_MESH_LEFT_EYE, width, height)
-    drawConnections(context, points, FACE_MESH_RIGHT_EYE, width, height)
-    drawConnections(context, points, FACE_MESH_LEFT_EYEBROW, width, height)
-    drawConnections(context, points, FACE_MESH_RIGHT_EYEBROW, width, height)
+    if (isPrimary) {
+      context.lineWidth = 1.15
+      context.strokeStyle = '#68f4d5'
+      drawConnections(context, points, FACE_MESH_CONTOURS, width, height)
+      context.lineWidth = 1
+      context.strokeStyle = 'rgba(255,255,255,0.9)'
+      drawConnections(context, points, FACE_MESH_LIPS, width, height)
+      drawConnections(context, points, FACE_MESH_LEFT_EYE, width, height)
+      drawConnections(context, points, FACE_MESH_RIGHT_EYE, width, height)
+      drawConnections(context, points, FACE_MESH_LEFT_EYEBROW, width, height)
+      drawConnections(context, points, FACE_MESH_RIGHT_EYEBROW, width, height)
+    }
 
-    context.fillStyle = isPrimary ? 'rgba(245, 255, 255, 0.84)' : '#ffd08b'
-    for (const point of points) {
-      if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) continue
-      context.beginPath()
-      context.arc(point[0] * width, point[1] * height, 0.72, 0, Math.PI * 2)
-      context.fill()
+    if (isPrimary) {
+      context.fillStyle = 'rgba(255, 255, 255, 0.92)'
+      for (const point of points) {
+        if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) continue
+        context.beginPath()
+        context.arc(point[0] * width, point[1] * height, 0.72, 0, Math.PI * 2)
+        context.fill()
+      }
     }
   })
 }
@@ -160,6 +168,18 @@ const largestIndex = computed(() => {
   })
   return best
 })
+const visualPrimaryIndex = computed(() => {
+  const hasAgentSelection = boxes.value.some((face) =>
+    ['primary', 'background', 'ambiguous'].includes(String(face.role)),
+  )
+  return hasAgentSelection
+    ? boxes.value.findIndex((face) => face.role === 'primary')
+    : largestIndex.value
+})
+
+function isPrimaryFace(face: OverlayFace, index: number): boolean {
+  return visualPrimaryIndex.value === index && face.role !== 'ambiguous'
+}
 
 watch(boxes, drawFaceMesh, { flush: 'post' })
 </script>
@@ -186,7 +206,7 @@ watch(boxes, drawFaceMesh, { flush: 'post' })
       :key="`${index}-${face.x}-${face.y}`"
       :class="[
         'face-overlay__mark',
-        index === largestIndex ? 'is-primary' : 'is-secondary',
+        isPrimaryFace(face, index) ? 'is-primary' : 'is-secondary',
         face.acceptable === true ? 'is-ready' : 'is-adjust',
       ]"
       :data-testid="`face-mark-${index}`"
@@ -194,14 +214,23 @@ watch(boxes, drawFaceMesh, { flush: 'post' })
       :data-y="face.y"
       :data-width="face.width"
       :data-height="face.height"
+      :data-role="face.role ?? (isPrimaryFace(face, index) ? 'primary' : 'secondary')"
     >
       <text
-        v-if="label && index === largestIndex"
+        v-if="label && isPrimaryFace(face, index)"
         :x="Math.min(0.98, Math.max(0, face.x))"
         :y="Math.max(0.02, face.y - 0.015)"
         class="face-overlay__tag"
       >
         {{ label }}
+      </text>
+      <text
+        v-else-if="face.role === 'background' || face.role === 'ambiguous'"
+        :x="Math.min(0.98, Math.max(0, face.x))"
+        :y="Math.max(0.02, face.y - 0.015)"
+        class="face-overlay__tag"
+      >
+        {{ face.role === 'background' ? 'Di belakang' : 'Bergantian' }}
       </text>
     </g>
   </svg>

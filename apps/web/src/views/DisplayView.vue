@@ -4,6 +4,7 @@ import CameraFrame from '../components/CameraFrame.vue'
 import { useFaceLandmarks } from '../composables/useFaceLandmarks'
 import { UiBadge, UiButton, UiInput } from '../components/ui'
 import { shortDisplayName } from '../utils/displayName'
+import { associateFaceRoles } from '../utils/faceLandmarks'
 import {
   agentHintUrl as buildAgentHintUrl,
   agentStreamUrl as buildAgentStreamUrl,
@@ -209,8 +210,11 @@ type AgentHintFace = {
   height: number
   landmarks?: number[][] | null
   acceptable?: boolean | null
+  role?: 'primary' | 'background' | 'ambiguous' | null
+  is_primary?: boolean
   quality_score?: number | null
   reason_codes?: string[] | null
+  [key: string]: unknown
 }
 
 interface AgentHint {
@@ -252,10 +256,7 @@ const kioskMesh = useFaceLandmarks(
 )
 const kioskFaces = computed(() => {
   if (!kioskMesh.faces.value.length) return agentFaces.value
-  return kioskMesh.faces.value.map((face, index) => ({
-    ...agentFaces.value[index],
-    ...face,
-  }))
+  return associateFaceRoles(kioskMesh.faces.value, agentFaces.value)
 })
 const kioskMeshSize = computed(() => kioskMesh.frameSize.value)
 const kioskFrameSize = computed(() =>
@@ -271,6 +272,14 @@ const agentFaceCount = computed(() => (hintFresh.value ? agentHint.value?.face_c
 // dense mesh that draws the overlay. A detected face is not an identity match.
 const kioskFaceCount = computed(() => Math.max(agentFaceCount.value, kioskMesh.faces.value.length))
 const agentLargestOk = computed(() => agentFaces.value.some((face) => face.acceptable === true))
+const ambiguousFaceSelection = computed(() =>
+  agentFaces.value.some((face) => face.role === 'ambiguous'),
+)
+const hasForegroundAndBackground = computed(
+  () =>
+    agentFaces.value.some((face) => face.role === 'primary') &&
+    agentFaces.value.some((face) => face.role === 'background'),
+)
 let hintTimer: ReturnType<typeof setInterval> | undefined
 let hintAbort: AbortController | null = null
 
@@ -856,6 +865,7 @@ const sessionStatsLabel = computed(() => {
 
 const spotlight = computed(() => live.value?.spotlight ?? null)
 const kioskResultTitle = computed(() => {
+  if (ambiguousFaceSelection.value) return 'Satu siswa di depan kamera'
   if (live.value?.status === 'scheduled') {
     return kioskFaceCount.value > 0 ? 'Wajah terdeteksi' : 'Menunggu petugas membuka sesi'
   }
@@ -879,6 +889,12 @@ const kioskResultTitle = computed(() => {
 })
 
 const kioskRecognitionMessage = computed(() => {
+  if (ambiguousFaceSelection.value) {
+    return 'Ada beberapa wajah yang sama-sama dekat. Silakan bergantian agar hanya satu siswa berada di depan kamera.'
+  }
+  if (hasForegroundAndBackground.value) {
+    return 'Wajah utama diproses. Wajah yang lebih jauh di belakang hanya diberi penanda dan tidak ikut dicocokkan.'
+  }
   if (live.value?.status === 'scheduled') {
     return kioskFaceCount.value > 0
       ? 'Pencocokan identitas dimulai setelah guru atau laboran membuka jadwal ini.'
