@@ -6,7 +6,7 @@ describe('FaceOverlay', () => {
   it('tidak menggambar landmark lima titik agent sebagai mesh wajah', () => {
     const wrapper = mount(FaceOverlay, {
       props: {
-        label: 'Wajah utama',
+        label: 'Wajah yang dipindai',
         faces: [
           {
             x: 0.05,
@@ -41,7 +41,7 @@ describe('FaceOverlay', () => {
     expect(wrapper.findAll('.face-overlay__point')).toHaveLength(0)
     expect(wrapper.findAll('.face-overlay__skeleton')).toHaveLength(0)
     expect(wrapper.findAll('rect')).toHaveLength(0)
-    expect(wrapper.text()).not.toContain('Wajah utama')
+    expect(wrapper.text()).not.toContain('Wajah yang dipindai')
   })
 
   it('aman tanpa wajah', () => {
@@ -122,6 +122,7 @@ describe('FaceOverlay', () => {
     try {
       const wrapper = mount(FaceOverlay, {
         props: {
+          label: 'Wajah yang dipindai',
           faces: [
             { x: 0.1, y: 0.1, width: 0.3, height: 0.4, landmarks, role: 'primary' },
             { x: 0.7, y: 0.2, width: 0.12, height: 0.15, landmarks, role: 'background' },
@@ -133,7 +134,8 @@ describe('FaceOverlay', () => {
       expect(context.arc).toHaveBeenCalledTimes(478 * clearRect.mock.calls.length)
       expect(wrapper.get('[data-testid="face-mark-0"]').attributes('data-role')).toBe('primary')
       expect(wrapper.get('[data-testid="face-mark-1"]').attributes('data-role')).toBe('background')
-      expect(wrapper.get('[data-testid="face-mark-1"]').text()).toContain('Di belakang')
+      expect(wrapper.get('[data-testid="face-mark-0"]').text()).toContain('Wajah yang dipindai')
+      expect(wrapper.get('[data-testid="face-mark-1"]').text()).toContain('Wajah lain')
       wrapper.unmount()
     } finally {
       getContext.mockRestore()

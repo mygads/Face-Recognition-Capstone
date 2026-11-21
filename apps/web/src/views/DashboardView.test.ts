@@ -142,6 +142,7 @@ describe('dashboard admin ala Stitch B01-03', () => {
     await flushPromises()
     const text = wrapper.text()
     expect(text).toContain('Dashboard Admin')
+    expect(text).toContain('Pantau presensi, kondisi kamera, dan siswa yang perlu perhatian.')
     expect(text).toContain('Sesi Praktikum Aktif')
     expect(text).toContain('Kesiapan Perangkat Kamera')
     expect(text).toContain('Aksi Cepat Operasional')
@@ -149,6 +150,22 @@ describe('dashboard admin ala Stitch B01-03', () => {
     expect(text).toContain('Lab Kimia 1')
     expect(text).toContain('Buka Sesi Presensi')
     expect(text).toContain('melewati ambang')
+    expect(wrapper.get('[data-testid="dashboard-active-session-status"]').text()).toBe('Berjalan')
+    expect(wrapper.get('.dashboard__lab-grid').classes()).toContain('dashboard__lab-grid--single')
+  })
+
+  it('menandai dashboard dengan jelas saat tidak ada sesi aktif', async () => {
+    api.listAttendanceSessions.mockResolvedValue({ items: [], pagination: { total: 0 } })
+    const wrapper = mount(DashboardView, {
+      global: { plugins: [piniaWith(adminAccount), testRouter()] },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="dashboard-active-session-status"]').text()).toBe(
+      'Tidak aktif',
+    )
+    expect(wrapper.text()).toContain('Tidak ada sesi aktif')
+    wrapper.unmount()
   })
 
   it('memuat ringkasan sesuai tanggal dan memperbaruinya saat tanggal diganti', async () => {

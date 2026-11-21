@@ -313,12 +313,40 @@ test('laborant captures a student, confirms identity, and advances to the next s
   // Fixture agent only has five diagnostic points and a 1px image; it is not
   // a dense local mesh and should not render a misleading face skeleton.
   await expect(page.locator('.face-overlay__skeleton')).toHaveCount(0)
+  await expect(page.getByTestId('start-enrollment-capture')).toBeDisabled()
+  await page.getByTestId('enrollment-identity-confirmation').check()
+  const observedCapturePoses = page.evaluate(
+    () =>
+      new Promise<string[]>((resolve) => {
+        const observed = new Set<string>()
+        const collect = () => {
+          const text = document.querySelector(
+            '[data-testid="enrollment-capture-pose"]',
+          )?.textContent
+          if (!text) return
+          observed.add(text.trim())
+          if (text.includes('Kembali menghadap lurus')) {
+            observer.disconnect()
+            clearTimeout(timeout)
+            resolve([...observed])
+          }
+        }
+        const observer = new MutationObserver(collect)
+        observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+        const timeout = window.setTimeout(() => {
+          observer.disconnect()
+          resolve([...observed])
+        }, 12_000)
+        collect()
+      }),
+  )
   await page.getByTestId('start-enrollment-capture').click()
   await expect(page.getByText(/capture dimulai dalam 3 detik/i)).toBeVisible()
-  await expect(page.getByTestId('enrollment-capture-pose')).toContainText('Lihat lurus ke kamera')
-  await expect(page.getByTestId('enrollment-capture-pose')).toContainText('Putar sedikit ke kiri')
-  await expect(page.getByTestId('enrollment-capture-pose')).toContainText('Putar sedikit ke kanan')
-  await expect(page.getByTestId('enrollment-capture-pose')).toContainText('Kembali menghadap lurus')
+  const capturePoses = (await observedCapturePoses).join(' ')
+  expect(capturePoses).toContain('Lihat lurus ke kamera')
+  expect(capturePoses).toContain('Putar sedikit ke kiri')
+  expect(capturePoses).toContain('Putar sedikit ke kanan')
+  expect(capturePoses).toContain('Kembali menghadap lurus')
   await expect(page.getByText(/4 dari 4 frame diterima, 0 tidak digunakan/i)).toBeVisible({
     timeout: 10_000,
   })
@@ -328,10 +356,9 @@ test('laborant captures a student, confirms identity, and advances to the next s
   await expect(page.getByText('0.91')).toHaveCount(0)
   await expect(page.getByText(/embedding|similarity|threshold/i)).toHaveCount(0)
 
-  const confirmButton = page.getByTestId('confirm-enrollment-identity')
-  await expect(confirmButton).toBeDisabled()
-  await page.getByLabel(/Saya memastikan siswa di kamera adalah Synthetic Student One/).check()
-  await confirmButton.click()
+  await expect(page.getByTestId('confirm-enrollment-identity')).toHaveCount(0)
+  await expect(page.getByTestId('continue-enrollment')).toBeVisible()
+  await page.getByTestId('continue-enrollment').click()
 
   await expect(page.getByTestId(`enrollment-student-${roster[1].id}`)).toHaveClass(
     /st-list__item--active/,

@@ -232,7 +232,7 @@ onMounted(load)
       <template v-if="isAdmin">
         <UiPageHeader
           title="Dashboard Admin"
-          description="Ringkasan operasional presensi praktikum dan infrastruktur dua laboratorium"
+          description="Pantau presensi, kondisi kamera, dan siswa yang perlu perhatian."
         >
           <template #actions>
             <UiSelect v-model="labFilter" aria-label="Filter laboratorium">
@@ -267,7 +267,13 @@ onMounted(load)
           <UiCard>
             <p class="st-kpi__label">Sesi Praktikum Aktif</p>
             <p class="st-kpi__value">
-              {{ activeSessions.length }} Sesi <UiBadge tone="present">Berjalan</UiBadge>
+              {{ activeSessions.length }} Sesi
+              <UiBadge
+                :tone="activeSessions.length ? 'present' : 'neutral'"
+                data-testid="dashboard-active-session-status"
+              >
+                {{ activeSessions.length ? 'Berjalan' : 'Tidak aktif' }}
+              </UiBadge>
             </p>
           </UiCard>
           <UiCard>
@@ -333,12 +339,15 @@ onMounted(load)
           </div>
         </UiCard>
 
-        <div class="st-grid2">
+        <div
+          class="st-grid2 dashboard__lab-grid"
+          :class="{ 'dashboard__lab-grid--single': visibleLabs.length === 1 }"
+        >
           <UiCard
             v-for="lab in visibleLabs"
             :key="lab.id"
             :title="lab.name"
-            :subtitle="`Sesi aktif di ${lab.name}`"
+            subtitle="Status sesi saat ini"
           >
             <template #header>
               <UiBadge :tone="labOnline(lab.name) > 0 ? 'present' : 'neutral'">
@@ -600,7 +609,15 @@ onMounted(load)
   width: min(230px, 100%);
 }
 .dashboard__date-filter .st-input {
+  width: 100%;
+  min-width: 0;
   padding-right: 44px;
+}
+.dashboard__date-filter .st-input::-webkit-calendar-picker-indicator {
+  display: none;
+}
+.dashboard__lab-grid--single {
+  grid-template-columns: minmax(0, 1fr);
 }
 .dashboard__calendar-button {
   position: absolute;
@@ -608,6 +625,7 @@ onMounted(load)
   display: grid;
   width: 36px;
   height: 36px;
+  z-index: 1;
   place-items: center;
   border: 0;
   border-radius: var(--st-radius-sm);

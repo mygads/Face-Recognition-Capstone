@@ -114,7 +114,6 @@ const countdownValue = ref(3)
 const captureIndex = ref(0)
 const captureResult = ref<EnrollmentCaptureResult | null>(null)
 const duplicateWarnings = computed(() => captureResult.value?.duplicate_warnings ?? [])
-const confirmationRequired = computed(() => captureResult.value?.confirmation_required ?? true)
 const activeTemplates = ref<FaceTemplate[]>([])
 const isLoadingTemplates = ref(false)
 const isRevoking = ref(false)
@@ -583,6 +582,7 @@ onMounted(() => {
 watch(cameraSource, (source) => {
   flowVersion += 1
   stopCamera()
+  identityConfirmed.value = false
   labStreamFailed.value = false
   if (source === 'device') {
     stopLocalPreview()
@@ -629,11 +629,10 @@ async function captureVideoFrame(): Promise<Blob> {
 }
 
 async function startEnrollment(): Promise<void> {
-  if (!selectedStudent.value || isStarting.value) return
+  if (!selectedStudent.value || isStarting.value || !identityConfirmed.value) return
   pageError.value = null
   pageMessage.value = null
   captureResult.value = null
-  identityConfirmed.value = false
   captureIndex.value = 0
   isStarting.value = true
   const currentFlow = ++flowVersion
@@ -693,6 +692,7 @@ async function startEnrollment(): Promise<void> {
     if (currentFlow === flowVersion) {
       pageError.value = formatError(error)
       capturePhase.value = 'ready'
+      identityConfirmed.value = false
       stopCamera()
     }
   } finally {
@@ -719,6 +719,8 @@ function selectStudent(student: EnrollmentStudentStatus): void {
   selectedStudentId.value = student.id
   activeTemplates.value = []
   if (student.template_status === 'enrolled') void loadActiveTemplates(student.id)
+  if (cameraSource.value === 'device') void startDevicePreview()
+  else void startLocalPreview()
 }
 
 async function loadActiveTemplates(studentId: string): Promise<void> {
@@ -805,13 +807,8 @@ async function confirmRevoke(): Promise<void> {
   }
 }
 
-function confirmIdentityAndContinue(): void {
-  if (
-    !captureResult.value ||
-    !selectedStudent.value ||
-    (confirmationRequired.value && !identityConfirmed.value)
-  )
-    return
+function completeEnrollmentAndContinue(): void {
+  if (!captureResult.value || !selectedStudent.value) return
   const currentIndex = students.value.findIndex((student) => student.id === selectedStudentId.value)
   students.value = students.value.map((student) =>
     student.id === selectedStudentId.value
@@ -1027,6 +1024,7 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             :image-height="deviceFaceMesh.frameSize.value.height"
             fit="cover"
             mirrored
+            label="Wajah yang dipindai"
             class="enrollment-view__face-overlay"
             data-testid="enrollment-device-mesh"
           />
@@ -1049,6 +1047,7 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             :image-height="labFaceMesh.frameSize.value.height"
             fit="cover"
             mirrored
+            label="Wajah yang dipindai"
             class="enrollment-view__face-overlay"
             data-testid="enrollment-lab-mesh"
           />
@@ -1137,8 +1136,25 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             Pastikan wajah dan nama siswa sesuai, terlihat jelas, dan cukup terang sebelum
             melanjutkan.
           </p>
+          <label
+            v-if="capturePhase === 'ready' && selectedStudent.template_status !== 'enrolled'"
+            class="enrollment-view__confirm"
+            data-testid="enrollment-identity-check"
+          >
+            <input
+              v-model="identityConfirmed"
+              type="checkbox"
+              data-testid="enrollment-identity-confirmation"
+            />
+            <span>
+              Saya memastikan wajah di kamera adalah
+              <strong>{{ selectedStudent.full_name }}</strong>
+              (NIS {{ selectedStudent.student_number }}). Acuan hanya dikirim setelah saya
+              mengonfirmasi.
+            </span>
+          </label>
           <p
-            v-else-if="capturePhase === 'countdown'"
+            v-if="capturePhase === 'countdown'"
             class="enrollment-view__instruction"
             aria-live="polite"
           >
@@ -1181,17 +1197,8 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             <p class="enrollment-view__instruction" role="status">
               {{ captureResult.accepted_frames }} dari 4 frame diterima,
               {{ captureResult.rejected_frames }} tidak digunakan.
-              {{ captureResult.template_count }}
-              acuan wajah tersimpan. Pastikan siswa pada preview cocok dengan identitas berikut.
+              {{ captureResult.template_count }} acuan wajah berhasil disimpan untuk siswa ini.
             </p>
-            <label v-if="confirmationRequired" class="enrollment-view__confirm">
-              <input v-model="identityConfirmed" type="checkbox" />
-              <span
-                >Saya memastikan siswa di kamera adalah {{ selectedStudent.full_name }} ({{
-                  selectedStudent.student_number
-                }}).</span
-              >
-            </label>
             <p v-if="duplicateWarnings.length" class="st-alert st-alert--error" role="status">
               Ada kemungkinan wajah mirip dengan
               {{ duplicateWarnings.map((w) => `${w.full_name} (${w.student_number})`).join(', ') }}.
@@ -1201,11 +1208,10 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             <UiButton
               variant="primary"
               type="button"
-              data-testid="confirm-enrollment-identity"
-              :disabled="confirmationRequired && !identityConfirmed"
-              @click="confirmIdentityAndContinue"
+              data-testid="continue-enrollment"
+              @click="completeEnrollmentAndContinue"
             >
-              Konfirmasi identitas & lanjut
+              Selesai & lanjut
             </UiButton>
           </template>
           <div v-else-if="capturePhase === 'complete'" class="enrollment-view__instruction">
@@ -1325,7 +1331,7 @@ function statusLabel(status: EnrollmentStudentStatus['template_status']): string
             variant="primary"
             type="button"
             data-testid="start-enrollment-capture"
-            :disabled="isStarting || !canStartAgentCapture"
+            :disabled="isStarting || !canStartAgentCapture || !identityConfirmed"
             :title="
               cameraSource === 'lab' && !canStartAgentCapture ? cameraObservationMessage : undefined
             "

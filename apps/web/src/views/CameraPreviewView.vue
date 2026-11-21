@@ -174,9 +174,7 @@ const previewPlaceholderMessage = computed(() => {
   return 'Pastikan agent AI_EDGE berjalan pada komputer kamera yang dipilih.'
 })
 const faceOverlayLabel = computed(() => {
-  const count = cameraObservation.value?.face_count ?? 0
-  if (count > 1) return `Wajah utama · ${count} wajah`
-  return 'Wajah utama'
+  return 'Wajah yang dipindai'
 })
 
 const diagnosticCandidate = computed(() => {
@@ -845,7 +843,7 @@ onBeforeUnmount(() => {
           <small>Presensi baru tercatat setelah hasil dikonfirmasi server.</small>
         </div>
         <div
-          v-else-if="unmatchedObservedFace"
+          v-else-if="unmatchedObservedFace && !identityMatched"
           class="camera-preview-view__candidate-empty"
           role="status"
           data-testid="preview-unmatched-face"

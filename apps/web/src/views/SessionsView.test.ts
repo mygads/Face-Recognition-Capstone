@@ -618,10 +618,72 @@ describe('session close confirmation', () => {
     await closeButton.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('belum tercatat akan menjadi absen')
+    expect(wrapper.text()).toContain('Terdapat 1 siswa belum tercatat')
+    const projection = wrapper
+      .get('[role="dialog"]')
+      .findAll('.st-kpi')
+      .map((item) => item.text().replace(/\s+/g, ' ').trim())
+    expect(projection).toEqual(['1 Siswa', '0 Siswa', '1 Siswa', '0 Siswa'])
+    expect(
+      wrapper.get('[data-testid="confirm-close-session"]').attributes('disabled'),
+    ).toBeUndefined()
     expect(api.closeAttendanceSession).not.toHaveBeenCalled()
 
     await wrapper.get('[data-testid="confirm-close-session"]').trigger('click')
     await flushPromises()
     expect(api.closeAttendanceSession).toHaveBeenCalledWith('session-1')
+  })
+
+  it('blocks closing until the roster loads and offers a retry', async () => {
+    const { mount: mountView } = await import('@vue/test-utils')
+    const { createPinia: makePinia } = await import('pinia')
+    const pinia = makePinia()
+    const { useAuthStore: useAuth } = await import('../stores/auth')
+    const { default: View } = await import('./SessionsView.vue')
+    useAuth(pinia).$patch({
+      accessToken: 'unit-test-token',
+      expiresAt: Date.now() + 60_000,
+      account: {
+        id: 'teacher-1',
+        email: 'teacher@example.test',
+        full_name: 'Test Teacher',
+        roles: ['TEACHER'],
+        must_change_password: false,
+        permissions: ['schedule_read', 'session_view', 'attendance_manual'],
+      },
+    })
+    api.listOpenableSchedules.mockResolvedValue([])
+    api.listAttendanceSessions.mockResolvedValue({
+      items: [overrideSession],
+      pagination: { total: 1, limit: 50, offset: 0 },
+    })
+    api.getSessionRoster.mockRejectedValueOnce(new Error('Roster unavailable'))
+    api.closeAttendanceSession.mockResolvedValue({ ...overrideSession, status: 'closed' })
+    const wrapper = mountView(View, { global: { plugins: [pinia] } })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="close-session-session-1"]').trigger('click')
+    await flushPromises()
+    expect(
+      wrapper.get('[data-testid="confirm-close-session"]').attributes('disabled'),
+    ).toBeDefined()
+    expect(wrapper.find('[data-testid="retry-close-roster"]').exists()).toBe(true)
+    expect(api.closeAttendanceSession).not.toHaveBeenCalled()
+
+    api.getSessionRoster.mockResolvedValueOnce([
+      { student_id: 's1', student_number: 'S-1', full_name: 'Satu', record_status: 'present' },
+    ])
+    await wrapper.get('[data-testid="retry-close-roster"]').trigger('click')
+    await flushPromises()
+    expect(
+      wrapper.get('[data-testid="confirm-close-session"]').attributes('disabled'),
+    ).toBeUndefined()
+    expect(wrapper.text()).toContain('Proyeksi Rekapitulasi Akhir · Total: 1 Siswa')
+    expect(
+      wrapper
+        .get('[role="dialog"]')
+        .findAll('.st-kpi')
+        .map((item) => item.text().replace(/\s+/g, ' ').trim()),
+    ).toEqual(['1 Siswa', '0 Siswa', '0 Siswa', '0 Siswa'])
   })
 })

@@ -893,7 +893,7 @@ const kioskRecognitionMessage = computed(() => {
     return 'Ada beberapa wajah yang sama-sama dekat. Silakan bergantian agar hanya satu siswa berada di depan kamera.'
   }
   if (hasForegroundAndBackground.value) {
-    return 'Wajah utama diproses. Wajah yang lebih jauh di belakang hanya diberi penanda dan tidak ikut dicocokkan.'
+    return 'Wajah yang dipindai sedang diproses. Wajah lain di belakang hanya ditandai.'
   }
   if (live.value?.status === 'scheduled') {
     return kioskFaceCount.value > 0
@@ -1190,7 +1190,7 @@ onBeforeUnmount(() => {
             :faces="agentVideoVisible && !agentVideoStale ? kioskFaces : []"
             :image-width="kioskFrameSize.width"
             :image-height="kioskFrameSize.height"
-            :label="kioskFaceCount > 1 ? `Wajah utama · ${kioskFaceCount} wajah` : 'Wajah utama'"
+            label="Wajah yang dipindai"
           >
             <img
               v-if="agentVideoVisible && !agentVideoStale"

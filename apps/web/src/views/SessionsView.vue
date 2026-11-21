@@ -259,32 +259,26 @@ const historySessions = computed(() =>
 const closingSession = computed(
   () => sessions.value.find((item) => item.id === confirmCloseId.value) ?? null,
 )
-const closeUnmarked = computed(() => {
-  if (closingSession.value && selected.value?.id === closingSession.value.id) {
-    return roster.value.filter((entry) => entry.record_status === null).length
-  }
-  return confirmUnmarked.value ?? 0
-})
-const closePresent = computed(() => {
-  if (closingSession.value && selected.value?.id === closingSession.value.id) {
-    return roster.value.filter((entry) => entry.record_status === 'present').length
-  }
-  return 0
-})
-const closeLate = computed(() => {
-  if (closingSession.value && selected.value?.id === closingSession.value.id) {
-    return roster.value.filter((entry) => entry.record_status === 'late').length
-  }
-  return 0
-})
+const closeRoster = ref<SessionRosterEntry[] | null>(null)
+const closeRosterLoading = ref(false)
+const closeRosterError = ref<string | null>(null)
+const closeUnmarked = computed(
+  () => closeRoster.value?.filter((entry) => entry.record_status == null).length ?? 0,
+)
+const closePresent = computed(
+  () => closeRoster.value?.filter((entry) => entry.record_status === 'present').length ?? 0,
+)
+const closeLate = computed(
+  () => closeRoster.value?.filter((entry) => entry.record_status === 'late').length ?? 0,
+)
 const closeAbsent = computed(() => {
-  if (!closingSession.value) return 0
-  if (selected.value?.id === closingSession.value.id && roster.value.length) {
-    const alreadyAbsent = roster.value.filter((entry) => entry.record_status === 'absent').length
-    return alreadyAbsent + closeUnmarked.value
-  }
-  return 0
+  if (!closeRoster.value) return 0
+  const alreadyAbsent = closeRoster.value.filter((entry) => entry.record_status === 'absent').length
+  return alreadyAbsent + closeUnmarked.value
 })
+const closeExcused = computed(
+  () => closeRoster.value?.filter((entry) => entry.record_status === 'excused').length ?? 0,
+)
 
 const liveRoster = ref<
   Record<
@@ -607,17 +601,23 @@ async function openSession(schedule: OpenableSchedule): Promise<void> {
 
 const confirmOpenSchedule = ref<OpenableSchedule | null>(null)
 const confirmCloseId = ref<string | null>(null)
-const confirmUnmarked = ref<number | null>(null)
 
 async function askClose(item: AttendanceSession): Promise<void> {
   confirmCloseId.value = item.id
-  confirmUnmarked.value = null
+  closeRoster.value = null
+  closeRosterError.value = null
+  closeRosterLoading.value = true
   try {
-    const entries = selected.value?.id === item.id ? roster.value : await getSessionRoster(item.id)
-    confirmUnmarked.value = entries.filter((entry) => entry.record_status === null).length
-  } catch {
-    confirmUnmarked.value = null
+    closeRoster.value = await getSessionRoster(item.id)
+  } catch (error) {
+    closeRosterError.value = formatError(error)
+  } finally {
+    closeRosterLoading.value = false
   }
+}
+
+function retryCloseRoster(): void {
+  if (closingSession.value) void askClose(closingSession.value)
 }
 
 async function closeSession(item: AttendanceSession): Promise<void> {
@@ -1382,24 +1382,38 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
         Sesi praktikum akan <strong>diakhiri dan dikunci secara permanen</strong>. Kamera pemindai
         wajah lab akan dinonaktifkan untuk rombel ini.
       </p>
-      <div class="st-alert st-alert--error" role="alert">
-        Terdapat {{ closeUnmarked }} siswa belum tercatat akan menjadi absen. Semua siswa yang Belum
-        Tercatat akan otomatis ditetapkan berstatus Absen (Alpha) tanpa rekaman kehadiran.
+      <p v-if="closeRosterLoading" class="st-table__muted" role="status" aria-live="polite">
+        Memuat roster untuk menghitung rekap akhir…
+      </p>
+      <div v-else-if="closeRosterError" class="st-alert st-alert--error" role="alert">
+        <p>{{ closeRosterError }}</p>
+        <UiButton variant="secondary" data-testid="retry-close-roster" @click="retryCloseRoster">
+          Coba muat roster lagi
+        </UiButton>
       </div>
-      <h3 class="st-section">
-        Proyeksi Rekapitulasi Akhir · Total: {{ closingSession.student_count }} Siswa
-      </h3>
-      <div class="st-grid3">
-        <UiCard title="Hadir"
-          ><p class="st-kpi">{{ closePresent }}<small> Siswa</small></p></UiCard
-        >
-        <UiCard title="Terlambat"
-          ><p class="st-kpi">{{ closeLate }}<small> Siswa</small></p></UiCard
-        >
-        <UiCard title="Absen (Alpha)"
-          ><p class="st-kpi">{{ closeAbsent }}<small> Siswa</small></p></UiCard
-        >
-      </div>
+      <template v-else-if="closeRoster">
+        <div class="st-alert st-alert--error" role="alert">
+          Terdapat {{ closeUnmarked }} siswa belum tercatat akan menjadi absen. Semua siswa yang
+          Belum Tercatat akan otomatis ditetapkan berstatus Absen (Alpha) tanpa rekaman kehadiran.
+        </div>
+        <h3 class="st-section">
+          Proyeksi Rekapitulasi Akhir · Total: {{ closeRoster.length }} Siswa
+        </h3>
+        <div class="st-grid3">
+          <UiCard title="Hadir"
+            ><p class="st-kpi">{{ closePresent }}<small> Siswa</small></p></UiCard
+          >
+          <UiCard title="Terlambat"
+            ><p class="st-kpi">{{ closeLate }}<small> Siswa</small></p></UiCard
+          >
+          <UiCard title="Absen (Alpha)"
+            ><p class="st-kpi">{{ closeAbsent }}<small> Siswa</small></p></UiCard
+          >
+          <UiCard title="Izin"
+            ><p class="st-kpi">{{ closeExcused }}<small> Siswa</small></p></UiCard
+          >
+        </div>
+      </template>
       <p class="st-table__muted">
         Ketentuan SOP: Setelah sesi ditutup, perubahan status hanya dapat dilakukan melalui prosedur
         Pengajuan Koreksi Kehadiran yang disetujui admin.
@@ -1409,7 +1423,7 @@ async function submitManualMark(entry: SessionRosterEntry): Promise<void> {
         <UiButton
           variant="danger"
           data-testid="confirm-close-session"
-          :disabled="closingSessionId !== null"
+          :disabled="closingSessionId !== null || closeRosterLoading || !closeRoster"
           @click="closeSession(closingSession)"
         >
           {{ closingSessionId ? 'Menutup…' : 'Tutup Sesi Presensi' }}

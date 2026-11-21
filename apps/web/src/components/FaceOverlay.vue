@@ -225,12 +225,12 @@ watch(boxes, drawFaceMesh, { flush: 'post' })
         {{ label }}
       </text>
       <text
-        v-else-if="face.role === 'background' || face.role === 'ambiguous'"
+        v-else-if="face.role === 'ambiguous' || !isPrimaryFace(face, index)"
         :x="Math.min(0.98, Math.max(0, face.x))"
         :y="Math.max(0.02, face.y - 0.015)"
         class="face-overlay__tag"
       >
-        {{ face.role === 'background' ? 'Di belakang' : 'Bergantian' }}
+        {{ face.role === 'ambiguous' ? 'Bergantian' : 'Wajah lain' }}
       </text>
     </g>
   </svg>

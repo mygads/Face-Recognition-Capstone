@@ -3133,6 +3133,7 @@ a:focus-visible {
 .enrollment-view__camera-placeholder {
   position: absolute;
   inset: 0;
+  z-index: 3;
   display: grid;
   align-content: center;
   justify-items: center;
@@ -3141,6 +3142,10 @@ a:focus-visible {
   font-size: 0.75rem;
   text-align: center;
   pointer-events: none;
+}
+
+.enrollment-view__camera-placeholder .st-btn {
+  pointer-events: auto;
 }
 
 .enrollment-view__camera-placeholder svg {

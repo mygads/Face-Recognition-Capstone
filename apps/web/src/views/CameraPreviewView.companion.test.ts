@@ -262,6 +262,75 @@ describe('camera preview confidence companion', () => {
     }
   })
 
+  it('keeps confirmed attendance visible when a later frame has no match', async () => {
+    const nowSeconds = Date.now() / 1000
+    const stubFetch = vi.fn(async (input: unknown) => {
+      const url = String(input)
+      if (url.endsWith('/v1/session')) {
+        return { ok: true, status: 200, json: async () => ({ preview_token: 'preview-1' }) }
+      }
+      if (url.endsWith('/v1/status')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            device_id: 'dev-1',
+            camera_open: true,
+            session_active: true,
+            recognition_state: 'no_match',
+            display_name: null,
+            diagnostic_candidate: null,
+            attendance_result: {
+              decision: 'recorded',
+              attendance_status: 'present',
+              display_name: 'Yoga',
+              class_name: 'MIPATES',
+              updated_at: nowSeconds,
+            },
+            updated_at: nowSeconds,
+            camera_observation: {
+              state: 'ready',
+              message: 'Wajah siap diperiksa.',
+              frame_width: 640,
+              frame_height: 480,
+              face_count: 1,
+              faces: [
+                {
+                  x: 0.2,
+                  y: 0.1,
+                  width: 0.5,
+                  height: 0.7,
+                  acceptable: true,
+                  reason_codes: [],
+                },
+              ],
+            },
+          }),
+        }
+      }
+      return { ok: false, status: 404, json: async () => ({}) }
+    })
+    vi.stubGlobal('fetch', stubFetch)
+    Object.defineProperty(window, 'location', {
+      value: { hostname: '127.0.0.1' },
+      writable: true,
+    })
+
+    const wrapper = mount(CameraPreviewView, { global: { plugins: [laborantPinia()] } })
+    try {
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      await flushPromises()
+
+      const identityPanel = wrapper.get('[aria-label="Status pengenalan siswa"]')
+      expect(identityPanel.text()).toContain('Yoga')
+      expect(identityPanel.text()).toContain('Presensi tercatat')
+      expect(wrapper.find('[data-testid="preview-unmatched-face"]').exists()).toBe(false)
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
   it('falls back to frame polling when the stream errors', async () => {
     const fetchCalls: string[] = []
     const nowSeconds = Date.now() / 1000
